@@ -1,0 +1,10 @@
+RequestedLayerState{Display 0 name="Built-in Screen"#2}
+RequestedLayerState{WindowedMagnification:0:31#20 parentId=3}
+RequestedLayerState{StatusBar#48 parentId=47}
+RequestedLayerState{Task=87#1409 parentId=1400}
+RequestedLayerState{ActivityRecord{e1f2a3b u0 com.mykynk.pati/.MainActivity t87}#1410 parentId=1409}
+RequestedLayerState{com.mykynk.pati/com.mykynk.pati.MainActivity#1418 parentId=1410}
+RequestedLayerState{SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity]@0#1421 parentId=1418 z=-2}
+RequestedLayerState{SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity]@0(BLAST)#1422 parentId=1421}
+RequestedLayerState{Background for SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity]@0#1423 parentId=1421 z=-2147483648}
+RequestedLayerState{com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity#312 parentId=300 !handle}

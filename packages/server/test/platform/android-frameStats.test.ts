@@ -75,6 +75,13 @@ describe('dumpsys SurfaceFlinger', () => {
     expect(findSurfaceViewLayers(android12, 'com.mykynk.pati')).toEqual([
       'SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity](BLAST)#212',
     ]);
+    // Android 15 prints the new frontend's debug string; --latency matches the bare name inside it.
+    expect(findSurfaceViewLayers(fx('sf-list-api35.txt'), 'com.mykynk.pati')).toEqual([
+      'SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity]@0(BLAST)#1422',
+    ]);
+    expect(findSurfaceViewLayers('RequestedLayerState{SurfaceView[com.foo/com.foo.Main]#7}', 'com.foo')).toEqual([
+      'SurfaceView[com.foo/com.foo.Main]#7',
+    ]);
     // A native app without SurfaceView, and a package whose name is a prefix of another.
     expect(findSurfaceViewLayers(fx('sf-list-api34.txt'), 'com.mykynk.mahalle')).toEqual([]);
     expect(findSurfaceViewLayers(fx('sf-list-api34.txt'), 'com.mykynk.patisserie')).toEqual([
@@ -189,6 +196,36 @@ describe('FrameStatsReader', () => {
     expect(await r.read(adb, 5000)).toEqual({ fps: 60, jankyFrames: 1, source: 'surfaceflinger' });
     // Idle Flutter app: 0 fps from SurfaceFlinger (not "unknown").
     expect(await r.read(adb, 7000)).toEqual({ fps: 0, jankyFrames: 0, source: 'surfaceflinger' });
+  });
+
+  it('Android 15 layer list: queries --latency with the bare layer name', async () => {
+    let presents = frames(T0, 90, V60);
+    const { adb, calls } = fakeAdb({
+      gfx: () => fx('gfxinfo-flutter-api34.txt'),
+      list: () => fx('sf-list-api35.txt'),
+      latency: (layer) => (layer === 'SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity]@0(BLAST)#1422' ? latency(presents) : '16666666\n'),
+    });
+    const r = new FrameStatsReader({ serial: 'S', logger: silentLogger, packageName: () => 'com.mykynk.pati' });
+    await r.read(adb, 1000);
+    await r.read(adb, 3000);
+    expect(calls[1]).toContain("--latency 'SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity]@0(BLAST)#1422'");
+    presents = [...presents, ...frames(presents.at(-1)!, 120, V60)];
+    expect(await r.read(adb, 5000)).toEqual({ fps: 60, jankyFrames: 0, source: 'surfaceflinger' });
+  });
+
+  it('SurfaceView app whose frame times are unreadable: no fps from the few HWUI decor frames', async () => {
+    let uptime = 245_122_611;
+    // HWUI draws 3 decor frames per 2 s while Flutter renders into its SurfaceView.
+    const decor = () => {
+      uptime += 2000;
+      return fx('gfxinfo-flutter-api34.txt')
+        .replace('Uptime: 245122611', `Uptime: ${uptime}`)
+        .replace('Stats since: 245120598000000ns', `Stats since: ${(uptime - 2000) * 1e6}ns`)
+        .replace('Total frames rendered: 0', 'Total frames rendered: 3');
+    };
+    const { adb } = fakeAdb({ gfx: decor, list: () => fx('sf-list-api34.txt'), latency: () => '16666666\n' });
+    const r = new FrameStatsReader({ serial: 'S', logger: silentLogger, packageName: () => 'com.mykynk.pati' });
+    for (let t = 1000; t <= 13_000; t += 2000) expect(await r.read(adb, t)).toBeUndefined();
   });
 
   it('native UI: gfxinfo counters; no SurfaceView → re-list only every 10 s', async () => {

@@ -67,19 +67,29 @@ function escapeRe(s: string): string {
  *   Android ≤ 11  "SurfaceView - com.foo/com.foo.MainActivity#0"
  *   Android 12+   "SurfaceView[com.foo/com.foo.MainActivity](BLAST)#1"   (container without "(BLAST)")
  *   Android 13+   "SurfaceView[com.foo/com.foo.MainActivity]@0(BLAST)#523"
+ *   Android 15+   "RequestedLayerState{SurfaceView[…]@0(BLAST)#523 parentId=522}" (new frontend's debug
+ *                 string; `--latency` still wants the bare name inside)
  * "Background for …" layers are skipped; "(BLAST)" layers win when present. At most 3.
  */
 export function findSurfaceViewLayers(listText: string, pkg: string): string[] {
   const owner = new RegExp(`(?:^|[^A-Za-z0-9_.])${escapeRe(pkg)}/`);
   const all: string[] = [];
   for (const raw of listText.split('\n')) {
-    const line = raw.trim();
+    const line = layerName(raw.trim());
     if (!line || line.length > 512 || !line.includes('SurfaceView')) continue;
     if (line.startsWith('Background for') || !owner.test(line)) continue;
     if (!all.includes(line)) all.push(line);
   }
   const blast = all.filter((l) => l.includes('(BLAST)'));
   return (blast.length ? blast : all).slice(0, 3);
+}
+
+const REQUESTED_LAYER_RE = /^RequestedLayerState\{(.*?)(?= (?:parentId|relativeParentId|mirrorId|z|layerStack)=| !handle|\}$)/;
+
+/** One `--list` line → the layer name `--latency` matches (unwraps Android 15's RequestedLayerState{…}). */
+function layerName(line: string): string {
+  if (!line.startsWith('RequestedLayerState{')) return line;
+  return REQUESTED_LAYER_RE.exec(line)?.[1]?.trim() ?? '';
 }
 
 export interface SfLatency {
@@ -178,6 +188,8 @@ export const FRAME_TIMING = {
   relistFastMs: 10_000,
   relistSlowMs: 30_000,
   fastPhaseMs: 60_000,
+  /** Reads without any sample since a watch began before frame stats count as unavailable (≈ 10 s). */
+  noDataReads: 5,
 };
 
 export interface FrameSample {
@@ -209,7 +221,11 @@ export class FrameStatsReader {
   private readonly sf = new Map<string, { max: number; at: number }>();
   private gfxPrimed = false;
   private gfxAt = 0;
+  private gfxSeen = false;
   private inFlight = false;
+  private failure?: string;
+  /** The last read(): 'sample' = fps reported, 'none' = read but nothing to report, 'skipped' = not read. */
+  lastRead: 'sample' | 'none' | 'skipped' = 'skipped';
 
   constructor(private readonly deps: FrameStatsDeps) {}
 
@@ -217,9 +233,13 @@ export class FrameStatsReader {
   async read(adb: Adb, nowMs?: number): Promise<FrameSample | undefined> {
     const now = nowMs ?? Date.now();
     const pkg = this.deps.packageName();
-    if (!pkg || !PKG_RE.test(pkg) || this.inFlight) return undefined;
+    if (!pkg || !PKG_RE.test(pkg) || this.inFlight) {
+      this.lastRead = 'skipped';
+      return undefined;
+    }
     if (pkg !== this.pkg) this.reset(pkg, now);
     this.inFlight = true;
+    this.lastRead = 'none';
     try {
       const wantList = !this.layers.length && now >= this.nextListAt;
       const parts = [`echo ${FRAME_GFX_MARK}`, `dumpsys gfxinfo ${pkg} reset`];
@@ -228,16 +248,32 @@ export class FrameStatsReader {
       const r = await adb.shell(this.deps.serial, parts.join('; '), { timeoutMs: FRAME_TIMING.timeoutMs });
       const at = nowMs ?? Date.now();
       if (!r.stdout.trim()) {
-        this.deps.logger.debug(`${this.deps.serial}: frame stats read failed: ${r.error ?? r.stderr.trim()}`);
+        this.failure = r.error ?? r.stderr.trim();
+        this.deps.logger.debug(`${this.deps.serial}: frame stats read failed: ${this.failure}`);
         return undefined;
       }
-      return this.consume(r.stdout, at, wantList);
+      this.failure = undefined;
+      const sample = this.consume(r.stdout, at, wantList);
+      if (sample) this.lastRead = 'sample';
+      return sample;
     } catch (e) {
-      this.deps.logger.debug(`${this.deps.serial}: frame stats read failed: ${(e as Error).message}`);
+      this.failure = (e as Error).message;
+      this.deps.logger.debug(`${this.deps.serial}: frame stats read failed: ${this.failure}`);
       return undefined;
     } finally {
       this.inFlight = false;
     }
+  }
+
+  /** Why reads give nothing (English, → DeviceInfo.readers.frameStats.detail). */
+  noDataDetail(): string {
+    const pkg = this.pkg ?? 'the app';
+    if (this.failure !== undefined) return `Reading frame stats for ${pkg} failed${this.failure ? `: ${this.failure}` : ''}`;
+    if (this.everHadLayer) {
+      return `SurfaceFlinger lists a SurfaceView of ${pkg} but gives no frame times for it; gfxinfo does not see what a SurfaceView draws`;
+    }
+    if (!this.gfxSeen) return `dumpsys gfxinfo printed no frame stats for ${pkg}, and SurfaceFlinger lists no SurfaceView of it`;
+    return `No frames could be counted for ${pkg} from gfxinfo or SurfaceFlinger`;
   }
 
   /** Parse one combined output (exposed for tests). */
@@ -247,6 +283,7 @@ export class FrameStatsReader {
     let gfx: { fps: number; janky: number; frames: number } | undefined;
     const g = parseGfxInfo(sections.gfx);
     if (g) {
+      this.gfxSeen = true;
       if (this.gfxPrimed) {
         const windowMs = g.windowMs ?? now - this.gfxAt;
         // A window of a few ms means the counters were reset right before printing (unexpected order on
@@ -300,9 +337,11 @@ export class FrameStatsReader {
 
     const best = sfBest as SfWindow | undefined;
     if (best && (best.frames ?? 0) > 0) return { fps: best.fps ?? 0, jankyFrames: best.janky ?? 0, source: 'surfaceflinger' };
-    if (gfx && gfx.frames > 0) return { fps: gfx.fps, jankyFrames: gfx.janky, source: 'gfxinfo' };
+    // A SurfaceView app (Flutter) draws its content outside HWUI: without readable SurfaceFlinger data this
+    // tick, gfxinfo only counts the few decor frames (or 0) — a false fps either way.
+    const surfaceBlind = this.everHadLayer && !sfPrimedAny;
+    if (gfx && gfx.frames > 0 && !surfaceBlind) return { fps: gfx.fps, jankyFrames: gfx.janky, source: 'gfxinfo' };
     if (sfPrimedAny) return { fps: 0, jankyFrames: 0, source: 'surfaceflinger' }; // SurfaceView idle
-    // A SurfaceView app (Flutter) whose latency is not readable: gfxinfo's 0 would be a lie.
     if (gfx && !this.everHadLayer) return { fps: gfx.fps, jankyFrames: gfx.janky, source: 'gfxinfo' };
     return undefined;
   }
@@ -317,6 +356,7 @@ export class FrameStatsReader {
     this.sf.clear();
     this.gfxPrimed = false;
     this.gfxAt = 0;
+    this.gfxSeen = false;
   }
 }
 
