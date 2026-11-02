@@ -346,19 +346,36 @@ function DeviceNode({
   );
 }
 
-/** Above this many apps on one device, apps that are not running fold into "Son açılanlar". */
+/** Above this many apps on one device, the quiet ones fold into "N uygulama daha" / "Son açılanlar". */
 const FOLD_ABOVE = 5;
+
+/** A third-party app counts as active this long after its last log line / process event. */
+const ACTIVE_MS = 3 * 60_000;
 
 function isGroupSelected(g: AppGroup, scope: Scope): boolean {
   if (scope.kind === 'deviceApp') return scope.deviceId === g.deviceId && scope.bundleId === g.bundleId;
   return scope.kind === 'app' && g.sessions.some((s) => s.id === scope.appId);
 }
 
+/**
+ * Rows a crowded device keeps unfolded: apps connected to Dürbün, the selected one, running developer builds and
+ * apps active in the last minutes. "Running" alone is not enough: iOS keeps suspended apps as processes and
+ * Android keeps cached ones, so a tester's phone reports dozens of store apps as running.
+ */
+function isProminentApp(g: AppGroup, scope: Scope, now: number): boolean {
+  if (g.connected || isGroupSelected(g, scope)) return true;
+  if (!g.running) return false;
+  const da = g.deviceApp;
+  if (da && (da.buildType === 'debug' || da.install.source === 'xcode' || da.install.source === 'simulator')) return true;
+  return now - g.lastActivity < ACTIVE_MS;
+}
+
 function DeviceApps({ device, groups, scope }: { device: DeviceInfo; groups: AppGroup[]; scope: Scope }) {
   const t = useT();
   const [openRecent, setOpenRecent] = usePersistentState<string[]>('sidebar.openRecent', []);
   const fold = groups.length > FOLD_ABOVE;
-  const shown = fold ? groups.filter((g) => g.running || g.connected || isGroupSelected(g, scope)) : groups;
+  const now = Date.now();
+  const shown = fold ? groups.filter((g) => isProminentApp(g, scope, now)) : groups;
   const folded = fold ? groups.filter((g) => !shown.includes(g)) : [];
   const recentOpen = openRecent.includes(device.id);
   return (
@@ -439,7 +456,7 @@ function AppNode({ group, device, scope }: { group: AppGroup; device: DeviceInfo
             </span>
             <span className="sb-row__subtitle sb-app__badges">
               <SourceBadge badge={badge} short />
-              {build ? <BuildBadgeChip badge={build} installer={group.deviceApp?.install.installer} /> : null}
+              {build ? <BuildBadgeChip badge={build} installer={group.deviceApp?.install.installer} short /> : null}
             </span>
           </span>
           <StatusDot tone={live ? 'success' : 'neutral'} pulse={group.connected} size={7} title={stateText} className={clsx(!live && 'dot--hollow')} />

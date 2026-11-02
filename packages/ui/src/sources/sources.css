@@ -409,3 +409,21 @@
 .src-empty .src-actions {
   margin-top: 4px;
 }
+
+/* Crash empty states: "none yet" vs "the device's crash records cannot be read". */
+.src-crash-note {
+  max-width: 560px;
+  margin: 12px auto 0;
+  text-align: left;
+}
+.src-crash-note p {
+  margin: 0 0 4px;
+}
+.src-crash-note--ok {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.src-crash-note--ok strong {
+  color: var(--text);
+  font-weight: 600;
+}

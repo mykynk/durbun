@@ -17,6 +17,7 @@ import {
 } from '../data/explain';
 import { appGroupKey, deviceAppKey, groupApps, useHub, type AppGroup, type HubState } from '../data/stores/hub';
 import { useScope, type Scope } from '../data/stores/scope';
+import { scopeDeviceId } from '../data/scope';
 
 type HubLike = Pick<HubState, 'apps' | 'devices'> & Partial<Pick<HubState, 'deviceApps'>>;
 
@@ -171,4 +172,37 @@ export function pickEmptyReason(capability: ExplainCapability, scope: Pick<Scope
     for (const a of row.actions) if (!actions.includes(a)) actions.push(a);
   }
   return { structural: true, status: partial ? 'partial' : 'no', rows, reasons, actions, single };
+}
+
+/* ───────────── crash records: "none yet" vs "cannot be read" ───────────── */
+
+export interface CrashRecordsState {
+  /** Online devices in scope whose own crash / ANR records cannot be read right now (reader reported down). */
+  unreadable: DeviceInfo[];
+  /** Online devices in scope whose records are read (reader reported 'ok'): an empty list really means none yet. */
+  readable: DeviceInfo[];
+}
+
+/** Devices of a scope ('all' = every device) split by whether the server can read their crash records. */
+export function crashRecordsState(scope: Scope, hub: Pick<HubState, 'apps' | 'devices'>): CrashRecordsState {
+  const one = scope.kind === 'all' ? undefined : scopeDeviceId(scope, hub);
+  const devices = scope.kind === 'all' ? Object.values(hub.devices) : one && hub.devices[one] ? [hub.devices[one]!] : [];
+  const out: CrashRecordsState = { unreadable: [], readable: [] };
+  for (const d of devices) {
+    const r = d.readers?.crashReports;
+    if (!r || d.state !== 'online') continue;
+    (r.status === 'ok' ? out.readable : out.unreadable).push(d);
+  }
+  return out;
+}
+
+/** `crashRecordsState` for the current scope; re-renders only when a reader of a scoped device changes. */
+export function useCrashRecordsState(): CrashRecordsState {
+  const scope = useScope();
+  const sig = useHub((s) => {
+    const st = crashRecordsState(scope, s);
+    return [...st.unreadable.map((d) => `u:${d.id}:${d.name}:${d.readers?.crashReports?.code ?? ''}:${d.readers?.crashReports?.detail ?? ''}`), ...st.readable.map((d) => `r:${d.id}:${d.name}`)].join('|');
+  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => crashRecordsState(scope, useHub.getState()), [scope, sig]);
 }

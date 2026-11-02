@@ -165,6 +165,17 @@ export const SERVER_CODES = {
     'action.uninstallFailed',
     'action.openUrlFailed',
   ],
+  /** `DeviceInfo.readers.<id>.code`: why an SDK-less reader (crash records, frame stats) does not work. */
+  readers: [
+    'reader.crashReports.dropboxRefused',
+    'reader.crashReports.devicectlMissing',
+    'reader.crashReports.developerModeOff',
+    'reader.crashReports.failed',
+    'reader.frameStats.noData',
+    'reader.frameStats.unsupported',
+  ],
+  /** `ToolCheck.code`: Doctor rows worded specially (params in `ToolCheck.params`). */
+  doctor: ['doctor.node.embedded'],
   /** REST `{ error, code }` bodies (`ApiError.code`). */
   rest: [
     'access.denied',
@@ -348,6 +359,21 @@ registerMessages('code', {
     'upload.tooLarge': ['Dosya çok büyük (en fazla {limit})', 'Dosya çok büyük'],
     'url.invalid': 'Geçersiz adres',
     network: 'Dürbün sunucusuna ulaşılamadı',
+
+    /* ── SDK-less readers (DeviceInfo.readers, `{ detail }` = the server's English detail) ── */
+    'reader.crashReports.dropboxRefused':
+      'Bu cihaz Android’in çökme kayıtlarının (dumpsys dropbox) okunmasına izin vermiyor; bazı üreticiler bunu kapatır. Canlı çökmeler cihaz logunda yine görünür, önceki açılışların kayıtları görünmez.',
+    'reader.crashReports.devicectlMissing':
+      'iPhone’un çökme raporlarını (.ips) okumak için Xcode’un devicectl aracı gerekir; bu Mac’te bulunamadı. Xcode 15 ya da daha yenisi kurulunca raporlar kendiliğinden gelir.',
+    'reader.crashReports.developerModeOff':
+      'iPhone’da Geliştirici Modu kapalı olduğu için çökme raporları (.ips) okunamıyor. Ayarlar → Gizlilik ve Güvenlik → Geliştirici Modu açılıp telefon yeniden başlatılınca raporlar gelir.',
+    'reader.crashReports.failed': ['Cihazın çökme kayıtları okunamadı: {detail}', 'Cihazın çökme kayıtları şu an okunamıyor.'],
+    'reader.frameStats.noData':
+      'CPU ve bellek cihazın süreç listesinden okunur. FPS ise bu cihazda dışarıdan ölçülemiyor: ne gfxinfo ne SurfaceFlinger bu uygulama için kare verdi; FPS için SDK ya da Flutter debug oturumu gerekir.',
+    'reader.frameStats.unsupported': 'Bu cihaz kare istatistiklerini dışarıya vermiyor; FPS ve takılan kareler yalnızca uygulamanın içinden (SDK ya da Flutter debug) ölçülür.',
+
+    /* ── Doctor rows (ToolCheck.code) ── */
+    'doctor.node.embedded': ['Dürbün.app içinde gömülü (Electron {electron}, Node {node})', 'Dürbün.app içinde gömülü (Node {node})', 'Dürbün.app içinde gömülü'],
 
     /* ── UI-side messages kept under code.* (used by the shell) ── */
     'demo.enabled': 'Demo verisi açıldı',
@@ -569,6 +595,19 @@ registerMessages('code', {
     'upload.tooLarge': ['The file is too large (limit {limit})', 'The file is too large'],
     'url.invalid': 'Malformed URL',
     network: 'Could not reach the Dürbün server',
+
+    'reader.crashReports.dropboxRefused':
+      'This device does not allow reading Android’s crash records (dumpsys dropbox); some manufacturers block it. Live crashes still show up in the device log; records of earlier launches do not.',
+    'reader.crashReports.devicectlMissing':
+      'Reading the iPhone’s crash reports (.ips) takes Xcode’s devicectl tool, which was not found on this Mac. Once Xcode 15 or newer is installed, the reports come in by themselves.',
+    'reader.crashReports.developerModeOff':
+      'Crash reports (.ips) cannot be read while Developer Mode is off on the iPhone. Once it is turned on in Settings → Privacy & Security → Developer Mode and the phone has restarted, the reports come in.',
+    'reader.crashReports.failed': ['The device’s crash records could not be read: {detail}', 'The device’s crash records cannot be read right now.'],
+    'reader.frameStats.noData':
+      'CPU and memory are read from the device’s process list. FPS cannot be measured from outside on this device: neither gfxinfo nor SurfaceFlinger gave frames for this app; FPS needs the SDK or a Flutter debug session.',
+    'reader.frameStats.unsupported': 'This device does not expose frame stats; FPS and janky frames can only be measured inside the app (SDK or Flutter debug).',
+
+    'doctor.node.embedded': ['Embedded in Dürbün.app (Electron {electron}, Node {node})', 'Embedded in Dürbün.app (Node {node})', 'Embedded in Dürbün.app'],
 
     /* ── UI-side messages kept under code.* (used by the shell) ── */
     'demo.enabled': 'Demo data enabled',

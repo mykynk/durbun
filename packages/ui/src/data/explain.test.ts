@@ -179,6 +179,8 @@ describe('explainSources — builds without the SDK', () => {
     ['Firebase', { buildType: 'release', source: 'firebase', installer: 'dev.firebase.appdistribution' }, 'firebase', 'releaseWithoutSdk', ['buildWithDurbunFlag', 'useDebugBuild']],
     ['Play', { buildType: 'release', source: 'play' }, 'store', 'storeBuild', ['useDebugBuild', 'buildWithDurbunFlag']],
     ['other store', { buildType: 'release', source: 'other-store', installer: 'com.sec.android.app.samsungapps' }, 'store', 'storeBuild', ['useDebugBuild', 'buildWithDurbunFlag']],
+    ['APK installed by hand', { buildType: 'release', source: 'other-store', installer: 'com.google.android.packageinstaller' }, 'release', 'releaseWithoutSdk', ['buildWithDurbunFlag', 'useDebugBuild']],
+    ['debug APK installed by hand', { buildType: 'debug', source: 'other-store', installer: 'com.android.packageinstaller' }, 'debug', 'noSdk', ['openSdkGuide', 'attachVm']],
     ['unknown', { buildType: 'unknown', source: 'unknown' }, 'unknown', 'noSdk', ['openSdkGuide']],
   ];
   for (const [label, da, build, reason, actions] of cases) {
@@ -244,6 +246,16 @@ describe('explainSources — device log status', () => {
     const r = ex({ device: dev, sessions: [session(dev, { platform: 'react-native', transport: 'websocket' })] });
     expect(r.context?.deviceLogs).toBe('none');
     expect(row(r, 'logs')).toMatchObject({ status: 'yes', sources: ['sdk'], reasons: ['networkOnly'] });
+    // Nothing is read from the phone itself over Wi-Fi: no crash reports.
+    expect(row(r, 'crashes')).toMatchObject({ status: 'yes', sources: ['sdk'] });
+  });
+
+  it('net: Android device: no dropbox records, no process polling (regression)', () => {
+    const dev = device('net:android-pixel-8-pixel-8', { platform: 'android', kind: 'physical', connection: 'wifi', logs: { status: 'unavailable', code: 'logs.networkOnly' }, actions: [] });
+    const r = ex({ device: dev, sessions: [session(dev, { capabilities: ['logs', 'network'], actions: [] })] });
+    expect(row(r, 'crashes')).toMatchObject({ status: 'yes', sources: ['sdk'] });
+    expect(row(r, 'metrics')).toMatchObject({ status: 'no', sources: [], reasons: ['sdkLacksCapability'], actions: ['openSdkGuide'] });
+    expect(row(r, 'tools')).toMatchObject({ status: 'no', reasons: ['sdkLacksCapability'] });
   });
 });
 
@@ -293,12 +305,31 @@ describe('explainSources — lifecycle and recordings', () => {
     expect(row(r, 'tools')).toMatchObject({ status: 'no', reasons: ['readOnly'] });
   });
 
-  it('demo data follows the simulated capabilities', () => {
-    const dev = device('demo:1', { name: 'Pixel 8 · Demo' });
-    const r = ex({ device: dev, sessions: [session(dev, { transport: 'demo', platform: 'demo', capabilities: ['logs', 'network', 'metrics'] })] });
-    expect(r.badge).toBe('demo');
-    expect(row(r, 'network')).toMatchObject({ status: 'yes', sources: ['demo'] });
+  it('the demo is explained like the device and build it stands for, with a demo note', () => {
+    const dev = device('demo:1', { name: 'Pixel 8 · Demo', logs: { status: 'streaming', via: 'demo' } });
+    const r = ex({ device: dev, sessions: [session(dev, { transport: 'demo', platform: 'flutter', capabilities: ['logs', 'network', 'metrics'] })] });
+    expect(r.badge).toBe('sdk');
+    expect(r.notes).toEqual(['demoData']);
+    expect(r.context?.demo).toBe(true);
+    expect(row(r, 'network')).toMatchObject({ status: 'yes', sources: ['sdk'] });
+    expect(row(r, 'logs')).toMatchObject({ status: 'yes', sources: ['sdk', 'logcat'] });
     expect(row(r, 'mocks')).toMatchObject({ status: 'no', reasons: ['sdkLacksCapability'] });
+  });
+
+  it('an SDK-less demo app never claims network or mocks (regression: every row was "yes · demo")', () => {
+    const dev = device('demo:1', { name: 'Pixel 8 · Demo', logs: { status: 'streaming', via: 'demo' } });
+    const kumbara = deviceApp(dev, { buildType: 'release', source: 'play', installer: 'com.android.vending' });
+    const r = ex({ device: dev, deviceApp: kumbara, sessions: [] });
+    expect(r.badge).toBe('device-only');
+    expect(row(r, 'network')).toMatchObject({ status: 'no', reasons: ['storeBuild', 'noOutsideNetwork'] });
+    expect(row(r, 'mocks').status).toBe('no');
+    expect(row(r, 'crashes')).toMatchObject({ status: 'yes', sources: ['dropbox', 'logcat'] });
+    expect(buildBadgeOf({ device: dev, deviceApp: kumbara, sessions: [] })).toBe('play');
+    // The USB iPhone of the demo: a TestFlight build.
+    const iphone = device('demo:3', { platform: 'ios', kind: 'physical', name: 'iPhone 13 · Demo', logs: { status: 'streaming', via: 'demo' } });
+    const ios = ex({ device: iphone, deviceApp: deviceApp(iphone, { buildType: 'release', source: 'store-or-testflight' }), sessions: [] });
+    expect(ios.context?.platform).toBe('ios-device');
+    expect(row(ios, 'metrics')).toMatchObject({ status: 'no', reasons: ['iosNoDeviceMetrics'] });
   });
 
   it('no device and no app: honest "no SDK" rows', () => {
@@ -316,6 +347,84 @@ describe('explainSources — lifecycle and recordings', () => {
   });
 });
 
+/* ───────────── SDK-less readers (DeviceInfo.readers) ───────────── */
+
+describe('explainSources — device readers', () => {
+  const refused = { crashReports: { status: 'unavailable' as const, code: 'reader.crashReports.dropboxRefused', detail: 'dumpsys dropbox: Permission Denial' } };
+
+  it('Android crash records refused: never "yes" from dropbox, live crash lines only', () => {
+    const dev = { ...PIXEL, readers: refused };
+    const r = ex({ device: dev, deviceApp: deviceApp(dev, { buildType: 'release', source: 'play' }), sessions: [] });
+    expect(row(r, 'crashes')).toEqual({ capability: 'crashes', status: 'partial', sources: ['logcat'], reasons: ['crashReportsUnavailable'], actions: [] });
+    expect(r.context?.readers?.crashReports?.code).toBe('reader.crashReports.dropboxRefused');
+  });
+
+  it('iPhone without devicectl: crash reports unavailable, Doctor offered', () => {
+    const dev = { ...IPHONE, readers: { crashReports: { status: 'unavailable' as const, code: 'reader.crashReports.devicectlMissing' } } };
+    const r = ex({ device: dev, deviceApp: deviceApp(dev, { buildType: 'release', source: 'store-or-testflight' }), sessions: [] });
+    expect(row(r, 'crashes')).toMatchObject({ status: 'partial', sources: ['idevicesyslog'], reasons: ['crashReportsUnavailable'], actions: ['openDoctor'] });
+  });
+
+  it('no device log and no crash records: "no", with both reasons', () => {
+    const dev = { ...IPHONE, logs: { status: 'unavailable' as const, code: 'device.untrusted' }, readers: { crashReports: { status: 'unavailable' as const, code: 'reader.crashReports.failed' } } };
+    const r = ex({ device: dev, deviceApp: deviceApp(dev, { buildType: 'release', source: 'store-or-testflight' }), sessions: [] });
+    expect(row(r, 'crashes')).toMatchObject({ status: 'no', reasons: ['deviceLogsUnavailable', 'crashReportsUnavailable'] });
+  });
+
+  it('with the SDK the crashes row stays "yes" and carries the caveat', () => {
+    const dev = { ...PIXEL, readers: refused };
+    const r = ex({ device: dev, sessions: [session(dev)] });
+    expect(row(r, 'crashes')).toMatchObject({ status: 'yes', sources: ['sdk', 'logcat'], reasons: ['crashReportsUnavailable'] });
+  });
+
+  it('a working reader (or none reported) changes nothing', () => {
+    const ok = ex({ device: { ...PIXEL, readers: { crashReports: { status: 'ok', lastOk: 5 } } }, deviceApp: deviceApp(PIXEL, { buildType: 'release', source: 'play' }), sessions: [] });
+    expect(row(ok, 'crashes')).toMatchObject({ status: 'yes', sources: ['dropbox', 'logcat'], reasons: [] });
+  });
+
+  it('Android frame stats without data: CPU / memory only, said so', () => {
+    const dev = { ...PIXEL, readers: { frameStats: { status: 'unavailable' as const, code: 'reader.frameStats.noData' } } };
+    const r = ex({ device: dev, deviceApp: deviceApp(dev, { buildType: 'release', source: 'play' }), sessions: [] });
+    expect(row(r, 'metrics')).toEqual({ capability: 'metrics', status: 'partial', sources: ['proc-stats'], reasons: ['frameStatsUnavailable'], actions: ['startProcessMetrics'] });
+    const iosSim = ex({ device: { ...SIM, readers: { frameStats: { status: 'unsupported' as const, code: 'reader.frameStats.unsupported' } } }, deviceApp: deviceApp(SIM, { buildType: 'debug', source: 'simulator' }), sessions: [] });
+    expect(row(iosSim, 'metrics')).toMatchObject({ status: 'partial', sources: ['host-ps'], reasons: ['fpsNeedsApp'] });
+  });
+});
+
+/* ───────────── SDK layers (sdk.layers) ───────────── */
+
+describe('explainSources — native layer of the Flutter plugin', () => {
+  const withLayers = (dev: DeviceInfo, layers: ('dart' | 'android' | 'ios')[] | undefined): AppSession => {
+    const s = session(dev);
+    return { ...s, sdk: { ...s.sdk, ...(layers ? { layers } : {}) } };
+  };
+
+  it('Android: native logs and crashes covered, OkHttp still needs the interceptor', () => {
+    const r = ex({ device: PIXEL, sessions: [withLayers(PIXEL, ['dart', 'android'])] });
+    expect(r.notes).toEqual(['nativeLayerActive']);
+    expect(row(r, 'logs').sources).toEqual(['sdk', 'native-layer', 'logcat']);
+    expect(row(r, 'crashes').sources).toEqual(['sdk', 'native-layer', 'dropbox', 'logcat']);
+    expect(row(r, 'network')).toMatchObject({ status: 'yes', sources: ['sdk'], reasons: ['nativeNetworkNeedsInterceptor', 'thirdPartyTraffic'], actions: ['addInterceptor'] });
+  });
+
+  it('iOS: URLSession is captured by the native layer, no interceptor caveat', () => {
+    const r = ex({ device: IPHONE, sessions: [withLayers(IPHONE, ['dart', 'ios'])] });
+    expect(r.notes).toEqual(['nativeLayerActive']);
+    expect(row(r, 'network')).toMatchObject({ status: 'yes', sources: ['sdk', 'native-layer'], reasons: ['thirdPartyTraffic'], actions: [] });
+  });
+
+  it('only the Dart layer reported: a note says native data does not come through', () => {
+    const r = ex({ device: IPHONE, sessions: [withLayers(IPHONE, ['dart'])] });
+    expect(r.notes).toEqual(['nativeLayerMissing']);
+    expect(row(r, 'logs').sources).toEqual(['sdk', 'idevicesyslog']);
+  });
+
+  it('layers not reported (older SDKs) or no native layer on the platform: no note', () => {
+    expect(ex({ device: PIXEL, sessions: [withLayers(PIXEL, undefined)] }).notes).toEqual([]);
+    expect(ex({ device: device('net:macos-desktop', { platform: 'other' }), sessions: [withLayers(device('net:macos-desktop', { platform: 'other' }), ['dart'])] }).notes).toEqual([]);
+  });
+});
+
 describe('buildBadgeOf', () => {
   it('names the install source, else the build type', () => {
     expect(buildBadgeOf({ deviceApp: deviceApp(PIXEL, { buildType: 'release', source: 'play' }), sessions: [] })).toBe('play');
@@ -328,6 +437,9 @@ describe('buildBadgeOf', () => {
     expect(buildBadgeOf({ deviceApp: deviceApp(PIXEL, { buildType: 'release', source: 'adb' }), sessions: [] })).toBe('release');
     expect(buildBadgeOf({ deviceApp: deviceApp(PIXEL, { buildType: 'unknown', source: 'unknown' }), sessions: [] })).toBeUndefined();
     expect(buildBadgeOf({ sessions: [session(PIXEL)] })).toBe('debug');
-    expect(buildBadgeOf({ device: device('demo:1'), sessions: [session(PIXEL)] })).toBeUndefined();
+    expect(buildBadgeOf({ device: device('demo:1'), sessions: [session(PIXEL)] })).toBe('debug');
+    expect(buildBadgeOf({ device: device('import:1'), sessions: [session(PIXEL)] })).toBeUndefined();
+    expect(buildBadgeOf({ deviceApp: deviceApp(PIXEL, { buildType: 'release', source: 'other-store', installer: 'com.google.android.packageinstaller' }), sessions: [] })).toBe('apk');
+    expect(buildBadgeOf({ deviceApp: deviceApp(PIXEL, { buildType: 'release', source: 'other-store', installer: 'com.huawei.appmarket' }), sessions: [] })).toBe('other-store');
   });
 });

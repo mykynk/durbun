@@ -23,6 +23,8 @@ import {
   buildBadgeHint,
   buildBadgeLabel,
   capabilityLabel,
+  crashReaderText,
+  frameReaderText,
   reasonText,
   sourceHint,
   sourceLabel,
@@ -31,7 +33,7 @@ import {
   tipText,
   type ReasonTextOptions,
 } from './text';
-import { pickEmptyReason, useAppExplain, useScopeExplain, type ExplainedApp } from './model';
+import { pickEmptyReason, useAppExplain, useCrashRecordsState, useScopeExplain, type ExplainedApp } from './model';
 import { actionAvailable, runExplainAction } from './actions';
 import './sources.css';
 
@@ -48,12 +50,14 @@ export function SourceBadge({ badge, short, className }: { badge: ExplainBadge; 
   );
 }
 
-/** Debug · Firebase · Play · Xcode · Store/TestFlight · Simülatör · Diğer mağaza. */
-export function BuildBadgeChip({ badge, installer, className }: { badge: BuildBadge; installer?: string; className?: string }) {
+/** Debug · Firebase · Play · Xcode · Store / TestFlight / ad-hoc · Simülatör · Galaxy Store… · APK. */
+export function BuildBadgeChip({ badge, installer, short, className }: { badge: BuildBadge; installer?: string; short?: boolean; className?: string }) {
+  const label = buildBadgeLabel(badge, installer, { short });
+  const full = buildBadgeLabel(badge, installer);
   return (
-    <Tooltip content={buildBadgeHint(badge, installer)}>
-      <span className={clsx('build-badge', `build-badge--${badge}`, className)} tabIndex={-1}>
-        {buildBadgeLabel(badge)}
+    <Tooltip content={label === full ? buildBadgeHint(badge, installer) : `${full} · ${buildBadgeHint(badge, installer)}`}>
+      <span className={clsx('build-badge', `build-badge--${badge}`, className)} tabIndex={-1} aria-label={full}>
+        {label}
       </span>
     </Tooltip>
   );
@@ -392,4 +396,65 @@ export function ScopeSourcesButton({ className }: { className?: string }) {
   if (scope.kind !== 'app' || scope.items.length !== 1) return null;
   const item = scope.items[0]!;
   return <WhatCanISeeButton groupKey={item.key} size="sm" className={className} label={t('sources.titleFor', { app: item.result.context?.appName || item.group.bundleId })} />;
+}
+
+/* ───────────── crash empty states ───────────── */
+
+/**
+ * Under an empty crash list: whether "no crash" really means none yet (the device's own records are read) or
+ * the records of a device in scope cannot be read (why + how). `onlyProblems`: nothing in the first case.
+ */
+export function CrashRecordsNote({ onlyProblems, className }: { onlyProblems?: boolean; className?: string }) {
+  const t = useT();
+  const st = useCrashRecordsState();
+  if (st.unreadable.length > 0) {
+    const one = st.unreadable.length === 1 ? st.unreadable[0] : undefined;
+    const title = one ? t('sources.crashEmpty.unreadableTitle', { device: deviceDisplayName(one) }) : t('sources.crashEmpty.unreadableMany');
+    const needsXcode = st.unreadable.some((d) => /\.devicectlMissing$/.test(d.readers?.crashReports?.code ?? ''));
+    return (
+      <Callout
+        tone="info"
+        compact
+        title={title}
+        className={clsx('src-crash-note', className)}
+        actions={
+          needsXcode ? (
+            <Button size="sm" onClick={() => ui.openDoctor()}>
+              {actionLabel('openDoctor')}
+            </Button>
+          ) : undefined
+        }
+      >
+        <p>{t('sources.crashEmpty.unreadableLead')}</p>
+        <ul className="src-reasons">
+          {st.unreadable.map((d) => (
+            <li key={d.id}>
+              {one ? null : <strong>{deviceDisplayName(d)}: </strong>}
+              <RichText text={crashReaderText(d)} />
+            </li>
+          ))}
+        </ul>
+      </Callout>
+    );
+  }
+  if (onlyProblems || st.readable.length === 0) return null;
+  const one = st.readable.length === 1 ? st.readable[0] : undefined;
+  return (
+    <p className={clsx('src-crash-note src-crash-note--ok', className)}>
+      <strong>{t('sources.crashEmpty.noneTitle')}.</strong> {t('sources.crashEmpty.none', { device: one ? deviceDisplayName(one) : undefined })}
+    </p>
+  );
+}
+
+/** Performance of a process measured from outside: why FPS is missing when the device gives no frame stats. */
+export function FrameStatsNote({ deviceId, className }: { deviceId: string; className?: string }) {
+  const t = useT();
+  const device = useHub((s) => s.devices[deviceId]);
+  const text = device && device.platform === 'android' && device.state === 'online' ? frameReaderText(device) : '';
+  if (!text) return null;
+  return (
+    <Callout tone="info" compact title={t('sources.framesNote.title')} className={clsx('src-frames-note', className)}>
+      <RichText text={text} />
+    </Callout>
+  );
 }

@@ -6,7 +6,7 @@
  * the sidebar badges, the "Neler görünüyor?" panel and the Network / Performance / Mocks empty states all
  * render from it so they can never disagree.
  */
-import type { AppInstallSource, AppSession, DeviceApp, DeviceInfo, SdkPlatform } from '@durbun/protocol';
+import type { AppInstallSource, AppSession, DeviceApp, DeviceInfo, DeviceReaderState, SdkLayer, SdkPlatform } from '@durbun/protocol';
 
 /** One row of the matrix. */
 export type ExplainCapability = 'logs' | 'network' | 'metrics' | 'crashes' | 'mocks' | 'tools';
@@ -26,7 +26,9 @@ export type ExplainSource =
   | 'host-ps'
   | 'frame-stats'
   | 'demo'
-  | 'import';
+  | 'import'
+  /** The Flutter plugin's native core (Kotlin / Swift) inside the app, feeding the same SDK session. */
+  | 'native-layer';
 
 /**
  * Why a capability is missing or partial. Each code has a natural Turkish + English sentence that names
@@ -73,7 +75,17 @@ export type ExplainReason =
   /** In-app tools need the SDK / VM service, but device tools (launch, stop, clear data, screenshot) still work. */
   | 'deviceToolsAvailable'
   /** The SDK is running inside a build installed from a store — store builds should ship with it off. */
-  | 'sdkInStoreBuild';
+  | 'sdkInStoreBuild'
+  /** The device's own crash / ANR records cannot be read (`DeviceInfo.readers.crashReports`, worded by its code). */
+  | 'crashReportsUnavailable'
+  /** Android frame stats gave no frames from outside the app (`DeviceInfo.readers.frameStats`): CPU / memory only. */
+  | 'frameStatsUnavailable'
+  /** The plugin's native core feeds this session too (`sdk.layers`): native logs and crashes, OkHttp / URLSession. */
+  | 'nativeLayerActive'
+  /** A Flutter session whose native core is not attached (`sdk.layers` without 'android' / 'ios'): Dart data only. */
+  | 'nativeLayerMissing'
+  /** Demo device and app: sample data, explained as a real device would be. */
+  | 'demoData';
 
 /** A button the UI can offer next to a reason. */
 export type ExplainAction =
@@ -136,6 +148,12 @@ export interface ExplainContext {
   deviceOnline: boolean;
   /** Device state ('disconnected' devices are read-only: their missing stream is not a problem to fix). */
   deviceState?: DeviceInfo['state'];
+  /** Layers feeding the picked SDK session (`sdk.layers`; undefined = not reported: older or single-layer SDKs). */
+  layers?: SdkLayer[];
+  /** SDK-less readers of the device as the server reports them (crash records, frame stats). */
+  readers?: DeviceInfo['readers'];
+  /** A demo device / app: sample data, explained like the real device and build it stands for. */
+  demo?: boolean;
 }
 
 export interface ExplainResult {
@@ -146,8 +164,32 @@ export interface ExplainResult {
   context?: ExplainContext;
 }
 
-/** Compact build badge for the sidebar (Debug · Firebase · Play · Xcode · Store/TestFlight · Simülatör · Diğer mağaza). */
-export type BuildBadge = 'debug' | 'release' | 'firebase' | 'play' | 'other-store' | 'xcode' | 'store-or-testflight' | 'simulator';
+/**
+ * Compact build badge for the sidebar (Debug · Firebase · Play · Xcode · Store / TestFlight / ad-hoc · Simülatör ·
+ * Galaxy Store, AppGallery… or Diğer mağaza · APK = installed by hand with the package installer).
+ */
+export type BuildBadge = 'debug' | 'release' | 'firebase' | 'play' | 'other-store' | 'xcode' | 'store-or-testflight' | 'simulator' | 'apk';
+
+/** Android stores besides Play, recognized by their installer package (`DeviceApp.install.installer`). */
+export type KnownStore = 'galaxy-store' | 'appgallery' | 'getapps' | 'amazon';
+
+const STORE_INSTALLERS: Readonly<Record<string, KnownStore>> = {
+  'com.sec.android.app.samsungapps': 'galaxy-store',
+  'com.huawei.appmarket': 'appgallery',
+  'com.xiaomi.market': 'getapps',
+  'com.xiaomi.mipicks': 'getapps',
+  'com.amazon.venezia': 'amazon',
+};
+
+/** The system package installer: an APK opened by hand (from a file, a chat, a download), not a store. */
+const MANUAL_INSTALLERS: ReadonlySet<string> = new Set(['com.google.android.packageinstaller', 'com.android.packageinstaller']);
+
+/** What an Android 'other-store' installer is: a known store, the package installer ('manual') or unknown. */
+export function otherStoreKind(installer: string | undefined): KnownStore | 'manual' | undefined {
+  if (!installer) return undefined;
+  if (MANUAL_INSTALLERS.has(installer)) return 'manual';
+  return STORE_INSTALLERS[installer];
+}
 
 export const EXPLAIN_CAPABILITIES: readonly ExplainCapability[] = ['logs', 'network', 'metrics', 'crashes', 'mocks', 'tools'];
 
@@ -170,6 +212,29 @@ function isImport(input: ExplainInput): boolean {
   return Boolean(input.device?.id.startsWith('import:')) || input.sessions.some((s) => s.transport === 'import');
 }
 
+/** `net:` device (an SDK over Wi-Fi without USB): nothing is read from the device itself. */
+function isNetworkOnly(device: DeviceInfo | undefined): boolean {
+  return Boolean(device && (device.id.startsWith('net:') || device.logs.code === 'logs.networkOnly'));
+}
+
+/** The server reports this reader as not working. Absent = assume it works (older servers do not report). */
+function readerDown(state: DeviceReaderState | undefined): boolean {
+  return Boolean(state && state.status !== 'ok');
+}
+
+/**
+ * The Flutter plugin's native core for this platform: 'active' when `sdk.layers` names it, 'missing' when the
+ * plugin reports its Dart layer only; undefined when the SDK does not say (older / single-layer SDKs) or the
+ * platform has no native layer (desktop, web).
+ */
+function nativeLayerOf(ctx: ExplainContext): 'active' | 'missing' | undefined {
+  if (ctx.transport !== 'sdk' || !ctx.layers) return undefined;
+  const want: SdkLayer | undefined = ctx.platform === 'android' ? 'android' : ctx.platform === 'ios-device' || ctx.platform === 'ios-simulator' ? 'ios' : undefined;
+  if (!want) return undefined;
+  if (ctx.layers.includes(want)) return 'active';
+  return ctx.sdkPlatform === 'flutter' && ctx.layers.includes('dart') ? 'missing' : undefined;
+}
+
 /** The session that describes the app best: connected first, SDK before VM service, newest first. */
 function pickSession(sessions: readonly AppSession[]): AppSession | undefined {
   let best: AppSession | undefined;
@@ -184,8 +249,11 @@ export function buildKindOf(deviceApp: DeviceApp | undefined, session: AppSessio
   if (deviceApp) {
     const bt = deviceApp.buildType;
     switch (deviceApp.install.source) {
-      case 'play':
       case 'other-store':
+        // An APK installed by hand is whatever build it is, not a store build.
+        if (otherStoreKind(deviceApp.install.installer) === 'manual') return bt === 'debug' ? 'debug' : 'release';
+        return 'store';
+      case 'play':
         return 'store';
       case 'firebase':
         return 'firebase';
@@ -205,15 +273,16 @@ export function buildKindOf(deviceApp: DeviceApp | undefined, session: AppSessio
   return 'unknown';
 }
 
-/** Sidebar build badge, or undefined when nothing is known (demo / import / an SDK that does not say). */
+/** Sidebar build badge, or undefined when nothing is known (an import / an SDK that does not say). */
 export function buildBadgeOf(input: Pick<ExplainInput, 'deviceApp' | 'sessions' | 'device'>): BuildBadge | undefined {
-  if (input.device && (input.device.id.startsWith('demo:') || input.device.id.startsWith('import:'))) return undefined;
+  if (input.device && input.device.id.startsWith('import:')) return undefined;
   const da = input.deviceApp;
   if (da) {
     switch (da.install.source) {
+      case 'other-store':
+        return otherStoreKind(da.install.installer) === 'manual' ? 'apk' : 'other-store';
       case 'play':
       case 'firebase':
-      case 'other-store':
       case 'xcode':
       case 'store-or-testflight':
       case 'simulator':
@@ -262,12 +331,14 @@ export function explainContext(input: ExplainInput): ExplainContext {
   const session = pickSession(input.sessions);
   const platform = platformOf(device);
   const connected = input.sessions.some((s) => s.connected);
+  // The demo stands for real devices and builds (its lines carry realistic origins): it is explained like
+  // them, its simulated SDK sessions as SDK sessions; `demo` marks it (a note says so).
   let transport: ExplainTransport;
   if (isImport(input)) transport = 'import';
-  else if (isDemo(input)) transport = 'demo';
   else if (!session) transport = 'none';
   else if (!session.connected && da?.running) transport = 'none'; // this run has no SDK (the old session ended)
-  else transport = session.transport === 'vm-service' ? 'vm-service' : 'sdk';
+  else transport = session.transport === 'vm-service' || session.sdk.platform === 'dart-vm' ? 'vm-service' : 'sdk';
+  const layers = Array.isArray(session?.sdk.layers) ? session.sdk.layers.filter((l): l is SdkLayer => l === 'dart' || l === 'android' || l === 'ios') : undefined;
   let deviceLogs: ExplainContext['deviceLogs'] = 'none';
   if (device && !device.id.startsWith('import:') && !device.id.startsWith('net:') && device.logs.code !== 'logs.networkOnly' && device.id !== 'desktop') {
     deviceLogs = device.state === 'online' && (device.logs.status === 'streaming' || device.logs.status === 'starting') ? 'ok' : 'unavailable';
@@ -288,6 +359,9 @@ export function explainContext(input: ExplainInput): ExplainContext {
     logsCode: device?.logs.code,
     deviceOnline: device?.state === 'online',
     deviceState: device?.state,
+    ...(layers ? { layers } : {}),
+    ...(device?.readers ? { readers: device.readers } : {}),
+    ...(transport !== 'import' && isDemo(input) ? { demo: true } : {}),
   };
 }
 
@@ -347,7 +421,6 @@ export function explainSources(input: ExplainInput): ExplainResult {
   /* badge */
   let badge: ExplainBadge;
   if (ctx.transport === 'import') badge = 'import';
-  else if (ctx.transport === 'demo') badge = 'demo';
   else if (ctx.transport === 'sdk') badge = 'sdk';
   else if (ctx.transport === 'vm-service') badge = 'vm-service';
   else badge = 'device-only';
@@ -359,29 +432,24 @@ export function explainSources(input: ExplainInput): ExplainResult {
   /* app-level notes */
   if (input.device && !ctx.deviceOnline) notes.push('readOnly');
   else if (!ctx.running && (input.deviceApp || input.sessions.length > 0)) notes.push('notRunning');
-  if (ctx.transport === 'sdk' && isStoreLike(ctx.build)) notes.push('sdkInStoreBuild');
+  if (ctx.transport === 'sdk' && isStoreLike(ctx.build) && !ctx.demo) notes.push('sdkInStoreBuild');
+  const native = nativeLayerOf(ctx);
+  if (native === 'active') notes.push('nativeLayerActive');
+  else if (native === 'missing') notes.push('nativeLayerMissing');
+  if (ctx.demo) notes.push('demoData');
 
   const p = ctx.platform;
+  const netOnly = isNetworkOnly(input.device);
   const logSrc = ctx.deviceLogs === 'ok' ? deviceLogSource(p) : undefined;
-  const crashSrc = ctx.deviceOnline || !input.device ? deviceCrashSource(p) : undefined;
+  // Crash records are read from a connected device over USB (not from a `net:` device or one that is gone).
+  const crashReadable = !netOnly && (ctx.deviceOnline || !input.device) ? deviceCrashSource(p) : undefined;
+  const crashReaderDown = Boolean(crashReadable && input.device && readerDown(ctx.readers?.crashReports));
+  const crashSrc = crashReaderDown ? undefined : crashReadable;
   const logProblems = deviceLogProblems(ctx);
   const rows: ExplainRow[] = [];
 
-  if (ctx.transport === 'demo') {
-    // Demo data stands in for every source; it follows the simulated sessions' capabilities.
-    const demoCaps = new Set(input.sessions.flatMap((s) => s.capabilities));
-    const any = input.sessions.length === 0;
-    const d = (c: ExplainCapability, cap?: string) =>
-      any || !cap || demoCaps.has(cap as never) ? row(c, 'yes', ['demo']) : row(c, 'no', [], ['sdkLacksCapability']);
-    return {
-      badge,
-      rows: [d('logs'), d('network', 'network'), d('metrics', 'metrics'), d('crashes'), d('mocks', 'mocks'), d('tools')],
-      notes: notes.filter((n) => n !== 'sdkInStoreBuild'),
-      context: ctx,
-    };
-  }
-
   const appSrc: ExplainSource | undefined = ctx.transport === 'sdk' ? 'sdk' : ctx.transport === 'vm-service' ? 'vm-service' : undefined;
+  const nativeSrc: ExplainSource[] = native === 'active' ? ['native-layer'] : [];
   const buildReason = noSdkReason(ctx.build);
   const buildActions = noSdkActions(ctx.build, p);
   const androidNative = p === 'android' && (ctx.sdkPlatform === 'flutter' || ctx.sdkPlatform === 'android' || ctx.transport === 'vm-service');
@@ -389,9 +457,9 @@ export function explainSources(input: ExplainInput): ExplainResult {
   /* logs */
   if (appSrc) {
     const reasons: ExplainReason[] = [...logProblems.reasons];
-    if (ctx.deviceLogs === 'none' && input.device && (input.device.id.startsWith('net:') || ctx.logsCode === 'logs.networkOnly')) reasons.push('networkOnly');
+    if (ctx.deviceLogs === 'none' && netOnly) reasons.push('networkOnly');
     const partial = logProblems.reasons.length > 0;
-    rows.push(row('logs', partial ? 'partial' : 'yes', [appSrc, ...(logSrc ? [logSrc] : [])], reasons, logProblems.actions));
+    rows.push(row('logs', partial ? 'partial' : 'yes', [appSrc, ...nativeSrc, ...(logSrc ? [logSrc] : [])], reasons, logProblems.actions));
   } else if (logSrc) {
     rows.push(row('logs', 'yes', [logSrc], isReleaseLike(ctx.build) ? ['releaseLogsDependOnApp'] : []));
   } else {
@@ -405,10 +473,12 @@ export function explainSources(input: ExplainInput): ExplainResult {
       const reasons: ExplainReason[] = ['thirdPartyTraffic'];
       const actions: ExplainAction[] = [];
       if (androidNative) {
+        // Even with the native layer attached, OkHttp is only seen through DurbunInterceptor.
         reasons.unshift('nativeNetworkNeedsInterceptor');
         actions.push('addInterceptor');
       }
-      rows.push(row('network', 'yes', ['sdk'], reasons, actions));
+      // iOS: the native layer captures URLSession by itself.
+      rows.push(row('network', 'yes', ['sdk', ...(p === 'android' ? [] : nativeSrc)], reasons, actions));
     } else rows.push(row('network', 'no', [], ['sdkLacksCapability'], ['openSdkGuide']));
   } else if (ctx.transport === 'vm-service') {
     rows.push(row('network', 'yes', ['vm-service'], ['nativeNetworkNeedsInterceptor'], ['openSdkGuide']));
@@ -417,9 +487,14 @@ export function explainSources(input: ExplainInput): ExplainResult {
   }
 
   /* metrics */
+  const framesDown = readerDown(ctx.readers?.frameStats);
   const outside = (): ExplainRow | undefined => {
-    if (p === 'android') return row('metrics', 'partial', ['proc-stats', 'frame-stats'], ['frameStatsApproximate'], ctx.deviceOnline ? ['startProcessMetrics'] : []);
-    if (p === 'ios-simulator') return row('metrics', 'partial', ['host-ps'], ['fpsNeedsApp'], ctx.deviceOnline ? ['startProcessMetrics'] : []);
+    if (netOnly) return undefined;
+    const poll: ExplainAction[] = ctx.deviceOnline ? ['startProcessMetrics'] : [];
+    if (p === 'android') {
+      return framesDown ? row('metrics', 'partial', ['proc-stats'], ['frameStatsUnavailable'], poll) : row('metrics', 'partial', ['proc-stats', 'frame-stats'], ['frameStatsApproximate'], poll);
+    }
+    if (p === 'ios-simulator') return row('metrics', 'partial', ['host-ps'], ['fpsNeedsApp'], poll);
     return undefined;
   };
   if (appSrc && (ctx.transport === 'vm-service' || has('metrics'))) {
@@ -438,12 +513,19 @@ export function explainSources(input: ExplainInput): ExplainResult {
   /* crashes */
   const deviceCrash: ExplainSource[] = [...(crashSrc ? [crashSrc] : []), ...(logSrc ? [logSrc] : [])];
   const unsym: ExplainReason[] = crashSrc === 'crash-report' ? ['crashesUnsymbolicated'] : [];
+  // The device cannot hand out its records: say so on the row instead of implying "no crashes".
+  const unreadable: ExplainReason[] = crashReaderDown ? ['crashReportsUnavailable'] : [];
+  const unreadableActions: ExplainAction[] = crashReaderDown && /\.devicectlMissing$/.test(ctx.readers?.crashReports?.code ?? '') ? ['openDoctor'] : [];
   if (appSrc) {
-    rows.push(row('crashes', 'yes', [appSrc, ...deviceCrash]));
-  } else if (deviceCrash.length > 0) {
+    rows.push(row('crashes', 'yes', [appSrc, ...nativeSrc, ...deviceCrash], unreadable, unreadableActions));
+  } else if (crashSrc) {
     rows.push(row('crashes', 'yes', deviceCrash, unsym));
+  } else if (deviceCrash.length > 0) {
+    // Live crash lines of the device log only.
+    rows.push(row('crashes', 'partial', deviceCrash, unreadable, unreadableActions));
   } else {
-    rows.push(row('crashes', 'no', [], logProblems.reasons.length ? logProblems.reasons : [buildReason], logProblems.actions.length ? logProblems.actions : buildActions));
+    const reasons: ExplainReason[] = [...(logProblems.reasons.length ? logProblems.reasons : unreadable.length ? [] : [buildReason]), ...unreadable];
+    rows.push(row('crashes', 'no', [], reasons, logProblems.actions.length ? logProblems.actions : unreadable.length ? unreadableActions : buildActions));
   }
 
   /* mocks */
@@ -458,16 +540,17 @@ export function explainSources(input: ExplainInput): ExplainResult {
     rows.push(row('mocks', 'no', [], [buildReason], buildActions));
   }
 
-  /* tools (in-app debug tools; device tools work for every app) */
+  /* tools (in-app debug tools; device tools work for every app on a USB / local device) */
+  const deviceTools: ExplainReason[] = input.device && !netOnly ? ['deviceToolsAvailable'] : [];
   if (offline) {
     rows.push(row('tools', 'no', [], ['readOnly']));
   } else if (ctx.transport === 'sdk') {
     if (has('commands') || (session?.actions.length ?? 0) > 0) rows.push(row('tools', 'yes', ['sdk']));
-    else rows.push(row('tools', 'no', [], ['sdkLacksCapability', 'deviceToolsAvailable'], ['openSdkGuide']));
+    else rows.push(row('tools', 'no', [], ['sdkLacksCapability', ...deviceTools], ['openSdkGuide']));
   } else if (ctx.transport === 'vm-service') {
     rows.push(row('tools', 'yes', ['vm-service']));
   } else {
-    rows.push(row('tools', 'no', [], input.device ? [buildReason, 'deviceToolsAvailable'] : [buildReason], buildActions));
+    rows.push(row('tools', 'no', [], [buildReason, ...deviceTools], buildActions));
   }
 
   return { badge, rows, notes, context: ctx };

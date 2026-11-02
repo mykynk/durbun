@@ -266,8 +266,8 @@ function ScopeBreadcrumb() {
           <>
             <ChevronRight size={13} className="crumb__sep" aria-hidden />
             {target.app ? <SdkBadge platform={target.app.sdk.platform} /> : <SourceBadge badge={explainSources(input).badge} short />}
-            <span className="crumb__text">{appName}</span>
-            {build ? <BuildBadgeChip badge={build} installer={target.deviceApp?.install.installer} /> : null}
+            <span className="crumb__text crumb__text--app">{appName}</span>
+            {build ? <BuildBadgeChip badge={build} installer={target.deviceApp?.install.installer} short /> : null}
             {scope.kind === 'app' && scope.exact && target.app ? <span className="crumb__session tnum">{formatClock(target.app.connectedAt, { ms: false })}</span> : null}
           </>
         ) : null}

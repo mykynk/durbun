@@ -11,11 +11,13 @@ export {
   ReasonList,
   ActionButtons,
   RichText,
+  CrashRecordsNote,
+  FrameStatsNote,
 } from './components';
 export type { ExplainEmptyProps } from './components';
 export { DataSourcesDialog, DataSourcesExplainer, buildMatrix } from './DataSourcesDialog';
-export { explainGroup, explainScope, groupFor, scopeGroupKeys, explainSignature, useAppExplain, useScopeExplain, pickEmptyReason } from './model';
-export type { ExplainedApp, ScopeExplain, EmptyExplanation } from './model';
+export { explainGroup, explainScope, groupFor, scopeGroupKeys, explainSignature, useAppExplain, useScopeExplain, pickEmptyReason, crashRecordsState, useCrashRecordsState } from './model';
+export type { ExplainedApp, ScopeExplain, EmptyExplanation, CrashRecordsState } from './model';
 export { runExplainAction, actionAvailable, guideTabFor, mainPidOf } from './actions';
 export {
   capabilityLabel,
@@ -38,5 +40,7 @@ export {
   isDeviceCrashRecord,
   isUnsymbolicated,
   isKnownOrigin,
+  crashReaderText,
+  frameReaderText,
   TIP_ACTIONS,
 } from './text';

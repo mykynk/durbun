@@ -4,8 +4,10 @@
  * sentences name the concrete app, version and install source. Calm, specific, never blaming the developer:
  * one sentence why, one sentence how (the how is usually an action button).
  */
-import type { LogEntry, LogOrigin } from '@durbun/protocol';
+import type { DeviceInfo, DeviceReaderState, LogEntry, LogOrigin } from '@durbun/protocol';
 import { registerMessages, t, hasMessage } from '../i18n';
+import { tCode } from '../i18n/codes';
+import { otherStoreKind } from '../data/explain';
 import type {
   BuildBadge,
   ExplainAction,
@@ -56,6 +58,7 @@ registerMessages('sources', {
       'frame-stats': 'Kare istatistikleri (gfxinfo)',
       demo: 'Demo verisi',
       import: 'İçe aktarılan kayıt',
+      'native-layer': 'SDK’nın native katmanı',
     },
     sourceHint: {
       logcat: 'Android’in sistem logu. USB yeterli; uygulamaya bir şey eklemek gerekmez.',
@@ -70,6 +73,7 @@ registerMessages('sources', {
       'frame-stats': 'Android’in kare zamanlamaları (Flutter’da SurfaceFlinger); yaklaşık değerlerdir.',
       demo: 'Gerçek bir cihaz yok; Dürbün’ün ürettiği örnek veri.',
       import: 'Bir .durbun.json dosyasından içe aktarılan kayıt.',
+      'native-layer': 'Flutter eklentisinin uygulama içindeki Kotlin / Swift çekirdeği: native loglar ve çökmeler; iOS’ta URLSession istekleri, Android’de DurbunInterceptor eklenmiş OkHttp istemcileri.',
     },
     badge: {
       sdk: 'SDK',
@@ -100,27 +104,41 @@ registerMessages('sources', {
       play: 'Play',
       'other-store': 'Diğer mağaza',
       xcode: 'Xcode',
-      'store-or-testflight': 'Store/TestFlight',
+      'store-or-testflight': 'Store / TestFlight / ad-hoc',
       simulator: 'Simülatör',
+      apk: 'APK',
+    },
+    /** Narrow sidebar rows (the tooltip carries the full label). */
+    buildShort: {
+      'store-or-testflight': 'Store/TestFlight',
     },
     buildHint: {
       debug: 'Debug derlemesi (adb, Android Studio ya da flutter run ile kurulmuş).',
-      release: 'adb ile kurulmuş bir release derlemesi.',
+      release: 'adb, Android Studio ya da flutter run ile kurulmuş bir release derlemesi.',
       firebase: 'Firebase App Distribution’dan kurulmuş.',
       play: 'Play Store’dan kurulmuş.',
       'other-store': ['Başka bir mağazadan kurulmuş ({installer}).', 'Başka bir mağazadan kurulmuş.'],
       xcode: 'Xcode ya da flutter run ile kurulmuş geliştirici derlemesi.',
       'store-or-testflight': 'App Store, TestFlight ya da ad-hoc ile kurulmuş (iOS hangisi olduğunu söylemez).',
       simulator: 'Simülatör derlemesi.',
+      apk: 'APK elle kuruldu (dosyadan, paket yükleyiciyle); bir mağazadan gelmedi.',
+    },
+    /** Android stores besides Play, by installer package: badge, tooltip, "{appv} {built}" predicate. */
+    store: {
+      'galaxy-store': { short: 'Galaxy Store', hint: 'Galaxy Store’dan kurulmuş.', built: 'Galaxy Store’dan kurulmuş bir sürüm' },
+      appgallery: { short: 'AppGallery', hint: 'Huawei AppGallery’den kurulmuş.', built: 'Huawei AppGallery’den kurulmuş bir sürüm' },
+      getapps: { short: 'GetApps', hint: 'Xiaomi GetApps mağazasından kurulmuş.', built: 'Xiaomi GetApps mağazasından kurulmuş bir sürüm' },
+      amazon: { short: 'Amazon', hint: 'Amazon Appstore’dan kurulmuş.', built: 'Amazon Appstore’dan kurulmuş bir sürüm' },
     },
     /** "{appv} {built}; …" — how the build got onto the device, as a predicate. */
     built: {
       play: 'Play Store’dan kurulmuş bir sürüm',
       'other-store': ['başka bir mağazadan ({installer}) kurulmuş bir sürüm', 'başka bir mağazadan kurulmuş bir sürüm'],
       firebase: 'Firebase App Distribution’dan kurulmuş bir sürüm',
-      'store-or-testflight': 'App Store’dan ya da TestFlight’tan kurulmuş bir sürüm',
+      'store-or-testflight': 'App Store, TestFlight ya da ad-hoc ile kurulmuş bir sürüm',
       release: 'bir release derlemesi',
-      adbRelease: 'adb ile kurulmuş bir release derlemesi',
+      adbRelease: 'adb, Android Studio ya da flutter run ile kurulmuş bir release derlemesi',
+      manualApk: 'elle kurulmuş bir APK',
       generic: 'bu cihazdaki sürüm',
     },
     summary: {
@@ -159,8 +177,27 @@ registerMessages('sources', {
       },
       fpsNeedsApp: 'Simülatörde CPU ve bellek Mac’in süreç listesinden gelir; FPS ve takılan kareler yalnızca uygulamanın içinden (SDK ya da Flutter debug) ölçülür.',
       networkOnly: 'Uygulama ağ üzerinden bağlı; cihaz USB ile takılı olmadığından cihaz logu gelmiyor, yalnızca SDK’nın gönderdikleri görünür.',
-      deviceToolsAvailable: 'Cihaz araçları (uygulamayı başlat / durdur, verisini temizle, ekran görüntüsü) her sürümde çalışır.',
+      deviceToolsAvailable: {
+        default: 'Cihaz araçları (uygulamayı başlat / durdur, verisini temizle, ekran görüntüsü) her sürümde çalışır.',
+        /** A physical iPhone cannot clear an app's data from outside. */
+        iosDevice: 'Cihaz araçları (uygulamayı başlat / durdur, ekran görüntüsü) her sürümde çalışır.',
+      },
       sdkInStoreBuild: ['{appv} {built} ve içinde Dürbün SDK’sı açık; mağazaya çıkan derlemelerde SDK kapalı olmalı.', 'Bu {built} ve içinde Dürbün SDK’sı açık; mağazaya çıkan derlemelerde SDK kapalı olmalı.'],
+      /** iOS cannot tell App Store from TestFlight / ad-hoc: the build may well be an internal one. */
+      storeBuildIos: ['{appv} {built} (iOS hangisi olduğunu söylemez); bu derlemede Dürbün SDK’sı açık değil.', 'Bu {built} (iOS hangisi olduğunu söylemez); bu derlemede Dürbün SDK’sı açık değil.'],
+      sdkInStoreBuildIos: ['{appv} {built} ve içinde Dürbün SDK’sı açık. TestFlight ya da ad-hoc ile dağıtılan bir iç test derlemesiyse sorun yok; App Store’a çıkan derlemede SDK kapalı olmalı.', 'Bu {built} ve içinde Dürbün SDK’sı açık. Bir iç test derlemesiyse sorun yok; App Store’a çıkan derlemede SDK kapalı olmalı.'],
+      /** Fallbacks when the server's reader code is unknown (the English detail is shown as it is). */
+      crashReportsUnavailable: ['Bu cihazın kendi çökme kayıtları okunamıyor: {detail}', 'Bu cihazın kendi çökme kayıtları şu an okunamıyor.'],
+      frameStatsUnavailable: ['CPU ve bellek cihazın süreç listesinden okunur; kare istatistikleri okunamadı: {detail}', 'CPU ve bellek cihazın süreç listesinden okunur; FPS bu cihazda dışarıdan ölçülemiyor.'],
+      nativeLayerActive: {
+        android: 'Native katman da bağlı: Kotlin / Java logları ve native çökmeler de bu oturumdan geliyor. OkHttp istekleri, istemciye .addInterceptor(DurbunInterceptor()) eklendiyse görünür.',
+        ios: 'Native katman da bağlı: Swift / Objective-C logları, native çökmeler ve URLSession istekleri de kendiliğinden geliyor.',
+      },
+      nativeLayerMissing: {
+        android: 'Bu oturuma yalnızca Dart katmanı bağlı: Kotlin / Java logları, native çökmeler ve OkHttp istekleri bu oturumdan gelmez.',
+        ios: 'Bu oturuma yalnızca Dart katmanı bağlı: Swift / Objective-C logları, native çökmeler ve URLSession istekleri bu oturumdan gelmez.',
+      },
+      demoData: 'Bu bir demo: cihaz ve uygulama Dürbün’ün ürettiği örnek veriler. Gerçek bir cihazda da aynı kaynaklar aynı şekilde çalışır.',
     },
     /** Capability-specific wording (falls back to `reasons.*`). */
     reasonFor: {
@@ -172,12 +209,14 @@ registerMessages('sources', {
         noSdk: ['Mock’lar uygulamanın içinde, Dürbün SDK’sı tarafından uygulanır; {app} içinde SDK yok.', 'Mock’lar uygulamanın içinde, Dürbün SDK’sı tarafından uygulanır.'],
         sdkLacksCapability: 'Bağlı Dürbün SDK’sı mock’ları desteklemiyor (eski bir sürüm ya da kapatılmış bir özellik).',
         storeBuild: 'Mock’lar uygulamanın içinde, Dürbün SDK’sıyla çalışır; mağaza sürümünde SDK yok.',
+        storeBuildIos: 'Mock’lar uygulamanın içinde, Dürbün SDK’sıyla çalışır; bu derlemede SDK açık değil.',
         releaseWithoutSdk: 'Mock’lar uygulamanın içinde, Dürbün SDK’sıyla çalışır; bu sürümde SDK açık değil.',
       },
       tools: {
         noSdk: ['Uygulama içi araçlar Dürbün SDK’sı ya da Flutter debug oturumu ister; {app} için ikisi de yok.', 'Uygulama içi araçlar Dürbün SDK’sı ya da Flutter debug oturumu ister.'],
         sdkLacksCapability: 'Bağlı Dürbün SDK’sı uygulama içi araç sunmuyor.',
         storeBuild: 'Uygulama içi araçlar da SDK ister; mağaza sürümünde SDK yok.',
+        storeBuildIos: 'Uygulama içi araçlar da SDK ister; bu derlemede SDK açık değil.',
         releaseWithoutSdk: 'Uygulama içi araçlar SDK ya da Flutter debug oturumu ister; bu sürümde SDK açık değil.',
       },
       metrics: {
@@ -235,7 +274,22 @@ registerMessages('sources', {
       fromDeviceTip: 'Bu kaydı cihazın kendisi tuttu; uygulamada SDK olmasa da görünür.',
       previousLaunchTip: 'Bu çökme Dürbün izlemeye başlamadan önce oldu; kaydı cihazın kendisi tuttu. Gösterilen saat çökmenin gerçek zamanı.',
       recordLabel: 'Kayıt',
+      download: 'İndir (.ips)',
+      downloadTip: 'Cihazdan kopyalanan çökme raporunu (.ips) indirir.',
+      symbolicateTitle: 'Yığın sembolsüz',
+      symbolicate: 'Satırlar adres + ofset olarak geldi. Okunur hâle getirmek için .ips dosyasını, bu derlemenin dSYM dosyası bulunan bir Mac’te Xcode’la ya da Console’la açın.',
     },
+    /** Crash empty states: "no crash yet" (records are read) vs "the device's records cannot be read". */
+    crashEmpty: {
+      noneTitle: 'Henüz çökme kaydı yok',
+      none: ['{device} için cihazın kendi çökme kayıtları da okunuyor; Dürbün bağlanmadan önceki çökmeler de burada görünür.', 'Cihazın kendi çökme kayıtları da okunuyor; Dürbün bağlanmadan önceki çökmeler de burada görünür.'],
+      unreadableTitle: ['{device} için çökme kayıtları okunamıyor', 'Bu cihazın çökme kayıtları okunamıyor'],
+      unreadableMany: 'Bazı cihazların çökme kayıtları okunamıyor',
+      unreadableLead: 'Burada çökme görünmemesi, hiç çökme olmadığı anlamına gelmeyebilir.',
+      toastTitle: 'Bu kapsamda görünen bir çökme yok',
+    },
+    /** Performance of a process measured from outside, when the device gives no frame stats. */
+    framesNote: { title: 'FPS bu cihazda dışarıdan ölçülemiyor' },
     empty: {
       network: {
         title: ['{app} için ağ istekleri görünmüyor', 'Ağ istekleri görünmüyor'],
@@ -345,6 +399,7 @@ registerMessages('sources', {
       'frame-stats': 'Frame stats (gfxinfo)',
       demo: 'Demo data',
       import: 'Imported recording',
+      'native-layer': 'SDK native layer',
     },
     sourceHint: {
       logcat: 'Android’s system log. USB is enough; nothing to add to the app.',
@@ -359,6 +414,7 @@ registerMessages('sources', {
       'frame-stats': 'Android’s frame timings (SurfaceFlinger for Flutter); approximate.',
       demo: 'No real device; sample data made up by Dürbün.',
       import: 'A recording imported from a .durbun.json file.',
+      'native-layer': 'The Flutter plugin’s Kotlin / Swift core inside the app: native logs and crashes; URLSession requests on iOS, OkHttp clients with DurbunInterceptor on Android.',
     },
     badge: {
       sdk: 'SDK',
@@ -388,26 +444,38 @@ registerMessages('sources', {
       play: 'Play',
       'other-store': 'Other store',
       xcode: 'Xcode',
-      'store-or-testflight': 'Store/TestFlight',
+      'store-or-testflight': 'Store / TestFlight / ad-hoc',
       simulator: 'Simulator',
+      apk: 'APK',
+    },
+    buildShort: {
+      'store-or-testflight': 'Store/TestFlight',
     },
     buildHint: {
       debug: 'Debug build (installed with adb, Android Studio or flutter run).',
-      release: 'A release build installed with adb.',
+      release: 'A release build installed with adb, Android Studio or flutter run.',
       firebase: 'Installed from Firebase App Distribution.',
       play: 'Installed from the Play Store.',
       'other-store': ['Installed from another store ({installer}).', 'Installed from another store.'],
       xcode: 'Developer build installed with Xcode or flutter run.',
       'store-or-testflight': 'Installed from the App Store, TestFlight or ad hoc (iOS does not say which).',
       simulator: 'Simulator build.',
+      apk: 'APK installed manually (from a file, with the package installer); it did not come from a store.',
+    },
+    store: {
+      'galaxy-store': { short: 'Galaxy Store', hint: 'Installed from the Galaxy Store.', built: 'was installed from the Galaxy Store' },
+      appgallery: { short: 'AppGallery', hint: 'Installed from Huawei AppGallery.', built: 'was installed from Huawei AppGallery' },
+      getapps: { short: 'GetApps', hint: 'Installed from Xiaomi GetApps.', built: 'was installed from Xiaomi GetApps' },
+      amazon: { short: 'Amazon', hint: 'Installed from the Amazon Appstore.', built: 'was installed from the Amazon Appstore' },
     },
     built: {
       play: 'was installed from the Play Store',
       'other-store': ['was installed from another store ({installer})', 'was installed from another store'],
       firebase: 'was installed from Firebase App Distribution',
-      'store-or-testflight': 'was installed from the App Store or TestFlight',
+      'store-or-testflight': 'was installed from the App Store, TestFlight or ad hoc',
       release: 'is a release build',
-      adbRelease: 'is a release build installed with adb',
+      adbRelease: 'is a release build installed with adb, Android Studio or flutter run',
+      manualApk: 'was installed manually as an APK',
       generic: 'is the build on this device',
     },
     summary: {
@@ -446,8 +514,24 @@ registerMessages('sources', {
       },
       fpsNeedsApp: 'In the simulator, CPU and memory come from the Mac’s process list; FPS and janky frames can only be measured inside the app (SDK or Flutter debug).',
       networkOnly: 'The app is connected over the network; the device is not plugged in over USB, so there is no device log — only what the SDK sends.',
-      deviceToolsAvailable: 'Device tools (launch / stop the app, clear its data, screenshot) work for every build.',
+      deviceToolsAvailable: {
+        default: 'Device tools (launch / stop the app, clear its data, screenshot) work for every build.',
+        iosDevice: 'Device tools (launch / stop the app, screenshot) work for every build.',
+      },
       sdkInStoreBuild: ['{appv} {built} and has the Dürbün SDK turned on; builds that go to a store should ship with it off.', 'This app {built} and has the Dürbün SDK turned on; builds that go to a store should ship with it off.'],
+      storeBuildIos: ['{appv} {built} (iOS does not say which); the Dürbün SDK is not turned on in this build.', 'This app {built} (iOS does not say which); the Dürbün SDK is not turned on in this build.'],
+      sdkInStoreBuildIos: ['{appv} {built} and has the Dürbün SDK turned on. That is fine for an internal build shared over TestFlight or ad hoc; the build that goes to the App Store should ship with it off.', 'This app {built} and has the Dürbün SDK turned on. That is fine for an internal build; the build that goes to the App Store should ship with it off.'],
+      crashReportsUnavailable: ['This device’s own crash records cannot be read: {detail}', 'This device’s own crash records cannot be read right now.'],
+      frameStatsUnavailable: ['CPU and memory are read from the device’s process list; frame stats could not be read: {detail}', 'CPU and memory are read from the device’s process list; FPS cannot be measured from outside on this device.'],
+      nativeLayerActive: {
+        android: 'The native layer is connected too: Kotlin / Java logs and native crashes come through this session as well. OkHttp requests show up once .addInterceptor(DurbunInterceptor()) is added to the client.',
+        ios: 'The native layer is connected too: Swift / Objective-C logs, native crashes and URLSession requests come in by themselves.',
+      },
+      nativeLayerMissing: {
+        android: 'Only the Dart layer feeds this session: Kotlin / Java logs, native crashes and OkHttp requests do not come through it.',
+        ios: 'Only the Dart layer feeds this session: Swift / Objective-C logs, native crashes and URLSession requests do not come through it.',
+      },
+      demoData: 'This is a demo: the device and the app are sample data made up by Dürbün. On a real device the same sources work the same way.',
     },
     reasonFor: {
       network: {
@@ -458,12 +542,14 @@ registerMessages('sources', {
         noSdk: ['Mocks are applied inside the app by the Dürbün SDK; {app} has no SDK.', 'Mocks are applied inside the app by the Dürbün SDK.'],
         sdkLacksCapability: 'The connected Dürbün SDK does not support mocks (an older version or a disabled feature).',
         storeBuild: 'Mocks run inside the app with the Dürbün SDK; the store build has no SDK.',
+        storeBuildIos: 'Mocks run inside the app with the Dürbün SDK; it is not turned on in this build.',
         releaseWithoutSdk: 'Mocks run inside the app with the Dürbün SDK; it is not turned on in this build.',
       },
       tools: {
         noSdk: ['In-app tools need the Dürbün SDK or a Flutter debug session; {app} has neither.', 'In-app tools need the Dürbün SDK or a Flutter debug session.'],
         sdkLacksCapability: 'The connected Dürbün SDK offers no in-app tools.',
         storeBuild: 'In-app tools need the SDK as well; the store build has none.',
+        storeBuildIos: 'In-app tools need the SDK as well; it is not turned on in this build.',
         releaseWithoutSdk: 'In-app tools need the SDK or a Flutter debug session; the SDK is not turned on in this build.',
       },
       metrics: {
@@ -521,7 +607,20 @@ registerMessages('sources', {
       fromDeviceTip: 'The device kept this record itself; it shows up even without the SDK in the app.',
       previousLaunchTip: 'This crash happened before Dürbün started watching; the device kept the record itself. The time shown is when it actually crashed.',
       recordLabel: 'Record',
+      download: 'Download .ips',
+      downloadTip: 'Downloads the crash report (.ips) copied from the device.',
+      symbolicateTitle: 'Unsymbolicated stack',
+      symbolicate: 'The frames came as address + offset. To make them readable, open the .ips file in Xcode or Console on a Mac that has this build’s dSYM.',
     },
+    crashEmpty: {
+      noneTitle: 'No crash records yet',
+      none: ['The device’s own crash records of {device} are read too; crashes from before Dürbün connected show up here as well.', 'The device’s own crash records are read too; crashes from before Dürbün connected show up here as well.'],
+      unreadableTitle: ['Crash records of {device} cannot be read', 'This device’s crash records cannot be read'],
+      unreadableMany: 'Some devices’ crash records cannot be read',
+      unreadableLead: 'No crash here does not necessarily mean nothing crashed.',
+      toastTitle: 'No crash visible in this scope',
+    },
+    framesNote: { title: 'FPS cannot be measured from outside on this device' },
     empty: {
       network: {
         title: ['No network requests for {app}', 'No network requests'],
@@ -626,11 +725,21 @@ export function badgeTooltip(b: ExplainBadge): string {
   return `${t(`sources.badge.${b}`)} · ${t(`sources.badgeHint.${b}`)}`;
 }
 
-export function buildBadgeLabel(b: BuildBadge): string {
+/**
+ * Badge text; 'other-store' names the store when the installer is a known one (Galaxy Store, AppGallery…).
+ * `short`: the narrow sidebar form ("Store/TestFlight"), when there is one.
+ */
+export function buildBadgeLabel(b: BuildBadge, installer?: string, opts: { short?: boolean } = {}): string {
+  const store = b === 'other-store' ? otherStoreKind(installer) : undefined;
+  if (store && store !== 'manual') return t(`sources.store.${store}.short`);
+  if (opts.short && hasMessage(`sources.buildShort.${b}`)) return t(`sources.buildShort.${b}`);
   return t(`sources.build.${b}`);
 }
 
 export function buildBadgeHint(b: BuildBadge, installer?: string): string {
+  const store = b === 'other-store' ? otherStoreKind(installer) : undefined;
+  if (store === 'manual') return t('sources.buildHint.apk');
+  if (store) return t(`sources.store.${store}.hint`);
   return t(`sources.buildHint.${b}`, { installer });
 }
 
@@ -651,8 +760,12 @@ function builtPhrase(ctx: ExplainContext | undefined): string {
     case 'firebase':
     case 'store-or-testflight':
       return t(`sources.built.${ctx.install}`);
-    case 'other-store':
+    case 'other-store': {
+      const store = otherStoreKind(ctx.installer);
+      if (store === 'manual') return t('sources.built.manualApk');
+      if (store) return t(`sources.store.${store}.built`);
       return t('sources.built.other-store', { installer: ctx.installer });
+    }
     case 'adb':
       return t('sources.built.adbRelease');
     default:
@@ -676,6 +789,9 @@ export function reasonParams(ctx: ExplainContext | undefined, opts: ReasonTextOp
 /** The sentence for one reason on one capability row (or an app-level note when `capability` is omitted). */
 export function reasonText(reason: ExplainReason, ctx: ExplainContext | undefined, capability?: ExplainCapability, opts: ReasonTextOptions = {}): string {
   const params = reasonParams(ctx, opts);
+  // iOS cannot tell App Store from TestFlight / ad-hoc: those sentences must not call the build a store build.
+  const ios = ctx?.install === 'store-or-testflight' && (reason === 'storeBuild' || reason === 'sdkInStoreBuild') ? 'Ios' : '';
+  if (capability && ios && hasMessage(`sources.reasonFor.${capability}.${reason}${ios}`)) return t(`sources.reasonFor.${capability}.${reason}${ios}`, params);
   if (capability && hasMessage(`sources.reasonFor.${capability}.${reason}`)) return t(`sources.reasonFor.${capability}.${reason}`, params);
   switch (reason) {
     case 'noOutsideNetwork': {
@@ -687,9 +803,43 @@ export function reasonText(reason: ExplainReason, ctx: ExplainContext | undefine
       return t(`sources.reasons.nativeNetworkNeedsInterceptor.${ctx?.transport === 'vm-service' ? 'vm-service' : 'sdk'}`, params);
     case 'readOnly':
       return t(`sources.reasons.readOnly.${ctx?.transport === 'import' ? 'import' : 'device'}`, params);
+    case 'storeBuild':
+    case 'sdkInStoreBuild':
+      return t(`sources.reasons.${reason}${ios}`, params);
+    case 'crashReportsUnavailable':
+      return readerText(ctx?.readers?.crashReports, reason);
+    case 'frameStatsUnavailable':
+      return readerText(ctx?.readers?.frameStats, reason);
+    case 'deviceToolsAvailable':
+      return t(`sources.reasons.deviceToolsAvailable.${ctx?.platform === 'ios-device' ? 'iosDevice' : 'default'}`, params);
+    case 'nativeLayerActive':
+    case 'nativeLayerMissing':
+      return t(`sources.reasons.${reason}.${ctx?.platform === 'android' ? 'android' : 'ios'}`, params);
     default:
       return t(`sources.reasons.${reason}`, params);
   }
+}
+
+/** Why the frame stats of a device cannot be read (empty when they can, or when the server does not say). */
+export function frameReaderText(device: Pick<DeviceInfo, 'readers'>): string {
+  const st = device.readers?.frameStats;
+  return st && st.status !== 'ok' ? readerText(st, 'frameStatsUnavailable') : '';
+}
+
+/** Why the crash records of a device cannot be read (empty when they can, or when the server does not say). */
+export function crashReaderText(device: Pick<DeviceInfo, 'readers'>): string {
+  const st = device.readers?.crashReports;
+  return st && st.status !== 'ok' ? readerText(st, 'crashReportsUnavailable') : '';
+}
+
+/**
+ * Why a reader of the device does not work: the text for the server's code (`reader.<id>.<reason>`), else the
+ * generic sentence with the server's English detail, else the generic sentence alone.
+ */
+function readerText(state: DeviceReaderState | undefined, reason: 'crashReportsUnavailable' | 'frameStatsUnavailable'): string {
+  const detail = state?.detail?.trim() || undefined;
+  const generic = t(`sources.reasons.${reason}`, { detail });
+  return state?.code ? tCode(state.code, { detail }, generic) : generic;
 }
 
 export function actionLabel(a: ExplainAction): string {

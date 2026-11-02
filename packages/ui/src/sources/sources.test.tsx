@@ -8,9 +8,9 @@ import { hubActions } from '../data/stores/hub';
 import { setScope, useScopeStore } from '../data/stores/scope';
 import { useUi } from '../data/stores/ui';
 import { Sidebar } from '../shell/Sidebar';
-import { entrySourceText, isDeviceCrashRecord, isUnsymbolicated, originLabel, reasonText, summaryText } from './text';
-import { pickEmptyReason, explainGroup, type ExplainedApp } from './model';
-import { ExplainEmpty, SourcesPanel, WhatCanISeeButton } from './components';
+import { buildBadgeHint, buildBadgeLabel, entrySourceText, isDeviceCrashRecord, isUnsymbolicated, originLabel, reasonText, summaryText } from './text';
+import { crashRecordsState, pickEmptyReason, explainGroup, type ExplainedApp } from './model';
+import { CrashRecordsNote, ExplainEmpty, FrameStatsNote, SourcesPanel, WhatCanISeeButton } from './components';
 import { DataSourcesExplainer } from './DataSourcesDialog';
 import { groupApps } from '../data/stores/hub';
 
@@ -119,7 +119,8 @@ describe('reason sentences', () => {
     const reasons: ExplainReason[] = [
       'noSdk', 'releaseWithoutSdk', 'storeBuild', 'noOutsideNetwork', 'vmServiceNoMocks', 'sdkLacksCapability', 'iosNoDeviceMetrics', 'frameStatsApproximate',
       'deviceLogsUnavailable', 'toolMissing', 'releaseLogsDependOnApp', 'nativeNetworkNeedsInterceptor', 'thirdPartyTraffic', 'crashesUnsymbolicated', 'notRunning',
-      'readOnly', 'fpsNeedsApp', 'networkOnly', 'deviceToolsAvailable', 'sdkInStoreBuild',
+      'readOnly', 'fpsNeedsApp', 'networkOnly', 'deviceToolsAvailable', 'sdkInStoreBuild', 'crashReportsUnavailable', 'frameStatsUnavailable',
+      'nativeLayerActive', 'nativeLayerMissing', 'demoData',
     ];
     const caps: (ExplainCapability | undefined)[] = ['logs', 'network', 'metrics', 'crashes', 'mocks', 'tools', undefined];
     const contexts: (ExplainContext | undefined)[] = [
@@ -127,6 +128,13 @@ describe('reason sentences', () => {
       play.context,
       explainSources({ device: device(IPHONE_ID), deviceApp: deviceApp(IPHONE_ID, 'k', { name: undefined, version: undefined, install: { source: 'other-store' } }), sessions: [] }).context,
       explainSources({ device: device('import:1', { state: 'disconnected' }), sessions: [session('import:1', { transport: 'import' })] }).context,
+      // Readers with a known code, an unknown code with a detail, and a store-or-testflight iPhone build.
+      explainSources({
+        device: device(PIXEL_ID, { readers: { crashReports: { status: 'unavailable', code: 'reader.crashReports.dropboxRefused' }, frameStats: { status: 'unavailable', code: 'reader.frameStats.somethingNew', detail: 'SurfaceFlinger: no layers' } } }),
+        deviceApp: deviceApp(PIXEL_ID, 'k', { install: { source: 'other-store', installer: 'com.google.android.packageinstaller' } }),
+        sessions: [],
+      }).context,
+      explainSources({ device: device(IPHONE_ID, { readers: { crashReports: { status: 'unavailable' } } }), deviceApp: deviceApp(IPHONE_ID, 'k', { install: { source: 'store-or-testflight' } }), sessions: [] }).context,
     ];
     for (const lang of ['tr', 'en'] as const) {
       setLanguage(lang);
@@ -139,6 +147,52 @@ describe('reason sentences', () => {
             expect(text.includes('  '), `${lang} ${r} ${c}`).toBe(false);
           }
     }
+  });
+
+  it('word the reader problems from the server’s code, else from its detail', () => {
+    const ctx = (readers: DeviceInfo['readers']) => explainSources({ device: device(PIXEL_ID, { readers }), deviceApp: deviceApp(PIXEL_ID, 'com.mykynk.kumbara'), sessions: [] }).context;
+    setLanguage('tr');
+    expect(reasonText('crashReportsUnavailable', ctx({ crashReports: { status: 'unavailable', code: 'reader.crashReports.dropboxRefused' } }), 'crashes')).toBe(
+      'Bu cihaz Android’in çökme kayıtlarının (dumpsys dropbox) okunmasına izin vermiyor; bazı üreticiler bunu kapatır. Canlı çökmeler cihaz logunda yine görünür, önceki açılışların kayıtları görünmez.',
+    );
+    expect(reasonText('crashReportsUnavailable', ctx({ crashReports: { status: 'unavailable', code: 'reader.crashReports.failed', detail: 'adb: device offline' } }), 'crashes')).toBe('Cihazın çökme kayıtları okunamadı: adb: device offline');
+    // A code the UI does not know yet: the generic sentence with the server's English detail.
+    expect(reasonText('crashReportsUnavailable', ctx({ crashReports: { status: 'unavailable', code: 'reader.crashReports.oemBlocked', detail: 'blocked by MIUI' } }), 'crashes')).toBe('Bu cihazın kendi çökme kayıtları okunamıyor: blocked by MIUI');
+    expect(reasonText('frameStatsUnavailable', ctx({ frameStats: { status: 'unavailable' } }), 'metrics')).toBe('CPU ve bellek cihazın süreç listesinden okunur; FPS bu cihazda dışarıdan ölçülemiyor.');
+    setLanguage('en');
+    expect(reasonText('frameStatsUnavailable', ctx({ frameStats: { status: 'unavailable', code: 'reader.frameStats.noData' } }), 'metrics')).toContain('neither gfxinfo nor SurfaceFlinger');
+  });
+
+  it('word Android installers and the iOS store / TestFlight / ad-hoc case', () => {
+    const fromInstaller = (installer: string, buildType: DeviceApp['buildType'] = 'release') =>
+      explainSources({ device: device(PIXEL_ID), deviceApp: deviceApp(PIXEL_ID, 'com.mykynk.kumbara', { buildType, install: { source: 'other-store', installer } }), sessions: [] }).context;
+    setLanguage('tr');
+    expect(reasonText('releaseWithoutSdk', fromInstaller('com.google.android.packageinstaller'))).toBe('Kumbara 3.1.0 elle kurulmuş bir APK; içinde Dürbün SDK’sı açık değil.');
+    expect(reasonText('storeBuild', fromInstaller('com.sec.android.app.samsungapps'))).toBe('Kumbara 3.1.0 Galaxy Store’dan kurulmuş bir sürüm; mağaza sürümlerinde Dürbün SDK’sı açılmaz.');
+    expect(reasonText('storeBuild', fromInstaller('com.huawei.appmarket'))).toBe('Kumbara 3.1.0 Huawei AppGallery’den kurulmuş bir sürüm; mağaza sürümlerinde Dürbün SDK’sı açılmaz.');
+    expect(reasonText('storeBuild', fromInstaller('com.xiaomi.mipicks'))).toContain('Xiaomi GetApps mağazasından');
+    expect(reasonText('storeBuild', fromInstaller('com.amazon.venezia'))).toContain('Amazon Appstore’dan');
+    expect(reasonText('storeBuild', fromInstaller('ru.vk.store'))).toBe('Kumbara 3.1.0 başka bir mağazadan (ru.vk.store) kurulmuş bir sürüm; mağaza sürümlerinde Dürbün SDK’sı açılmaz.');
+    expect(buildBadgeLabel('other-store', 'com.sec.android.app.samsungapps')).toBe('Galaxy Store');
+    expect(buildBadgeLabel('other-store', 'ru.vk.store')).toBe('Diğer mağaza');
+    expect(buildBadgeHint('other-store', 'ru.vk.store')).toBe('Başka bir mağazadan kurulmuş (ru.vk.store).');
+    expect(buildBadgeLabel('apk')).toBe('APK');
+    expect(buildBadgeHint('other-store', 'com.android.packageinstaller')).toContain('APK elle kuruldu');
+    expect(buildBadgeHint('release')).toBe('adb, Android Studio ya da flutter run ile kurulmuş bir release derlemesi.');
+    expect(buildBadgeLabel('store-or-testflight')).toBe('Store / TestFlight / ad-hoc');
+    expect(buildBadgeLabel('store-or-testflight', undefined, { short: true })).toBe('Store/TestFlight'); // narrow sidebar row
+    expect(buildBadgeLabel('play', undefined, { short: true })).toBe('Play');
+    const tf = explainSources({ device: device(IPHONE_ID), deviceApp: deviceApp(IPHONE_ID, 'com.mykynk.kumbara', { install: { source: 'store-or-testflight' } }), sessions: [] }).context;
+    expect(reasonText('storeBuild', tf)).toBe('Kumbara 3.1.0 App Store, TestFlight ya da ad-hoc ile kurulmuş bir sürüm (iOS hangisi olduğunu söylemez); bu derlemede Dürbün SDK’sı açık değil.');
+    expect(reasonText('sdkInStoreBuild', tf)).toContain('iç test derlemesiyse sorun yok');
+    // A physical iPhone cannot clear an app's data; Android and the simulator can.
+    expect(reasonText('deviceToolsAvailable', tf, 'tools')).toBe('Cihaz araçları (uygulamayı başlat / durdur, ekran görüntüsü) her sürümde çalışır.');
+    expect(reasonText('deviceToolsAvailable', play.context, 'tools')).toContain('verisini temizle');
+    expect(reasonText('storeBuild', tf, 'mocks')).toBe('Mock’lar uygulamanın içinde, Dürbün SDK’sıyla çalışır; bu derlemede SDK açık değil.');
+    expect(reasonText('storeBuild', tf, 'tools')).not.toContain('mağaza sürümünde');
+    setLanguage('en');
+    expect(reasonText('releaseWithoutSdk', fromInstaller('com.google.android.packageinstaller'))).toBe('Kumbara 3.1.0 was installed manually as an APK without the Dürbün SDK turned on.');
+    expect(buildBadgeLabel('store-or-testflight')).toBe('Store / TestFlight / ad-hoc');
   });
 
   it('Turkish and English define the same sources.* keys', () => {
@@ -301,6 +355,45 @@ describe('scope-specific empty states', () => {
   });
 });
 
+describe('crash empty states: "none yet" vs "cannot be read"', () => {
+  const refused = { crashReports: { status: 'unavailable' as const, code: 'reader.crashReports.dropboxRefused', detail: 'Permission Denial' } };
+  const load = (readers: DeviceInfo['readers']) =>
+    hubActions.replaceAll({ devices: [device(PIXEL_ID, { name: 'Galaxy S23', readers })], apps: [], drivers: [], processes: [], deviceApps: [deviceApp(PIXEL_ID, 'com.mykynk.kumbara')] });
+  beforeEach(() => setLanguage('tr'));
+  afterEach(() => act(() => setScope({ kind: 'all' })));
+
+  it('records that cannot be read: never "no crashes", says why', () => {
+    load(refused);
+    act(() => setScope({ kind: 'deviceApp', deviceId: PIXEL_ID, bundleId: 'com.mykynk.kumbara' }));
+    const { container } = render(<CrashRecordsNote />);
+    expect(container.textContent).toContain('Galaxy S23 için çökme kayıtları okunamıyor');
+    expect(container.textContent).toContain('Burada çökme görünmemesi, hiç çökme olmadığı anlamına gelmeyebilir.');
+    expect(container.textContent).toContain('dumpsys dropbox');
+    expect(crashRecordsState({ kind: 'all' }, { apps: {}, devices: { [PIXEL_ID]: device(PIXEL_ID, { readers: refused }) } }).unreadable).toHaveLength(1);
+  });
+
+  it('records that are read: "none yet" (or nothing at all with onlyProblems)', () => {
+    load({ crashReports: { status: 'ok', lastOk: 1 } });
+    act(() => setScope({ kind: 'device', deviceId: PIXEL_ID }));
+    expect(render(<CrashRecordsNote />).container.textContent).toContain('Henüz çökme kaydı yok.');
+    cleanup();
+    expect(render(<CrashRecordsNote onlyProblems />).container.textContent).toBe('');
+  });
+
+  it('a server that does not report readers: no claim either way', () => {
+    load(undefined);
+    act(() => setScope({ kind: 'device', deviceId: PIXEL_ID }));
+    expect(render(<CrashRecordsNote />).container.textContent).toBe('');
+  });
+
+  it('a polled process on a device without frame stats: FPS is explained', () => {
+    load({ frameStats: { status: 'unavailable', code: 'reader.frameStats.noData' } });
+    const { container } = render(<FrameStatsNote deviceId={PIXEL_ID} />);
+    expect(container.textContent).toContain('FPS bu cihazda dışarıdan ölçülemiyor');
+    expect(container.textContent).toContain('ne gfxinfo ne SurfaceFlinger');
+  });
+});
+
 describe('sidebar with device apps', () => {
   beforeEach(() => {
     setLanguage('tr');
@@ -343,6 +436,30 @@ describe('sidebar with device apps', () => {
     expect(container.textContent).not.toContain('Uygulama 3');
     fireEvent.click(screen.getByRole('button', { name: /6 uygulama daha/ }));
     expect(container.textContent).toContain('Uygulama 3');
+  });
+
+  it('a tester’s iPhone full of suspended store apps folds the quiet ones (regression: 20 "running" rows)', () => {
+    const now = Date.now();
+    hubActions.replaceAll({
+      devices: [device(IPHONE_ID)],
+      apps: [],
+      drivers: [],
+      processes: [],
+      deviceApps: [
+        // iOS reports suspended apps with a live process: "running", but nothing happened for an hour.
+        ...Array.from({ length: 8 }, (_, i) =>
+          deviceApp(IPHONE_ID, `com.vendor.app${i}`, { name: `Mağaza ${i}`, install: { source: 'store-or-testflight' }, running: true, pids: [900 + i], lastActivity: now - 3_600_000 }),
+        ),
+        deviceApp(IPHONE_ID, 'com.mykynk.kumbara', { install: { source: 'store-or-testflight' }, processName: 'Runner', running: true, pids: [811], lastActivity: now - 20_000 }),
+        deviceApp(IPHONE_ID, 'com.mykynk.pati', { name: 'Pati', buildType: 'debug', install: { source: 'xcode' }, processName: 'Runner', running: true, pids: [902], lastActivity: now - 3_600_000 }),
+      ],
+    });
+    const { container } = render(<Sidebar />);
+    const text = container.textContent ?? '';
+    expect(text).toContain('Kumbara'); // active a moment ago
+    expect(text).toContain('Pati'); // a developer build
+    expect(text).not.toContain('Mağaza 3');
+    expect(text).toContain('8 uygulama daha');
   });
 });
 
