@@ -35,6 +35,9 @@ export function defaultDiagnosticReportDirs(): string[] {
 }
 
 export type SimCrashListener = (report: IpsReport, file: string) => void;
+/** Whether the report folders could be read (a missing folder is fine: no report was written yet). */
+export type SimCrashStatus = { ok: true } | { ok: false; error: string };
+export type SimCrashStatusListener = (status: SimCrashStatus) => void;
 
 interface Cached {
   udid: string;
@@ -56,6 +59,8 @@ export interface SimCrashWatcherOptions {
 export class SimCrashWatcher {
   private readonly dirs: string[];
   private readonly listeners = new Map<string, Set<SimCrashListener>>();
+  private readonly statusListeners = new Set<SimCrashStatusListener>();
+  private lastStatus?: SimCrashStatus;
   private readonly seen = new Set<string>();
   private readonly attempts = new Map<string, number>();
   private readonly cache: Cached[] = [];
@@ -69,8 +74,11 @@ export class SimCrashWatcher {
     this.now = opts.now ?? Date.now;
   }
 
-  /** Deliver crash reports of simulator `udid` (the last 24 h first, then new ones). */
-  register(udid: string, listener: SimCrashListener): () => void {
+  /**
+   * Deliver crash reports of simulator `udid` (the last 24 h first, then new ones); `onStatus` hears after
+   * every pass whether the folders could be read.
+   */
+  register(udid: string, listener: SimCrashListener, onStatus?: SimCrashStatusListener): () => void {
     const key = udid.toUpperCase();
     let set = this.listeners.get(key);
     if (!set) {
@@ -80,6 +88,10 @@ export class SimCrashWatcher {
     set.add(listener);
     const cutoff = this.now() - (this.opts.lookbackMs ?? CRASH_LOOKBACK_MS);
     for (const c of this.cache) if (c.udid === key && !c.delivered && c.ts >= cutoff) this.safeCall(listener, c);
+    if (onStatus) {
+      this.statusListeners.add(onStatus);
+      if (this.lastStatus) this.callStatus(onStatus, this.lastStatus);
+    }
     if (!this.poller) {
       this.poller = new Poller(() => this.scan(), this.opts.intervalMs ?? 5000, this.opts.logger, 'simulator crash reports');
       this.poller.start();
@@ -87,6 +99,7 @@ export class SimCrashWatcher {
       this.poller.trigger();
     }
     return () => {
+      if (onStatus) this.statusListeners.delete(onStatus);
       set!.delete(listener);
       if (set!.size === 0) this.listeners.delete(key);
       if (this.listeners.size === 0) void this.stop();
@@ -117,8 +130,16 @@ export class SimCrashWatcher {
 
   private async scanOnce(): Promise<void> {
     const cutoff = this.now() - (this.opts.lookbackMs ?? CRASH_LOOKBACK_MS);
+    const errors: string[] = [];
     for (const dir of this.dirs) {
-      const names = await fs.promises.readdir(dir).catch(() => [] as string[]);
+      let names: string[];
+      try {
+        names = await fs.promises.readdir(dir);
+      } catch (e) {
+        const err = e as NodeJS.ErrnoException;
+        if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') errors.push(`${displayPath(dir)}: ${err.code ?? err.message}`);
+        names = [];
+      }
       for (const name of names) {
         // Reports move from the folder to Retired/ with the same name: one key per report.
         if (this.seen.has(name)) continue;
@@ -128,6 +149,17 @@ export class SimCrashWatcher {
         }
         await this.inspect(path.join(dir, name), name, cutoff);
       }
+    }
+    const status: SimCrashStatus = errors.length ? { ok: false, error: `Cannot read ${errors.join(', ')}` } : { ok: true };
+    this.lastStatus = status;
+    for (const l of [...this.statusListeners]) this.callStatus(l, status);
+  }
+
+  private callStatus(l: SimCrashStatusListener, status: SimCrashStatus): void {
+    try {
+      l(status);
+    } catch (e) {
+      this.opts.logger.debug(`simulator crash status listener failed: ${(e as Error).message}`);
     }
   }
 
@@ -186,6 +218,12 @@ export class SimCrashWatcher {
       this.opts.logger.debug(`simulator crash listener failed: ${(e as Error).message}`);
     }
   }
+}
+
+/** "~/Library/Logs/DiagnosticReports" rather than the full home path (UI detail text). */
+function displayPath(p: string): string {
+  const home = os.homedir();
+  return home && p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p;
 }
 
 async function readHead(file: string, bytes: number): Promise<string> {

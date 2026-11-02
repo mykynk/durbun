@@ -2,8 +2,11 @@
  * iOS simulator driver: polls `xcrun simctl list devices booted -j` every 3 s; per booted simulator
  * streams `log stream --style ndjson` (restarted when the scope/level settings change) and offers
  * simctl actions + host-ps metrics. Phase 3 (SPEC §10): DeviceApps (simctl listapps + host ps) and
- * crash reports (~/Library/Logs/DiagnosticReports, matched to the simulator's UDID).
+ * crash reports (~/Library/Logs/DiagnosticReports, matched to the simulator's UDID, copied to
+ * <tempDir>/crash/<udid>/ for download); `readers` says whether the report folder can be read.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import type {
   DeviceActionId,
   DeviceActionResult,
@@ -19,11 +22,15 @@ import { run, StreamProcess, type StreamExitInfo } from '../exec';
 import { LogBatcher } from '../shared/batcher';
 import { fail } from '../shared/files';
 import { FlutterErrorGrouper } from '../shared/flutter';
+import { mergeReaders, ReaderReporter, readerDetail } from '../shared/readers';
 import { Poller } from '../shared/timing';
 import { probeXcodeTools, type XcodeTools } from '../tools';
 import { IosAppTracker, type AppSource } from './appTracker';
+import { IosCrashIndex } from './crashDedupe';
 import { crashReportEntry, type IpsReport } from './crashReport';
+import { crashCopyDir, crashReportUrl, localCrashName } from './deviceCrashes';
 import { HostProcessMetrics } from './hostMetrics';
+import { IOS_FRAME_STATS_UNSUPPORTED, READ_FAILED_CODE } from './readerStates';
 import { simAppSource } from './simApps';
 import { SimCrashWatcher } from './simCrashes';
 import { runSimAction, SIM_ACTIONS } from './simActions';
@@ -33,13 +40,15 @@ import { parseSimLogLine, simLogStreamArgs } from './simlog';
 const POLL_MS = 3000;
 const VIA = 'simctl log stream';
 
-interface SimDeps {
+export interface SimDeps {
   ctx: DriverContext;
   logger: Logger;
   isBooted: (udid: string) => boolean;
   /** Fresh `simctl list devices booted` check (also nudges the poller). */
   checkBooted: (udid: string) => Promise<boolean>;
   crashes: SimCrashWatcher;
+  /** Live crash rows of every simulator (de-duplicates crash reports). */
+  crashIndex: IosCrashIndex;
   appSource: (udid: string) => AppSource;
   timing: IosSimTiming;
 }
@@ -61,7 +70,8 @@ export interface IosSimDriverOptions {
   crashScanMs?: number;
 }
 
-class SimulatorSession {
+/** One booted simulator (exported for tests). */
+export class SimulatorSession {
   readonly id: string;
   private info: DeviceInfo;
   private readonly batcher: LogBatcher;
@@ -75,6 +85,9 @@ class SimulatorSession {
   private readonly watchStart = Date.now();
   private readonly apps: IosAppTracker;
   private unsubCrashes?: () => void;
+  private readonly crashReader = new ReaderReporter((state) => this.patch({ readers: { crashReports: state } }));
+  /** Crash reports are copied one after another, so their entries keep the report order. */
+  private crashQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly deps: SimDeps,
@@ -95,6 +108,7 @@ class SimulatorSession {
       state: 'online',
       logs: { status: 'starting', via: VIA },
       actions: [...SIM_ACTIONS],
+      readers: { frameStats: { ...IOS_FRAME_STATS_UNSUPPORTED } },
       firstSeen: now,
       lastSeen: now,
     };
@@ -125,19 +139,53 @@ class SimulatorSession {
     this.deps.ctx.hub.upsertDevice({ ...this.info });
     this.startStream();
     this.apps.start();
-    this.unsubCrashes = this.deps.crashes.register(this.sim.udid, (report, file) => this.onCrashReport(report, file));
+    this.unsubCrashes = this.deps.crashes.register(
+      this.sim.udid,
+      (report, file) => this.onCrashReport(report, file),
+      (s) => (s.ok ? this.crashReader.ok() : this.crashReader.unavailable(READ_FAILED_CODE, readerDetail(s.error))),
+    );
   }
 
   private onCrashReport(report: IpsReport, file: string): void {
     if (this.disposed) return;
+    this.crashQueue = this.crashQueue
+      .then(() => this.deliverCrash(report, file))
+      .catch((e: Error) => this.deps.logger.debug(`crash report ${file}: ${e.message}`));
+  }
+
+  /** Copy the report next to the device crash copies (stable for download), then push its entry. */
+  private async deliverCrash(report: IpsReport, file: string): Promise<void> {
+    const dir = crashCopyDir(this.deps.ctx.tempDir, this.sim.udid);
+    const name = localCrashName(file);
+    let copy: string | undefined = path.join(dir, name);
+    try {
+      await fs.promises.mkdir(dir, { recursive: true });
+      await fs.promises.copyFile(file, copy);
+    } catch (e) {
+      this.deps.logger.debug(`copying ${file}: ${(e as Error).message}`);
+      copy = undefined;
+    }
+    if (this.disposed) return;
     const known = report.bundleId ? this.apps.app(report.bundleId) : undefined;
-    this.batcher.push(crashReportEntry(report, { watchStart: this.watchStart, file, ...(known?.name ? { appName: known.name } : {}) }));
+    const duplicateOf = this.deps.crashIndex.claim(this.id, report);
+    this.batcher.push(
+      crashReportEntry(report, {
+        watchStart: this.watchStart,
+        // Without a copy the entry still names the original report (no download link).
+        file: copy ?? file,
+        ...(copy ? { reportUrl: crashReportUrl(path.basename(dir), name) } : {}),
+        ...(duplicateOf !== undefined ? { duplicateOf } : {}),
+        ...(known?.name ? { appName: known.name } : {}),
+      }),
+    );
     this.apps.onCrash(report);
   }
 
   private patch(patch: Partial<DeviceInfo>): void {
     if (this.disposed) return;
-    this.info = { ...this.info, ...patch, lastSeen: Date.now() };
+    // `readers` merges per reader id here as in the hub; the hub gets only the readers in this patch.
+    const readers = mergeReaders(this.info.readers, patch.readers);
+    this.info = { ...this.info, ...patch, ...(readers ? { readers } : {}), lastSeen: Date.now() };
     this.deps.ctx.hub.patchDevice(this.id, { ...patch, lastSeen: this.info.lastSeen });
   }
 
@@ -306,6 +354,8 @@ export class IosSimDriver implements DeviceDriver {
   private pollProblem?: string;
   private polls = 0;
   private readonly crashes: SimCrashWatcher;
+  private crashIndex?: IosCrashIndex;
+  private unsubLogs?: () => void;
   private readonly timing: IosSimTiming;
   private readonly appSource: (udid: string) => AppSource;
 
@@ -335,6 +385,9 @@ export class IosSimDriver implements DeviceDriver {
     this.logKey = logSettingsKey(ctx.settings());
     this.xcode = await probeXcodeTools();
     if (!this.xcode.simctl) this.logger.info(`simctl unavailable: ${this.xcode.detail ?? 'unknown reason'}`);
+    const crashIndex = new IosCrashIndex({ owns: (id) => this.owns(id), getApps: () => ctx.getApps() });
+    this.crashIndex = crashIndex;
+    this.unsubLogs = ctx.onLogs((entries) => crashIndex.add(entries));
     this.unsubSettings = ctx.onSettings((s) => void this.onSettings(s));
     this.poller = new Poller(() => this.poll(), POLL_MS, this.logger, 'simctl list');
     this.poller.start();
@@ -345,6 +398,8 @@ export class IosSimDriver implements DeviceDriver {
     this.running = false;
     this.unsubSettings?.();
     this.unsubSettings = undefined;
+    this.unsubLogs?.();
+    this.unsubLogs = undefined;
     await this.poller?.stop();
     this.poller = undefined;
     const sessions = [...this.sessions.values()];
@@ -468,6 +523,7 @@ export class IosSimDriver implements DeviceDriver {
           isBooted: (udid) => this.booted.has(udid),
           checkBooted: (udid) => this.checkBooted(udid),
           crashes: this.crashes,
+          crashIndex: this.crashIndex!,
           appSource: this.appSource,
           timing: this.timing,
         },

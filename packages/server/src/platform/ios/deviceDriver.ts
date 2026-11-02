@@ -3,7 +3,9 @@
  * lockdown GetValue (no session) for name/model/OS (devicectl enrichment), idevicesyslog for logs,
  * SDK tunnels to on-device ports 9752–9755, devicectl actions and a usbmux port bridge.
  * Phase 3 (SPEC §10): DeviceApps (devicectl apps/processes + syslog process names) and crash reports
- * (devicectl systemCrashLogs) for every build, with or without the SDK.
+ * (devicectl systemCrashLogs) for every build, with or without the SDK. `readers` tells the UI whether crash
+ * reports can be read (frame stats: never on iOS); reports a live crash row already showed are marked
+ * `duplicateOf` (crashDedupe.ts).
  */
 import fs from 'node:fs';
 import net from 'node:net';
@@ -25,15 +27,18 @@ import { run, StreamProcess, type StreamExitInfo } from '../exec';
 import { LogBatcher } from '../shared/batcher';
 import { fail } from '../shared/files';
 import { FlutterErrorGrouper } from '../shared/flutter';
+import { mergeReaders, ReaderReporter, readerDetail } from '../shared/readers';
 import { Backoff, every, Poller, serialize } from '../shared/timing';
 import { probeXcodeTools, resolveIdeviceTool, type ResolvedTool } from '../tools';
 import { IosAppTracker } from './appTracker';
+import { IosCrashIndex } from './crashDedupe';
 import { crashReportEntry, type IpsReport } from './crashReport';
 import { devicectl, parseDevicectlDevices, probeDevicectlCaps, type DevicectlCaps, type DevicectlRunner } from './devicectl';
 import { iosDeviceActions, runIosDeviceAction } from './deviceActions';
 import { devicectlAppSource } from './deviceApps';
-import { DeviceCrashWatcher } from './deviceCrashes';
+import { crashCopyDir, crashReportUrl, DeviceCrashWatcher } from './deviceCrashes';
 import { lockdownGetValues, type LockdownValues } from './lockdown';
+import { DEVELOPER_MODE_OFF_CODE, DEVICECTL_MISSING, IOS_FRAME_STATS_UNSUPPORTED, READ_FAILED_CODE } from './readerStates';
 import { SyslogLineParser } from './syslog';
 import {
   pipeTunnel,
@@ -93,6 +98,8 @@ interface DriverShared {
   timing: IosDeviceTiming;
   /** Crash files already handled per device udid (kept across re-plugs so crashes are reported once). */
   crashSeen: (udid: string) => Set<string>;
+  /** Live crash rows of every device of the driver (de-duplicates crash reports). */
+  crashIndex: IosCrashIndex;
 }
 
 /** Polling intervals of the phase-3 watchers (tests shorten them). */
@@ -133,6 +140,9 @@ class IosDeviceSession {
   private readonly watchStart = Date.now();
   private apps?: IosAppTracker;
   private crashes?: DeviceCrashWatcher;
+  /** From `devicectl list devices` ('enabled' / 'disabled'), once known. */
+  private developerMode?: string;
+  private readonly crashReader = new ReaderReporter((state) => this.patch({ readers: { crashReports: state } }));
 
   constructor(
     private readonly shared: DriverShared,
@@ -153,6 +163,7 @@ class IosDeviceSession {
       state: 'online',
       logs: { status: 'starting', via: VIA },
       actions: [],
+      readers: { frameStats: { ...IOS_FRAME_STATS_UNSUPPORTED } },
       firstSeen: now,
       lastSeen: now,
     };
@@ -197,7 +208,9 @@ class IosDeviceSession {
 
   private patch(patch: Partial<DeviceInfo>): void {
     if (this.disposed) return;
-    this.info = { ...this.info, ...patch, lastSeen: Date.now() };
+    // `readers` merges per reader id here as in the hub; the hub gets only the readers in this patch.
+    const readers = mergeReaders(this.info.readers, patch.readers);
+    this.info = { ...this.info, ...patch, ...(readers ? { readers } : {}), lastSeen: Date.now() };
     if (this.started) this.shared.ctx.hub.patchDevice(this.id, { ...patch, lastSeen: this.info.lastSeen });
   }
 
@@ -228,6 +241,7 @@ class IosDeviceSession {
     this.trusted = !!(await client.readPairRecord(this.udid).catch(() => null));
     if (this.disposed) return;
     if (values) this.applyLockdown(values);
+    if (!this.shared.caps().available) this.crashReader.unavailable(DEVICECTL_MISSING.code, DEVICECTL_MISSING.detail);
     const syslogTool = this.shared.syslogTool();
     this.info = {
       ...this.info,
@@ -272,10 +286,14 @@ class IosDeviceSession {
     this.crashes = new DeviceCrashWatcher({
       udid: this.udid,
       devicectl: this.shared.devicectl,
-      destDir: path.join(ctx.tempDir, 'crash', this.udid),
+      destDir: crashCopyDir(ctx.tempDir, this.udid),
       logger,
       isInteresting: (name) => apps.isInteresting(name),
       onReport: (report, file) => this.onCrashReport(report, file),
+      onStatus: (s) => {
+        if (s.ok) this.crashReader.ok();
+        else this.crashReader.unavailable(this.developerMode === 'disabled' ? DEVELOPER_MODE_OFF_CODE : READ_FAILED_CODE, readerDetail(s.error));
+      },
       intervalMs: timing.crashesEveryMs,
       seen: this.shared.crashSeen(this.udid),
     });
@@ -288,7 +306,17 @@ class IosDeviceSession {
   private onCrashReport(report: IpsReport, file: string): void {
     if (this.disposed) return;
     const known = report.bundleId ? this.apps?.app(report.bundleId) : undefined;
-    this.batcher.push(crashReportEntry(report, { watchStart: this.watchStart, file, ...(known?.name ? { appName: known.name } : {}) }));
+    const duplicateOf = this.shared.crashIndex.claim(this.id, report);
+    this.batcher.push(
+      crashReportEntry(report, {
+        watchStart: this.watchStart,
+        file,
+        // The copy lies in <tempDir>/crash/<udid>/ (crashCopyDir) under a safe name (localCrashName).
+        reportUrl: crashReportUrl(path.basename(path.dirname(file)), path.basename(file)),
+        ...(duplicateOf !== undefined ? { duplicateOf } : {}),
+        ...(known?.name ? { appName: known.name } : {}),
+      }),
+    );
     this.apps?.onCrash(report);
   }
 
@@ -311,6 +339,7 @@ class IosDeviceSession {
     if (!r.ok || this.disposed) return;
     const d = parseDevicectlDevices(r.json).find((x) => x.udid === this.udid);
     if (!d) return;
+    if (d.developerMode) this.developerMode = d.developerMode;
     const patch: Partial<DeviceInfo> = {};
     if (d.marketingName && d.marketingName !== this.info.model) patch.model = d.marketingName;
     if (d.osVersion && !this.info.osVersion) patch.osVersion = d.osVersion;
@@ -619,6 +648,7 @@ export class IosDeviceDriver implements DeviceDriver {
   private readonly fakeDevicectl?: DevicectlRunner;
   private readonly timing: IosDeviceTiming;
   private readonly crashSeen = new Map<string, Set<string>>();
+  private unsubLogs?: () => void;
 
   constructor(opts: IosDeviceDriverOptions = {}) {
     this.client = new UsbmuxClient({ socketPath: opts.socketPath ?? USBMUXD_SOCKET });
@@ -656,7 +686,10 @@ export class IosDeviceDriver implements DeviceDriver {
         }
         return set;
       },
+      crashIndex: new IosCrashIndex({ owns: (id) => this.owns(id), getApps: () => ctx.getApps() }),
     };
+    const crashIndex = this.shared.crashIndex;
+    this.unsubLogs = ctx.onLogs((entries) => crashIndex.add(entries));
     this.unsubSettings = ctx.onSettings((s) => void this.onSettings(s));
     await this.connectListen();
     this.tunnelPoller = new Poller(
@@ -675,6 +708,8 @@ export class IosDeviceDriver implements DeviceDriver {
     this.running = false;
     this.unsubSettings?.();
     this.unsubSettings = undefined;
+    this.unsubLogs?.();
+    this.unsubLogs = undefined;
     clearTimeout(this.retryTimer);
     this.listener?.close();
     this.listener = undefined;

@@ -501,6 +501,10 @@ export interface CrashEntryOptions {
   now?: number;
   /** Local copy of the report (diagnostics / "open in Xcode"). */
   file?: string;
+  /** URL path the UI downloads the copy from (`/api/files/crash/<udid>/<name>`, SPEC §10.3). */
+  reportUrl?: string;
+  /** Id of the live crash entry this report duplicates (the UI hides marked copies). */
+  duplicateOf?: number;
   /** App display name when the device knows a better one than the report. */
   appName?: string;
 }
@@ -541,6 +545,8 @@ export function crashReportEntry(r: IpsReport, opts: CrashEntryOptions): DeviceL
       ...(r.osVersion ? { osVersion: r.osVersion } : {}),
       bugType: r.bugType,
       ...(opts.file ? { file: opts.file } : {}),
+      ...(opts.reportUrl ? { reportUrl: opts.reportUrl } : {}),
+      ...(opts.duplicateOf !== undefined ? { duplicateOf: opts.duplicateOf } : {}),
     },
   };
   if (r.procName) entry.process = r.procName;
