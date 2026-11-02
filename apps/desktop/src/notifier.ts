@@ -1,6 +1,8 @@
 /**
  * Shows the UI's notifications (sent by the preload's Notification shim) as macOS notifications.
- * Clicking one brings the window to the front and fires the page's onclick. When macOS refuses
+ * Clicking one brings the window to the front and fires the page's onclick. As with the web API, a
+ * notification replaces the previous one with the same tag (the UI tags crash alerts 'durbun-crash'),
+ * so a crash loop does not pile up in Notification Center. When macOS refuses
  * (Electron's notifications need a code-signed app; this build is unsigned/ad-hoc) the Dock icon
  * bounces and gets a badge instead, which clears when the window is focused.
  */
@@ -30,6 +32,7 @@ const MAX_LIVE = 20;
 export function createNotifier(opts: { log: FileLog; onClick(): void; isFocused(): boolean }): Notifier {
   // Electron removes a notification when its object is garbage-collected: keep the recent ones.
   const live = new Map<string, Notification>();
+  const byTag = new Map<string, string>(); // tag → id of the notification showing it
   const outcomes: Notifier['outcomes'] = [];
   let warned = false;
   const record = (id: string, outcome: NotifyOutcome, error?: string) => {
@@ -48,9 +51,28 @@ export function createNotifier(opts: { log: FileLog; onClick(): void; isFocused(
     }
   };
 
+  const forget = (id: string) => {
+    live.delete(id);
+    for (const [tag, owner] of byTag) if (owner === id) byTag.delete(tag);
+  };
+  const close = (id: string) => {
+    const n = live.get(id);
+    forget(id);
+    try {
+      n?.close();
+    } catch {
+      /* already gone */
+    }
+  };
+
   return {
     outcomes,
     show(req, sender) {
+      if (req.tag) {
+        const previous = byTag.get(req.tag);
+        if (previous) close(previous);
+        byTag.set(req.tag, req.id);
+      }
       if (!Notification.isSupported()) {
         record(req.id, 'unsupported');
         fallback(req.id);
@@ -60,13 +82,13 @@ export function createNotifier(opts: { log: FileLog; onClick(): void; isFocused(
         const n = new Notification({ title: req.title || 'Dürbün', body: req.body, silent: req.silent });
         n.on('show', () => record(req.id, 'shown'));
         n.on('click', () => {
-          live.delete(req.id);
+          forget(req.id);
           opts.onClick();
           if (!sender.isDestroyed()) sender.send('durbun:notification-click', req.id);
         });
-        n.on('close', () => live.delete(req.id));
+        n.on('close', () => forget(req.id));
         n.on('failed', (_event, error) => {
-          live.delete(req.id);
+          forget(req.id);
           record(req.id, 'failed', String(error));
           if (!warned) {
             warned = true;
@@ -82,15 +104,7 @@ export function createNotifier(opts: { log: FileLog; onClick(): void; isFocused(
         fallback(req.id);
       }
     },
-    close(id) {
-      const n = live.get(id);
-      live.delete(id);
-      try {
-        n?.close();
-      } catch {
-        /* already gone */
-      }
-    },
+    close,
     clearBadge() {
       try {
         if (app.dock?.getBadge()) app.dock.setBadge('');
