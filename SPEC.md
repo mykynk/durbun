@@ -689,7 +689,16 @@ ACTUALLY does — trust it over older wording above.
 ### 9.1 Demo data (`--demo`, or "Demo verisiyle dene")
 - `demo:1` "Pixel 8 · Demo" (Android emulator) runs **Pati** (Flutter, `com.mykynk.pati`) and
   **Mahalle** (native Android/OkHttp, `com.mykynk.mahalle`); `demo:2` "iPhone 16 Pro · Demo" (iOS
-  simulator) runs **Pati**. ≈ 38 lines/s with bursts.
+  simulator) runs **Pati**; `demo:3` "iPhone 13 · Demo" (physical iPhone over USB, iOS 17.6.1, iPhone action
+  set, no host metrics) has **Pati** installed (debug, `xcode`, not running until launched from the UI).
+  ≈ 38 lines/s with bursts.
+- SDK-less builds (phase 3) are reported as DeviceApps only: **Kumbara** `com.mykynk.kumbara` 3.1.0 (310)
+  on the Pixel (release, Play, main + `:widget` process; an old `data_app_crash` with `previousLaunch`, a live
+  AndroidRuntime crash every 5–8 min with its dropbox copy marked `duplicateOf`, a live ANR with its
+  `data_app_anr` copy), **Pati QA** `com.mykynk.pati.staging` 2.5.0-rc.2 (252) on the Pixel (release,
+  Firebase, quiet), and **Kumbara** on `demo:3` (release, `store-or-testflight`, process `Runner`; an old `.ips`
+  report and a live SIGSEGV followed by the copied `.ips`). Demo lines carry the origin the real driver would
+  set (`logcat`, `simctl-log`, `idevicesyslog`, `dropbox`, `crash-report`), not `'demo'`.
 - The first ~20 s of every launch are scripted so the interesting things show early: crash → restart, ANR,
   Flutter error boxes (sent TWICE on purpose: SDK log `source:'app'` + stdout device log, same text and ts —
   the app-vs-device dedupe case), Dart exceptions, iOS native crash → relaunch, app reconnect.
@@ -833,6 +842,14 @@ impossible and the UI says so plainly (`noOutsideNetwork`), without blaming the 
   listapps` `IsDeveloperApp` → 'simulator'.
 - Device log lines get `origin` (`'logcat' | 'idevicesyslog' | 'simctl-log'`), SDK lines `'sdk'`, VM
   service `'vm-service'`, system lines `'durbun'`, demo `'demo'`, imports keep theirs or `'import'`.
+  The demo mirrors the real drivers' origins (§9.1).
+- Hub rules: when a device leaves `online` its apps get `running:false, pids:[]` and stay listed; removing a
+  device removes its apps; activity-only changes are throttled to one per app per second; on iOS a shared
+  `processName` (e.g. `Runner`) bumps an app only when exactly one app on the device has it; crash entries
+  with `data.previousLaunch` (dropbox / crash-report) do **not** bump `lastActivity` (the driver sends
+  `lastActivity = reportTs` for them); at most 2000 apps (the least recently active non-running one goes).
+- Export writes `SessionExport.deviceApps` (an app-scoped export keeps that bundle id only); import puts them on
+  the `import:` devices as not running.
 
 ### 10.3 Crash reports (any build)
 - Android `dumpsys dropbox --print <tag>` for `data_app_crash`, `data_app_anr`, `data_app_native_crash`,
@@ -847,12 +864,22 @@ impossible and the UI says so plainly (`noOutsideNetwork`), without blaming the 
   bundleID, app_version, build_version, timestamp, exception type/codes, termination reason, crashed
   thread frames (image + offset; **unsymbolicated** — say so). Third-party bundle ids only. Same LogEntry
   shape with `origin 'crash-report'`.
+- Simulator reports are matched to the simulator by the report's `coalitionName` / paths inside the
+  simulator's data dir (macOS 26+ writes them to the Mac's DiagnosticReports).
+- Download: every crash-report entry whose file was copied to `<tempDir>/crash/<udid>/<name>` carries
+  `data.reportUrl = '/api/files/crash/<enc(udid)>/<enc(name)>'` (and `data.file`, the absolute path).
+  The server serves only `.ips` names from that folder (loopback + Origin rules like every `/api` route,
+  `Content-Disposition: attachment`); the UI offers "İndir (.ips)" and says how to symbolicate.
+- Reader state: drivers report `DeviceInfo.readers.crashReports` (`ok` / `unavailable` / `unsupported` +
+  `reader.crashReports.<reason>` code + English detail) so "no crash reports" and "crash reports cannot be read
+  here" never look the same (§10.8).
 
 ### 10.4 Android frame stats (any build)
 `dumpsys gfxinfo <pkg>` (+ `reset`) every 2 s for native UI; for Flutter's SurfaceView use
 `dumpsys SurfaceFlinger --latency '<layer>'` (find the layer with `dumpsys SurfaceFlinger --list`).
 → `MetricSample{source:'adb', fps, jankyFrames}`. If neither yields data (permissions/OS), emit nothing
-and let the UI explain (`frameStatsApproximate`).
+and let the UI explain (`frameStatsApproximate`), and set `DeviceInfo.readers.frameStats` to `unavailable`
+(`reader.frameStats.noData`); iOS reports `unsupported` (§10.8).
 
 ### 10.5 Source transparency in the UI (`packages/ui/src/data/explain.ts`, frozen contract)
 - `explainSources({device, deviceApp, sessions})` → `{badge, rows}`: one row per capability (logs,
@@ -866,6 +893,14 @@ and let the UI explain (`frameStatsApproximate`).
   plain language + action buttons. Empty states in Network / Performance / Mocks use the same reasons
   for the scoped app. Log rows' source tooltip and the detail panel name the exact origin.
 - Writing: calm, specific, never blame the developer; one sentence why + one sentence how.
+- Details fixed during phase 3: the scope kind `deviceApp`; `ExplainResult.notes` (caveats for the whole app)
+  and `context` (what the explanation was based on); reason codes `fpsNeedsApp`, `networkOnly`,
+  `deviceToolsAvailable`, `sdkInStoreBuild` (plus the reader-driven ones, §10.8); 'yes' rows may carry
+  caveat reasons; the short sidebar source label is «Cihaz logu».
+- `install.source = 'other-store'` is worded from `install.installer` (package installer → "APK elle kuruldu",
+  Samsung → Galaxy Store, Huawei → AppGallery, Xiaomi → GetApps, Amazon → Appstore, else the installer id);
+  `adb` also covers Android Studio / `flutter run`; the iOS badge reads "Store / TestFlight / ad-hoc" (iOS
+  cannot tell App Store, TestFlight and ad-hoc installs apart).
 
 ### 10.6 One-step SDK (`sdks/**`)
 - `durbun` becomes a Flutter **plugin** (Android + iOS) that carries the native cores; native side is
@@ -875,8 +910,49 @@ and let the UI explain (`frameStatsApproximate`).
   e.g. the Firebase build when it is a separate build). Never auto-on in release. Native follows Dart.
 - Setup = pubspec line + `Durbun.run(...)` in main. Android native network: one optional line
   `.addInterceptor(DurbunInterceptor())`; iOS URLSession capture automatic. Measure release size delta.
+- Packaging: Android compiles the shared Kotlin core into the plugin through Gradle `sourceSets`; iOS carries a
+  synced copy of the Swift core (`dart run tool/sync_native.dart`, drift-checked by `--check` and a test).
+- `--dart-define=DURBUN=false` turns the SDK off in every mode (debug and profile too); `DurbunOptions.enabled`
+  overrides both defines.
+- Measured release size delta: Android +35 KB APK when the app already has a plugin, +71 KB (arm64) when
+  Dürbün is its first plugin (≈ 36 KB of androidx resources); iOS +868–888 KB unstripped `.app`, +278 KB zipped.
+  Xcode 27 rejects iOS deployment targets below 15 for apps (the example's Podfile raises it); the plugin
+  itself stays at iOS 13.
+- Hosted-mode native crashes: a main-thread Kotlin crash blocks Dart, so the native core sends the crash report
+  over a short-lived second connection that reuses Dart's hello and session (same app session on the desktop);
+  next-launch delivery stays the fallback. Native metrics are off in hosted mode (Flutter metrics only).
+- `hello.sdk.layers` says which layers feed the session (`['dart']`, plus `'android'` / `'ios'` when the native
+  core attached); the UI uses it to say native crashes / logs / URLSession are covered (§10.8).
 
 ### 10.7 Mac app (`apps/desktop`, Electron, unsigned for now)
 One click: the app starts the server in-process (programmatic entry built from `startServer`), opens
 the UI window, fixes PATH from the login shell (`$SHELL -ilc env`), single instance, tray/menu-bar item,
 quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.dmg`, arm64).
+- Output: `apps/desktop/release/mac-arm64/Dürbün.app` and `apps/desktop/release/Durbun-<version>-arm64.dmg`
+  (unsigned; ad-hoc signature after the fuses are flipped).
+- Environment variables: `DURBUN_PORT` / `DURBUN_SDK_PORT` (defaults 9750 / 9751; when another program holds
+  the HTTP port the app tries 9760, 9770, 9780, then an OS port; an existing Dürbün on the port is reused),
+  `DURBUN_DATA_DIR` (default `~/.durbun`), `DURBUN_USER_DATA_DIR` (Electron profile), `DURBUN_DEMO`,
+  `DURBUN_DEBUG`, `DURBUN_DESKTOP_SELFTEST=<report.json>` (writes a report + screenshot, then quits).
+- Pitfall: electron-builder names the helper apps in Unicode NFD but writes `CFBundleName` in NFC, so a
+  `productName` with "ü" must be given as `'Dürbün'.normalize('NFD')` or the packaged app never starts.
+- The server entry for embedders is `dist/server.mjs` (`startServer(opts, {logger})`, `probeServer(port)`);
+  `startServer` installs no process handlers and never exits the process; a busy HTTP port rejects with
+  `ServerStartError.code === 'EADDRINUSE'`.
+- Desktop-only styles live in the UI under `html[data-desktop='mac']` (+ `html[data-desktop-fullscreen]`), set
+  by the app's preload: drag areas, the traffic-light inset, compact mode.
+
+### 10.8 Contracts added while reviewing phase 3 (lead)
+- `DeviceInfo.readers?: Partial<Record<'crashReports' | 'frameStats', DeviceReaderState>>`,
+  `DeviceReaderState = {status: 'ok' | 'unavailable' | 'unsupported', code?, detail?, lastOk?}`. `ok` means an
+  empty result is real; `unavailable` = tried and failed; `unsupported` = impossible on this device/OS. Codes
+  are `reader.<readerId>.<reason>`: `reader.crashReports.dropboxRefused`, `reader.crashReports.devicectlMissing`,
+  `reader.crashReports.failed`, `reader.frameStats.noData`, `reader.frameStats.unsupported` (drivers may add
+  more; the UI falls back to `detail`). The hub merges `readers` per reader id on `upsertDevice` / `patchDevice`.
+- `SdkIdentity = {name, version, platform, layers?: ('dart' | 'android' | 'ios')[]}` is the type of
+  `SdkHello.sdk` and `AppSession.sdk`; the server keeps only known layer values.
+- `SessionExport.deviceApps?: DeviceApp[]`.
+- `ToolCheck.code?` / `params?` for wording variants, e.g. `doctor.node.embedded {electron, node}` when the
+  server runs inside Dürbün.app.
+- The UI document is served with a Content-Security-Policy (scripts only from the server, hashed when inline;
+  WebSocket to the same host; `blob:` / `data:` for images and media; `frame-ancestors 'none'`).
