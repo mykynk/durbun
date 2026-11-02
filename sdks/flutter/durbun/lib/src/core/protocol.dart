@@ -59,6 +59,15 @@ abstract final class SdkCapability {
   static const String commands = 'commands';
 }
 
+/// `SdkLayer` values (`hello.sdk.layers`): the parts of the app that feed one
+/// session. The Flutter SDK always sends `dart`, plus `android` / `ios` while
+/// the plugin's native core is attached.
+abstract final class SdkLayer {
+  static const String dart = 'dart';
+  static const String android = 'android';
+  static const String ios = 'ios';
+}
+
 /// `LogKind` values an SDK may send.
 abstract final class SdkLogKind {
   static const String text = 'text';
@@ -217,6 +226,7 @@ Map<String, Object?> buildHello({
   required List<String> capabilities,
   required List<Map<String, Object?>> actions,
   String platform = 'flutter',
+  List<String>? layers,
 }) {
   return <String, Object?>{
     'type': 'hello',
@@ -225,6 +235,7 @@ Map<String, Object?> buildHello({
       'name': kSdkName,
       'version': kSdkVersion,
       'platform': platform,
+      if (layers != null) 'layers': layers,
     },
     'app': app,
     'device': device,

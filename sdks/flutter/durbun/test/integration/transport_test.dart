@@ -60,7 +60,13 @@ void main() {
         final hello = conn.hello!;
         expect(hello['type'], 'hello');
         expect(hello['protocol'], 1);
-        expect(hello['sdk'], {'name': 'durbun-flutter', 'version': kSdkVersion, 'platform': 'flutter'});
+        expect(hello['sdk'], {
+          'name': 'durbun-flutter',
+          'version': kSdkVersion,
+          'platform': 'flutter',
+          // No plugin here: only the Dart layer feeds the session.
+          'layers': ['dart'],
+        });
         final app = hello['app']! as Map<String, Object?>;
         expect(app['id'], 'com.example.durbun_test');
         expect(app['name'], 'Dürbün Test');

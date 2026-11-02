@@ -702,7 +702,16 @@ class DurbunClient implements HttpCaptureHost {
     capabilities: _capabilities().toSet().toList(),
     actions: describeActions(),
     platform: sdkPlatform,
+    layers: _layers(),
   );
+
+  /// `hello.sdk.layers`: Dart, plus the plugin's native core while attached.
+  List<String> _layers() => <String>[
+    SdkLayer.dart,
+    if (_native?.platform case final native?
+        when native == SdkLayer.android || native == SdkLayer.ios)
+      native,
+  ];
 
   /// The hello message as it is sent (for diagnostics and tests).
   Map<String, Object?> debugHello() => _buildHello();

@@ -174,6 +174,7 @@ void main() {
       expect(app['build'], '230');
       expect(app['name'], 'Pati');
       expect((hello['sdk']! as Map)['name'], 'durbun-flutter');
+      expect((hello['sdk']! as Map)['layers'], <String>['dart', 'android']);
       expect(DurbunNetwork.capturesUrlSession, isFalse, reason: 'Android reply');
 
       final start = _json(calls.firstWhere((c) => c.method == 'start').arguments);
@@ -189,6 +190,8 @@ void main() {
       expect(state['via'], startsWith('tcp 127.0.0.1:'));
       expect(state['appId'], 'app:native');
       expect((state['hello']! as Map)['session'], hello['session']);
+      // The hello a native crash report presents carries the same layers.
+      expect(((state['hello']! as Map)['sdk']! as Map)['layers'], <String>['dart', 'android']);
       expect((state['config']! as Map)['maxBodyBytes'], 1048576);
     });
 
@@ -257,6 +260,7 @@ void main() {
       final actionIds = [for (final a in conn.hello!['actions']! as List) (a as Map)['id']];
       expect(actionIds, isNot(contains('android.dumpThreads')));
       expect((conn.hello!['app']! as Map)['version'], isNull);
+      expect((conn.hello!['sdk']! as Map)['layers'], <String>['dart']);
       expect(Durbun.isEnabled, isTrue);
       Durbun.i('still works');
       await conn.waitForLog('still works');
@@ -268,7 +272,8 @@ void main() {
         'platform': 'ios',
         'urlSession': true,
       });
-      await startSdk();
+      final conn = await startSdk();
+      expect((conn.hello!['sdk']! as Map)['layers'], <String>['dart', 'ios']);
       expect(DurbunNetwork.capturesUrlSession, isTrue);
       await Durbun.dispose();
       expect(DurbunNetwork.capturesUrlSession, isFalse);
@@ -286,6 +291,13 @@ void main() {
       expect(calls.map((c) => c.method), <String>['start']);
       final actionIds = [for (final a in conn.hello!['actions']! as List) (a as Map)['id']];
       expect(actionIds, isNot(contains('android.dumpThreads')));
+      expect((conn.hello!['sdk']! as Map)['layers'], <String>['dart']);
+    });
+
+    test('a native platform outside SdkLayer is not reported as a layer', () async {
+      startReply = (_) => jsonEncode(<String, Object?>{...attachedReply(), 'platform': 'macos'});
+      final conn = await startSdk();
+      expect((conn.hello!['sdk']! as Map)['layers'], <String>['dart']);
     });
 
     test('dispose stops the native side', () async {
