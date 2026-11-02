@@ -49,6 +49,15 @@ export interface ErrorInfo {
 export type DevicePlatform = 'android' | 'ios' | 'other';
 export type SdkPlatform = 'flutter' | 'android' | 'ios' | 'react-native' | 'js' | 'dart-vm' | 'demo';
 export type SdkCapability = 'logs' | 'network' | 'mocks' | 'metrics' | 'events' | 'crash' | 'commands';
+/** Layers inside the app that feed one session ('dart' + 'android' / 'ios' for the Flutter plugin). */
+export type SdkLayer = 'dart' | 'android' | 'ios';
+/** `hello.sdk`. */
+export interface SdkIdentity {
+  name: string;
+  version: string;
+  platform: SdkPlatform;
+  layers?: SdkLayer[];
+}
 
 export interface AppInfo {
   /** Display name, e.g. "Pati". */
@@ -126,7 +135,7 @@ export interface DeviceHints {
 export interface SdkHello {
   type: 'hello';
   protocol: number;
-  sdk: { name: string; version: string; platform: SdkPlatform };
+  sdk: SdkIdentity;
   app: AppInfo;
   device: DeviceHints;
   /** Random id per app launch. */

@@ -102,8 +102,33 @@ export interface DeviceInfo {
   };
   /** Device actions that work for this device right now. */
   actions: DeviceActionId[];
+  /**
+   * Readers that work without an SDK (SPEC §10.3 / §10.4), so the UI can tell "nothing found" from "cannot
+   * read". Absent reader = not reported (older server, or not applicable to this device). The hub merges
+   * this per reader id on `upsertDevice` / `patchDevice`.
+   */
+  readers?: Partial<Record<DeviceReaderId, DeviceReaderState>>;
   firstSeen: number;
   lastSeen: number;
+}
+
+/** SDK-less readers: device crash / ANR records (dropbox, .ips) and Android frame stats. */
+export type DeviceReaderId = 'crashReports' | 'frameStats';
+
+/**
+ * 'ok' = reading works (an empty result really means there is nothing); 'unavailable' = tried and failed
+ * (tool missing, refused by the OEM, an error); 'unsupported' = not possible on this device or OS.
+ */
+export type DeviceReaderStatus = 'ok' | 'unavailable' | 'unsupported';
+
+export interface DeviceReaderState {
+  status: DeviceReaderStatus;
+  /** i18n code, `reader.<readerId>.<reason>`, e.g. 'reader.crashReports.devicectlMissing' (SPEC §10.3). */
+  code?: string;
+  /** English detail (fallback text). */
+  detail?: string;
+  /** Last successful read (epoch ms). */
+  lastOk?: number;
 }
 
 export interface ProcessUpdate {
@@ -179,6 +204,19 @@ export interface DeviceApp {
 export type SdkPlatform = 'flutter' | 'android' | 'ios' | 'react-native' | 'js' | 'dart-vm' | 'demo';
 export type Transport = 'adb-reverse' | 'usbmux' | 'tcp' | 'websocket' | 'vm-service' | 'demo' | 'import';
 export type SdkCapability = 'logs' | 'network' | 'mocks' | 'metrics' | 'events' | 'crash' | 'commands';
+/**
+ * Layers inside the app that feed one session (SPEC §10.6): 'dart' = the Flutter / Dart side; 'android' /
+ * 'ios' = the plugin's native core is attached (native logs, native crashes, OkHttp via DurbunInterceptor /
+ * URLSession). Sent in `hello.sdk.layers`; absent = unknown (older SDKs, single-layer SDKs).
+ */
+export type SdkLayer = 'dart' | 'android' | 'ios';
+/** `hello.sdk` / `AppSession.sdk`. */
+export interface SdkIdentity {
+  name: string;
+  version: string;
+  platform: SdkPlatform;
+  layers?: SdkLayer[];
+}
 
 export interface AppInfo {
   /** Display name, e.g. "Pati". */
@@ -214,7 +252,7 @@ export interface AppSession {
   /** SDK-provided per-launch id (`hello.session`). */
   sessionKey: string;
   deviceId: string;
-  sdk: { name: string; version: string; platform: SdkPlatform };
+  sdk: SdkIdentity;
   app: AppInfo;
   transport: Transport;
   connected: boolean;
@@ -549,6 +587,9 @@ export interface ToolCheck {
   /** Shell command or short instruction that fixes the problem. */
   fix?: string;
   docsUrl?: string;
+  /** i18n code for a variant the UI should word specially, e.g. 'doctor.node.embedded' {electron, node}. */
+  code?: string;
+  params?: I18nParams;
 }
 
 export interface ServerInfo {
@@ -664,6 +705,8 @@ export interface SessionExport {
   logs: LogEntry[];
   network: NetworkDetail[];
   metrics?: MetricSample[];
+  /** Apps the devices reported (SPEC §10.2). Optional: older exports have none. */
+  deviceApps?: DeviceApp[];
 }
 
 /* ────────────────────────────── SDK wire protocol ────────────────────────────── */
@@ -683,7 +726,7 @@ export interface DeviceHints {
 export interface SdkHello {
   type: 'hello';
   protocol: number;
-  sdk: { name: string; version: string; platform: SdkPlatform };
+  sdk: SdkIdentity;
   app: AppInfo;
   device: DeviceHints;
   /** Random id per app launch. */

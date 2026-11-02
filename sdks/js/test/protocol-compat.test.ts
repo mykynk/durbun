@@ -22,6 +22,8 @@ export type TypeChecks = [
   Assert<Equals<W.DevicePlatform, P.DevicePlatform>>,
   Assert<Equals<W.SdkPlatform, P.SdkPlatform>>,
   Assert<Equals<W.SdkCapability, P.SdkCapability>>,
+  Assert<Equals<W.SdkLayer, P.SdkLayer>>,
+  Assert<Equals<W.SdkIdentity, P.SdkIdentity>>,
   Assert<Equals<W.AppInfo, P.AppInfo>>,
   Assert<Equals<W.AppActionDescriptor, P.AppActionDescriptor>>,
   Assert<Equals<W.UrlMatchType, P.UrlMatchType>>,
