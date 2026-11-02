@@ -317,6 +317,15 @@
   gap: 4px;
   overflow: hidden;
 }
+/* A long store name truncates instead of being cut off (the tooltip has the full text). */
+.sb-app__badges .build-badge {
+  display: inline-block;
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 16px;
+}
 .sb-app__glyph {
   display: inline-flex;
   align-items: center;
@@ -506,7 +515,8 @@
   align-items: center;
   gap: 7px;
   height: 30px;
-  max-width: 320px;
+  /* Wide enough for device › source badge · app · build badge. */
+  max-width: 380px;
   min-width: 0;
   padding: 0 8px;
   border-radius: var(--radius);
@@ -533,6 +543,10 @@
   color: var(--text-muted);
   font-weight: 500;
   flex-shrink: 4;
+}
+/* With the source and build badges next to it, the device name gives way before the app name does. */
+.crumb__text--app {
+  min-width: 3.5em;
 }
 .crumb__sep {
   color: var(--text-subtle);
@@ -600,6 +614,9 @@
   .palette-trigger {
     min-width: 0;
   }
+  .crumb {
+    max-width: 320px;
+  }
   .palette-trigger__text {
     display: none;
   }
@@ -610,6 +627,10 @@
   }
   .crumb {
     max-width: 220px;
+  }
+  /* The build badge stays in the sidebar and the ⓘ panel next to the crumb. */
+  .crumb .build-badge {
+    display: none;
   }
 }
 @container main (max-width: 860px) {
@@ -643,7 +664,8 @@
   }
 }
 @container main (max-width: 620px) {
-  .crumb .sdk-badge {
+  .crumb .sdk-badge,
+  .crumb .src-badge {
     display: none;
   }
 }
@@ -2010,4 +2032,27 @@
   color: var(--text-muted);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
+}
+
+/* ───────────── Dürbün.app (macOS) ─────────────
+ * The Mac app (apps/desktop) uses a "hiddenInset" title bar and sets <html data-desktop="mac">, plus
+ * data-desktop-fullscreen while in full screen. The sidebar header and the top bar are the window's drag
+ * area (their controls stay clickable), and the traffic lights (16 px from the left, ~58 px wide) get room
+ * outside full screen. */
+html[data-desktop='mac'] .sb-header,
+html[data-desktop='mac'] .topbar {
+  -webkit-app-region: drag;
+}
+html[data-desktop='mac'] :is(.sb-header, .topbar) :is(button, a, input, select, textarea, [role='button'], [role='tab'], [role='tablist'], [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+html[data-desktop='mac']:not([data-desktop-fullscreen]) .sidebar:not(.is-compact) .sb-header {
+  padding-left: 74px;
+}
+/* Collapsed sidebar: the brand mark moves below the traffic lights, which reach into the top bar. */
+html[data-desktop='mac']:not([data-desktop-fullscreen]) .sidebar.is-compact .sb-header {
+  margin-top: 26px;
+}
+html[data-desktop='mac']:not([data-desktop-fullscreen]) .app--compact .topbar {
+  padding-left: 26px;
 }
