@@ -11,6 +11,7 @@
  *   GET  /api/doctor                              ToolCheck[]
  *   POST /api/upload?name=<file>                  raw body (≤ 2 GB) → { file, name, size }
  *   GET  /api/files/:name                         a file from the temp directory (?download=1)
+ *   GET  /api/files/crash/:udid/:name             a copied iOS crash report (<tempDir>/crash/<udid>/*.ips), as a download
  */
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, promises as fsp } from 'node:fs';
@@ -54,6 +55,16 @@ export interface ApiDeps {
 }
 
 export type ApiHandler = (req: IncomingMessage, res: ServerResponse, pathname: string, query: URLSearchParams) => Promise<void>;
+
+/** Device UDID as the iOS driver names its crash folder (hex + dashes; simulator UUIDs too). */
+const CRASH_UDID = /^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/;
+/** Crash report copy name (platform/ios localCrashName keeps [A-Za-z0-9._-]): no dot files, only .ips. */
+const CRASH_FILE = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,199}\.ips$/i;
+
+/** Is `udid` / `name` a crash report copy the server may serve (GET /api/files/crash/:udid/:name)? */
+export function isServableCrashFile(udid: string, name: string): boolean {
+  return CRASH_UDID.test(udid) && CRASH_FILE.test(name) && !name.includes('..');
+}
 
 /** Safe file name for an upload: basename only, ASCII letters/digits/._-, max 120 chars, extension kept. */
 export function safeUploadName(name: string): string {
@@ -320,6 +331,29 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
     sendFile(req, res, real, stat, { cacheControl: 'no-cache', sandboxActive: true, headers });
   }
 
+  /** iOS crash report copies (SPEC §10.3: `<tempDir>/crash/<udid>/<name>.ips`), always as a download. */
+  async function crashFile(req: IncomingMessage, res: ServerResponse, udid: string, name: string): Promise<void> {
+    const notFound = () => new HttpError(404, 'Crash report not found', 'file.unknown');
+    if (!isServableCrashFile(udid, name)) throw notFound();
+    const crashRoot = path.join(tempDir, 'crash');
+    const dir = path.join(crashRoot, udid);
+    const filePath = path.join(dir, name);
+    if (path.dirname(filePath) !== dir || path.dirname(dir) !== crashRoot) throw notFound();
+    const stat = await statFile(filePath);
+    if (!stat?.isFile()) throw notFound();
+    // Symlinks must not lead out of the crash folder of that device.
+    const [real, realDir, realTemp] = await Promise.all([fsp.realpath(filePath), fsp.realpath(dir), fsp.realpath(tempDir)]).catch(() => {
+      throw notFound();
+    });
+    if (path.dirname(real) !== realDir || !isInside(realTemp, realDir) || realDir === realTemp) throw notFound();
+    sendFile(req, res, real, stat, {
+      cacheControl: 'no-cache',
+      contentType: 'text/plain; charset=utf-8',
+      sandboxActive: true,
+      headers: { 'Content-Disposition': contentDisposition(name) },
+    });
+  }
+
   async function route(req: IncomingMessage, res: ServerResponse, pathname: string, query: URLSearchParams): Promise<void> {
     const segs = pathname.split('/').slice(2).filter((s, i, all) => s !== '' || i < all.length - 1).map(decodeSegment);
     const method = req.method ?? 'GET';
@@ -364,6 +398,10 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
         requireMethod(req, 'POST', 'PUT');
         return upload(req, res, query);
       case 'files':
+        if (segs.length === 4 && second === 'crash') {
+          requireMethod(req, 'GET', 'HEAD');
+          return crashFile(req, res, third ?? '', fourth ?? '');
+        }
         if (segs.length !== 2) break;
         requireMethod(req, 'GET', 'HEAD');
         return file(req, res, second ?? '', query);

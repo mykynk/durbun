@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -230,6 +230,66 @@ describe('REST API', () => {
       expect(res.status, attempt).toBeGreaterThanOrEqual(400);
       expect(res.body.toString()).not.toContain('top secret');
     }
+  });
+
+  it('serves copied iOS crash reports (<tempDir>/crash/<udid>/*.ips) as downloads and nothing else', async () => {
+    t = await startTestApp();
+    const udid = '00008130-0001A2B3C4D5E6F7';
+    const dir = path.join(t.config.tempDir, 'crash', udid);
+    await mkdir(dir, { recursive: true });
+    const report = '{"app_name":"Kumbara","bug_type":"309"}\n{"pid":2841}\n';
+    await writeFile(path.join(dir, 'Runner-2026-11-02-114301.ips'), report);
+    await writeFile(path.join(dir, 'notes.txt'), 'top secret');
+    await writeFile(path.join(dir, '.hidden.ips'), 'top secret');
+    await writeFile(path.join(t.config.tempDir, 'crash', 'loose.ips'), 'top secret');
+    await writeFile(path.join(t.config.dataDir, 'secret.ips'), 'top secret');
+    await symlink(path.join(t.config.dataDir, 'secret.ips'), path.join(dir, 'link.ips'));
+    await symlink(t.config.dataDir, path.join(t.config.tempDir, 'crash', 'linked-udid'));
+
+    // the URL the iOS driver puts into data.reportUrl
+    const url = `/api/files/crash/${encodeURIComponent(udid)}/${encodeURIComponent('Runner-2026-11-02-114301.ips')}`;
+    const ok = await raw(t.port, 'GET', url);
+    expect(ok.status).toBe(200);
+    expect(ok.body.toString()).toBe(report);
+    expect(ok.headers['content-disposition']).toBe(`attachment; filename="Runner-2026-11-02-114301.ips"; filename*=UTF-8''Runner-2026-11-02-114301.ips`);
+    expect(ok.headers['content-type']).toBe('text/plain; charset=utf-8');
+    expect(ok.headers['x-content-type-options']).toBe('nosniff');
+    const head = await raw(t.port, 'HEAD', url);
+    expect(head.status).toBe(200);
+    expect(head.body.length).toBe(0);
+    expect((await raw(t.port, 'POST', url)).status).toBe(405);
+
+    const attempts = [
+      `/api/files/crash/${udid}/notes.txt`,
+      `/api/files/crash/${udid}/.hidden.ips`,
+      `/api/files/crash/${udid}/link.ips`, // symlink out of the folder
+      '/api/files/crash/linked-udid/secret.ips', // the device folder itself is a symlink
+      '/api/files/crash/loose.ips',
+      '/api/files/crash/./loose.ips',
+      `/api/files/crash/${udid}/..%2F..%2F..%2Fdata%2Fsecret.ips`,
+      `/api/files/crash/${udid}/%2e%2e%2f%2e%2e%2f%2e%2e%2fdata%2fsecret.ips`,
+      `/api/files/crash/${udid}/..%5C..%5Csecret.ips`,
+      `/api/files/crash/${udid}/%252e%252e%252fsecret.ips`, // double-encoded
+      `/api/files/crash/${udid}/Runner-2026-11-02-114301.ips%00.txt`,
+      `/api/files/crash/${udid}/notes.txt%00.ips`,
+      `/api/files/crash/${udid}/R%C3%BCnner.ips`,
+      `/api/files/crash/${udid}/%EF%BC%8E%EF%BC%8E%EF%BC%8Fsecret.ips`, // fullwidth "../"
+      `/api/files/crash/..%2F..%2Fdata/secret.ips`,
+      '/api/files/crash/../../data/secret.ips',
+      `/api/files/crash/${udid}/sub/../secret.ips`,
+      `/api/files/crash/${udid}/`,
+      `/api/files/crash/%2F${udid}/Runner-2026-11-02-114301.ips`,
+      `/api/files/crash/${udid}/Runner..ips`,
+    ];
+    for (const attempt of attempts) {
+      const res = await raw(t.port, 'GET', attempt);
+      expect(res.status, attempt).toBeGreaterThanOrEqual(400);
+      expect(res.body.toString(), attempt).not.toContain('top secret');
+    }
+    // same access rules as every /api route
+    expect((await raw(t.port, 'GET', url, { Origin: 'https://evil.example' })).status).toBe(403);
+    expect((await raw(t.port, 'GET', url, { 'Sec-Fetch-Site': 'cross-site' })).status).toBe(403);
+    expect((await raw(t.port, 'GET', url, { Host: 'rebind.attacker.example' })).status).toBe(403);
   });
 
   it('applies loopback/origin/fetch-metadata/host checks to every /api route', async () => {
