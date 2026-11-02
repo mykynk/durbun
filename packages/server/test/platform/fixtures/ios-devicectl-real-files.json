@@ -1,0 +1,423 @@
+{
+ "info": {
+  "arguments": [
+   "devicectl",
+   "device",
+   "info",
+   "files",
+   "--device",
+   "00008130-000A1B2C3D4E001F",
+   "--domain-type",
+   "systemCrashLogs",
+   "--json-output",
+   "/tmp/durbun-devicectl.json"
+  ],
+  "commandType": "devicectl.device.info.files",
+  "environment": {},
+  "jsonVersion": 5,
+  "outcome": "success",
+  "version": "651.32"
+ },
+ "result": {
+  "deviceIdentifier": "1F4C0B9E-2A7D-4E61-9C35-8B0D6F2A1E47",
+  "domain": "systemCrashLogs",
+  "files": [
+   {
+    "metadata": {
+     "extendedAttributes": {},
+     "lastModDate": "2026-11-02T17:20:24.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 493,
+     "size": 96
+    },
+    "name": "Assistant",
+    "relativePath": "Assistant",
+    "resources": {
+     "isDirectory": true,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "LogType": "298",
+      "bug_type": "298"
+     },
+     "lastModDate": "2026-11-02T19:05:01.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 432,
+     "size": 246518
+    },
+    "name": "JetsamEvent-2026-11-02-220501.ips",
+    "relativePath": "JetsamEvent-2026-11-02-220501.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {},
+     "lastModDate": "2025-03-07T09:53:31.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 504,
+     "size": 160
+    },
+    "name": "ProxiedDevice-0123456789abcdef0123456789abcdef01234567",
+    "relativePath": "ProxiedDevice-0123456789abcdef0123456789abcdef01234567",
+    "resources": {
+     "isDirectory": true,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {},
+     "lastModDate": "2025-03-13T15:32:43.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 504,
+     "size": 64
+    },
+    "name": "ProxiedDevice-0123456789abcdef0123456789abcdef01234567/Retired",
+    "relativePath": "ProxiedDevice-0123456789abcdef0123456789abcdef01234567/Retired",
+    "resources": {
+     "isDirectory": true,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {},
+     "lastModDate": "2025-03-06T19:03:57.000Z",
+     "ownerGid": 501,
+     "ownerUid": 501,
+     "permissions": 420,
+     "size": 999
+    },
+    "name": "ProxiedDevice-0123456789abcdef0123456789abcdef01234567/deviceMetadata.proxy",
+    "relativePath": "ProxiedDevice-0123456789abcdef0123456789abcdef01234567/deviceMetadata.proxy",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {},
+     "lastModDate": "2025-01-29T07:21:04.000Z",
+     "ownerGid": 501,
+     "ownerUid": 501,
+     "permissions": 420,
+     "size": 2233841
+    },
+    "name": "ProxiedDevice-0123456789abcdef0123456789abcdef01234567/tasking.ca1.proxy",
+    "relativePath": "ProxiedDevice-0123456789abcdef0123456789abcdef01234567/tasking.ca1.proxy",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {},
+     "lastModDate": "2026-11-02T19:04:30.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 504,
+     "size": 28512
+    },
+    "name": "Retired",
+    "relativePath": "Retired",
+    "resources": {
+     "isDirectory": true,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "LogType": "211",
+      "bug_type": "211",
+      "retired-reason": "submitted",
+      "routing": "ca1-ohttp"
+     },
+     "lastModDate": "2026-10-28T00:00:08.000Z",
+     "ownerGid": 250,
+     "ownerUid": 0,
+     "permissions": 432,
+     "size": 5167
+    },
+    "name": "Retired/Analytics-2026-10-28-030008.ips.ca.synced",
+    "relativePath": "Retired/Analytics-2026-10-28-030008.ips.ca.synced",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "LogType": "312",
+      "bug_type": "312",
+      "retired-reason": "rejected-config"
+     },
+     "lastModDate": "2026-11-02T16:32:36.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 432,
+     "size": 946
+    },
+    "name": "Retired/DiagnosticRequest_com.apple.coreanimation_hitch-2026-11-02-193236.ips",
+    "relativePath": "Retired/DiagnosticRequest_com.apple.coreanimation_hitch-2026-11-02-193236.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "LogType": "308_SpringBoard_sim",
+      "bug_type": "308",
+      "retired-reason": "rejected-config"
+     },
+     "lastModDate": "2026-10-26T21:59:44.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 432,
+     "size": 4868
+    },
+    "name": "Retired/ExcUserFault_SpringBoard-2026-10-27-005944.000.ips",
+    "relativePath": "Retired/ExcUserFault_SpringBoard-2026-10-27-005944.000.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "LogType": "308_SpringBoard_sim",
+      "bug_type": "308",
+      "retired-reason": "rejected-config"
+     },
+     "lastModDate": "2026-10-26T21:59:44.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 432,
+     "size": 4868
+    },
+    "name": "Retired/ExcUserFault_SpringBoard-2026-10-27-005944.ips",
+    "relativePath": "Retired/ExcUserFault_SpringBoard-2026-10-27-005944.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "LogType": "145",
+      "bug_type": "145",
+      "retired-reason": "submitted"
+     },
+     "lastModDate": "2026-11-01T18:00:25.000Z",
+     "ownerGid": 250,
+     "ownerUid": 0,
+     "permissions": 432,
+     "size": 9799
+    },
+    "name": "Retired/Mahalle.diskwrites_resource-2026-11-01-210025.ips",
+    "relativePath": "Retired/Mahalle.diskwrites_resource-2026-11-01-210025.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "LogType": "298_LOW_PRIORITY",
+      "bug_type": "298",
+      "retired-reason": "submitted"
+     },
+     "lastModDate": "2026-11-02T18:05:05.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 432,
+     "size": 234975
+    },
+    "name": "Retired/JetsamEvent-2026-11-02-210505.ips",
+    "relativePath": "Retired/JetsamEvent-2026-11-02-210505.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "LogType": "313",
+      "bug_type": "313",
+      "retired-reason": "rejected-config"
+     },
+     "lastModDate": "2026-11-01T21:17:04.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 432,
+     "size": 347
+    },
+    "name": "Retired/SiriSearchFeedback-2026-11-02-001704.ips",
+    "relativePath": "Retired/SiriSearchFeedback-2026-11-02-001704.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "DoNotSubmit": "1",
+      "LogType": "309_Runner",
+      "Signature": "0000000000000000000000000000000000000000",
+      "bug_type": "309",
+      "com.apple.dataprotection.policy.exception-applied-by": "com.apple.osanalyticshelper",
+      "retired-reason": "rejected-doNotSubmit"
+     },
+     "lastModDate": "2026-11-02T06:50:19.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 432,
+     "size": 75715
+    },
+    "name": "Retired/Runner-2026-11-02-095019.ips",
+    "relativePath": "Retired/Runner-2026-11-02-095019.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "LogType": "233",
+      "bug_type": "233",
+      "retired-reason": "rejected-config"
+     },
+     "lastModDate": "2026-11-02T16:18:37.000Z",
+     "ownerGid": 250,
+     "ownerUid": 0,
+     "permissions": 432,
+     "size": 3236
+    },
+    "name": "Retired/WiFiConnectionQuality-2026-11-02-191837.ips",
+    "relativePath": "Retired/WiFiConnectionQuality-2026-11-02-191837.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "LogType": "288",
+      "bug_type": "288",
+      "retired-reason": "rejected-blacklist"
+     },
+     "lastModDate": "2026-10-29T16:13:56.000Z",
+     "ownerGid": 250,
+     "ownerUid": 0,
+     "permissions": 432,
+     "size": 1956211
+    },
+    "name": "Retired/stacks-2026-10-29-191355.ips",
+    "relativePath": "Retired/stacks-2026-10-29-191355.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   },
+   {
+    "metadata": {
+     "extendedAttributes": {
+      "DoNotSubmit": "1",
+      "LogType": "309_Runner",
+      "Signature": "0000000000000000000000000000000000000000",
+      "bug_type": "309",
+      "com.apple.dataprotection.policy.exception-applied-by": "com.apple.osanalyticshelper",
+      "retired-reason": "rejected-doNotSubmit"
+     },
+     "lastModDate": "2026-11-02T07:15:00.000Z",
+     "ownerGid": 250,
+     "ownerUid": 501,
+     "permissions": 432,
+     "size": 75715
+    },
+    "name": "ProxiedDevice-0123456789abcdef0123456789abcdef01234567/Runner-2026-11-02-101500.ips",
+    "relativePath": "ProxiedDevice-0123456789abcdef0123456789abcdef01234567/Runner-2026-11-02-101500.ips",
+    "resources": {
+     "isDirectory": false,
+     "isHidden": false,
+     "isReadable": true,
+     "isSymbolicLink": false,
+     "isWritable": true
+    }
+   }
+  ]
+ }
+}

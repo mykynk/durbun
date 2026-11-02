@@ -1,0 +1,56 @@
+{
+ "info": {
+  "arguments": [
+   "devicectl",
+   "device",
+   "info",
+   "apps",
+   "--device",
+   "00008130-000A1B2C3D4E001F",
+   "--json-output",
+   "/tmp/durbun-devicectl.json"
+  ],
+  "commandType": "devicectl.device.info.apps",
+  "environment": {},
+  "jsonVersion": 5,
+  "outcome": "success",
+  "version": "651.32"
+ },
+ "result": {
+  "apps": [
+   {
+    "appClip": false,
+    "builtByDeveloper": true,
+    "bundleIdentifier": "com.mykynk.pati",
+    "containerAccessible": true,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Pati",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/5BAD0758-E451-4998-B18D-E7D7D1AE5BA0/Runner.app/",
+    "version": "2.3.0",
+    "bundleVersion": "57"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": true,
+    "bundleIdentifier": "com.mykynk.sugarsquare",
+    "containerAccessible": true,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Sugar Square",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/7FBF2046-2851-48DD-A96F-DFE7913CD8BB/Runner.app/",
+    "version": "1.0.0",
+    "bundleVersion": "1"
+   }
+  ],
+  "defaultAppsIncluded": false,
+  "deviceIdentifier": "1F4C0B9E-2A7D-4E61-9C35-8B0D6F2A1E47",
+  "hiddenAppsIncluded": false,
+  "internalAppsIncluded": false,
+  "removableAppsIncluded": true
+ }
+}

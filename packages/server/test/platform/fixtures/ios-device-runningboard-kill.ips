@@ -1,0 +1,459 @@
+{"app_name":"Kumbara","timestamp":"2026-11-02 09:50:19.00 +0300","app_version":"3.1.0","slice_uuid":"00000000-0000-0000-0000-000000000001","adam_id":"1000000001","build_version":"310","bundleID":"com.mykynk.kumbara","platform":2,"share_with_app_devs":0,"is_first_party":0,"bug_type":"309","os_version":"iPhone OS 27.2 (24B5089g)","roots_installed":0,"incident_id":"11111111-2222-3333-4444-555555555555","name":"Runner"}
+{
+  "uptime": 860000,
+  "procRole": "unknown",
+  "version": 2,
+  "userID": 501,
+  "deployVersion": 210,
+  "modelCode": "iPhone16,2",
+  "coalitionID": 15586,
+  "osVersion": {
+    "isEmbedded": true,
+    "train": "iPhone OS 27.2",
+    "releaseType": "Beta",
+    "build": "24B5089g"
+  },
+  "captureTime": "2026-11-02 09:50:17.9591 +0300",
+  "codeSigningMonitor": 2,
+  "incident": "11111111-2222-3333-4444-555555555555",
+  "pid": 11384,
+  "translated": false,
+  "cpuType": "ARM-64",
+  "procLaunch": "2026-11-02 07:48:14.2061 +0300",
+  "procStartAbsTime": 20530640297429,
+  "procExitAbsTime": 20664115156366,
+  "procName": "Runner",
+  "procPath": "\/private\/var\/containers\/Bundle\/Application\/43C89094-84AA-4C28-854A-677674ED1F62\/Runner.app\/Runner",
+  "bundleInfo": {
+    "CFBundleShortVersionString": "3.1.0",
+    "CFBundleVersion": "310",
+    "CFBundleIdentifier": "com.mykynk.kumbara",
+    "DTAppStoreToolsBuild": "27B47"
+  },
+  "parentProc": "launchd",
+  "parentPid": 1,
+  "coalitionName": "com.mykynk.kumbara",
+  "isLocked": 1,
+  "developerMode": 1,
+  "exception": {
+    "codes": "0x0000000000000000, 0x0000000000000000",
+    "rawCodes": [
+      0,
+      0
+    ],
+    "type": "EXC_CRASH",
+    "signal": "SIGKILL"
+  },
+  "termination": {
+    "namespace": "RUNNINGBOARD",
+    "flags": 6,
+    "code": 3735883980
+  },
+  "faultingThread": 0,
+  "legacyInfo": {
+    "threadTriggered": {
+      "queue": "com.apple.main-thread"
+    }
+  },
+  "storeInfo": {
+    "distributorID": "com.apple.AppStore",
+    "thirdParty": true
+  },
+  "crashReporterKey": "0000000000000000000000000000000000000000",
+  "bootSessionUUID": "00000000-0000-0000-0000-000000000000",
+  "threads": [
+    {
+      "triggered": true,
+      "id": 15435584,
+      "threadState": {
+        "x": [
+          {
+            "value": 268451845
+          },
+          {
+            "value": 21592279046
+          },
+          {
+            "value": 8589934592
+          },
+          {
+            "value": 47291884896256
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 47291884896256
+          },
+          {
+            "value": 2
+          },
+          {
+            "value": 4294967295
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 2
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 11011
+          },
+          {
+            "value": 348672
+          },
+          {
+            "value": 1497534837379584
+          },
+          {
+            "value": 18446744073709551569
+          },
+          {
+            "value": 8092432216
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 4294967295
+          },
+          {
+            "value": 2
+          },
+          {
+            "value": 47291884896256
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 47291884896256
+          },
+          {
+            "value": 21592279046
+          },
+          {
+            "value": 6100705592
+          },
+          {
+            "value": 8589934592
+          },
+          {
+            "value": 18446744073709550527
+          },
+          {
+            "value": 10570006528,
+            "symbolLocation": 0,
+            "symbol": "_libkernel_string_functions"
+          }
+        ],
+        "flavor": "ARM_THREAD_STATE64",
+        "lr": {
+          "value": 9608291080
+        },
+        "cpsr": {
+          "value": 4096
+        },
+        "fp": {
+          "value": 6100705440
+        },
+        "sp": {
+          "value": 6100705360
+        },
+        "esr": {
+          "value": 1442840704,
+          "description": "(Syscall)"
+        },
+        "pc": {
+          "value": 9608277204,
+          "matchesCrashFrame": 1
+        },
+        "far": {
+          "value": 0
+        }
+      },
+      "queue": "com.apple.main-thread",
+      "frames": [
+        {
+          "imageOffset": 3284,
+          "symbol": "mach_msg2_trap",
+          "symbolLocation": 8,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 17160,
+          "symbol": "mach_msg2_internal",
+          "symbolLocation": 76,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 16936,
+          "symbol": "mach_msg_overwrite",
+          "symbolLocation": 424,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 16500,
+          "symbol": "mach_msg",
+          "symbolLocation": 24,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 242780,
+          "symbol": "__CFRunLoopServiceMachPort",
+          "symbolLocation": 136,
+          "imageIndex": 2
+        },
+        {
+          "imageOffset": 238632,
+          "symbol": "__CFRunLoopRun",
+          "symbolLocation": 596,
+          "imageIndex": 2
+        },
+        {
+          "imageOffset": 243684,
+          "symbol": "_CFRunLoopRunSpecificWithOptions",
+          "symbolLocation": 344,
+          "imageIndex": 2
+        },
+        {
+          "imageOffset": 3876,
+          "symbol": "GSEventRunModal",
+          "symbolLocation": 120,
+          "imageIndex": 3
+        },
+        {
+          "imageOffset": 764756,
+          "symbol": "UIApplicationMain",
+          "symbolLocation": 336,
+          "imageIndex": 4
+        },
+        {
+          "imageOffset": 1638860,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 21944,
+          "symbol": "start",
+          "symbolLocation": 6616,
+          "imageIndex": 5
+        }
+      ]
+    },
+    {
+      "id": 15435616,
+      "name": "GC Timer thread",
+      "threadState": {
+        "x": [
+          {
+            "value": 260
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 58880
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 160
+          },
+          {
+            "value": 9
+          },
+          {
+            "value": 999897542
+          },
+          {
+            "value": 6107573768
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 2
+          },
+          {
+            "value": 2
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 305
+          },
+          {
+            "value": 8092432104
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 5581854888
+          },
+          {
+            "value": 5581854952
+          },
+          {
+            "value": 6107574496
+          },
+          {
+            "value": 999897542
+          },
+          {
+            "value": 9
+          },
+          {
+            "value": 58880
+          },
+          {
+            "value": 58881
+          },
+          {
+            "value": 59136
+          },
+          {
+            "value": 1725342576945416
+          },
+          {
+            "value": 0
+          }
+        ],
+        "flavor": "ARM_THREAD_STATE64",
+        "lr": {
+          "value": 6454738336
+        },
+        "cpsr": {
+          "value": 1610616832
+        },
+        "fp": {
+          "value": 6107573888
+        },
+        "sp": {
+          "value": 6107573744
+        },
+        "esr": {
+          "value": 1442840704,
+          "description": "(Syscall)"
+        },
+        "pc": {
+          "value": 9608300024
+        },
+        "far": {
+          "value": 0
+        }
+      },
+      "frames": [
+        {
+          "imageOffset": 26104,
+          "symbol": "__psynch_cvwait",
+          "symbolLocation": 8,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 30625444,
+          "symbol": "XPluginsGetListLookupDataPair",
+          "symbolLocation": 27992140,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 29371996,
+          "symbol": "XPluginsGetListLookupDataPair",
+          "symbolLocation": 26738692,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 30405648,
+          "symbol": "XPluginsGetListLookupDataPair",
+          "symbolLocation": 27772344,
+          "imageIndex": 0
+        }
+      ]
+    }
+  ],
+  "usedImages": [
+    {
+      "source": "P",
+      "arch": "arm64",
+      "base": 4366172160,
+      "size": 137314304,
+      "uuid": "00000000-0000-0000-0000-000000000001",
+      "path": "\/private\/var\/containers\/Bundle\/Application\/43C89094-84AA-4C28-854A-677674ED1F62\/Runner.app\/Runner",
+      "name": "Runner"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 9608273920,
+      "size": 250588,
+      "uuid": "3c285789-2558-33a3-985f-9664d8c35bf5",
+      "path": "\/usr\/lib\/system\/libsystem_kernel.dylib",
+      "name": "libsystem_kernel.dylib"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 6455521280,
+      "size": 5128944,
+      "uuid": "e2d82633-015b-3230-97bf-609f21b479cb",
+      "path": "\/System\/Library\/Frameworks\/CoreFoundation.framework\/CoreFoundation",
+      "name": "CoreFoundation"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 9353678848,
+      "size": 32420,
+      "uuid": "cd9775af-b669-356c-a826-9d4384b678ae",
+      "path": "\/System\/Library\/PrivateFrameworks\/GraphicsServices.framework\/GraphicsServices",
+      "name": "GraphicsServices"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 6524055552,
+      "size": 33970848,
+      "uuid": "0042b2f3-5fb3-3e5d-a587-3f3cc33d2819",
+      "path": "\/System\/Library\/PrivateFrameworks\/UIKitCore.framework\/UIKitCore",
+      "name": "UIKitCore"
+    },
+    {
+      "source": "P",
+      "arch": "arm64e",
+      "base": 6453977088,
+      "size": 752092,
+      "uuid": "b668582b-c710-3640-80c5-5af47a014893",
+      "path": "\/usr\/lib\/dyld",
+      "name": "dyld"
+    }
+  ],
+  "sharedCache": {
+    "base": 6449250304,
+    "size": 6569754624,
+    "uuid": "00000000-0000-0000-0000-000000000002"
+  }
+}

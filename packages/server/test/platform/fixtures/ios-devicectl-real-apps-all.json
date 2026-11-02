@@ -1,0 +1,139 @@
+{
+ "info": {
+  "arguments": [
+   "devicectl",
+   "device",
+   "info",
+   "apps",
+   "--device",
+   "00008130-000A1B2C3D4E001F",
+   "--include-all-apps",
+   "--json-output",
+   "/tmp/durbun-devicectl.json"
+  ],
+  "commandType": "devicectl.device.info.apps",
+  "environment": {},
+  "jsonVersion": 5,
+  "outcome": "success",
+  "version": "651.32"
+ },
+ "result": {
+  "apps": [
+   {
+    "appClip": false,
+    "builtByDeveloper": true,
+    "bundleIdentifier": "com.mykynk.pati",
+    "containerAccessible": true,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Pati",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/5BAD0758-E451-4998-B18D-E7D7D1AE5BA0/Runner.app/",
+    "version": "2.3.0",
+    "bundleVersion": "57"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": true,
+    "bundleIdentifier": "com.mykynk.sugarsquare",
+    "containerAccessible": true,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Sugar Square",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/7FBF2046-2851-48DD-A96F-DFE7913CD8BB/Runner.app/",
+    "version": "1.0.0",
+    "bundleVersion": "1"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.mykynk.kumbara",
+    "containerAccessible": true,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Kumbara",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/43C89094-84AA-4C28-854A-677674ED1F62/Runner.app/",
+    "version": "3.1.0",
+    "bundleVersion": "310"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.mykynk.mahalle",
+    "containerAccessible": true,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Mahalle",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/241EB666-57AF-4122-A98A-37318530C210/Mahalle.app/",
+    "version": "4.2.0",
+    "bundleVersion": "420"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.example.authenticator",
+    "containerAccessible": true,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Authenticator",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/CA14FDAD-A51C-410F-A148-1C449FE27577/Microsoft%20Authenticator.app/",
+    "version": "6.8.57",
+    "bundleVersion": "2"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.apple.Health",
+    "containerAccessible": true,
+    "defaultApp": true,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Health",
+    "removable": false,
+    "url": "file:///private/var/containers/Bundle/Application/7F7E7A1A-E6CE-483E-8ACA-64866E6BB6DE/Health.app/",
+    "version": "1.0",
+    "bundleVersion": "1"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.apple.Fitness",
+    "containerAccessible": true,
+    "defaultApp": true,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Fitness",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/B4CF6DA8-DD81-46E0-BADA-74DF93B7B0FE/Fitness.app/",
+    "version": "1.0",
+    "bundleVersion": "1"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.apple.ShortcutsActions",
+    "containerAccessible": true,
+    "defaultApp": true,
+    "hidden": false,
+    "internalApp": false,
+    "name": "ShortcutsActions",
+    "removable": false,
+    "url": "file:///private/var/containers/Bundle/Application/9DF8B3BC-1111-4AB4-8388-1945CA94C978/ShortcutsActions.app/"
+   }
+  ],
+  "defaultAppsIncluded": true,
+  "deviceIdentifier": "1F4C0B9E-2A7D-4E61-9C35-8B0D6F2A1E47",
+  "hiddenAppsIncluded": true,
+  "internalAppsIncluded": true,
+  "removableAppsIncluded": true
+ }
+}

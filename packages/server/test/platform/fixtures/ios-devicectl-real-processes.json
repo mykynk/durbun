@@ -1,0 +1,108 @@
+{
+ "info": {
+  "arguments": [
+   "devicectl",
+   "device",
+   "info",
+   "processes",
+   "--device",
+   "00008130-000A1B2C3D4E001F",
+   "--json-output",
+   "/tmp/durbun-devicectl.json"
+  ],
+  "commandType": "devicectl.device.info.processes",
+  "environment": {},
+  "jsonVersion": 5,
+  "outcome": "success",
+  "version": "651.32"
+ },
+ "result": {
+  "deviceIdentifier": "1F4C0B9E-2A7D-4E61-9C35-8B0D6F2A1E47",
+  "runningProcesses": [
+   {
+    "executable": "file:///sbin/launchd",
+    "processIdentifier": 1
+   },
+   {
+    "executable": "file:///usr/libexec/UserEventAgent",
+    "processIdentifier": 33
+   },
+   {
+    "executable": "file:///usr/libexec/logd",
+    "processIdentifier": 35
+   },
+   {
+    "executable": "file:///usr/libexec/runningboardd",
+    "processIdentifier": 36
+   },
+   {
+    "executable": "file:///System/Library/PrivateFrameworks/AssistantServices.framework/assistantd",
+    "processIdentifier": 39
+   },
+   {
+    "executable": "file:///System/Library/PrivateFrameworks/AXAssetLoader.framework/Support/axassetsd",
+    "processIdentifier": 43
+   },
+   {
+    "executable": "file:///usr/libexec/configd",
+    "processIdentifier": 48
+   },
+   {
+    "executable": "file:///System/Library/CoreServices/powerd.bundle/powerd",
+    "processIdentifier": 51
+   },
+   {
+    "executable": "file:///usr/libexec/atc",
+    "processIdentifier": 53
+   },
+   {
+    "executable": "file:///usr/sbin/WirelessRadioManagerd",
+    "processIdentifier": 54
+   },
+   {
+    "executable": "file:///System/Library/PrivateFrameworks/BiomeStreams.framework/Support/biomed",
+    "processIdentifier": 55
+   },
+   {
+    "executable": "file:///usr/libexec/watchdogd",
+    "processIdentifier": 64
+   },
+   {
+    "executable": "file:///usr/libexec/thermalmonitord",
+    "processIdentifier": 69
+   },
+   {
+    "executable": "file:///usr/libexec/backboardd",
+    "processIdentifier": 73
+   },
+   {
+    "executable": "file:///private/var/containers/Bundle/Application/B4CF6DA8-DD81-46E0-BADA-74DF93B7B0FE/Fitness.app/PlugIns/FitnessWidget.appex/FitnessWidget",
+    "processIdentifier": 14799
+   },
+   {
+    "executable": "file:///private/var/containers/Bundle/Application/5BAD0758-E451-4998-B18D-E7D7D1AE5BA0/Runner.app/Runner",
+    "processIdentifier": 14812
+   },
+   {
+    "executable": "file:///private/var/containers/Bundle/Application/241EB666-57AF-4122-A98A-37318530C210/Mahalle.app/PlugIns/MahalleNotificationService.appex/MahalleNotificationService",
+    "processIdentifier": 14807
+   },
+   {
+    "executable": "file:///private/var/containers/Bundle/Application/43C89094-84AA-4C28-854A-677674ED1F62/Runner.app/Runner",
+    "processIdentifier": 14871
+   },
+   {
+    "executable": "file:///private/var/containers/Bundle/Application/241EB666-57AF-4122-A98A-37318530C210/Mahalle.app/Mahalle",
+    "processIdentifier": 14889
+   },
+   {
+    "executable": "file:///private/var/containers/Bundle/Application/CA14FDAD-A51C-410F-A148-1C449FE27577/Microsoft%20Authenticator.app/Microsoft%20Authenticator",
+    "processIdentifier": 14939
+   },
+   {
+    "executable": "file:///private/var/containers/Bundle/Application/7F7E7A1A-E6CE-483E-8ACA-64866E6BB6DE/Health.app/Health",
+    "processIdentifier": 14906
+   }
+  ]
+ }
+}
