@@ -1,0 +1,456 @@
+[
+  {
+    "type": "HttpProfileRequest",
+    "id": "2655734315706517250",
+    "isolateId": "isolates/4429147007222695",
+    "method": "GET",
+    "uri": "http://127.0.0.1:51265/api/users?page=1",
+    "events": [
+      {
+        "timestamp": 1793612016609337,
+        "event": "Connection established"
+      },
+      {
+        "timestamp": 1793612016610317,
+        "event": "Request sent"
+      },
+      {
+        "timestamp": 1793612016625485,
+        "event": "Waiting (TTFB)"
+      },
+      {
+        "timestamp": 1793612016627842,
+        "event": "Content Download"
+      }
+    ],
+    "startTime": 1793612016598295,
+    "endTime": 1793612016614551,
+    "request": {
+      "headers": {
+        "user-agent": [
+          "Dart/3.10 (dart:io)"
+        ],
+        "accept": [
+          "application/json"
+        ],
+        "accept-encoding": [
+          "gzip"
+        ],
+        "content-length": [
+          "0"
+        ],
+        "host": [
+          "127.0.0.1:51265"
+        ]
+      },
+      "connectionInfo": {
+        "localPort": 51267,
+        "remoteAddress": "127.0.0.1",
+        "remotePort": 51265
+      },
+      "contentLength": 0,
+      "cookies": [],
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "method": "GET",
+      "persistentConnection": true,
+      "uri": "http://127.0.0.1:51265/api/users?page=1",
+      "filterKey": "HTTP/client"
+    },
+    "response": {
+      "startTime": 1793612016625931,
+      "headers": {
+        "x-frame-options": [
+          "SAMEORIGIN"
+        ],
+        "content-type": [
+          "application/json; charset=utf-8"
+        ],
+        "x-request-path": [
+          "/api/users"
+        ],
+        "x-xss-protection": [
+          "1; mode=block"
+        ],
+        "x-content-type-options": [
+          "nosniff"
+        ],
+        "transfer-encoding": [
+          "chunked"
+        ]
+      },
+      "compressionState": "HttpClientResponseCompressionState.notCompressed",
+      "connectionInfo": {
+        "localPort": 51267,
+        "remoteAddress": "127.0.0.1",
+        "remotePort": 51265
+      },
+      "contentLength": -1,
+      "cookies": [],
+      "isRedirect": false,
+      "persistentConnection": true,
+      "reasonPhrase": "OK",
+      "redirects": [],
+      "statusCode": 200,
+      "endTime": 1793612016627778
+    },
+    "requestBody": [],
+    "responseBody": [
+      123,
+      34,
+      117,
+      115,
+      101,
+      114,
+      115,
+      34,
+      58,
+      91,
+      123,
+      34,
+      105,
+      100,
+      34,
+      58,
+      49,
+      44,
+      34,
+      110,
+      97,
+      109,
+      101,
+      34,
+      58,
+      34,
+      65,
+      121,
+      197,
+      159,
+      101,
+      34,
+      125,
+      44,
+      123,
+      34,
+      105,
+      100,
+      34,
+      58,
+      50,
+      44,
+      34,
+      110,
+      97,
+      109,
+      101,
+      34,
+      58,
+      34,
+      77,
+      101,
+      104,
+      109,
+      101,
+      116,
+      34,
+      125,
+      93,
+      44,
+      34,
+      112,
+      97,
+      103,
+      101,
+      34,
+      58,
+      34,
+      49,
+      34,
+      125
+    ]
+  },
+  {
+    "type": "HttpProfileRequest",
+    "id": "2655734315706517252",
+    "isolateId": "isolates/4429147007222695",
+    "method": "POST",
+    "uri": "http://127.0.0.1:51265/api/login",
+    "events": [
+      {
+        "timestamp": 1793612016628198,
+        "event": "Connection established"
+      },
+      {
+        "timestamp": 1793612016628217,
+        "event": "Request sent"
+      },
+      {
+        "timestamp": 1793612016631585,
+        "event": "Waiting (TTFB)"
+      },
+      {
+        "timestamp": 1793612016631862,
+        "event": "Content Download"
+      }
+    ],
+    "startTime": 1793612016628016,
+    "endTime": 1793612016628734,
+    "request": {
+      "headers": {
+        "user-agent": [
+          "Dart/3.10 (dart:io)"
+        ],
+        "content-type": [
+          "application/json; charset=utf-8"
+        ],
+        "transfer-encoding": [
+          "chunked"
+        ],
+        "accept-encoding": [
+          "gzip"
+        ],
+        "host": [
+          "127.0.0.1:51265"
+        ]
+      },
+      "connectionInfo": {
+        "localPort": 51267,
+        "remoteAddress": "127.0.0.1",
+        "remotePort": 51265
+      },
+      "contentLength": -1,
+      "cookies": [],
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "method": "POST",
+      "persistentConnection": true,
+      "uri": "http://127.0.0.1:51265/api/login",
+      "filterKey": "HTTP/client"
+    },
+    "response": {
+      "startTime": 1793612016631616,
+      "headers": {
+        "x-frame-options": [
+          "SAMEORIGIN"
+        ],
+        "content-type": [
+          "application/json; charset=utf-8"
+        ],
+        "x-xss-protection": [
+          "1; mode=block"
+        ],
+        "x-content-type-options": [
+          "nosniff"
+        ],
+        "transfer-encoding": [
+          "chunked"
+        ]
+      },
+      "compressionState": "HttpClientResponseCompressionState.notCompressed",
+      "connectionInfo": {
+        "localPort": 51267,
+        "remoteAddress": "127.0.0.1",
+        "remotePort": 51265
+      },
+      "contentLength": -1,
+      "cookies": [],
+      "isRedirect": false,
+      "persistentConnection": true,
+      "reasonPhrase": "OK",
+      "redirects": [],
+      "statusCode": 200,
+      "endTime": 1793612016631853
+    },
+    "requestBody": [
+      123,
+      34,
+      117,
+      115,
+      101,
+      114,
+      34,
+      58,
+      34,
+      121,
+      117,
+      115,
+      117,
+      102,
+      34,
+      44,
+      34,
+      116,
+      105,
+      99,
+      107,
+      34,
+      58,
+      49,
+      125
+    ],
+    "responseBody": [
+      123,
+      34,
+      116,
+      111,
+      107,
+      101,
+      110,
+      34,
+      58,
+      34,
+      116,
+      111,
+      107,
+      45,
+      49,
+      50,
+      51,
+      34,
+      44,
+      34,
+      117,
+      115,
+      101,
+      114,
+      34,
+      58,
+      34,
+      121,
+      117,
+      115,
+      117,
+      102,
+      34,
+      125
+    ]
+  },
+  {
+    "type": "HttpProfileRequest",
+    "id": "2655734315706517262",
+    "isolateId": "isolates/4429147007222695",
+    "method": "GET",
+    "uri": "http://127.0.0.1:51265/api/missing",
+    "events": [
+      {
+        "timestamp": 1793612017595625,
+        "event": "Connection established"
+      },
+      {
+        "timestamp": 1793612017595634,
+        "event": "Request sent"
+      },
+      {
+        "timestamp": 1793612017596045,
+        "event": "Waiting (TTFB)"
+      },
+      {
+        "timestamp": 1793612017596173,
+        "event": "Content Download"
+      }
+    ],
+    "startTime": 1793612017595590,
+    "endTime": 1793612017595707,
+    "request": {
+      "headers": {
+        "user-agent": [
+          "Dart/3.10 (dart:io)"
+        ],
+        "accept-encoding": [
+          "gzip"
+        ],
+        "content-length": [
+          "0"
+        ],
+        "host": [
+          "127.0.0.1:51265"
+        ]
+      },
+      "connectionInfo": {
+        "localPort": 51269,
+        "remoteAddress": "127.0.0.1",
+        "remotePort": 51265
+      },
+      "contentLength": 0,
+      "cookies": [],
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "method": "GET",
+      "persistentConnection": true,
+      "uri": "http://127.0.0.1:51265/api/missing",
+      "filterKey": "HTTP/client"
+    },
+    "response": {
+      "startTime": 1793612017596063,
+      "headers": {
+        "x-frame-options": [
+          "SAMEORIGIN"
+        ],
+        "content-type": [
+          "application/json; charset=utf-8"
+        ],
+        "x-xss-protection": [
+          "1; mode=block"
+        ],
+        "x-content-type-options": [
+          "nosniff"
+        ],
+        "transfer-encoding": [
+          "chunked"
+        ]
+      },
+      "compressionState": "HttpClientResponseCompressionState.notCompressed",
+      "connectionInfo": {
+        "localPort": 51269,
+        "remoteAddress": "127.0.0.1",
+        "remotePort": 51265
+      },
+      "contentLength": -1,
+      "cookies": [],
+      "isRedirect": false,
+      "persistentConnection": true,
+      "reasonPhrase": "Not Found",
+      "redirects": [],
+      "statusCode": 404,
+      "endTime": 1793612017596157
+    },
+    "requestBody": [],
+    "responseBody": [
+      123,
+      34,
+      101,
+      114,
+      114,
+      111,
+      114,
+      34,
+      58,
+      34,
+      110,
+      111,
+      116,
+      32,
+      102,
+      111,
+      117,
+      110,
+      100,
+      34,
+      125
+    ]
+  },
+  {
+    "type": "HttpProfileRequest",
+    "id": "2655734315706517268",
+    "isolateId": "isolates/4429147007222695",
+    "method": "GET",
+    "uri": "http://127.0.0.1:51266/unreachable",
+    "events": [],
+    "startTime": 1793612018095087,
+    "endTime": 1793612018096404,
+    "request": {
+      "error": "SocketException: Connection refused (OS Error: Connection refused, errno = 61), address = 127.0.0.1, port = 51273"
+    },
+    "requestBody": []
+  }
+]

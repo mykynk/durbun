@@ -1,0 +1,22 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+# Flutter / Dart
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+pubspec.lock
+# Android / Gradle
+.gradle/
+local.properties
+*.iml
+.idea/
+captures/
+# Swift
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+DerivedData/

@@ -1,0 +1,21 @@
+{
+  "devices" : {
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-2" : [
+      {
+        "dataPath" : "\/Users\/dev\/Library\/Developer\/CoreSimulator\/Devices\/133A4688-E13E-4080-A1E2-0F6CF49FD4C5\/data",
+        "dataPathSize" : 592715776,
+        "logPath" : "\/Users\/dev\/Library\/Logs\/CoreSimulator\/133A4688-E13E-4080-A1E2-0F6CF49FD4C5",
+        "udid" : "133A4688-E13E-4080-A1E2-0F6CF49FD4C5",
+        "lastUsedAt" : "2026-11-02T09:30:41Z",
+        "isAvailable" : true,
+        "logPathSize" : 176128,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        "state" : "Booted",
+        "name" : "durbun-test"
+      }
+    ]
+  }
+}

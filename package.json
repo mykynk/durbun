@@ -1,0 +1,34 @@
+{
+  "name": "durbun",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dürbün — live logs, network and performance inspector for Android and iOS devices",
+  "type": "module",
+  "workspaces": [
+    "packages/protocol",
+    "packages/server",
+    "packages/ui",
+    "sdks/js"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "durbun": "bin/durbun.mjs"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build -w @durbun/ui && npm run build -w @durbun/server",
+    "start": "node dist/durbun.mjs",
+    "demo": "node dist/durbun.mjs --demo",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

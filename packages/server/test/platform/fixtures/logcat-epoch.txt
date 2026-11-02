@@ -1,0 +1,48 @@
+--------- beginning of main
+         1793608981.101   612   650 I ActivityManager: Start proc 4321:com.mykynk.pati/u0a190 for next-top-activity {com.mykynk.pati/com.mykynk.pati.MainActivity}
+         1793608981.205  4321  4321 I flutter : The Dart VM service is listening on http://127.0.0.1:43123/AbCdEfGh=/
+         1793608981.206  4321  4344 D EGL_emulation: app_time_stats: avg=16.67ms min=15.21ms max=18.03ms count=60
+         1793608981.320  4321  4321 I flutter : {"event":"login","userId":42,"path":"C:\\\\temp","note":"he said \\"hi\\""}
+         1793608981.330  4321  4321 I flutter : Kullanıcı giriş yaptı — ÇĞİÖŞÜ çğıöşü
+--------- beginning of system
+         1793608981.400   612   612 W ActivityTaskManager: Slow operation: 112ms so far, now at startProcess: done updating pids map
+         1793608982.001  4321  4321 I flutter : ══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞═════════════════════════════════════════════════════════
+         1793608982.001  4321  4321 I flutter : The following assertion was thrown during layout:
+         1793608982.001  4321  4321 I flutter : A RenderFlex overflowed by 42 pixels on the right.
+         1793608982.002  4321  4321 I flutter :
+         1793608982.002  4321  4321 I flutter : The relevant error-causing widget was:
+         1793608982.002  4321  4321 I flutter :   Row Row:file:///Users/yusuf/pati/lib/home.dart:57:14
+         1793608982.003   612   650 W ActivityManager: Unable to start service Intent { act=com.google.android.gms.measurement.START } U=0: not found
+         1793608982.004  4321  4321 I flutter : ════════════════════════════════════════════════════════════════════════════════════════════════════
+--------- beginning of crash
+         1793608983.500  4321  4321 E AndroidRuntime: FATAL EXCEPTION: main
+         1793608983.500  4321  4321 E AndroidRuntime: Process: com.mykynk.pati, PID: 4321
+         1793608983.500  4321  4321 E AndroidRuntime: java.lang.IllegalStateException: Boom
+         1793608983.500  4321  4321 E AndroidRuntime: 	at com.mykynk.pati.MainActivity.onCreate(MainActivity.kt:21)
+         1793608983.501  4321  4321 E AndroidRuntime: 	at android.app.Activity.performCreate(Activity.java:8595)
+         1793608983.501  4321  4321 E AndroidRuntime: 	at android.app.ActivityThread.main(ActivityThread.java:8177)
+         1793608983.502  4321  4321 I Process : Sending signal. PID: 4321 SIG: 9
+         1793608983.610   612   700 I ActivityManager: Process com.mykynk.pati (pid 4321) has died: fg  TOP
+         1793608990.100  5001  5001 F libc    : Fatal signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0 in tid 5001 (RenderThread), pid 5001 (com.example.native)
+         1793608990.250  5010  5010 F DEBUG   : *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+         1793608990.250  5010  5010 F DEBUG   : Build fingerprint: 'google/sdk_gphone64_arm64/emu64a:14/UE1A.230829.036.A1/11228894:userdebug/dev-keys'
+         1793608990.251  5010  5010 F DEBUG   : Revision: '0'
+         1793608990.251  5010  5010 F DEBUG   : ABI: 'arm64'
+         1793608990.252  5010  5010 F DEBUG   : Timestamp: 2026-11-02 11:43:10.123456789+0300
+         1793608990.252  5010  5010 F DEBUG   : pid: 5001, tid: 5001, name: RenderThread  >>> com.example.native <<<
+         1793608990.252  5010  5010 F DEBUG   : uid: 10191
+         1793608990.253  5010  5010 F DEBUG   : signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0000000000000000
+         1793608990.253  5010  5010 F DEBUG   : Cause: null pointer dereference
+         1793608990.300  5010  5010 F DEBUG   : backtrace:
+         1793608990.300  5010  5010 F DEBUG   :       #00 pc 000000000004ee8c  /data/app/~~x==/com.example.native-y==/lib/arm64/libnative.so (crash+12)
+         1793608995.000   612   720 E ActivityManager: ANR in com.mykynk.pati (com.mykynk.pati/.MainActivity)
+         1793608995.000   612   720 E ActivityManager: PID: 4400
+         1793608995.000   612   720 E ActivityManager: Reason: Input dispatching timed out (ActivityRecord{a1b2c3 u0 com.mykynk.pati/.MainActivity t42} is not responding. Waited 5001ms for FocusEvent(hasFocus=true))
+         1793608995.000   612   720 E ActivityManager: Load: 1.25 / 0.98 / 0.77
+         1793608996.100  4400  4400 E flutter : [ERROR:flutter/runtime/dart_vm_initializer.cc(40)] Unhandled Exception: Exception: Ödeme başarısız
+         1793608996.100  4400  4400 E flutter : #0      PaymentService.pay (package:pati/payment.dart:12:5)
+         1793608996.100  4400  4400 E flutter : #1      _HomeState.build.<anonymous closure> (package:pati/home.dart:88:22)
+         1793608996.100  4400  4400 E flutter : <asynchronous suspension>
+         1793608996.500  4400  4400 I flutter : Another exception was thrown: A RenderFlex overflowed by 42 pixels on the right.
+         1793608997.000   612   700 I ActivityManager: Killing 4400:com.mykynk.pati/u0a190 (adj 0): user request after error
+         1793608997.050   611   611 I Zygote  : Process 4400 exited due to signal 9 (Killed)

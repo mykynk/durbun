@@ -1,0 +1,298 @@
+/*
+ * Dürbün design tokens (SPEC §7.1). Features MUST use these variables — never hard-coded colors.
+ *
+ * Theme selection: <html data-theme="dark|light"> holds the RESOLVED theme (the "system" preference is
+ * resolved in JS and kept in sync with prefers-color-scheme). Without the attribute (no JS yet) the
+ * media query below picks the theme, so there is no flash on first paint.
+ */
+
+:root {
+  /* Shape */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* Typography */
+  --font-ui: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "SF Mono", ui-monospace, Menlo, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --lh-tight: 1.25;
+  --lh: 1.45;
+  /* Log content size (UI pref 11–16px, set on :root by the prefs store). */
+  --log-fs: 12.5px;
+  /* Log row height: compact 20px / comfortable 24px (data-density on <html>). */
+  --row-h: 20px;
+
+  /* Layout */
+  --sidebar-w: 248px;
+  --sidebar-w-collapsed: 52px;
+  --topbar-h: 44px;
+  --statusbar-h: 26px;
+  --gutter: 8px;
+
+  /* Motion */
+  --dur: 120ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Layers */
+  --z-sticky: 10;
+  --z-overlay-panel: 30;
+  --z-dialog: 40;
+  --z-popover: 50;
+  --z-tooltip: 60;
+  --z-toast: 70;
+  --z-drop: 80;
+
+  /* Icon defaults (lucide) */
+  --icon: 16px;
+  --icon-sm: 14px;
+  --icon-stroke: 1.75;
+}
+
+/* ───────────── Dark (default) ───────────── */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-app: #0b0d12;
+  --bg-panel: #11141b;
+  --bg-elevated: #171b24;
+  --bg-sunken: #0d1016;
+  --bg-hover: #1b2030;
+  --bg-active: #222839;
+  --bg-selected: rgba(124, 108, 242, 0.16);
+  --border: #232937;
+  --border-strong: #2f3647;
+  --text: #e6e9f0;
+  --text-muted: #9aa3b5;
+  --text-subtle: #6b7488;
+  --accent: #7c6cf2;
+  --accent-hover: #9587f7;
+  --accent-soft: rgba(124, 108, 242, 0.18);
+  --text-on-accent: #ffffff;
+
+  --lv-verbose: #7d8799;
+  --lv-debug: #4ea1ff;
+  --lv-info: #3dd68c;
+  --lv-warn: #f5b544;
+  --lv-error: #ff6369;
+  --lv-fatal: #ff4fd8;
+  --lv-warn-bg: rgba(245, 181, 68, 0.07);
+  --lv-error-bg: rgba(255, 99, 105, 0.09);
+  --lv-fatal-bg: rgba(255, 79, 216, 0.13);
+
+  --m-get: #4ea1ff;
+  --m-post: #3dd68c;
+  --m-put: #f5b544;
+  --m-patch: #b18cff;
+  --m-delete: #ff6369;
+  --m-other: #9aa3b5;
+
+  --st-2xx: #3dd68c;
+  --st-3xx: #5cc8ff;
+  --st-4xx: #f5b544;
+  --st-5xx: #ff6369;
+  --st-fail: #ff6369;
+  --st-pending: #9aa3b5;
+
+  --json-key: #9cc2ff;
+  --json-string: #a5e3b4;
+  --json-number: #f5c27a;
+  --json-bool: #d7a4ff;
+  --json-null: #8b94a7;
+
+  --tag-l: 0.8;
+  --tag-c: 0.11;
+  --tag-bg-a: 0.14;
+
+  --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 10px 28px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-modal: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 28px 72px rgba(0, 0, 0, 0.62), 0 6px 18px rgba(0, 0, 0, 0.4);
+
+  /* Foundation extensions (documented in README-ui.md) */
+  --success: #3dd68c;
+  --warning: #f5b544;
+  --danger: #ff6369;
+  --info: #4ea1ff;
+  --success-soft: rgba(61, 214, 140, 0.12);
+  --warning-soft: rgba(245, 181, 68, 0.12);
+  --danger-soft: rgba(255, 99, 105, 0.12);
+  --info-soft: rgba(78, 161, 255, 0.12);
+  --danger-hover: #ff7d82;
+
+  --overlay-bg: rgba(4, 5, 9, 0.62);
+  --scrollbar-thumb: rgba(154, 163, 181, 0.22);
+  --scrollbar-thumb-hover: rgba(154, 163, 181, 0.38);
+  --hl-mark: rgba(245, 181, 68, 0.3);
+  --hl-mark-text: inherit;
+  --hl-mark-current: rgba(245, 181, 68, 0.62);
+  --focus-ring: rgba(149, 135, 247, 0.85);
+  --skeleton: rgba(154, 163, 181, 0.1);
+  --input-bg: #0d1016;
+  --kbd-bg: #1b2030;
+  --tooltip-bg: #232937;
+  --tooltip-text: #eef0f5;
+  --tooltip-border: #333b4e;
+
+  --code-keyword: #d7a4ff;
+  --code-fn: #9cc2ff;
+  --code-tag: #ff8d92;
+  --code-attr: #f5c27a;
+  --code-builtin: #5cc8ff;
+  --code-comment: #6b7488;
+
+  --pick-red: #ff6369;
+  --pick-orange: #ff9f43;
+  --pick-yellow: #f5d544;
+  --pick-green: #3dd68c;
+  --pick-blue: #4ea1ff;
+  --pick-violet: #b18cff;
+  --pick-pink: #ff6fb5;
+
+  --sdk-flutter: #54c5f8;
+  --sdk-android: #3ddc84;
+  --sdk-ios: #c9cfdb;
+  --sdk-rn: #61dafb;
+  --sdk-js: #f0d74e;
+  --sdk-dart: #40c4ff;
+  --sdk-demo: #9587f7;
+}
+
+/* ───────────── Light ───────────── */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-app: #f5f6f9;
+  --bg-panel: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #eef0f4;
+  --bg-hover: #f0f2f7;
+  --bg-active: #e6e9f1;
+  --bg-selected: rgba(91, 75, 224, 0.1);
+  --border: #e3e6ee;
+  --border-strong: #cdd2de;
+  --text: #161a23;
+  --text-muted: #5b6476;
+  --text-subtle: #8a93a6;
+  --accent: #5b4be0;
+  --accent-hover: #4b3bd0;
+  --accent-soft: rgba(91, 75, 224, 0.1);
+  --text-on-accent: #ffffff;
+
+  --lv-verbose: #6b7488;
+  --lv-debug: #1f6feb;
+  --lv-info: #1a7f4b;
+  --lv-warn: #b7791f;
+  --lv-error: #d93a41;
+  --lv-fatal: #c2188f;
+  --lv-warn-bg: rgba(183, 121, 31, 0.08);
+  --lv-error-bg: rgba(217, 58, 65, 0.07);
+  --lv-fatal-bg: rgba(194, 24, 143, 0.09);
+
+  --m-get: #1f6feb;
+  --m-post: #1a7f4b;
+  --m-put: #b7791f;
+  --m-patch: #7a4cd9;
+  --m-delete: #d93a41;
+  --m-other: #5b6476;
+
+  --st-2xx: #1a7f4b;
+  --st-3xx: #0e7ab8;
+  --st-4xx: #b7791f;
+  --st-5xx: #d93a41;
+  --st-fail: #d93a41;
+  --st-pending: #5b6476;
+
+  --json-key: #1f4fb8;
+  --json-string: #1a7f4b;
+  --json-number: #a15c00;
+  --json-bool: #7a4cd9;
+  --json-null: #6b7488;
+
+  --tag-l: 0.48;
+  --tag-c: 0.13;
+  --tag-bg-a: 0.1;
+
+  --shadow-pop: 0 0 0 1px rgba(22, 26, 35, 0.07), 0 10px 28px rgba(22, 26, 35, 0.12), 0 2px 6px rgba(22, 26, 35, 0.06);
+  --shadow-modal: 0 0 0 1px rgba(22, 26, 35, 0.08), 0 28px 72px rgba(22, 26, 35, 0.2), 0 6px 18px rgba(22, 26, 35, 0.08);
+
+  --success: #1a7f4b;
+  --warning: #b7791f;
+  --danger: #d93a41;
+  --info: #1f6feb;
+  --success-soft: rgba(26, 127, 75, 0.1);
+  --warning-soft: rgba(183, 121, 31, 0.11);
+  --danger-soft: rgba(217, 58, 65, 0.09);
+  --info-soft: rgba(31, 111, 235, 0.09);
+  --danger-hover: #c22f36;
+
+  --overlay-bg: rgba(22, 26, 35, 0.3);
+  --scrollbar-thumb: rgba(91, 100, 118, 0.24);
+  --scrollbar-thumb-hover: rgba(91, 100, 118, 0.4);
+  --hl-mark: rgba(255, 196, 0, 0.38);
+  --hl-mark-text: inherit;
+  --hl-mark-current: rgba(255, 160, 0, 0.62);
+  --focus-ring: rgba(91, 75, 224, 0.75);
+  --skeleton: rgba(91, 100, 118, 0.1);
+  --input-bg: #ffffff;
+  --kbd-bg: #f0f2f7;
+  --tooltip-bg: #1f2430;
+  --tooltip-text: #f5f6f9;
+  --tooltip-border: #1f2430;
+
+  --code-keyword: #7a4cd9;
+  --code-fn: #1f4fb8;
+  --code-tag: #c2353c;
+  --code-attr: #a15c00;
+  --code-builtin: #0e7ab8;
+  --code-comment: #8a93a6;
+
+  --pick-red: #d93a41;
+  --pick-orange: #c86412;
+  --pick-yellow: #a68a00;
+  --pick-green: #1a7f4b;
+  --pick-blue: #1f6feb;
+  --pick-violet: #7a4cd9;
+  --pick-pink: #c2188f;
+
+  --sdk-flutter: #0277bd;
+  --sdk-android: #1a7f4b;
+  --sdk-ios: #3b4252;
+  --sdk-rn: #0b7da0;
+  --sdk-js: #8a6d00;
+  --sdk-dart: #0175c2;
+  --sdk-demo: #5b4be0;
+}
+
+/* No data-theme yet (before the boot script ran): follow the OS. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --bg-app: #f5f6f9;
+    --bg-panel: #ffffff;
+    --bg-elevated: #ffffff;
+    --bg-sunken: #eef0f4;
+    --bg-hover: #f0f2f7;
+    --bg-active: #e6e9f1;
+    --border: #e3e6ee;
+    --border-strong: #cdd2de;
+    --text: #161a23;
+    --text-muted: #5b6476;
+    --text-subtle: #8a93a6;
+    --accent: #5b4be0;
+  }
+}
+
+:root[data-density="comfortable"] {
+  --row-h: 24px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 0ms;
+  }
+}

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dürbün</title>
+    <meta name="description" content="Dürbün — live logs, network traffic and performance of Android and iOS apps in one readable view." />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0B0D12" />
+    <meta name="application-name" content="Dürbün" />
+    <meta name="apple-mobile-web-app-title" content="Dürbün" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <script>
+      // Apply theme / density / font size / language before the first paint (no flash).
+      (function () {
+        var root = document.documentElement;
+        var p = {};
+        try {
+          p = JSON.parse(localStorage.getItem('durbun.prefs.v1') || '{}') || {};
+        } catch (e) {}
+        var theme = p.theme === 'light' || p.theme === 'dark' ? p.theme : null;
+        if (!theme) {
+          try {
+            theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          } catch (e) {
+            theme = 'dark';
+          }
+        }
+        root.setAttribute('data-theme', theme);
+        root.setAttribute('data-density', p.density === 'comfortable' ? 'comfortable' : 'compact');
+        if (typeof p.logFontSize === 'number' && p.logFontSize >= 11 && p.logFontSize <= 16) root.style.setProperty('--log-fs', p.logFontSize + 'px');
+        var lang = p.language === 'tr' || p.language === 'en' ? p.language : /^tr/i.test(navigator.language || '') ? 'tr' : 'en';
+        root.setAttribute('lang', lang);
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', theme === 'light' ? '#F5F6F9' : '#0B0D12');
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>Dürbün needs JavaScript. / Dürbün için JavaScript gerekli.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

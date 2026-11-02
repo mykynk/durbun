@@ -1,0 +1,539 @@
+/* Log query field, autocomplete popup, token colors and cheat sheet (tokens only, dark + light). */
+
+/* ───────────── Token colors (shared by the field overlay, help and QueryHighlight) ───────────── */
+.qt--key {
+  color: var(--code-fn);
+}
+.qt--operator {
+  color: var(--text-subtle);
+}
+.qt--negation {
+  color: var(--danger);
+}
+.qt--value,
+.qt--phrase {
+  color: var(--json-string);
+}
+.qt--value.qt--k-is {
+  color: var(--code-keyword);
+}
+.qt--value.qt--k-age,
+.qt--value.qt--k-pid {
+  color: var(--json-number);
+}
+.qt--value.qt--k-source {
+  color: var(--code-builtin);
+}
+.qt--value.qt--k-level {
+  color: var(--text);
+}
+.qt--value.qt--lv-verbose {
+  color: var(--lv-verbose);
+}
+.qt--value.qt--lv-debug {
+  color: var(--lv-debug);
+}
+.qt--value.qt--lv-info {
+  color: var(--lv-info);
+}
+.qt--value.qt--lv-warn {
+  color: var(--lv-warn);
+}
+.qt--value.qt--lv-error {
+  color: var(--lv-error);
+}
+.qt--value.qt--lv-fatal {
+  color: var(--lv-fatal);
+}
+.qt--text {
+  color: var(--text);
+}
+.qt--or {
+  color: var(--code-keyword);
+}
+.qt--paren {
+  color: var(--text-muted);
+}
+.qt--paren.is-match {
+  color: var(--text);
+  background: var(--bg-active);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+.qt--error {
+  color: var(--danger);
+}
+.qt-err {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--danger);
+  text-decoration-thickness: 1px;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+
+/* Static highlighted query (help, saved filters) */
+.qhl {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: 12px;
+  white-space: pre;
+  color: var(--text);
+  background: none;
+}
+
+/* ───────────── Field ───────────── */
+.lq {
+  --lq-fs: 12.5px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  min-width: 180px;
+  padding: 0 3px 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.lq:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.lq.is-invalid {
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--border-strong));
+}
+.lq.is-invalid:focus-within {
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+.lq__icon {
+  color: var(--text-subtle);
+  flex-shrink: 0;
+}
+.lq:focus-within .lq__icon {
+  color: var(--text-muted);
+}
+.lq__field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* The input and the layer must share every metric that affects glyph positions. */
+.lq__input,
+.lq__hl {
+  font-family: var(--font-mono);
+  font-size: var(--lq-fs);
+  font-weight: 400;
+  font-style: normal;
+  font-variant-ligatures: none;
+  font-feature-settings: normal;
+  font-kerning: none;
+  letter-spacing: 0;
+  word-spacing: 0;
+  text-indent: 0;
+  text-transform: none;
+  line-height: 20px;
+  tab-size: 4;
+  padding: 0 2px;
+}
+.lq__hl {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  pointer-events: none;
+  white-space: pre;
+  color: var(--text);
+}
+.lq__hl-inner {
+  flex: none;
+  white-space: pre;
+}
+.lq__input {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text);
+  appearance: none;
+}
+.lq__input:focus,
+.lq__input:focus-visible {
+  outline: none;
+}
+.lq__input::placeholder {
+  color: var(--text-subtle);
+  -webkit-text-fill-color: var(--text-subtle);
+  opacity: 1;
+}
+.lq__input::selection {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+/* IME composition: show the native text, hide the overlay until the composition ends. */
+.lq.is-composing .lq__input {
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+}
+.lq.is-composing .lq__hl {
+  visibility: hidden;
+}
+.lq__err {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  cursor: help;
+}
+.lq__err:hover {
+  background: var(--danger-soft);
+}
+.lq__kbd {
+  margin-right: 4px;
+}
+.lq__clear {
+  color: var(--text-subtle);
+}
+
+/* ───────────── Autocomplete popup ───────────── */
+.lq-pop {
+  position: fixed;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  max-width: min(520px, calc(100vw - 16px));
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: durbun-pop-in 110ms var(--ease);
+}
+.lq-pop__section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 2px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-subtle);
+}
+.lq-pop__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.lq-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.lq-opt.is-active {
+  background: var(--accent-soft);
+}
+.lq-opt__icon {
+  color: var(--text-subtle);
+  flex-shrink: 0;
+}
+.lq-opt__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.lq-dot--verbose {
+  background: var(--lv-verbose);
+}
+.lq-dot--debug {
+  background: var(--lv-debug);
+}
+.lq-dot--info {
+  background: var(--lv-info);
+}
+.lq-dot--warn {
+  background: var(--lv-warn);
+}
+.lq-dot--error {
+  background: var(--lv-error);
+}
+.lq-dot--fatal {
+  background: var(--lv-fatal);
+}
+.lq-opt__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.lq-opt--key .lq-opt__label {
+  color: var(--code-fn);
+}
+.lq-opt--history .lq-opt__label {
+  color: var(--text-muted);
+}
+.lq-opt.is-active .lq-opt__label {
+  color: var(--text);
+}
+.lq-opt__match {
+  font-weight: 650;
+  color: var(--text);
+}
+.lq-opt__detail {
+  flex-shrink: 1;
+  min-width: 0;
+  margin-left: auto;
+  padding-left: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+}
+.lq-opt.is-active .lq-opt__detail {
+  color: var(--text-muted);
+}
+.lq-pop__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.lq-pop__error svg {
+  margin-top: 1px;
+}
+.lq-pop__foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+}
+.lq-pop__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.lq-pop__hint .kbd-group {
+  margin-right: 2px;
+}
+
+/* Error tooltip under the wavy span */
+.lq-errtip {
+  max-width: 360px;
+  align-items: flex-start;
+}
+.lq-errtip__icon {
+  color: var(--danger);
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+/* ───────────── Cheat sheet ───────────── */
+.lq-help {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 600px;
+  padding: 14px 16px 16px;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.lq-help__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lq-help__title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.lq-help__intro {
+  color: var(--text-muted);
+}
+.lq-help__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lq-help__h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-subtle);
+}
+.lq-help__hnote {
+  font-weight: 400;
+}
+.lq-help__keys {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  column-gap: 14px;
+  margin: 0;
+}
+.lq-help__key-row {
+  display: contents;
+}
+.lq-help__key,
+.lq-help__desc,
+.lq-help__sample {
+  margin: 0;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+.lq-help__key-row:last-child > * {
+  border-bottom: 0;
+}
+.lq-help__key {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+.lq-help__alias {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+.lq-help__desc {
+  min-width: 0;
+  color: var(--text-muted);
+}
+.lq-help__sample {
+  text-align: right;
+}
+/* Two columns when there is room, one in a narrow popover; descriptions wrap instead of truncating. */
+.lq-help__ops {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+  gap: 3px 16px;
+}
+.lq-help__kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+  gap: 3px 16px;
+}
+.lq-help__op,
+.lq-help__kind {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.lq-help__op > .qhl {
+  flex-shrink: 0;
+  min-width: 76px;
+}
+.lq-help__kind > .qhl {
+  flex-shrink: 0;
+  min-width: 104px;
+}
+.lq-help__kind > span:last-child,
+.lq-help__op > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lq-help__examples {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.lq-help__ex {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 4px 8px;
+  margin: 0 -8px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--text-muted);
+}
+.lq-help__ex.is-clickable {
+  width: calc(100% + 16px);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.lq-help__ex.is-clickable:hover,
+.lq-help__ex.is-clickable:focus-visible {
+  background: var(--bg-hover);
+}
+.lq-help__ex-query {
+  flex-shrink: 0;
+}
+.lq-help__ex-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-xs);
+}
+.lq-help__ex-icon {
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--text-subtle);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+.lq-help__ex.is-clickable:hover .lq-help__ex-icon,
+.lq-help__ex.is-clickable:focus-visible .lq-help__ex-icon {
+  opacity: 1;
+}
+.lq-help__levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-xs);
+}
+.lq-help__levels-title {
+  font-weight: 600;
+  color: var(--text-subtle);
+}

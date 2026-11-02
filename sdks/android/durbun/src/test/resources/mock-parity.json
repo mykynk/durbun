@@ -1,0 +1,822 @@
+{
+  "generatedFrom": "packages/protocol/src/index.ts",
+  "cases": [
+    {
+      "rule": {
+        "id": "r1",
+        "enabled": true,
+        "method": "*",
+        "url": "/api/users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/API/Users?id=1",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r2",
+        "enabled": true,
+        "method": "*",
+        "url": "",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r3",
+        "enabled": true,
+        "method": "*",
+        "url": "USERS",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users/42",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r4",
+        "enabled": true,
+        "method": "*",
+        "url": "/ürün",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/ÜRÜN/1",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r5",
+        "enabled": true,
+        "method": "*",
+        "url": "/istanbul",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/İSTANBUL",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r6",
+        "enabled": true,
+        "method": "*",
+        "url": "/İstanbul",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/i̇stanbul",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r7",
+        "enabled": true,
+        "method": "*",
+        "url": "https://api.example.com/Users",
+        "match": "exact",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r8",
+        "enabled": true,
+        "method": "*",
+        "url": "https://api.example.com/users",
+        "match": "exact",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users/",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r9",
+        "enabled": true,
+        "method": "*",
+        "url": "",
+        "match": "exact",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r10",
+        "enabled": true,
+        "method": "*",
+        "url": "https://api.example.com/*",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users/42",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r11",
+        "enabled": true,
+        "method": "*",
+        "url": "https://api.example.com/*",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://evil.example.com/users",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r12",
+        "enabled": true,
+        "method": "*",
+        "url": "*/users/?",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users/4",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r13",
+        "enabled": true,
+        "method": "*",
+        "url": "*/users/?",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users/42",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r14",
+        "enabled": true,
+        "method": "*",
+        "url": "https://x.com/a.b+c(1)/*",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/a.b+c(1)/z",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r15",
+        "enabled": true,
+        "method": "*",
+        "url": "https://x.com/a.b+c(1)/*",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/aXb+c(1)/z",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r16",
+        "enabled": true,
+        "method": "*",
+        "url": "*[v1]*",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/[v1]/a",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r17",
+        "enabled": true,
+        "method": "*",
+        "url": "*[v1]*",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/v/a",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r18",
+        "enabled": true,
+        "method": "*",
+        "url": "*price=$5^{x}|y\\z*",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/?price=$5^{x}|y\\z&a=1",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r19",
+        "enabled": true,
+        "method": "*",
+        "url": "api.example.com",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r20",
+        "enabled": true,
+        "method": "*",
+        "url": "HTTPS://API.EXAMPLE.COM/*",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/a",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r21",
+        "enabled": true,
+        "method": "*",
+        "url": "**",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://anything/at/all?x=1",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r22",
+        "enabled": true,
+        "method": "*",
+        "url": "https://x.com/v?",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/v1",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r23",
+        "enabled": true,
+        "method": "*",
+        "url": "https://x.com/v?",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://x.com/v",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r24",
+        "enabled": true,
+        "method": "*",
+        "url": "*/graphql",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "POST",
+      "url": "https://api.example.com/graphql",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r25",
+        "enabled": true,
+        "method": "*",
+        "url": "*/graphql",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "POST",
+      "url": "https://api.example.com/graphql?op=Me",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r26",
+        "enabled": true,
+        "method": "*",
+        "url": "",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r27",
+        "enabled": true,
+        "method": "*",
+        "url": "*",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "line1\nline2",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r28",
+        "enabled": true,
+        "method": "*",
+        "url": "users/\\d+$",
+        "match": "regex",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users/42",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r29",
+        "enabled": true,
+        "method": "*",
+        "url": "users/\\d+$",
+        "match": "regex",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users/42/posts",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r30",
+        "enabled": true,
+        "method": "*",
+        "url": "Users",
+        "match": "regex",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r31",
+        "enabled": true,
+        "method": "*",
+        "url": "example",
+        "match": "regex",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r32",
+        "enabled": true,
+        "method": "*",
+        "url": "([",
+        "match": "regex",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r33",
+        "enabled": true,
+        "method": "*",
+        "url": "^https://api\\.example\\.com/(?<id>\\d+)$",
+        "match": "regex",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/123",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r34",
+        "enabled": true,
+        "method": "*",
+        "url": "\\?page=[2-9]",
+        "match": "regex",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/feed?page=3",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r35",
+        "enabled": true,
+        "method": "GET",
+        "url": "users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "get",
+      "url": "https://api.example.com/users",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r36",
+        "enabled": true,
+        "method": "get",
+        "url": "users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r37",
+        "enabled": true,
+        "method": "POST",
+        "url": "users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r38",
+        "enabled": true,
+        "method": "DELETE",
+        "url": "users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "DELETE",
+      "url": "https://api.example.com/users/1",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r39",
+        "enabled": false,
+        "method": "*",
+        "url": "users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r40",
+        "enabled": true,
+        "method": "*",
+        "url": "users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0,
+        "apps": [
+          "com.mykynk.pati"
+        ]
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "appId": "com.mykynk.pati",
+      "expected": true
+    },
+    {
+      "rule": {
+        "id": "r41",
+        "enabled": true,
+        "method": "*",
+        "url": "users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0,
+        "apps": [
+          "com.mykynk.pati"
+        ]
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "appId": "com.other.app",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r42",
+        "enabled": true,
+        "method": "*",
+        "url": "users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0,
+        "apps": [
+          "com.mykynk.pati"
+        ]
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "expected": false
+    },
+    {
+      "rule": {
+        "id": "r43",
+        "enabled": true,
+        "method": "*",
+        "url": "users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0,
+        "apps": []
+      },
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "expected": true
+    }
+  ],
+  "find": {
+    "rules": [
+      {
+        "id": "first",
+        "enabled": false,
+        "method": "*",
+        "url": "/users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      {
+        "id": "second",
+        "enabled": true,
+        "method": "POST",
+        "url": "https://api.example.com/users/*",
+        "match": "glob",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      {
+        "id": "third",
+        "enabled": true,
+        "method": "*",
+        "url": "users/\\d+",
+        "match": "regex",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      },
+      {
+        "id": "fourth",
+        "enabled": true,
+        "method": "*",
+        "url": "users",
+        "match": "contains",
+        "action": {
+          "type": "respond",
+          "status": 200
+        },
+        "createdAt": 0
+      }
+    ],
+    "cases": [
+      {
+        "method": "GET",
+        "url": "https://api.example.com/users/42",
+        "expectedId": "third"
+      },
+      {
+        "method": "POST",
+        "url": "https://api.example.com/users/42",
+        "expectedId": "second"
+      },
+      {
+        "method": "GET",
+        "url": "https://api.example.com/users",
+        "expectedId": "fourth"
+      },
+      {
+        "method": "GET",
+        "url": "https://api.example.com/orders",
+        "expectedId": null
+      }
+    ]
+  }
+}

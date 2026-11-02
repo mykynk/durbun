@@ -1,0 +1,104 @@
+[
+  {
+    "streamId": "Stdout",
+    "event": {
+      "type": "Event",
+      "kind": "WriteEvent",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016594,
+      "bytes": "cGFydGlhbCA="
+    }
+  },
+  {
+    "streamId": "Stdout",
+    "event": {
+      "type": "Event",
+      "kind": "WriteEvent",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016594,
+      "bytes": "cHJpbnRlZCBsaW5lIDEK"
+    }
+  },
+  {
+    "streamId": "Stderr",
+    "event": {
+      "type": "Event",
+      "kind": "WriteEvent",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016594,
+      "bytes": "c3RkZXJyIGxpbmUgMQo="
+    }
+  },
+  {
+    "streamId": "Stdout",
+    "event": {
+      "type": "Event",
+      "kind": "WriteEvent",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612017091,
+      "bytes": "cGFydGlhbCA="
+    }
+  },
+  {
+    "streamId": "Stdout",
+    "event": {
+      "type": "Event",
+      "kind": "WriteEvent",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612017091,
+      "bytes": "cHJpbnRlZCBsaW5lIDIK"
+    }
+  },
+  {
+    "streamId": "Stderr",
+    "event": {
+      "type": "Event",
+      "kind": "WriteEvent",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612017091,
+      "bytes": "c3RkZXJyIGxpbmUgMgo="
+    }
+  }
+]

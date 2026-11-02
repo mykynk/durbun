@@ -1,0 +1,104 @@
+{
+  "type": "Isolate",
+  "id": "isolates/4429147007222695",
+  "name": "main",
+  "number": "4429147007222695",
+  "isSystemIsolate": false,
+  "isolateGroupId": "isolateGroups/8350247159410945",
+  "startTime": 1793612015867,
+  "isolateFlags": [
+    {
+      "name": "is_system_isolate",
+      "valueAsString": "false"
+    },
+    {
+      "name": "is_service_isolate",
+      "valueAsString": "false"
+    },
+    {
+      "name": "is_kernel_isolate",
+      "valueAsString": "false"
+    }
+  ],
+  "runnable": true,
+  "livePorts": 2,
+  "pauseOnExit": false,
+  "_isReloading": false,
+  "pauseEvent": {
+    "type": "Event",
+    "kind": "Resume",
+    "isolateGroup": {
+      "type": "@IsolateGroup",
+      "id": "isolateGroups/8350247159410945",
+      "name": "/work/durbun/packages/server/test/vm/fixtures/app.dart",
+      "number": "8350247159410945",
+      "isSystemIsolateGroup": false
+    },
+    "isolate": {
+      "type": "@Isolate",
+      "id": "isolates/4429147007222695",
+      "name": "main",
+      "number": "4429147007222695",
+      "isSystemIsolate": false,
+      "isolateGroupId": "isolateGroups/8350247159410945"
+    },
+    "timestamp": 1793612016070
+  },
+  "rootLib": {
+    "type": "@Library",
+    "fixedId": true,
+    "id": "libraries/@20207024",
+    "name": "",
+    "uri": "file:///work/durbun/packages/server/test/vm/fixtures/app.dart"
+  },
+  "libraries": [
+    {
+      "type": "@Library",
+      "fixedId": true,
+      "id": "libraries/@0150898",
+      "name": "dart.core",
+      "uri": "dart:core"
+    },
+    {
+      "type": "@Library",
+      "fixedId": true,
+      "id": "libraries/@1026248",
+      "name": "dart.isolate",
+      "uri": "dart:isolate"
+    },
+    {
+      "type": "@Library",
+      "fixedId": true,
+      "id": "libraries/@2408521",
+      "name": "dart.mirrors",
+      "uri": "dart:mirrors"
+    },
+    {
+      "type": "@Library",
+      "fixedId": true,
+      "id": "libraries/@3099033",
+      "name": "dart._compact_hash",
+      "uri": "dart:_compact_hash"
+    }
+  ],
+  "breakpoints": [],
+  "exceptionPauseMode": "None",
+  "_debuggerSettings": {
+    "_exceptions": "none"
+  },
+  "extensionRPCs": [
+    "ext.dart.io.httpEnableTimelineLogging",
+    "ext.dart.io.getSocketProfile",
+    "ext.dart.io.socketProfilingEnabled",
+    "ext.dart.io.clearSocketProfile",
+    "ext.dart.io.getVersion",
+    "ext.dart.io.getHttpProfile",
+    "ext.dart.io.getHttpProfileRequest",
+    "ext.dart.io.clearHttpProfile",
+    "ext.flutter.debugPaint",
+    "ext.flutter.timeDilation",
+    "ext.flutter.debugDumpApp",
+    "ext.dart.io.getOpenFiles",
+    "ext.dart.io.getOpenFileById"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@durbun/react-native",
+  "version": "0.1.0",
+  "description": "Dürbün SDK for React Native and JavaScript apps — streams logs, network and errors to the Dürbün desktop app",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "react-native": "./dist/cjs/index.js",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      },
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": ["dist", "README.md"],
+  "keywords": ["react-native", "logging", "network", "debugger", "inspector", "durbun"],
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && tsc -p tsconfig.build.cjs.json && node scripts/postbuild.mjs",
+    "prepack": "npm run build",
+    "smoke": "node scripts/smoke-dist.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "ws": "^8.22.1",
+    "@types/ws": "^8.18.2"
+  }
+}

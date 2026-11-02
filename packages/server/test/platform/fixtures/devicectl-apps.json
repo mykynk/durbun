@@ -1,0 +1,85 @@
+{
+ "info": {
+  "arguments": [
+   "devicectl",
+   "device",
+   "info",
+   "apps",
+   "--device",
+   "133A4688-E13E-4080-A1E2-0F6CF49FD4C5",
+   "--include-all-apps",
+   "--json-output",
+   "/tmp/x.json"
+  ],
+  "commandType": "devicectl.device.info.apps",
+  "environment": {},
+  "jsonVersion": 5,
+  "outcome": "success",
+  "version": "651.32"
+ },
+ "result": {
+  "apps": [
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.apple.ActivityMessagesApp",
+    "bundleVersion": "1",
+    "containerAccessible": true,
+    "defaultApp": true,
+    "hidden": false,
+    "internalApp": false,
+    "name": "ActivityMessagesApp",
+    "removable": false,
+    "url": "file:///private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.2.8117.0.MaY0wY/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS%2027.2.simruntime/Contents/Resources/RuntimeRoot/Applications/ActivityMessagesApp.app/",
+    "version": "1.0"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.apple.assistivetouchd",
+    "bundleVersion": "1.0",
+    "containerAccessible": true,
+    "defaultApp": true,
+    "hidden": false,
+    "internalApp": false,
+    "name": "AssistiveTouch",
+    "removable": false,
+    "url": "file:///private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.2.8117.0.MaY0wY/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS%2027.2.simruntime/Contents/Resources/RuntimeRoot/System/Library/CoreServices/AssistiveTouch.app/",
+    "version": "1.0"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.apple.NanoUniverse.AegirProxyApp",
+    "bundleVersion": "1",
+    "containerAccessible": true,
+    "defaultApp": true,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Astronomy",
+    "removable": false,
+    "url": "file:///private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.2.8117.0.MaY0wY/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS%2027.2.simruntime/Contents/Resources/RuntimeRoot/System/Library/CoreServices/AegirProxyApp.app/",
+    "version": "1.0"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.apple.icloud.apps.messages.business",
+    "bundleVersion": "1",
+    "containerAccessible": true,
+    "defaultApp": true,
+    "hidden": false,
+    "internalApp": false,
+    "name": "BusinessExtensionsWrapper",
+    "removable": false,
+    "url": "file:///private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.2.8117.0.MaY0wY/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS%2027.2.simruntime/Contents/Resources/RuntimeRoot/Applications/BusinessExtensionsWrapper.app/",
+    "version": "1.0"
+   }
+  ],
+  "defaultAppsIncluded": true,
+  "deviceIdentifier": "133A4688-E13E-4080-A1E2-0F6CF49FD4C5",
+  "hiddenAppsIncluded": true,
+  "internalAppsIncluded": true,
+  "removableAppsIncluded": true
+ }
+}

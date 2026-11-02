@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The SDK talks to the Dürbün desktop over a plain TCP socket (127.0.0.1 via adb reverse, or Wi-Fi). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

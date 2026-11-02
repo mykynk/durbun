@@ -1,0 +1,22 @@
+name: durbun
+description: >-
+  Dürbün SDK for Flutter. Streams app logs, errors, crashes, custom events,
+  dart:io HTTP traffic (with bodies) and frame/memory metrics to the Dürbün
+  desktop inspector, applies its mock rules and answers its commands.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  # Only used by the integration tests to prove package:http (IOClient) is captured.
+  http: ^1.5.0

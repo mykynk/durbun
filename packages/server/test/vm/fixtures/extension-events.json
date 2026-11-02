@@ -1,0 +1,385 @@
+[
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016605,
+      "extensionData": {
+        "number": 24,
+        "startTime": 1000400008,
+        "elapsed": 30000,
+        "build": 24000,
+        "raster": 5000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016605,
+      "extensionData": {
+        "number": 25,
+        "startTime": 1000416675,
+        "elapsed": 9000,
+        "build": 4000,
+        "raster": 3000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016605,
+      "extensionData": {
+        "number": 26,
+        "startTime": 1000433342,
+        "elapsed": 9000,
+        "build": 4000,
+        "raster": 3000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016605,
+      "extensionData": {
+        "number": 27,
+        "startTime": 1000450009,
+        "elapsed": 9000,
+        "build": 4000,
+        "raster": 3000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016605,
+      "extensionData": {
+        "number": 28,
+        "startTime": 1000466676,
+        "elapsed": 9000,
+        "build": 4000,
+        "raster": 3000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016605,
+      "extensionData": {
+        "number": 29,
+        "startTime": 1000483343,
+        "elapsed": 9000,
+        "build": 4000,
+        "raster": 3000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016693,
+      "extensionData": {
+        "number": 30,
+        "startTime": 1000500010,
+        "elapsed": 30000,
+        "build": 24000,
+        "raster": 5000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016693,
+      "extensionData": {
+        "number": 31,
+        "startTime": 1000516677,
+        "elapsed": 9000,
+        "build": 4000,
+        "raster": 3000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016693,
+      "extensionData": {
+        "number": 32,
+        "startTime": 1000533344,
+        "elapsed": 9000,
+        "build": 4000,
+        "raster": 3000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016693,
+      "extensionData": {
+        "number": 33,
+        "startTime": 1000550011,
+        "elapsed": 9000,
+        "build": 4000,
+        "raster": 3000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016693,
+      "extensionData": {
+        "number": 34,
+        "startTime": 1000566678,
+        "elapsed": 9000,
+        "build": 4000,
+        "raster": 3000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Frame",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016693,
+      "extensionData": {
+        "number": 35,
+        "startTime": 1000583345,
+        "elapsed": 9000,
+        "build": 4000,
+        "raster": 3000,
+        "vsyncOverhead": 500,
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Error",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612017592,
+      "extensionData": {
+        "description": "Exception caught by widgets library",
+        "errorsSinceReload": 0,
+        "renderedErrorText": "══╡ EXCEPTION CAUGHT BY WIDGETS LIBRARY ╞════════════════\nThe following assertion was thrown building Fixture:\nFixture error 3\n═════════════════════════════════════════════════════",
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "Flutter.Navigation",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612017592,
+      "extensionData": {
+        "route": {
+          "description": "MaterialPageRoute<void>(RouteSettings(\"/details\", null), animation: null)",
+          "settings": {
+            "name": "/details"
+          }
+        },
+        "__destinationStream": "Extension"
+      }
+    }
+  },
+  {
+    "streamId": "Extension",
+    "event": {
+      "type": "Event",
+      "kind": "Extension",
+      "extensionKind": "HttpTimelineLoggingStateChange",
+      "isolate": {
+        "type": "@Isolate",
+        "id": "isolates/4429147007222695",
+        "name": "main",
+        "number": "4429147007222695",
+        "isSystemIsolate": false,
+        "isolateGroupId": "isolateGroups/8350247159410945"
+      },
+      "timestamp": 1793612016530,
+      "extensionData": {
+        "isolateId": "isolates/4429147007222695",
+        "enabled": true,
+        "__destinationStream": "Extension"
+      }
+    }
+  }
+]

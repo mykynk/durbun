@@ -1,0 +1,23 @@
+name: durbun_dio
+description: >-
+  Dürbün interceptor for Dio: reports requests made through adapters that
+  bypass dart:io (NativeAdapter, cupertino_http, cronet_http) and applies the
+  desktop's mock rules to them.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  dio: ^5.4.0
+  durbun:
+    path: ../durbun
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
