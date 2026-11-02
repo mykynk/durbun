@@ -7,12 +7,25 @@
  * by the driver (`seen`), so re-plugging a device does not report its crashes again; only .ips crash
  * reports of third-party apps become log entries. Files named after a process that is not an installed
  * app are re-checked on every scan (the app may be installed after the last app listing).
+ * Real listing (devicectl 651.32, iOS 27.2): `name` and `relativePath` are both the path inside the domain
+ * ("Retired/Runner-2026-11-02-095019.ips"); nearly every report sits in Retired/. `--destination` is the
+ * file to write (an existing folder there makes the copy fail). ProxiedDevice-<id>/ holds a paired Apple
+ * Watch's reports: not this device's crashes.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from '../../types';
 import { Poller } from '../shared/timing';
-import { crashFileDate, crashFileProcess, isCrashFileName, isCrashReport, isThirdPartyBundle, parseIps, type IpsReport } from './crashReport';
+import {
+  CRASH_BUG_TYPES,
+  crashFileDate,
+  crashFileProcess,
+  isCrashFileName,
+  isCrashReport,
+  isThirdPartyBundle,
+  parseIps,
+  type IpsReport,
+} from './crashReport';
 import { parseDevicectlFiles, type DevicectlFile, type DevicectlRunner } from './devicectl';
 
 export const CRASH_LOOKBACK_MS = 24 * 3600_000;
@@ -27,6 +40,8 @@ export interface DeviceCrashWatcherOptions {
   /** Is a crash file named after this process worth copying (installed third-party app)? */
   isInteresting(processName: string | undefined): boolean;
   onReport(report: IpsReport, file: string): void;
+  /** Outcome of every listing (the device's crash-report reader state). */
+  onStatus?(status: { ok: true } | { ok: false; error: string }): void;
   intervalMs?: number;
   lookbackMs?: number;
   maxCopiesPerScan?: number;
@@ -35,11 +50,34 @@ export interface DeviceCrashWatcherOptions {
   seen?: Set<string>;
 }
 
-/** Safe local file name for a device-side crash file name. */
+/**
+ * Safe local file name for a crash file name, always /^[A-Za-z0-9][A-Za-z0-9._-]{0,155}\.ips$/ without "..":
+ * the copy can be served by name and never points outside its folder.
+ */
 export function localCrashName(name: string): string {
-  const base = path.posix.basename(name).replace(/[^A-Za-z0-9._-]+/g, '_');
-  return base && base !== '.' && base !== '..' ? base : 'crash.ips';
+  const base = path.posix.basename(name.replace(/\\/g, '/'));
+  const stem = (/\.ips$/i.test(base) ? base.slice(0, -4) : base)
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^[._-]+/, '')
+    .slice(0, 156)
+    .replace(/\.+$/, '');
+  return `${stem || 'crash'}.ips`;
 }
+
+/** URL path the UI downloads a copied report from (served from `<tempDir>/crash/<udid>/`). */
+export function crashReportUrl(udid: string, fileName: string): string {
+  return `/api/files/crash/${encodeURIComponent(udid)}/${encodeURIComponent(fileName)}`;
+}
+
+/** `<tempDir>/crash/<udid>` (the udid kept to letters, digits and dashes, like the download route). */
+export function crashCopyDir(tempDir: string, udid: string): string {
+  const safe = udid.replace(/[^A-Za-z0-9-]+/g, '').replace(/^-+/, '').slice(0, 100);
+  return path.join(tempDir, 'crash', safe || 'device');
+}
+
+/** Reports of a paired Apple Watch (synced through the phone), not of this device. */
+const PROXIED_DEVICE = /^ProxiedDevice-[^/]*\//;
 
 export class DeviceCrashWatcher {
   private readonly seen: Set<string>;
@@ -67,6 +105,14 @@ export class DeviceCrashWatcher {
     this.poller = undefined;
   }
 
+  private status(s: { ok: true } | { ok: false; error: string }): void {
+    try {
+      this.opts.onStatus?.(s);
+    } catch (e) {
+      this.opts.logger.debug(`crash report status ${this.opts.udid}: ${(e as Error).message}`);
+    }
+  }
+
   /** One listing + copy round (public for tests). Never throws; a call during a round runs one more round after it. */
   scan(): Promise<void> {
     if (this.scanning) {
@@ -87,16 +133,20 @@ export class DeviceCrashWatcher {
     if (this.stopped) return;
     const { udid, devicectl, logger } = this.opts;
     const r = await devicectl(['device', 'info', 'files', '--device', udid, '--domain-type', 'systemCrashLogs'], 60_000);
+    if (this.stopped) return;
     if (!r.ok) {
       logger.debug(`crash report listing for ${udid} failed: ${r.error ?? 'unknown error'}`);
+      this.status({ ok: false, error: r.error ?? 'devicectl failed' });
       return;
     }
+    this.status({ ok: true });
     const cutoff = this.now() - (this.opts.lookbackMs ?? CRASH_LOOKBACK_MS);
     const candidates: Array<{ file: DevicectlFile; when: number }> = [];
     for (const file of parseDevicectlFiles(r.json)) {
       // iOS moves reports into Retired/ under the same name: one key per report, not per path.
-      if (file.isDirectory || this.seen.has(reportKey(file))) continue;
-      if (!isCrashFileName(file.name)) {
+      if (file.isDirectory || PROXIED_DEVICE.test(file.relativePath) || this.seen.has(reportKey(file))) continue;
+      // The listing says the report type (bug_type xattr): only crash reports are worth a copy.
+      if (!isCrashFileName(file.name) || (file.bugType !== undefined && !CRASH_BUG_TYPES.has(file.bugType))) {
         this.seen.add(reportKey(file));
         continue;
       }
@@ -139,7 +189,7 @@ export class DeviceCrashWatcher {
       this.seen.delete(key);
       return;
     }
-    const local = await resolveCopied(dest, file.name);
+    const local = await resolveCopied(dest);
     if (!r.ok || !local) {
       const n = (this.attempts.get(key) ?? 0) + 1;
       this.attempts.set(key, n);
@@ -148,17 +198,19 @@ export class DeviceCrashWatcher {
       return;
     }
     this.attempts.delete(key);
-    let text: string;
+    let text: string | undefined;
     try {
       const st = await fs.promises.stat(local);
-      if (st.size > MAX_REPORT_BYTES) return;
-      text = await fs.promises.readFile(local, 'utf8');
+      if (st.size <= MAX_REPORT_BYTES) text = await fs.promises.readFile(local, 'utf8');
     } catch (e) {
       logger.debug(`reading ${local}: ${(e as Error).message}`);
+    }
+    const report = text !== undefined ? parseIps(text) : null;
+    if (!report || report.incomplete || !isCrashReport(report) || !isThirdPartyBundle(report.bundleId)) {
+      // Not a third-party crash: nothing links to this copy.
+      await fs.promises.rm(local, { force: true }).catch(() => undefined);
       return;
     }
-    const report = parseIps(text);
-    if (!report || report.incomplete || !isCrashReport(report) || !isThirdPartyBundle(report.bundleId)) return;
     if (this.stopped) {
       this.seen.delete(key);
       return;
@@ -173,14 +225,8 @@ export class DeviceCrashWatcher {
 
 const reportKey = (file: DevicectlFile): string => path.posix.basename(file.relativePath) || file.name;
 
-/** devicectl may treat --destination as a file or as a folder; find the copied file either way. */
-async function resolveCopied(dest: string, name: string): Promise<string | undefined> {
+/** The copy devicectl wrote at `--destination` (always a file path). */
+async function resolveCopied(dest: string): Promise<string | undefined> {
   const st = await fs.promises.stat(dest).catch(() => undefined);
-  if (st?.isFile()) return dest;
-  if (st?.isDirectory()) {
-    const inner = path.join(dest, path.posix.basename(name));
-    const s2 = await fs.promises.stat(inner).catch(() => undefined);
-    if (s2?.isFile()) return inner;
-  }
-  return undefined;
+  return st?.isFile() ? dest : undefined;
 }

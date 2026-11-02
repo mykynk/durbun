@@ -155,6 +155,21 @@ export interface DevicectlDevice {
   osVersion?: string;
   reality?: string;
   connectionState?: string;
+  /** Developer Mode on the device ('enabled' / 'disabled'); absent when devicectl does not say. */
+  developerMode?: string;
+}
+
+/**
+ * Developer Mode from `list devices`: `properties.state.developerModeStatus` is an enum object
+ * (`{"enabled": {"mode": 1}}`), the deprecated `deviceProperties.developerModeStatus` a plain string.
+ */
+function developerModeOf(state: unknown, deprecated: unknown): string | undefined {
+  if (state && typeof state === 'object' && !Array.isArray(state)) {
+    const key = Object.keys(state)[0];
+    if (key) return key;
+  }
+  if (typeof state === 'string' && state) return state;
+  return typeof deprecated === 'string' && deprecated ? deprecated : undefined;
 }
 
 /** `devicectl list devices` JSON (new `properties` layout and the deprecated one). */
@@ -173,6 +188,7 @@ export function parseDevicectlDevices(json: Record<string, unknown> | undefined)
       (typeof sw.osVersionNumber?.stringValue === 'string' ? sw.osVersionNumber.stringValue : undefined) ??
       (typeof dp.osVersionNumber === 'string' ? dp.osVersionNumber : undefined);
     const name = props.state?.name ?? dp.name;
+    const developerMode = developerModeOf(props.state?.developerModeStatus, dp.developerModeStatus);
     out.push({
       udid,
       ...(typeof d.identifier === 'string' ? { identifier: d.identifier } : {}),
@@ -186,6 +202,7 @@ export function parseDevicectlDevices(json: Record<string, unknown> | undefined)
         : typeof d.connectionProperties?.tunnelState === 'string'
           ? { connectionState: d.connectionProperties.tunnelState }
           : {}),
+      ...(developerMode ? { developerMode } : {}),
     });
   }
   return out;
@@ -249,12 +266,16 @@ export interface DevicectlFile {
   isDirectory: boolean;
   size?: number;
   modified?: number;
+  /** Report type from the file's `bug_type` extended attribute ("309" crash, "298" Jetsam…), when set. */
+  bugType?: string;
 }
 
 /**
  * `devicectl device info files --domain-type <d>` JSON: result.files[] = {name, relativePath,
- * resources?, metadata?: {isDirectory, lastModDate, size, …}} (key names verified against the
- * CoreDeviceClientJSONSupport strings of devicectl 651.32; the nesting is read leniently).
+ * resources: {isDirectory, …}, metadata: {lastModDate, size, extendedAttributes: {bug_type, LogType, …}}}.
+ * Seen on devicectl 651.32 / iOS 27.2: `name` is the path inside the domain like `relativePath`
+ * ("Retired/Runner-2026-11-02-095019.ips"); report files carry `bug_type` / `LogType` ("309_Runner").
+ * The nesting is read leniently.
  */
 export function parseDevicectlFiles(json: Record<string, unknown> | undefined): DevicectlFile[] {
   const r = result(json);
@@ -278,12 +299,16 @@ export function parseDevicectlFiles(json: Record<string, unknown> | undefined): 
     const isDirectory = dirFlag === true || type === 'directory' || type === 'NSFileTypeDirectory';
     const size = pick('size');
     const modified = devicectlDate(pick('lastModDate') ?? pick('lastModificationDate') ?? pick('modificationDate') ?? pick('creationDate'));
+    const xattrs = pick('extendedAttributes');
+    const rawBugType = xattrs && typeof xattrs === 'object' ? (xattrs as Record<string, unknown>).bug_type : undefined;
+    const bugType = typeof rawBugType === 'string' || typeof rawBugType === 'number' ? String(rawBugType).trim() : '';
     out.push({
       name,
       relativePath: (rel ?? name).replace(/^\/+/, ''),
       isDirectory,
       ...(typeof size === 'number' ? { size } : {}),
       ...(modified !== undefined ? { modified } : {}),
+      ...(bugType ? { bugType } : {}),
     });
   }
   return out;
