@@ -6,10 +6,14 @@
  *   node packages/ui/dev/mock-server.mjs [--port 9799] [--empty] [--rate 30]
  *   DURBUN_SERVER=http://127.0.0.1:9799 npx vite --port 5179     (from packages/ui)
  *
- * WS /ui: hello → snapshot (2 devices, 3 apps + an older session, mocks, drivers) → ~2000 history
- * logs → live batches (logs, network, metrics, occasional device/app changes). Every command gets
- * {ok: true} with plausible data. REST: /api/health, /api/doctor, /api/network/:id (+ bodies),
- * /api/network/search, /api/export, /api/import, /api/har, /api/upload.
+ * WS /ui: hello → snapshot (3 devices, 3 apps + an older session, device apps, mocks, drivers) → ~2000
+ * history logs → live batches (logs, network, metrics, device apps, occasional device/app changes). Every
+ * command gets {ok: true} with plausible data. REST: /api/health, /api/doctor, /api/network/:id (+ bodies),
+ * /api/network/search, /api/export, /api/import, /api/har, /api/upload, /api/files/crash/:udid/:name.
+ * Phase 3 (SPEC §10): apps without the SDK (`snapshot.deviceApps`: a Play build, a Firebase build, an APK
+ * installed by hand, a TestFlight build next to an Xcode build — both "Runner" — on a USB iPhone), exact
+ * log origins, dropbox / .ips crash records (one marked `duplicateOf`, one with a downloadable .ips),
+ * device readers (frame stats without data on the Pixel, dropbox refused on the Galaxy) and SDK layers.
  * `--empty` starts with no devices (onboarding); `demo.set {enabled:true}` then fills everything.
  */
 import http from 'node:http';
@@ -84,6 +88,10 @@ function baseDevices() {
       screen: { width: 1080, height: 2400, density: 420 },
       logs: { status: 'streaming', via: 'logcat' },
       actions: ANDROID_ACTIONS,
+      readers: {
+        crashReports: { status: 'ok', lastOk: Date.now() },
+        frameStats: { status: 'unavailable', code: 'reader.frameStats.noData', detail: 'Neither gfxinfo nor SurfaceFlinger gave frames for com.mykynk.kumbara' },
+      },
       firstSeen: startedAt - 600_000,
       lastSeen: Date.now(),
     },
@@ -101,7 +109,29 @@ function baseDevices() {
       screen: { width: 1206, height: 2622, density: 3 },
       logs: { status: 'streaming', via: 'simctl log stream' },
       actions: SIM_ACTIONS,
+      readers: { crashReports: { status: 'ok', lastOk: Date.now() }, frameStats: { status: 'unsupported', code: 'reader.frameStats.unsupported' } },
       firstSeen: startedAt - 400_000,
+      lastSeen: Date.now(),
+    },
+    {
+      id: IPHONE,
+      platform: 'ios',
+      kind: 'physical',
+      name: 'Ayşe’nin iPhone’u',
+      model: 'iPhone14,5',
+      manufacturer: 'Apple',
+      osVersion: '18.1',
+      serial: IPHONE_UDID,
+      connection: 'usb',
+      state: 'online',
+      battery: { level: 64, charging: false },
+      logs: { status: 'streaming', via: 'idevicesyslog' },
+      actions: ['screenshot', 'list-apps', 'app-launch', 'app-stop'],
+      readers: {
+        crashReports: { status: 'ok', lastOk: Date.now() },
+        frameStats: { status: 'unsupported', code: 'reader.frameStats.unsupported', detail: 'iOS does not give the frame timing of an app to the Mac' },
+      },
+      firstSeen: startedAt - 300_000,
       lastSeen: Date.now(),
     },
   ];
@@ -109,6 +139,11 @@ function baseDevices() {
 
 const PIXEL = 'android:R5CT20XK9QM';
 const SIM = 'ios-sim:7C1F2B9E-41A3-4D7E-9C2B-1F00D3A4B5C6';
+const IPHONE_UDID = '00008110-001A2B3C4D5E6F70';
+const IPHONE = `ios:${IPHONE_UDID}`;
+/** The .ips copy the server keeps for the TestFlight crash (served by /api/files/crash/…). */
+const IPS_NAME = 'Runner-2026-11-02-213004.ips';
+const IPS_URL = `/api/files/crash/${encodeURIComponent(IPHONE_UDID)}/${encodeURIComponent(IPS_NAME)}`;
 const FLUTTER_ACTIONS = [
   { id: 'flutter.debugPaint', kind: 'toggle', label: 'Debug paint', group: 'flutter', value: false },
   { id: 'flutter.repaintRainbow', kind: 'toggle', label: 'Repaint rainbow', group: 'flutter', value: false },
@@ -138,7 +173,7 @@ function baseApps() {
       id: 'app:2',
       sessionKey: 's-pati',
       deviceId: PIXEL,
-      sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter' },
+      sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter', layers: ['dart', 'android'] },
       app: { name: 'Pati', id: 'com.mykynk.pati', version: '1.4.2', build: '42', pid: 12345, processName: 'com.mykynk.pati', debug: true },
       transport: 'adb-reverse',
       connected: true,
@@ -164,7 +199,7 @@ function baseApps() {
       id: 'app:4',
       sessionKey: 's-pati-ios',
       deviceId: SIM,
-      sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter' },
+      sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter', layers: ['dart', 'ios'] },
       app: { name: 'Pati', id: 'com.mykynk.pati', version: '1.4.2', build: '42', pid: 48211, processName: 'Runner', debug: true },
       transport: 'tcp',
       connected: true,
@@ -176,8 +211,35 @@ function baseApps() {
   ];
 }
 
+/** Apps the devices report (SPEC §10.2), with or without the SDK; SDK apps join their sessions by bundle id. */
+function baseDeviceApps() {
+  const da = (deviceId, id, p) => ({ key: `${deviceId}|${id}`, deviceId, id, pids: [], running: false, lastActivity: Date.now(), ...p });
+  const DAY = 86_400_000;
+  return [
+    da(PIXEL, 'com.mykynk.pati', { name: 'Pati', version: '1.4.2', build: '42', buildType: 'debug', install: { source: 'adb', installer: 'com.android.shell', lastUpdate: startedAt - 35 * 60_000 }, pids: [12345], running: true }),
+    da(PIXEL, 'com.mykynk.kasa', { name: 'Kasa', version: '2.0.1', build: '201', buildType: 'debug', install: { source: 'adb' }, pids: [13002], running: true }),
+    da(PIXEL, 'com.mykynk.kumbara', {
+      name: 'Kumbara',
+      version: '3.1.0',
+      build: '412',
+      buildType: 'release',
+      install: { source: 'play', installer: 'com.android.vending', firstInstall: startedAt - 40 * DAY, lastUpdate: startedAt - 3 * DAY },
+      pids: [14210, 14388],
+      running: true,
+      crashReports: 2,
+    }),
+    da(PIXEL, 'com.mykynk.pati.qa', { name: 'Pati QA', version: '1.5.0', build: '57', buildType: 'release', install: { source: 'firebase', installer: 'dev.firebase.appdistribution' }, lastActivity: Date.now() - 6 * 60_000 }),
+    da(PIXEL, 'com.mykynk.mahalle', { name: 'Mahalle', version: '0.9.0', build: '90', buildType: 'release', install: { source: 'other-store', installer: 'com.google.android.packageinstaller' }, lastActivity: Date.now() - 11 * 60_000 }),
+    da(SIM, 'com.mykynk.pati', { name: 'Pati', version: '1.4.2', build: '42', buildType: 'debug', install: { source: 'simulator' }, processName: 'Runner', pids: [48211], running: true }),
+    // Two Flutter apps on one iPhone, both "Runner": a TestFlight build and an Xcode build.
+    da(IPHONE, 'com.mykynk.kumbara', { name: 'Kumbara', version: '3.1.0', build: '412', buildType: 'release', install: { source: 'store-or-testflight' }, processName: 'Runner', pids: [811], running: true, crashReports: 1 }),
+    da(IPHONE, 'com.mykynk.pati', { name: 'Pati', version: '1.5.0', build: '58', buildType: 'debug', install: { source: 'xcode' }, processName: 'Runner', lastActivity: Date.now() - 9 * 60_000 }),
+  ];
+}
+
 let devices = empty ? [] : baseDevices();
 let apps = empty ? [] : baseApps();
+let deviceApps = empty ? [] : baseDeviceApps();
 let mocks = [
   { id: 'm1', enabled: true, name: 'Ödeme hatası', method: 'POST', url: '/v1/payments', match: 'contains', action: { type: 'respond', status: 502, headers: [['Content-Type', 'application/json']], body: '{"error":"gateway"}' }, createdAt: startedAt - 90_000 },
   { id: 'm2', enabled: false, name: 'Yavaş akış', method: 'GET', url: 'https://api.pati.app/v1/feed*', match: 'glob', action: { type: 'delay', delayMs: 2500 }, createdAt: startedAt - 60_000 },
@@ -260,11 +322,42 @@ java.lang.IllegalStateException: Fragment CheckoutFragment{8f1a2b} not attached 
 	at android.os.Looper.loop(Looper.java:232)
 	at android.app.ActivityThread.main(ActivityThread.java:8592)`;
 
+/** Exact origin of a line (SPEC §10.2) when the generator did not set one. */
+function originOf(e) {
+  if (e.source === 'system') return 'durbun';
+  if (e.source === 'app') return 'sdk';
+  return e.deviceId === SIM ? 'simctl-log' : e.deviceId === IPHONE ? 'idevicesyslog' : 'logcat';
+}
+
 function logEntry(base) {
-  return { id: nextLogId++, ts: base.ts ?? Date.now(), ...base };
+  const e = { id: nextLogId++, ts: base.ts ?? Date.now(), ...base };
+  if (!e.origin) e.origin = originOf(e);
+  return e;
+}
+
+/** Device lines of the apps without the SDK: Kumbara (Play) on the Pixel, Kumbara (TestFlight) on the iPhone. */
+function genDeviceOnlyLog(ts) {
+  if (chance(0.5)) {
+    const pid = pick([14210, 14210, 14388]);
+    const [tag, message, level] = pick([
+      ['flutter', 'Kumbara: sepet güncellendi (3 ürün)', 'info'],
+      ['flutter', 'Kumbara: hedef ilerlemesi %42', 'info'],
+      ['ActivityTaskManager', 'Displayed com.mykynk.kumbara/.MainActivity: +412ms', 'info'],
+      ['KumbaraWidget', 'Widget refreshed (2 goals)', 'debug'],
+      ['FirebaseMessaging', 'Token refreshed', 'debug'],
+    ]);
+    return logEntry({ ts, deviceId: PIXEL, source: 'device', level, tag, message, pid, tid: pid, process: pid === 14388 ? 'com.mykynk.kumbara:widget' : 'com.mykynk.kumbara' });
+  }
+  const [tag, message, level] = pick([
+    ['flutter', 'Kumbara: hedef kaydedildi', 'info'],
+    ['Runner', 'nw_connection_copy_connected_local_endpoint_block_invoke [C3] Connection has no local endpoint', 'debug'],
+    ['UIKitCore', 'Snapshotting a view that has not been rendered', 'warn'],
+  ]);
+  return logEntry({ ts, deviceId: IPHONE, source: 'device', level, tag, message, pid: 811, process: 'Runner', subsystem: tag });
 }
 
 function genLog(ts) {
+  if (chance(0.08)) return genDeviceOnlyLog(ts);
   const r = rnd();
   if (r < 0.34) {
     const [tag, message, level] = pick(SYSTEM_NOISE);
@@ -407,6 +500,73 @@ function strip(detail) {
   return entry;
 }
 
+/* ───────────── crash records (dropbox, .ips) ───────────── */
+const KUMBARA_WIDGET_STACK = `java.lang.NullPointerException: Attempt to invoke virtual method 'int java.util.List.size()' on a null object reference
+	at com.mykynk.kumbara.widget.GoalsWidget.onUpdate(GoalsWidget.kt:58)
+	at android.appwidget.AppWidgetProvider.onReceive(AppWidgetProvider.java:66)
+	at android.app.ActivityThread.handleReceiver(ActivityThread.java:4759)`;
+const KUMBARA_WIDGET_NPE = `Process: com.mykynk.kumbara:widget
+PID: 9921
+Flags: 0x38c83e44
+Package: com.mykynk.kumbara v412 (3.1.0)
+Foreground: No
+
+${KUMBARA_WIDGET_STACK}`;
+const KUMBARA_CRASH = `FATAL EXCEPTION: main
+Process: com.mykynk.kumbara, PID: 14210
+java.lang.IllegalStateException: Channel is unrecoverably broken and will be disposed!
+	at com.mykynk.kumbara.MainActivity.onPause(MainActivity.kt:88)
+	at android.app.Activity.performPause(Activity.java:8689)`;
+
+/** A live logcat crash of the Play build and the device's dropbox copy of it (hidden: `duplicateOf`). */
+function kumbaraCrash(ts) {
+  const live = logEntry({ ts, deviceId: PIXEL, source: 'device', origin: 'logcat', level: 'fatal', tag: 'AndroidRuntime', kind: 'crash', message: KUMBARA_CRASH, pid: 14210, process: 'com.mykynk.kumbara' });
+  const copy = logEntry({
+    ts: ts + 900,
+    deviceId: PIXEL,
+    source: 'device',
+    origin: 'dropbox',
+    level: 'fatal',
+    kind: 'crash',
+    tag: 'data_app_crash',
+    process: 'com.mykynk.kumbara',
+    pid: 14210,
+    message: KUMBARA_CRASH.replace('FATAL EXCEPTION: main\n', ''),
+    error: { type: 'java.lang.IllegalStateException', message: 'Channel is unrecoverably broken and will be disposed!' },
+    data: { origin: 'dropbox', dropboxTag: 'data_app_crash', package: 'com.mykynk.kumbara', process: 'com.mykynk.kumbara', pid: 14210, reportTs: ts, previousLaunch: false, version: '3.1.0', build: '412', duplicateOf: live.id },
+  });
+  return [live, copy];
+}
+
+/** The TestFlight build on the iPhone crashed: the .ips report copied from the device (unsymbolicated). */
+function kumbaraIpsCrash(ts) {
+  return logEntry({
+    ts,
+    deviceId: IPHONE,
+    source: 'device',
+    origin: 'crash-report',
+    level: 'fatal',
+    kind: 'crash',
+    tag: 'crash-report',
+    process: 'Runner',
+    pid: 811,
+    message: 'Kumbara 3.1.0 (412) crashed: EXC_BAD_ACCESS (SIGSEGV) · KERN_INVALID_ADDRESS at 0x0000000000000010',
+    error: {
+      type: 'EXC_BAD_ACCESS',
+      message: 'SIGSEGV · KERN_INVALID_ADDRESS at 0x0000000000000010',
+      stack: 'Thread 0 Crashed:\n0   Runner      0x0000000102f1c3a4 Runner + 115620\n1   Flutter     0x00000001052a8c10 Flutter + 3820560\n2   Flutter     0x00000001052a1b88 Flutter + 3791752\n3   UIKitCore   0x000000018b1e2a54 UIKitCore + 1993300',
+    },
+    data: { origin: 'crash-report', bundleId: 'com.mykynk.kumbara', reportTs: ts, previousLaunch: false, symbolicated: false, version: '3.1.0', build: '412', exceptionType: 'EXC_BAD_ACCESS', signal: 'SIGSEGV', bugType: '309', reportUrl: IPS_URL },
+  });
+}
+
+/** A minimal two-part .ips (JSON header line + JSON body) for the download button. */
+function ipsFile() {
+  const header = { app_name: 'Runner', timestamp: '2026-11-02 21:30:04.00 +0300', app_version: '3.1.0', build_version: '412', bundleID: 'com.mykynk.kumbara', bug_type: '309', os_version: 'iPhone OS 18.1 (22B83)', name: 'Runner' };
+  const body = { procName: 'Runner', pid: 811, exception: { type: 'EXC_BAD_ACCESS', signal: 'SIGSEGV', subtype: 'KERN_INVALID_ADDRESS at 0x0000000000000010' }, faultingThread: 0, threads: [{ triggered: true, frames: [{ imageOffset: 115620, imageIndex: 0 }, { imageOffset: 3820560, imageIndex: 1 }] }], usedImages: [{ name: 'Runner' }, { name: 'Flutter' }] };
+  return `${JSON.stringify(header)}\n${JSON.stringify(body, null, 2)}\n`;
+}
+
 /* ───────────── history ───────────── */
 function seedHistory() {
   logs = [];
@@ -415,6 +575,22 @@ function seedHistory() {
   const base = Date.now() - 10 * 60_000;
   logs.push(logEntry({ ts: base, deviceId: PIXEL, source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'device.connected', params: { device: 'Pixel 8', deviceId: PIXEL, platform: 'android', kind: 'physical', connection: 'usb', osVersion: '15' }, message: 'Device connected: Pixel 8 (Android 15)' }));
   logs.push(logEntry({ ts: base + 50, deviceId: PIXEL, source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'logs.streamStarted', params: { via: 'logcat' }, message: 'Device log stream started (logcat)' }));
+  // A widget crash from this morning, read from the device's dropbox when it connected (arrives right after the connect line).
+  logs.push(
+    logEntry({
+      ts: base - 3 * 3_600_000,
+      deviceId: PIXEL,
+      source: 'device',
+      origin: 'dropbox',
+      level: 'fatal',
+      kind: 'crash',
+      tag: 'data_app_crash',
+      process: 'com.mykynk.kumbara:widget',
+      message: KUMBARA_WIDGET_NPE,
+      error: { type: 'java.lang.NullPointerException', message: "Attempt to invoke virtual method 'int java.util.List.size()' on a null object reference", stack: KUMBARA_WIDGET_STACK },
+      data: { origin: 'dropbox', dropboxTag: 'data_app_crash', package: 'com.mykynk.kumbara', process: 'com.mykynk.kumbara:widget', pid: 9921, reportTs: base - 3 * 3_600_000, previousLaunch: true, version: '3.1.0', build: '412', foreground: false },
+    }),
+  );
   logs.push(logEntry({ ts: base + 900, deviceId: SIM, source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'device.connected', params: { device: 'iPhone 16 Pro', deviceId: SIM, platform: 'ios', kind: 'simulator', connection: 'local', osVersion: '18.2' }, message: 'Device connected: iPhone 16 Pro (iOS 18.2)' }));
   logs.push(logEntry({ ts: base + 2000, deviceId: PIXEL, appId: 'app:1', source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'app.connected', params: { app: 'Pati', bundleId: 'com.mykynk.pati', version: '1.4.1', sdk: 'flutter', transport: 'adb-reverse', device: 'Pixel 8' }, message: 'Pati 1.4.1 connected (flutter SDK via adb-reverse)' }));
   for (let i = 0; i < 2000; i++) {
@@ -426,6 +602,8 @@ function seedHistory() {
       logs.push(logEntry({ ts: ts + 1500, deviceId: PIXEL, appId: 'app:2', source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'app.connected', params: { app: 'Pati', bundleId: 'com.mykynk.pati', version: '1.4.2', sdk: 'flutter', transport: 'adb-reverse', device: 'Pixel 8' }, message: 'Pati 1.4.2 connected (flutter SDK via adb-reverse)' }));
     }
     if (i === 1500) logs.push(logEntry({ ts, deviceId: PIXEL, source: 'system', level: 'info', tag: 'durbun', kind: 'marker', code: 'marker', params: { label: 'Ödeme akışı testi', n: 1 }, message: 'Ödeme akışı testi' }));
+    if (i === 1200) logs.push(...kumbaraCrash(ts));
+    if (i === 1700) logs.push(kumbaraIpsCrash(ts));
   }
   for (let i = 0; i < 60; i++) {
     const r = makeRequest(pick(['app:2', 'app:3', 'app:4']));
@@ -436,7 +614,7 @@ function seedHistory() {
 
 /* ───────────── broadcasting ───────────── */
 const clients = new Set();
-const queue = { logs: [], network: [], devices: [], apps: [], metrics: [], processes: [], removedDevices: [] };
+const queue = { logs: [], network: [], devices: [], apps: [], metrics: [], processes: [], removedDevices: [], deviceApps: [], removedDeviceApps: [] };
 
 function send(ws, msg) {
   if (ws.readyState === 1) ws.send(JSON.stringify(msg));
@@ -462,6 +640,7 @@ function snapshot() {
     drivers: drivers(),
     processes: [...processes.values()],
     metrics: [],
+    deviceApps,
     logCount: logs.length,
   };
 }
@@ -515,6 +694,23 @@ function simulate() {
       });
     }
   }
+  // Activity of the apps without the SDK (lastActivity only: the UI coalesces these), now and then a crash.
+  if (tick % 20 === 0) {
+    for (const d of deviceApps) {
+      if (!d.running) continue;
+      d.lastActivity = now;
+      queue.deviceApps.push(d);
+    }
+  }
+  if (tick % 1200 === 600) {
+    const crash = chance(0.5) ? kumbaraCrash(now) : [kumbaraIpsCrash(now)];
+    pushLogs(crash);
+    const da = deviceApps.find((d) => d.deviceId === crash[0].deviceId && d.id === 'com.mykynk.kumbara');
+    if (da) {
+      da.crashReports = (da.crashReports ?? 0) + 1;
+      queue.deviceApps.push(da);
+    }
+  }
   // battery drift
   if (tick % 300 === 0) {
     const d = devices.find((x) => x.id === PIXEL);
@@ -549,7 +745,21 @@ function simulate() {
   if (tick === 650) {
     const g = devices.find((d) => d.id === 'android:RF8N30ABCD');
     if (g) {
-      Object.assign(g, { state: 'online', stateCode: undefined, stateDetail: undefined, osVersion: '14', apiLevel: 34, logs: { status: 'streaming', via: 'logcat' }, actions: ANDROID_ACTIONS, lastSeen: now });
+      Object.assign(g, {
+        state: 'online',
+        stateCode: undefined,
+        stateDetail: undefined,
+        osVersion: '14',
+        apiLevel: 34,
+        logs: { status: 'streaming', via: 'logcat' },
+        actions: ANDROID_ACTIONS,
+        // Some OEM builds refuse `dumpsys dropbox` to the shell user.
+        readers: { crashReports: { status: 'unavailable', code: 'reader.crashReports.dropboxRefused', detail: 'dumpsys dropbox: Permission Denial: can\'t access dropbox from pid=8812, uid=2000' }, frameStats: { status: 'ok' } },
+        lastSeen: now,
+      });
+      const store = { key: `${g.id}|com.mykynk.kumbara`, deviceId: g.id, id: 'com.mykynk.kumbara', name: 'Kumbara', version: '3.0.4', build: '398', buildType: 'release', install: { source: 'other-store', installer: 'com.sec.android.app.samsungapps' }, pids: [7120], running: true, lastActivity: now };
+      deviceApps.push(store);
+      queue.deviceApps.push(store);
       queue.devices.push(g);
       pushLogs([logEntry({ ts: now, deviceId: g.id, source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'device.connected', params: { device: 'Galaxy S23', deviceId: g.id, platform: 'android', kind: 'physical', connection: 'usb', osVersion: '14' }, message: 'Device connected: Galaxy S23 (Android 14)' })]);
     }
@@ -574,9 +784,11 @@ function enableDemo(on) {
   if (on) {
     devices = baseDevices();
     apps = baseApps();
+    deviceApps = baseDeviceApps();
   } else {
     devices = [];
     apps = [];
+    deviceApps = [];
     network.clear();
   }
   seedHistory();
@@ -645,7 +857,8 @@ function handleCommand(ws, { requestId, command }) {
 
 function doctorChecks() {
   return [
-    { id: 'node', label: 'Node.js', status: 'ok', version: process.version },
+    // As inside Dürbün.app (the server runs in Electron): worded from the code.
+    { id: 'node', label: 'Node.js', status: 'ok', version: process.version, detail: `Embedded in Dürbün.app (Electron 45.1.0, Node ${process.versions.node})`, code: 'doctor.node.embedded', params: { electron: '45.1.0', node: process.versions.node } },
     { id: 'adb', label: 'adb', status: 'ok', version: '1.0.41', path: '/Users/dev/Library/Android/sdk/platform-tools/adb' },
     { id: 'xcrun', label: 'Xcode command line tools', status: 'ok', version: 'Xcode 26.1', path: '/usr/bin/xcrun' },
     { id: 'idevicesyslog', label: 'idevicesyslog', status: 'missing', detail: 'Needed for logs of physical iPhones. Flutter’s bundled copy was not found either.', fix: 'brew install libimobiledevice' },
@@ -695,7 +908,7 @@ const httpServer = http.createServer(async (req, res) => {
       return d ? json(res, 200, d) : json(res, 404, { error: 'Unknown network entry' });
     }
     if (p === '/api/export') {
-      const exp = { format: 'durbun-session', version: 1, exportedAt: Date.now(), server: { version: '0.1.0' }, devices, apps, logs: logs.slice(-5000), network: [...network.values()] };
+      const exp = { format: 'durbun-session', version: 1, exportedAt: Date.now(), server: { version: '0.1.0' }, devices, apps, logs: logs.slice(-5000), network: [...network.values()], deviceApps };
       const date = new Date().toISOString().slice(0, 10);
       return json(res, 200, exp, { 'Content-Disposition': `attachment; filename="durbun-${date}.durbun.json"` });
     }
@@ -713,6 +926,12 @@ const httpServer = http.createServer(async (req, res) => {
       devices.push(dev);
       queue.devices.push(dev);
       return json(res, 200, { deviceIds: [id] });
+    }
+    const ips = /^\/api\/files\/crash\/([^/]+)\/([^/]+\.ips)$/.exec(p);
+    if (ips && req.method === 'GET') {
+      if (decodeURIComponent(ips[1]) !== IPHONE_UDID || decodeURIComponent(ips[2]) !== IPS_NAME) return json(res, 404, { error: 'Unknown file', code: 'file.unknown' });
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${IPS_NAME}"` });
+      return res.end(ipsFile());
     }
     if (p === '/api/har' && req.method === 'POST') {
       return json(res, 200, { log: { version: '1.2', creator: { name: 'Dürbün', version: '0.1.0' }, entries: [] } }, { 'Content-Disposition': 'attachment; filename="durbun.har"' });

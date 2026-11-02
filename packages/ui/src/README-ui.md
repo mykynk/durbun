@@ -50,6 +50,9 @@ npx vitest run                            # in packages/ui (jsdom, 2 workers)
 npm run build -w @durbun/ui               # → dist/ui
 ```
 
+The mock also carries the phase-3 data: `snapshot.deviceApps` (Play, Firebase, a hand-installed APK, two "Runner"
+apps on a USB iPhone), exact origins, dropbox / .ips crash records (one `duplicateOf`, one downloadable .ips), device
+readers and SDK layers.
 The mock answers every command with `{ok:true}` and plausible data; `demo.set false/true` empties/refills
 it (onboarding). It is a dev tool only — the real server is `packages/server`. Its system lines use the real
 server params (SPEC §9.2).
@@ -232,7 +235,19 @@ Use `compiled.key` as the memo key for scans (it changes when the app's sessions
   the scoped app(s) structurally cannot have the capability, else `fallback`), `<ExplainCallout capability>`,
   `<DataSourcesDialog>` ("Veriler nereden gelir?", `ui.openDataSources()`), texts: `reasonText(reason, ctx, capability?)`,
   `entrySourceText(entry)` / `originLabel(origin)` (log origins), `isDeviceCrashRecord`, `isUnsymbolicated`.
+- Inputs beyond the session and the device app: `DeviceInfo.readers` (crash records / frame stats that cannot be read →
+  `crashReportsUnavailable` / `frameStatsUnavailable`, worded from the reader's `code` under `code.reader.*`, else its
+  English `detail`), `sdk.layers` (`nativeLayerActive` / `nativeLayerMissing` notes, `native-layer` source), Android
+  installers (`otherStoreKind`: Galaxy Store, AppGallery, GetApps, Amazon; the package installer = `apk` badge, not a
+  store build). `net:` devices get no device-side sources; the demo is explained like the device it stands for
+  (`context.demo`, `demoData` note).
+- Crash empty states: `<CrashRecordsNote onlyProblems?>` ("none yet" vs "this device's records cannot be read") under
+  the Logs empty states and `is:crash` / `is:anr` queries; `<FrameStatsNote deviceId>` above a polled process's
+  Performance tiles. The log detail panel offers «İndir (.ips)» for `data.reportUrl` (`crashReportDownload`, only
+  `/api/files/crash/…`, not for imports) with a short symbolication note.
 - `ui.openSdkGuide(tab, section?)` scrolls to `'release' | 'native' | 'vm'` (`data-sdk-section` in the guide).
+- Dürbün.app: `html[data-desktop='mac']` (+ `data-desktop-fullscreen`) styles the window drag areas and the
+  traffic-light inset (`styles/shell.css`, end of file); the desktop app only sets the attributes.
 
 ### 4.5 Commands (WS) and REST
 
