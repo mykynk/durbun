@@ -2,6 +2,8 @@
 import type {
   AppSession,
   DeviceInfo,
+  DeviceReaderState,
+  DeviceReaderStatus,
   Header,
   LogEntry,
   LogKind,
@@ -9,6 +11,7 @@ import type {
   LogOrigin,
   LogSource,
   NetworkDetail,
+  SdkLayer,
   WireBody,
 } from '@durbun/protocol';
 import { LOG_LEVELS } from '@durbun/protocol';
@@ -46,6 +49,56 @@ export function normKind(kind: unknown): LogKind | undefined {
 /** A known LogOrigin, else undefined (unknown values are dropped rather than passed to the UI). */
 export function normOrigin(origin: unknown): LogOrigin | undefined {
   return typeof origin === 'string' && ORIGINS.has(origin) ? (origin as LogOrigin) : undefined;
+}
+
+const SDK_LAYERS = new Set<string>(['dart', 'android', 'ios'] satisfies SdkLayer[]);
+
+/** `hello.sdk.layers`: the known layers once each, in order; undefined when none is left (= unknown). */
+export function normSdkLayers(v: unknown): SdkLayer[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: SdkLayer[] = [];
+  for (const l of v) if (typeof l === 'string' && SDK_LAYERS.has(l) && !out.includes(l as SdkLayer)) out.push(l as SdkLayer);
+  return out.length > 0 ? out : undefined;
+}
+
+type Readers = NonNullable<DeviceInfo['readers']>;
+const READER_STATUSES = new Set<string>(['ok', 'unavailable', 'unsupported'] satisfies DeviceReaderStatus[]);
+/** Reader ids are identifiers ('crashReports', 'frameStats'; later ones pass through unchanged). */
+const READER_ID = /^[A-Za-z][A-Za-z0-9]{0,47}$/;
+
+export function sanitizeReaderState(v: unknown): DeviceReaderState | undefined {
+  if (!isRecord(v) || typeof v.status !== 'string' || !READER_STATUSES.has(v.status)) return undefined;
+  const state: DeviceReaderState = { status: v.status as DeviceReaderStatus };
+  if (typeof v.code === 'string' && v.code) state.code = v.code.slice(0, 128);
+  if (typeof v.detail === 'string' && v.detail) state.detail = v.detail.slice(0, 1000);
+  const lastOk = finite(v.lastOk);
+  if (lastOk !== undefined) state.lastOk = lastOk;
+  return state;
+}
+
+/**
+ * DeviceInfo.readers merged per reader id: a reader named in `patch` gets the new state (null / undefined
+ * removes it), the others stay. code / detail belong to the state they came with; lastOk (last successful
+ * read) carries over until a newer one is reported. Invalid states are ignored. Undefined when empty.
+ */
+export function mergeReaders(prev: DeviceInfo['readers'], patch: unknown): DeviceInfo['readers'] {
+  const out: Record<string, DeviceReaderState> = {};
+  for (const [id, state] of Object.entries(prev ?? {})) if (state) out[id] = state;
+  if (isRecord(patch)) {
+    for (const [id, raw] of Object.entries(patch)) {
+      if (!READER_ID.test(id)) continue;
+      if (raw === undefined || raw === null) {
+        delete out[id];
+        continue;
+      }
+      const state = sanitizeReaderState(raw);
+      if (!state) continue;
+      const lastOk = out[id]?.lastOk;
+      if (lastOk !== undefined && (state.lastOk === undefined || state.lastOk < lastOk)) state.lastOk = lastOk;
+      out[id] = state;
+    }
+  }
+  return Object.keys(out).length > 0 ? (out as Readers) : undefined;
 }
 
 export function toMessage(v: unknown): string {
@@ -150,6 +203,9 @@ export function sanitizeImportedDevice(v: unknown): DeviceInfo | undefined {
   }
   const apiLevel = finite(v.apiLevel);
   if (apiLevel !== undefined) device.apiLevel = apiLevel;
+  // What could be read on the device when the session was recorded ("no crashes" vs "could not read").
+  const readers = mergeReaders(undefined, v.readers);
+  if (readers) device.readers = readers;
   if (isRecord(v.screen) && finite(v.screen.width) !== undefined && finite(v.screen.height) !== undefined) {
     device.screen = { width: v.screen.width as number, height: v.screen.height as number };
     const density = finite(v.screen.density);
@@ -179,6 +235,8 @@ export function sanitizeImportedApp(v: unknown): AppSession | undefined {
     actions: [],
     stats: { logs: 0, requests: 0, errors: 0 },
   };
+  const layers = normSdkLayers(sdk.layers);
+  if (layers) app.sdk.layers = layers;
   const disconnectedAt = finite(v.disconnectedAt);
   if (disconnectedAt !== undefined) app.disconnectedAt = disconnectedAt;
   for (const key of ['version', 'build', 'processName'] as const) {

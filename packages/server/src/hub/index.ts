@@ -39,9 +39,11 @@ import { RingBuffer } from './ringBuffer';
 import {
   finite,
   isRecord,
+  mergeReaders,
   normKind,
   normLevel,
   normOrigin,
+  normSdkLayers,
   sanitizeImportedApp,
   sanitizeImportedDevice,
   sanitizeImportedLog,
@@ -66,9 +68,13 @@ const pidKey = (deviceId: string, pid: number) => `${deviceId}\u0000${pid}`;
 const appOrigin = (app: AppSession): LogOrigin =>
   app.transport === 'vm-service' ? 'vm-service' : app.transport === 'import' ? 'import' : 'sdk';
 
-/** Session files written by this server also carry the device apps (optional, ignored by older servers). */
-type SessionExportWithApps = SessionExport & { deviceApps?: DeviceApp[] };
 const sessionIndexKey = (deviceId: string, sessionKey: string) => `${deviceId}\u0000${sessionKey}`;
+/** AppSession.sdk with its own copy of the known layers (SPEC §10.6; unknown values dropped). */
+function copySdk(sdk: AppSession['sdk']): AppSession['sdk'] {
+  const { layers: raw, ...rest } = sdk;
+  const layers = normSdkLayers(raw);
+  return layers ? { ...rest, layers } : rest;
+}
 const copyApp = (app: AppSession): AppSession => ({ ...app, stats: { ...app.stats } });
 const limitsFrom = (s: ServerSettings): NetworkLimits => ({
   maxEntries: s.maxNetworkEntries,
@@ -302,6 +308,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     next.lastSeen = Math.max(finite(device.lastSeen) ?? now, prev?.lastSeen ?? 0);
     next.actions = Array.isArray(device.actions) ? [...device.actions] : (prev?.actions ?? []);
     next.logs = isRecord(device.logs) ? { ...device.logs } : (prev?.logs ?? { status: 'stopped' });
+    setReaders(next, prev, device);
     storeDevice(prev, next);
   }
 
@@ -311,7 +318,15 @@ export function createHub(opts: CreateHubOptions): Hub {
     const next: DeviceInfo = { ...prev, ...patch, id, firstSeen: prev.firstSeen };
     if (patch.logs) next.logs = { ...patch.logs };
     if (patch.actions) next.actions = [...patch.actions];
+    setReaders(next, prev, patch);
     storeDevice(prev, next);
+  }
+
+  /** Readers merge per reader id: a driver reporting one reader keeps what the others reported. */
+  function setReaders(next: DeviceInfo, prev: DeviceInfo | undefined, input: Partial<DeviceInfo>): void {
+    const readers = 'readers' in input ? mergeReaders(prev?.readers, input.readers) : prev?.readers;
+    if (readers) next.readers = readers;
+    else delete next.readers;
   }
 
   function markDeviceDisconnected(id: string, detail?: string, code?: string): void {
@@ -420,7 +435,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     if (existing) {
       const wasConnected = existing.connected;
       unindexPid(existing);
-      existing.sdk = { ...input.sdk };
+      existing.sdk = copySdk(input.sdk);
       existing.app = { ...input.app };
       existing.transport = input.transport;
       existing.capabilities = [...(input.capabilities ?? [])];
@@ -438,7 +453,7 @@ export function createHub(opts: CreateHubOptions): Hub {
       id: `app:${nextAppSeq++}`,
       sessionKey: input.sessionKey,
       deviceId: input.deviceId,
-      sdk: { ...input.sdk },
+      sdk: copySdk(input.sdk),
       app: { ...input.app },
       transport: input.transport,
       connected: input.connected !== false,
@@ -762,7 +777,7 @@ export function createHub(opts: CreateHubOptions): Hub {
         .values()
         .filter((a) => exportedDevices.has(a.deviceId) && (!scopedBundle || (a.deviceId === scopedBundle.deviceId && a.id === scopedBundle.app.id)))
         .map(copyDeviceApp);
-      const out: SessionExportWithApps = {
+      const out: SessionExport = {
         format: 'durbun-session',
         version: 1,
         exportedAt: Date.now(),
@@ -897,7 +912,7 @@ export function createHub(opts: CreateHubOptions): Hub {
 
       // Device apps travel with their (imported) device: a snapshot, nothing runs any more.
       let importedDeviceApps = 0;
-      for (const raw of list((data as SessionExportWithApps).deviceApps)) {
+      for (const raw of list(data.deviceApps)) {
         if (!isRecord(raw) || typeof raw.deviceId !== 'string' || typeof raw.id !== 'string' || !raw.id) continue;
         const deviceId = deviceMap.get(raw.deviceId);
         if (!deviceId) continue;
