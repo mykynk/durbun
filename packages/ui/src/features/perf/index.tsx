@@ -27,7 +27,7 @@ import {
 } from '../../components';
 import { useLanguage, useT } from '../../i18n';
 import { describeError } from '../device/codes';
-import { ExplainEmpty, mainPidOf, useScopeExplain } from '../../sources';
+import { ExplainEmpty, FrameStatsNote, mainPidOf, useScopeExplain } from '../../sources';
 import { requestDeviceSection } from '../device/request';
 import './i18n';
 import './perf.css';
@@ -727,6 +727,8 @@ export default function PerfView() {
             {pollError.detail ? <span className="pf-callout__detail mono">{pollError.detail}</span> : null}
           </Callout>
         ) : null}
+        {/* FPS of a process comes from the device's frame stats: say so when the device gives none. */}
+        {target.kind === 'process' && polling ? <FrameStatsNote deviceId={target.deviceId} className="pf-callout" /> : null}
         {tiles}
         {view === 'table' ? (
           <PerfTableView data={data} showRequests={showRequests} />

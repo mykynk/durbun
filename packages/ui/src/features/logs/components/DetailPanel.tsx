@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { ChevronDown, ChevronUp, Copy, ExternalLink, Funnel, FunnelX, History, LocateFixed, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Copy, Download, ExternalLink, Funnel, FunnelX, History, LocateFixed, X } from 'lucide-react';
 import type { LogEntry, NetworkEntry } from '@durbun/protocol';
 import { Button, CodeView, CopyButton, IconButton, JsonTree, LevelBadge, MethodBadge, StatusBadge, copyText, formatBytes, formatClock, formatDateTime, formatDuration, toast } from '../../../components';
 import { networkStore, useHub, useNetworkVersion } from '../../../data';
@@ -14,6 +14,7 @@ import { isPreviousLaunch, type LogRow } from '../model/types';
 import type { ExplainSource } from '../../../data';
 import { entryOrigin, entrySourceText, isDeviceCrashRecord, isUnsymbolicated, sourceHint } from '../../../sources/text';
 import { StackLines, type RowDisplay } from './LogRow';
+import { downloadUrl } from '../../../lib/download';
 
 export interface DetailPanelProps {
   entry: LogEntry;
@@ -64,6 +65,23 @@ const KIND_QUERY: Partial<Record<NonNullable<LogEntry['kind']>, string>> = {
   marker: 'marker',
 };
 
+/**
+ * Copy of an iOS crash report the server keeps (`data.reportUrl`, SPEC §10.3 convention): only its own
+ * `/api/files/crash/<udid>/<name>.ips` path, never for imported recordings (the file stayed on the other Mac).
+ */
+export function crashReportDownload(e: Pick<LogEntry, 'data' | 'deviceId'>): { url: string; fileName: string } | undefined {
+  const d = e.data as { reportUrl?: unknown } | null | undefined;
+  const url = d && typeof d === 'object' && typeof d.reportUrl === 'string' ? d.reportUrl : undefined;
+  if (!url || !url.startsWith('/api/files/crash/') || e.deviceId.startsWith('import:')) return undefined;
+  const last = url.slice(url.lastIndexOf('/') + 1);
+  let fileName = last;
+  try {
+    fileName = decodeURIComponent(last);
+  } catch {
+    // keep the encoded name
+  }
+  return { url, fileName: fileName || 'crash.ips' };
+}
 
 /** Log origin → the source whose one-line description explains it (tooltip on the metadata row). */
 const ORIGIN_HINT: Partial<Record<string, ExplainSource>> = {
@@ -119,10 +137,13 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
     copy: origin ?? e.source,
     filter: { field: 'source', value: e.source },
   });
-  if (isDeviceCrashRecord(e)) {
+  const record = isDeviceCrashRecord(e);
+  const report = record ? crashReportDownload(e) : undefined;
+  const unsymbolicated = record && isUnsymbolicated(e);
+  if (record) {
     const notes = [t('sources.crash.fromDevice')];
     if (isPreviousLaunch(e)) notes.push(t('logs.row.previousLaunch'));
-    if (isUnsymbolicated(e)) notes.push(t('sources.crash.unsymbolicated'));
+    if (unsymbolicated) notes.push(t('sources.crash.unsymbolicated'));
     meta.push({ key: 'record', label: t('sources.crash.recordLabel'), value: <span title={t('sources.crash.fromDeviceTip')}>{notes.join(' · ')}</span>, copy: notes.join(' · ') });
   }
   meta.push({ key: 'kind', label: t('logs.detail.fields.kind'), value: kindLabel, copy: e.kind ?? 'text', filter: e.kind && KIND_QUERY[e.kind] ? { field: 'is', value: KIND_QUERY[e.kind]! } : undefined });
@@ -194,6 +215,21 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
                 <History size={12} aria-hidden />
                 {t('logs.row.previousLaunch')} · {preciseTime(e.ts)}
               </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {record && (report || unsymbolicated) ? (
+          <section className="lg-detail__sec lg-detail__record">
+            {unsymbolicated ? (
+              <p className="lg-detail__symb">
+                <strong>{t('sources.crash.symbolicateTitle')}.</strong> {t('sources.crash.symbolicate')}
+              </p>
+            ) : null}
+            {report ? (
+              <Button size="sm" icon={Download} title={t('sources.crash.downloadTip')} onClick={() => downloadUrl(report.url, report.fileName)}>
+                {t('sources.crash.download')}
+              </Button>
             ) : null}
           </section>
         ) : null}

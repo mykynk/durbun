@@ -1257,6 +1257,26 @@
 .lg-detail__crash .lg-prev {
   align-self: flex-start;
 }
+/* Device crash record (.ips / dropbox): symbolication note + download of the copied report. */
+.lg-detail__record {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.lg-detail__symb {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.lg-detail__symb strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.lg-empty__crash {
+  margin-top: 4px;
+}
 .lg-detail__net {
   display: flex;
   align-items: center;

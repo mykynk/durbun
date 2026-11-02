@@ -74,10 +74,13 @@ import { DetailPanel, displayText, entryAsLine } from './components/DetailPanel'
 import { Histogram } from './components/Histogram';
 import { CrashBanner, NewLinesPill, PausedBar, crashTitle } from './components/Banners';
 import { NoLogsState, NoMatchState, type ActiveFilter } from './components/EmptyStates';
-import { ExplainEmpty } from '../../sources';
+import { CrashRecordsNote, ExplainEmpty, crashReaderText, crashRecordsState } from '../../sources';
 import { HighlightRulesDialog, NoiseRulesDialog, SavedFiltersDialog } from './components/RulesDialogs';
 
 const ALL_SOURCES: SourceToggles = { device: true, app: true, system: true };
+
+/** A query that looks for crashes / ANRs (`is:crash`, `is:anr`): its empty result says whether records can be read. */
+const CRASH_QUERY = /(^|\s)is:(crash|anr)\b/i;
 const SOURCES: readonly LogSource[] = ['device', 'app', 'system'];
 const MENU_LEVELS: readonly LogLevel[] = ['verbose', 'debug', 'info', 'warn', 'error'];
 /** Level names in prose (technical names, SPEC §7.1) — the pills keep their letters / caps. */
@@ -748,7 +751,10 @@ export default function LogsView() {
         return;
       }
     }
-    toast.info(t('logs.crash.none'));
+    // "No crash" is only true when the scoped devices' own crash records can be read.
+    const unreadable = crashRecordsState(scopeRef.current.scope, useHub.getState()).unreadable;
+    if (unreadable.length > 0) toast.info(t('sources.crashEmpty.toastTitle'), { description: [t('sources.crashEmpty.unreadableLead'), ...unreadable.map(crashReaderText)].join(' ') });
+    else toast.info(t('logs.crash.none'));
   }, [revealEntry]);
 
   const toggleNotify = useCallback(async () => {
@@ -961,9 +967,21 @@ export default function LogsView() {
             {empty ? (
               <div className="lg-empty">
                 {filtersActive ? (
-                  <NoMatchState inScope={inScope} filters={activeFilters} onClearAll={clearFilters} noiseHidden={hideNoise && snap.counts.noise > 0} onShowNoise={() => setPref('hideNoise', false)} />
+                  <NoMatchState inScope={inScope} filters={activeFilters} onClearAll={clearFilters} noiseHidden={hideNoise && snap.counts.noise > 0} onShowNoise={() => setPref('hideNoise', false)}>
+                    {CRASH_QUERY.test(appliedQuery) ? <CrashRecordsNote className="lg-empty__crash" /> : null}
+                  </NoMatchState>
                 ) : (
-                  <ExplainEmpty capability="logs" icon={ScrollText} fallback={<NoLogsState scope={compiledScope.scope} device={scopeDevice} />} />
+                  <ExplainEmpty
+                    capability="logs"
+                    icon={ScrollText}
+                    fallback={
+                      <NoLogsState scope={compiledScope.scope} device={scopeDevice}>
+                        <CrashRecordsNote onlyProblems className="lg-empty__crash" />
+                      </NoLogsState>
+                    }
+                  >
+                    <CrashRecordsNote onlyProblems className="lg-empty__crash" />
+                  </ExplainEmpty>
                 )}
               </div>
             ) : (

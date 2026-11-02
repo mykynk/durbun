@@ -1,10 +1,11 @@
+import type { ReactNode } from 'react';
 import { BookOpen, FunnelX, ScrollText, Stethoscope, Volume2, X } from 'lucide-react';
 import { Button, EmptyState } from '../../../components';
 import { ui, type Scope } from '../../../data';
 import { logStatusText, t } from '../../../i18n';
 import type { DeviceInfo } from '@durbun/protocol';
 
-export function NoLogsState({ scope, device }: { scope: Scope; device?: DeviceInfo }) {
+export function NoLogsState({ scope, device, children }: { scope: Scope; device?: DeviceInfo; children?: ReactNode }) {
   const status = device && device.logs.status !== 'streaming' ? logStatusText(device) : null;
   return (
     <EmptyState
@@ -27,7 +28,9 @@ export function NoLogsState({ scope, device }: { scope: Scope; device?: DeviceIn
           </Button>
         </>
       }
-    />
+    >
+      {children}
+    </EmptyState>
   );
 }
 
@@ -39,7 +42,22 @@ export interface ActiveFilter {
   clear(): void;
 }
 
-export function NoMatchState({ inScope, filters, onClearAll, noiseHidden, onShowNoise }: { inScope: number; filters: readonly ActiveFilter[]; onClearAll(): void; noiseHidden: boolean; onShowNoise(): void }) {
+export function NoMatchState({
+  inScope,
+  filters,
+  onClearAll,
+  noiseHidden,
+  onShowNoise,
+  children,
+}: {
+  inScope: number;
+  filters: readonly ActiveFilter[];
+  onClearAll(): void;
+  noiseHidden: boolean;
+  onShowNoise(): void;
+  /** Extra explanation under the filter chips (e.g. crash records that cannot be read). */
+  children?: ReactNode;
+}) {
   return (
     <EmptyState
       icon={FunnelX}
@@ -70,6 +88,7 @@ export function NoMatchState({ inScope, filters, onClearAll, noiseHidden, onShow
           ))}
         </div>
       ) : null}
+      {children}
     </EmptyState>
   );
 }
