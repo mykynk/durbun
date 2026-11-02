@@ -3,7 +3,15 @@
  * adb-reverse SDK routing, actions and metrics, plus (SPEC §10) the apps the device reports
  * (DeviceApps), dropbox crash / ANR records and frame stats.
  */
-import type { DeviceActionId, DeviceActionResult, DeviceInfo, DeviceState, LogStreamStatus } from '@durbun/protocol';
+import type {
+  DeviceActionId,
+  DeviceActionResult,
+  DeviceInfo,
+  DeviceReaderId,
+  DeviceReaderState,
+  DeviceState,
+  LogStreamStatus,
+} from '@durbun/protocol';
 import type { DeviceLogInput, DriverContext, Logger, PortForward } from '../../types';
 import { StreamProcess, type StreamExitInfo, type StreamSpec } from '../exec';
 import { LogBatcher } from '../shared/batcher';
@@ -27,6 +35,7 @@ import {
   parseWmOutput,
   type AdbDeviceRow,
 } from './parsers';
+import { DeviceReaders } from './readers';
 import { AdbReverseRouter } from './reverse';
 
 const VIA = 'logcat';
@@ -110,6 +119,8 @@ export class AndroidDeviceSession {
   private readonly dropbox: DropboxWatcher;
   private watchStart?: number;
   private unsubLogs?: () => void;
+  /** DeviceInfo.readers: crash records (dropbox) and frame stats, changes only. */
+  private readonly readers = new DeviceReaders((id, state) => this.patchReader(id, state));
 
   constructor(
     private readonly deps: AndroidSessionDeps,
@@ -171,6 +182,7 @@ export class AndroidDeviceSession {
       watchStart: () => this.watchStart ?? Date.now(),
       apps: this.apps,
       crashes: this.crashes,
+      onReader: (r) => this.readers.report('crashReports', r),
     });
     try {
       // Live logcat crashes / ANRs (with their hub ids) → de-duplication of dropbox records.
@@ -220,6 +232,13 @@ export class AndroidDeviceSession {
     if (this.disposed) return;
     this.info = { ...this.info, ...patch, lastSeen: Date.now() };
     this.deps.ctx.hub.patchDevice(this.id, { ...patch, lastSeen: this.info.lastSeen });
+  }
+
+  /** One reader only: the hub merges `readers` per reader id. */
+  private patchReader(id: DeviceReaderId, state: DeviceReaderState): void {
+    if (this.disposed) return;
+    this.info = { ...this.info, readers: { ...this.info.readers, [id]: state } };
+    this.deps.ctx.hub.patchDevice(this.id, { readers: { [id]: state } });
   }
 
   private setLogs(logs: DeviceInfo['logs']): void {
@@ -661,6 +680,7 @@ export class AndroidDeviceSession {
         logger: this.deps.logger,
         findPid: (name) => this.findPid(name),
         packageOf: (pid) => basePackage(target.processName ?? (pid !== undefined ? this.processes.get(pid) : undefined)),
+        onFrameReader: (r) => this.readers.report('frameStats', r),
       },
       target,
     );

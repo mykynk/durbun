@@ -8,14 +8,16 @@
  *
  * Frame stats (fps / jankyFrames, SPEC §10.4) come from a second, parallel call (gfxinfo +
  * SurfaceFlinger latency, see frameStats.ts) so a hung app (slow `dumpsys gfxinfo`) never costs the
- * CPU/memory sample.
+ * CPU/memory sample. Whether frames can be read at all goes to DeviceInfo.readers.frameStats: 'ok' with
+ * every sample, 'unavailable' once a watch of a live process gave none for FRAME_TIMING.noDataReads reads.
  */
 import type { MetricSample } from '@durbun/protocol';
 import type { HubSink, Logger } from '../../types';
 import { every } from '../shared/timing';
 import type { Adb } from './adb';
-import { FrameStatsReader, type FrameSample } from './frameStats';
+import { FRAME_TIMING, FrameStatsReader, type FrameSample } from './frameStats';
 import { cpuPercent, parsePidof, parseProcStat, parseVmRssMB } from './parsers';
+import { READER_CODES, type ReaderReport } from './readers';
 
 export interface MetricsTarget {
   pid?: number;
@@ -32,6 +34,8 @@ export interface AndroidMetricsDeps {
   findPid?: (name: string) => number | undefined;
   /** Package of the watched process (pid → process name → package); enables frame stats. */
   packageOf?: (pid: number | undefined) => string | undefined;
+  /** Frame stats readable or not (→ DeviceInfo.readers.frameStats); repeats are expected, the receiver dedupes. */
+  onFrameReader?: (report: ReaderReport) => void;
 }
 
 export const ANDROID_METRICS_INTERVAL_MS = 2000;
@@ -42,6 +46,8 @@ export class AndroidMetricsWatcher {
   private prev?: { ticks: number; at: number };
   private misses = 0;
   private readonly frames?: FrameStatsReader;
+  private framesSeen = false;
+  private frameMisses = 0;
 
   constructor(
     private readonly deps: AndroidMetricsDeps,
@@ -105,6 +111,7 @@ export class AndroidMetricsWatcher {
       return;
     }
     this.misses = 0;
+    this.noteFrames(frames);
     const now = Date.now();
     const cpu = this.prev ? cpuPercent(this.prev.ticks, stat.cpuTicks, now - this.prev.at) : undefined;
     this.prev = { ticks: stat.cpuTicks, at: now };
@@ -119,5 +126,21 @@ export class AndroidMetricsWatcher {
       sample.jankyFrames = frames.jankyFrames;
     }
     this.deps.hub.pushMetrics([sample]);
+  }
+
+  /** Called only while the process lives (a dead app's missing frames say nothing about the device). */
+  private noteFrames(frames: FrameSample | undefined): void {
+    const reader = this.frames;
+    if (!reader) return;
+    if (frames) {
+      this.framesSeen = true;
+      this.deps.onFrameReader?.({ status: 'ok' });
+      return;
+    }
+    // Once frames came, a quiet spell (app in the background, SurfaceView gone) is not "unreadable".
+    if (this.framesSeen || reader.lastRead !== 'none') return;
+    this.frameMisses += 1;
+    if (this.frameMisses !== FRAME_TIMING.noDataReads) return;
+    this.deps.onFrameReader?.({ status: 'unavailable', code: READER_CODES.frameStatsNoData, detail: reader.noDataDetail() });
   }
 }
