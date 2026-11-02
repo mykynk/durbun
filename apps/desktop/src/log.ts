@@ -16,6 +16,17 @@ export interface FileLog {
   warn(message: string, ...args: unknown[]): void;
   error(message: string, ...args: unknown[]): void;
   debug(message: string, ...args: unknown[]): void;
+  /** A logger for another component (`[scope]` instead of `[desktop]`): the embedded server's Logger. */
+  scoped(scope: string, opts?: { debug?: boolean }): ScopedLogger;
+}
+
+/** The shape of packages/server's Logger (startServer(opts, { logger })). */
+export interface ScopedLogger {
+  debug(message: string, ...args: unknown[]): void;
+  info(message: string, ...args: unknown[]): void;
+  warn(message: string, ...args: unknown[]): void;
+  error(message: string, ...args: unknown[]): void;
+  child(scope: string): ScopedLogger;
 }
 
 type ConsoleMethod = 'log' | 'info' | 'warn' | 'error' | 'debug';
@@ -60,16 +71,24 @@ export function installFileLog(file: string): FileLog {
     };
   }
 
+  type Level = 'info' | 'warn' | 'error' | 'debug';
   const at =
-    (level: 'info' | 'warn' | 'error' | 'debug') =>
+    (level: Level, scope: string) =>
     (message: string, ...args: unknown[]) => {
-      const text = `${level.toUpperCase().padEnd(5)} [desktop] ${format(message, ...args)}`;
+      const text = `${level.toUpperCase().padEnd(5)} [${scope}] ${format(message, ...args)}`;
       write(text);
       try {
-        original[level === 'debug' ? 'debug' : level === 'info' ? 'info' : level](text);
+        original[level](text);
       } catch {
         /* no console */
       }
     };
-  return { file, info: at('info'), warn: at('warn'), error: at('error'), debug: at('debug') };
+  const scoped = (scope: string, opts: { debug?: boolean } = {}): ScopedLogger => ({
+    debug: opts.debug ? at('debug', scope) : () => {},
+    info: at('info', scope),
+    warn: at('warn', scope),
+    error: at('error', scope),
+    child: (child) => scoped(`${scope}:${child}`, opts),
+  });
+  return { file, info: at('info', 'desktop'), warn: at('warn', 'desktop'), error: at('error', 'desktop'), debug: at('debug', 'desktop'), scoped };
 }
