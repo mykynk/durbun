@@ -823,8 +823,10 @@ The team (Flutter apps with a native layer, several projects) needs, in this ord
 2. **Debug builds** appear automatically.
 3. **Release builds** and 4. builds from **Firebase App Distribution or the stores** expose everything
    that is technically possible.
-Constraints: the SDK must **never** be enabled in store builds (security). Apps use **SSL pinning**
-(a third-party provider) → no proxy route. Whether the Firebase build is the same binary as the store
+Constraints: **the team decides per project** whether a build runs the SDK, store builds included —
+Dürbün supports every case and polices nothing (decision of 2026-11-02, replacing an earlier "never in store
+builds" rule; there is no install-source guard). Apps use **SSL pinning** (a third-party provider) → no proxy
+route. Whether the Firebase build is the same binary as the store
 build **differs per project**. SDK setup must be minimal. Every user must understand **where each piece
 of data comes from**, and when something is missing **why** (and what would enable it). UI/UX matters.
 
@@ -943,6 +945,10 @@ SurfaceView (Flutter) app never falls back to gfxinfo's decor frames for its fps
   side's single connection (one app session).
 - Enablement: debug/profile on; release only with `--dart-define=DURBUN=true` (per project/flavor —
   e.g. the Firebase build when it is a separate build). Never auto-on in release. Native follows Dart.
+  The define (or `DurbunOptions.enabled`) is the team's choice for any build, store builds included; the SDK
+  never checks how the app was installed. Docs state the facts neutrally: Flutter writes the defines into
+  `ios/Flutter/Generated.xcconfig`, so a later Xcode Archive keeps `DURBUN=true` until the next `flutter build`
+  without it; an enabled build talks to whatever answers on its device loopback port (no pairing yet).
 - Setup = pubspec line + `Durbun.run(...)` in main. Android native network: one optional line
   `.addInterceptor(DurbunInterceptor())`; iOS URLSession capture automatic. Measure release size delta.
 - Packaging: Android compiles the shared Kotlin core into the plugin through Gradle `sourceSets`; iOS carries a
