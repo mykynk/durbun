@@ -21,6 +21,7 @@ import { sleep } from '../shared/timing';
 import type { Adb } from './adb';
 import { basePackage, type CrashAppMeta } from './deviceApps';
 import { deviceLocalToEpoch, type DeviceClock } from './deviceClock';
+import { READER_CODES, type ReaderReport } from './readers';
 
 export const DROPBOX_TAGS = ['data_app_crash', 'data_app_anr', 'data_app_native_crash', 'SYSTEM_TOMBSTONE'] as const;
 export type DropboxTag = (typeof DROPBOX_TAGS)[number];
@@ -51,6 +52,19 @@ export const DEDUPE_PACKAGE_WINDOW_MS = 6_000;
 
 const HEADER_RE =
   /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (\S+) \((?:(compressed )?(text|data), (\d+) bytes|contents lost|no file)\)\s*$/;
+/** Every real dump starts with "Drop box contents: N entries"; an empty search ends with "(No entries found.)". */
+const DUMP_RE = /^Drop box contents: \d+|^\(No entries found\.\)/m;
+const REFUSED_RE = /Permission Denial|SecurityException|Can't find service: dropbox|not allowed/i;
+
+/** The line saying why dumpsys refused us (OEM restriction / missing permission), when it did. */
+function refusalOf(out: string): string | undefined {
+  if (!REFUSED_RE.test(out)) return undefined;
+  return out.split('\n').find((l) => REFUSED_RE.test(l))?.trim() ?? 'refused';
+}
+
+function firstLine(out: string): string {
+  return (out.split('\n').find((l) => l.trim()) ?? '').trim().slice(0, 200);
+}
 
 /* ───────────────────────────── parsers ───────────────────────────── */
 
@@ -257,7 +271,8 @@ function parseTombstone(body: string): NativeInfo {
     for (let i = bt + 1; i < lines.length && info.frames.length < 128; i++) {
       const l = lines[i]!;
       if (/^\s+#\d+\s/.test(l)) info.frames.push(l.trim());
-      else if (l.trim() === '' && info.frames.length === 0) continue;
+      // debuggerd prints "  NOTE: … unreadable libraries …" lines between "backtrace:" and the frames.
+      else if (info.frames.length === 0 && (l.trim() === '' || /^\s*NOTE:/.test(l))) continue;
       else break;
     }
   }
@@ -461,6 +476,8 @@ export interface DropboxWatcherDeps {
   watchStart: () => number;
   apps: DropboxApps;
   crashes: CrashIndex;
+  /** Outcome of each poll (→ DeviceInfo.readers.crashReports); repeats are expected, the receiver dedupes. */
+  onReader?: (report: ReaderReport) => void;
 }
 
 export class DropboxWatcher {
@@ -468,6 +485,10 @@ export class DropboxWatcher {
   private active = false;
   private gen = 0;
   private polling?: Promise<void>;
+  private everRead = false;
+  private failures = 0;
+  /** Live logcat crashes a dropbox record was already counted for (a native crash is filed twice). */
+  private readonly countedLive = new Set<number>();
   /** Why the dropbox cannot be read on this device (permission / OEM), when it cannot. */
   unavailable?: string;
   /** Successful listings (diagnostics / tests). */
@@ -517,24 +538,57 @@ export class DropboxWatcher {
     return this.polling;
   }
 
+  private readerOk(): void {
+    this.everRead = true;
+    this.failures = 0;
+    this.deps.onReader?.({ status: 'ok' });
+  }
+
+  private readerRefused(detail: string): void {
+    this.unavailable = detail;
+    this.deps.logger.debug(`${this.deps.serial}: dropbox unavailable: ${detail}`);
+    this.deps.onReader?.({ status: 'unavailable', code: READER_CODES.dropboxRefused, detail });
+  }
+
+  /** Reported at once until the dropbox was read once; after that only two in a row (one adb hiccup is no news). */
+  private readerFailed(detail: string): void {
+    this.failures += 1;
+    this.deps.logger.debug(`${this.deps.serial}: ${detail}`);
+    if (!this.everRead || this.failures >= 2) {
+      this.deps.onReader?.({ status: 'unavailable', code: READER_CODES.crashReportsFailed, detail });
+    }
+  }
+
   private async poll(gen: number): Promise<void> {
     const { deps } = this;
     const adb = deps.adb();
     if (!adb) return;
-    if (!(await deps.apps.ready()) || gen !== this.gen) return;
+    const ready = await deps.apps.ready();
+    if (gen !== this.gen) return;
+    if (!ready) {
+      this.readerFailed('The installed apps could not be listed (pm list packages), so crash records cannot be matched to apps');
+      return;
+    }
     const listCmd = DROPBOX_TAGS.map((t) => `dumpsys dropbox ${t}`).join(`; echo ${DROPBOX_SEP}; `);
     const list = await adb.shell(deps.serial, listCmd, { timeoutMs: 15_000 });
     if (gen !== this.gen) return;
     const out = list.stdout;
     if (!out.trim()) {
-      deps.logger.debug(`${deps.serial}: dumpsys dropbox gave no output: ${list.error ?? list.stderr.trim()}`);
+      const why = list.error ?? list.stderr.trim();
+      this.readerFailed(`dumpsys dropbox gave no output${why ? `: ${why}` : ''}`);
       return;
     }
     const headers = parseDropboxListing(out);
-    if (!headers.length && /Permission Denial|SecurityException|Can't find service: dropbox|not allowed/i.test(out)) {
-      this.unavailable = out.split('\n').find((l) => /Permission|Security|Can't find|not allowed/i.test(l))?.trim() ?? 'refused';
-      deps.logger.debug(`${deps.serial}: dropbox unavailable: ${this.unavailable}`);
-      return;
+    if (!headers.length) {
+      const refusal = refusalOf(out);
+      if (refusal) {
+        this.readerRefused(refusal);
+        return;
+      }
+      if (!DUMP_RE.test(out)) {
+        this.readerFailed(`dumpsys dropbox printed something unexpected: ${firstLine(out)}`);
+        return;
+      }
     }
     this.unavailable = undefined;
     this.polls += 1;
@@ -551,9 +605,14 @@ export class DropboxWatcher {
       list2.push(h);
     }
     this.prune(now);
-    if (!wanted.size) return;
+    if (!wanted.size) {
+      this.readerOk();
+      return;
+    }
 
     const crashes: DropboxCrash[] = [];
+    let printRefused: string | undefined;
+    let printFailed: string | undefined;
     for (const [tag, hs] of wanted) {
       const dates = [...new Set(hs.map((h) => h.date))];
       const cmd =
@@ -563,11 +622,21 @@ export class DropboxWatcher {
       const r = await adb.shell(deps.serial, cmd, { timeoutMs: 30_000, maxBuffer: 64 * 1024 * 1024 });
       if (gen !== this.gen) return;
       if (!r.stdout.trim()) {
-        deps.logger.debug(`${deps.serial}: dumpsys dropbox --print ${tag} failed: ${r.error ?? r.stderr.trim()}`);
+        const why = r.error ?? r.stderr.trim();
+        printFailed = `dumpsys dropbox --print ${tag} gave no output${why ? `: ${why}` : ''}`;
         continue; // retry next poll
       }
+      const records = parseDropboxPrint(r.stdout);
+      if (!records.length) {
+        // Listing allowed, printing refused (OEM): keep the records for when reading works again.
+        const refusal = refusalOf(r.stdout);
+        if (refusal) {
+          printRefused = refusal;
+          continue;
+        }
+      }
       const keys = new Set(hs.map(dropboxKey));
-      for (const record of parseDropboxPrint(r.stdout)) {
+      for (const record of records) {
         if (record.tag !== tag || !keys.has(dropboxKey(record))) continue;
         const c = dropboxToCrash(record, deps.clock, deps.watchStart());
         if (c) crashes.push(c);
@@ -575,6 +644,9 @@ export class DropboxWatcher {
       // Mark everything we asked for as handled (a record deleted meanwhile must not be retried forever).
       for (const h of hs) deps.cursor.seen.set(dropboxKey(h), deviceLocalToEpoch(h.date, deps.clock) ?? now);
     }
+    if (printRefused) this.readerRefused(printRefused);
+    else if (printFailed) this.readerFailed(printFailed);
+    else this.readerOk();
     if (!crashes.length) return;
     crashes.sort((a, b) => a.ts - b.ts);
     if (crashes.some((c) => c.ts > now - 120_000)) {
@@ -586,7 +658,14 @@ export class DropboxWatcher {
       const dup = deps.crashes.findDuplicate(c);
       if (dup) c.entry.data.duplicateOf = dup.id;
       deps.hub.pushDeviceLogs(deps.deviceId, [c.entry]);
-      if (c.pkg && dup?.origin !== 'dropbox') deps.apps.noteCrash(c.pkg, c.meta);
+      // One crash, one report: data_app_native_crash + SYSTEM_TOMBSTONE of a crash seen live both link to
+      // the logcat entry (dropbox copies with duplicateOf are not indexed), so count the first only.
+      const counted = dup !== undefined && (dup.origin === 'dropbox' || this.countedLive.has(dup.id));
+      if (dup?.origin === 'logcat') {
+        this.countedLive.add(dup.id);
+        if (this.countedLive.size > 500) this.countedLive.delete(this.countedLive.values().next().value!);
+      }
+      if (c.pkg && !counted) deps.apps.noteCrash(c.pkg, c.meta);
     }
   }
 

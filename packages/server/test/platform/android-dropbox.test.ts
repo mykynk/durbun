@@ -18,6 +18,7 @@ import {
   type DropboxCursor,
 } from '../../src/platform/android/dropbox';
 import type { CrashAppMeta } from '../../src/platform/android/deviceApps';
+import type { ReaderReport } from '../../src/platform/android/readers';
 import type { RunResult } from '../../src/platform/exec';
 import { silentLogger } from '../../src/util/logger';
 import { createFakeHub } from './helpers';
@@ -152,6 +153,37 @@ describe('dumpsys dropbox parsing', () => {
     expect(daemon.entry.error).toMatchObject({ type: 'SIGABRT', message: 'Check failed: stream != nullptr' });
     expect(daemon.entry.data).toMatchObject({ abortMessage: 'Check failed: stream != nullptr' });
   });
+
+  it('keeps the backtrace when debuggerd prints NOTE lines about unreadable libraries first', () => {
+    const [rec] = parseDropboxPrint(fx('dropbox-print-SYSTEM_TOMBSTONE.txt'));
+    const body = rec!.body.replace(
+      '\nbacktrace:\n',
+      [
+        '',
+        '2 total frames',
+        'backtrace:',
+        '  NOTE: Function names and BuildId information is missing for some frames due',
+        '  NOTE: to unreadable libraries. For unwinds of apps, only shared libraries',
+        '  NOTE: found under the lib/ directory are readable.',
+        '  NOTE: Unreadable libraries:',
+        '  NOTE:   /data/app/~~a1==/com.example.native-b2==/base.apk',
+        '',
+      ].join('\n'),
+    );
+    const c = dropboxToCrash({ ...rec!, body }, IST, NOW)!;
+    expect(c.entry.error!.stack).toBe(
+      '#00 pc 000000000005c2f4  /apex/com.android.runtime/lib64/bionic/libc.so (abort+164) (BuildId: 2e9e3c4b9c1a1d2b3c4d5e6f7a8b9c0d)',
+    );
+    expect(c.entry.message).toContain('backtrace:\n  #00 pc 000000000005c2f4');
+  });
+
+  it('keeps data.package for the UI scope when the record has no Process header', () => {
+    const rec = record('dropbox-print-data_app_crash.txt', '2026-11-02 11:43:03');
+    const { Process: _p, PID: _pid, ...headers } = rec.headers;
+    const c = dropboxToCrash({ ...rec, headers }, IST, NOW)!;
+    expect(c.entry.process).toBeUndefined();
+    expect(c.entry.data).toMatchObject({ package: 'com.mykynk.pati', version: '1.4.0-dev' });
+  });
 });
 
 describe('CrashIndex de-duplication', () => {
@@ -216,13 +248,23 @@ function ok(stdout: string): RunResult<string> {
 
 const LIST_CMD = DROPBOX_TAGS.map((t) => `dumpsys dropbox ${t}`).join(`; echo ${DROPBOX_SEP}; `);
 
-function setup(opts: { listing?: string; cursor?: DropboxCursor; watchStart?: number } = {}) {
+function setup(
+  opts: {
+    listing?: string;
+    cursor?: DropboxCursor;
+    watchStart?: number;
+    shell?: (cmd: string) => RunResult<string> | undefined;
+    appsReady?: boolean;
+  } = {},
+) {
   const calls: string[] = [];
   const adb = {
     path: '/fake/adb',
     tool: { path: '/fake/adb', source: 'path' },
     async shell(_serial: string, cmd: string) {
       calls.push(cmd);
+      const custom = opts.shell?.(cmd);
+      if (custom) return custom;
       if (cmd === LIST_CMD) return ok(opts.listing ?? fx('dropbox-list.txt'));
       const m = /^dumpsys dropbox --print (\S+)/.exec(cmd);
       if (m) return ok(fx(`dropbox-print-${m[1]}.txt`));
@@ -246,12 +288,13 @@ function setup(opts: { listing?: string; cursor?: DropboxCursor; watchStart?: nu
   const noted: Array<{ pkg: string; meta: CrashAppMeta }> = [];
   const third = new Set(['com.mykynk.pati', 'com.example.native', 'com.whatsapp']);
   const apps: DropboxApps = {
-    ready: async () => true,
+    ready: async () => opts.appsReady ?? true,
     isThirdParty: (p) => third.has(p),
     isSystem: (p) => p === 'com.google.android.gms',
     noteCrash: (pkg, meta) => noted.push({ pkg, meta }),
   };
   const cursor = opts.cursor ?? createDropboxCursor();
+  const readers: ReaderReport[] = [];
   const watcher = new DropboxWatcher({
     adb: () => adb,
     serial: 'R58M123ABC',
@@ -263,8 +306,9 @@ function setup(opts: { listing?: string; cursor?: DropboxCursor; watchStart?: nu
     watchStart: () => opts.watchStart ?? NOW - 60_000,
     apps,
     crashes,
+    onReader: (r) => readers.push(r),
   });
-  return { watcher, calls, pushed, noted, crashes, cursor };
+  return { watcher, calls, pushed, noted, crashes, cursor, readers };
 }
 
 describe('DropboxWatcher', () => {
@@ -322,6 +366,27 @@ describe('DropboxWatcher', () => {
     expect(t.watcher.polls).toBe(2);
   });
 
+  it('a native crash seen live counts once, though dropbox files it twice (native_crash + tombstone)', async () => {
+    const t = setup();
+    t.crashes.add({
+      id: 88,
+      ts: ist(2026, 11, 2, 11, 43, 10, 300),
+      deviceId: DEVICE,
+      source: 'device',
+      origin: 'logcat',
+      level: 'fatal',
+      kind: 'crash',
+      tag: 'DEBUG',
+      message: '*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***',
+      pid: 5001,
+      process: 'com.example.native',
+    });
+    await t.watcher.pollNow();
+    const native = t.pushed.filter((e) => e.tag === 'data_app_native_crash' || e.tag === 'SYSTEM_TOMBSTONE');
+    expect(native.map((e) => (e.data as { duplicateOf?: number }).duplicateOf)).toEqual([88, 88]);
+    expect(t.noted.filter((n) => n.pkg === 'com.example.native')).toHaveLength(1);
+  });
+
   it('a replugged device (same cursor) does not repeat records; a new record is read alone', async () => {
     const first = setup();
     await first.watcher.pollNow();
@@ -377,5 +442,77 @@ describe('DropboxWatcher', () => {
     } finally {
       DROPBOX_TIMING.settleMs = saved;
     }
+  });
+
+  it('reader state: ok when the dropbox reads, refused by the OEM, back to ok when it recovers', async () => {
+    let refuse = false;
+    const denial = "Permission Denial: can't dump dropbox from from pid=12345, uid=2000 due to missing android.permission.DUMP permission\n";
+    const t = setup({ shell: (cmd) => (refuse && cmd === LIST_CMD ? ok(denial) : undefined) });
+    await t.watcher.pollNow();
+    expect(t.readers).toEqual([{ status: 'ok' }]);
+    refuse = true;
+    await t.watcher.pollNow();
+    expect(t.readers.at(-1)).toEqual({ status: 'unavailable', code: 'reader.crashReports.dropboxRefused', detail: denial.trim() });
+    refuse = false;
+    await t.watcher.pollNow();
+    expect(t.readers.at(-1)).toEqual({ status: 'ok' });
+    expect(t.watcher.unavailable).toBeUndefined();
+  });
+
+  it('reader state: a failing read is reported at once before the first success, then only twice in a row', async () => {
+    let fail = true;
+    const t = setup({
+      shell: (cmd) =>
+        fail && cmd === LIST_CMD ? { ok: false, code: 1, signal: null, stdout: '', stderr: 'error: closed', timedOut: false } : undefined,
+    });
+    await t.watcher.pollNow();
+    expect(t.readers).toEqual([{ status: 'unavailable', code: 'reader.crashReports.failed', detail: 'dumpsys dropbox gave no output: error: closed' }]);
+    fail = false;
+    await t.watcher.pollNow();
+    expect(t.readers.at(-1)).toEqual({ status: 'ok' });
+    fail = true;
+    await t.watcher.pollNow();
+    expect(t.readers.at(-1)).toEqual({ status: 'ok' }); // one hiccup after a good read: not reported
+    await t.watcher.pollNow();
+    expect(t.readers.at(-1)).toMatchObject({ status: 'unavailable', code: 'reader.crashReports.failed' });
+  });
+
+  it('reader state: unexpected output is a failure, not "no crashes"', async () => {
+    const t = setup({ listing: '/system/bin/sh: dumpsys: inaccessible or not found\n' });
+    await t.watcher.pollNow();
+    expect(t.readers).toEqual([
+      {
+        status: 'unavailable',
+        code: 'reader.crashReports.failed',
+        detail: 'dumpsys dropbox printed something unexpected: /system/bin/sh: dumpsys: inaccessible or not found',
+      },
+    ]);
+    const empty = setup({ listing: LIST_CMD.split('; ').filter((p) => !p.startsWith('echo')).map(() => 'Drop box contents: 0 entries\n\n(No entries found.)\n').join(`${DROPBOX_SEP}\n`) });
+    await empty.watcher.pollNow();
+    expect(empty.readers).toEqual([{ status: 'ok' }]);
+  });
+
+  it('a refused --print keeps the records for later and reports the refusal', async () => {
+    let refuse = true;
+    const t = setup({
+      shell: (cmd) => (refuse && cmd.startsWith('dumpsys dropbox --print') ? ok('Permission Denial: not allowed to print dropbox entries\n') : undefined),
+    });
+    await t.watcher.pollNow();
+    expect(t.pushed).toHaveLength(0);
+    expect(t.cursor.seen.size).toBe(0);
+    expect(t.readers.at(-1)).toMatchObject({ status: 'unavailable', code: 'reader.crashReports.dropboxRefused' });
+    refuse = false;
+    await t.watcher.pollNow();
+    expect(t.pushed).toHaveLength(5);
+    expect(t.readers.at(-1)).toEqual({ status: 'ok' });
+  });
+
+  it('cannot match records without the app list: reported, nothing read', async () => {
+    const t = setup({ appsReady: false });
+    await t.watcher.pollNow();
+    expect(t.calls).toHaveLength(0);
+    expect(t.readers).toEqual([
+      expect.objectContaining({ status: 'unavailable', code: 'reader.crashReports.failed', detail: expect.stringContaining('pm list packages') }),
+    ]);
   });
 });
