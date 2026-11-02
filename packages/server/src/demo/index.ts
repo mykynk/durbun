@@ -10,7 +10,7 @@
  * dropbox / crash-report records) so every "where does this come from" text in the UI can be seen
  * without a device; the `demo:` device ids and `logs.via: 'demo'` mark the data as demo data.
  */
-import type { DeviceActionId, DeviceActionResult, DriverStatus, LogEntry, ToolCheck } from '@durbun/protocol';
+import type { DeviceActionId, DeviceActionResult, DeviceReaderState, DriverStatus, LogEntry, ToolCheck } from '@durbun/protocol';
 import type { DeviceDriver, DriverContext, HubSink } from '../types';
 import { type DemoRuntime, type DeviceUiState, runDemoAction } from './actions';
 import { restamp, type SimApp } from './appSim';
@@ -55,6 +55,25 @@ interface Running {
   kumbaraIos: KumbaraIos;
   watchers: Map<string, () => void>;
   unsubscribe: (() => void)[];
+  /** The Pixel's frame-stats reader as last reported (Android driver rules: on change, else ≤ every 5 min). */
+  frameReader?: { state: DeviceReaderState; at: number };
+  frameLastOk?: number;
+}
+
+const READER_REFRESH_MS = { android: 5 * 60_000, ios: 10 * 60_000 };
+const FRAME_NO_DATA_READS = 5;
+
+/** Reports the Pixel's frame-stats reader the way the Android driver does (platform/android/readers.ts). */
+function reportFrameReader(r: Running, report: { status: 'ok' } | { status: 'unavailable'; code: string; detail: string }): void {
+  const now = Date.now();
+  if (report.status === 'ok') r.frameLastOk = now;
+  const prev = r.frameReader;
+  const code = report.status === 'ok' ? undefined : report.code;
+  if (prev && prev.state.status === report.status && prev.state.code === code && now - prev.at < READER_REFRESH_MS.android) return;
+  const state: DeviceReaderState = report.status === 'ok' ? { status: 'ok' } : { status: report.status, code: report.code, detail: report.detail };
+  if (r.frameLastOk !== undefined) state.lastOk = r.frameLastOk;
+  r.frameReader = { state, at: now };
+  r.ctx.hub.patchDevice(PIXEL_ID, { readers: { frameStats: state } });
 }
 
 const isDemoDevice = (id: string) => (DEMO_DEVICE_IDS as readonly string[]).includes(id);
@@ -213,6 +232,14 @@ export function createDemoDriver(): DeviceDriver {
       },
     );
 
+    // Crash records stay readable on every demo device; lastOk refreshes as often as the drivers send it.
+    const crashReadersOk = (ids: readonly string[]) => {
+      const t = Date.now();
+      for (const id of ids) ctx.hub.patchDevice(id, { readers: { crashReports: { status: 'ok', lastOk: t } } });
+    };
+    sched.repeat(() => READER_REFRESH_MS.android, () => crashReadersOk([PIXEL_ID]));
+    sched.repeat(() => READER_REFRESH_MS.ios, () => crashReadersOk([IPHONE_ID, IPHONE_DEVICE_ID]));
+
     // Battery drift on the Pixel (the simulator has no battery).
     const battery = new Walk(87, 86, 0.05, 0.6, 15, 100);
     sched.repeat(
@@ -314,8 +341,11 @@ export function createDemoDriver(): DeviceDriver {
       const app = allApps(r).find(
         (a) => a.deviceId === deviceId && ((target.pid !== undefined && a.pid === target.pid) || (!!target.processName && a.identity.processName === target.processName)),
       );
-      // SDK-less Android builds also get frame stats (dumpsys gfxinfo / SurfaceFlinger, SPEC §10.4).
+      // SDK-less Android builds also get frame stats (dumpsys gfxinfo / SurfaceFlinger, SPEC §10.4) — except
+      // Pati QA: SurfaceFlinger gives no frame times for its SurfaceView, so after a few empty reads the
+      // Pixel's frame-stats reader says they cannot be read (and why), as the Android driver does.
       const frameStats = app instanceof DeviceOnlyApp && deviceId === PIXEL_ID;
+      const noFrames = frameStats && app === r.patiQa;
       const pid = target.pid ?? app?.pid ?? Object.values(ANDROID_SYSTEM).find((p) => p.name === target.processName)?.pid;
       if (pid === undefined) return;
       const key = `${deviceId}:${pid}`;
@@ -326,9 +356,11 @@ export function createDemoDriver(): DeviceDriver {
       const cpu = new Walk(app ? 18 : 4, app ? 15 : 3, 0.2, app ? 3 : 1, 0.1, 180);
       const mem = new Walk(app ? 230 : 90, app ? 240 : 92, 0.05, 1.5, 20, 600);
       const fps = new Walk(57, 58, 0.3, 2.5, 0, 60);
+      let reads = 0;
       const cancel = r.sched.repeat(
         () => 2000,
-        () =>
+        () => {
+          const frames = frameStats && !noFrames;
           r.ctx.hub.pushMetrics([
             {
               ts: Date.now(),
@@ -338,9 +370,18 @@ export function createDemoDriver(): DeviceDriver {
               cpu: round(cpu.step(rng)),
               memoryMB: round(mem.step(rng)),
               threads: rng.int(app ? 30 : 8, app ? 40 : 20),
-              ...(frameStats ? { fps: Math.round(fps.step(rng)), jankyFrames: rng.chance(0.25) ? rng.int(1, 6) : 0 } : {}),
+              ...(frames ? { fps: Math.round(fps.step(rng)), jankyFrames: rng.chance(0.25) ? rng.int(1, 6) : 0 } : {}),
             },
-          ]),
+          ]);
+          if (frames) reportFrameReader(r, { status: 'ok' });
+          else if (noFrames && ++reads >= FRAME_NO_DATA_READS) {
+            reportFrameReader(r, {
+              status: 'unavailable',
+              code: 'reader.frameStats.noData',
+              detail: `SurfaceFlinger lists a SurfaceView of ${app.identity.bundleId} but gives no frame times for it; gfxinfo does not see what a SurfaceView draws`,
+            });
+          }
+        },
       );
       r.watchers.set(key, cancel);
     },

@@ -105,7 +105,8 @@ export class PatiApp extends DemoApp {
         version: VERSION,
         build: BUILD,
         processName: ios ? 'Runner' : 'com.mykynk.pati',
-        sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter' },
+        // The plugin's native core is attached (native logs / crashes, OkHttp / URLSession): SPEC §10.6.
+        sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter', layers: ['dart', ios ? 'ios' : 'android'] },
         source: 'dart:io',
         capabilities: ['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands'],
         device:

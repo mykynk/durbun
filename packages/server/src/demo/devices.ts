@@ -1,11 +1,25 @@
 /** The demo devices and their background processes. */
-import type { DeviceActionId, DeviceInfo, LogOrigin } from '@durbun/protocol';
+import type { DeviceActionId, DeviceInfo, DeviceReaderState, LogOrigin } from '@durbun/protocol';
 
 export const PIXEL_ID = 'demo:1';
 export const IPHONE_ID = 'demo:2';
 /** A tester's physical iPhone over USB (store / TestFlight build, an Xcode build, crash reports). */
 export const IPHONE_DEVICE_ID = 'demo:3';
+/** Its UDID: names the folder its crash report copies go to (`<tempDir>/crash/<udid>/`, as the iOS driver does). */
+export const IPHONE_DEVICE_UDID = '00008110-001A2B3C4D5E6F70';
 export const DEMO_DEVICE_IDS = [PIXEL_ID, IPHONE_ID, IPHONE_DEVICE_ID] as const;
+
+/**
+ * SDK-less readers (DeviceInfo.readers) as the real drivers report them: crash records can be read on
+ * every demo device (dropbox / DiagnosticReports / devicectl); iOS has no frame stats from outside. The
+ * Pixel's frame-stats reader is set when an SDK-less app is watched (see watchMetrics in index.ts).
+ */
+export const IOS_FRAME_STATS_READER: DeviceReaderState = {
+  status: 'unsupported',
+  code: 'reader.frameStats.unsupported',
+  detail: 'iOS does not give the frame timing of an app to the Mac; FPS is measured inside the app (SDK or Flutter debug).',
+};
+const crashReader = (now: number): DeviceReaderState => ({ status: 'ok', lastOk: now });
 
 /**
  * Device lines of each demo device carry the origin the real driver would set (SPEC §10.2), so the UI's
@@ -91,6 +105,8 @@ export function pixelDevice(now: number): DeviceInfo {
     screen: { width: 1080, height: 2400, density: 420 },
     logs: { status: 'streaming', via: 'demo' },
     actions: [...ANDROID_ACTIONS],
+    // frameStats: not read yet (undefined clears what an earlier demo run left; the hub merges per reader)
+    readers: { crashReports: crashReader(now), frameStats: undefined },
     firstSeen: now,
     lastSeen: now,
   };
@@ -111,6 +127,7 @@ export function iphoneDevice(now: number): DeviceInfo {
     screen: { width: 1206, height: 2622, density: 3 },
     logs: { status: 'streaming', via: 'demo' },
     actions: [...IOS_SIM_ACTIONS],
+    readers: { crashReports: crashReader(now), frameStats: { ...IOS_FRAME_STATS_READER } },
     firstSeen: now,
     lastSeen: now,
   };
@@ -125,13 +142,14 @@ export function iphoneUsbDevice(now: number): DeviceInfo {
     model: 'iPhone14,5',
     manufacturer: 'Apple',
     osVersion: '17.6.1',
-    serial: '00008110-001A2B3C4D5E6F70',
+    serial: IPHONE_DEVICE_UDID,
     connection: 'usb',
     state: 'online',
     battery: { level: 64, charging: true },
     screen: { width: 1170, height: 2532, density: 3 },
     logs: { status: 'streaming', via: 'demo' },
     actions: [...IOS_DEVICE_ACTIONS],
+    readers: { crashReports: crashReader(now), frameStats: { ...IOS_FRAME_STATS_READER } },
     firstSeen: now,
     lastSeen: now,
   };

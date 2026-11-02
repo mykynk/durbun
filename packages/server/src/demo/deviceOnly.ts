@@ -11,19 +11,24 @@
  *  - KumbaraIos       App Store / TestFlight build on the USB iPhone: syslog lines, an old .ips crash
  *                     report and a live SIGSEGV now and then (syslog + the copied .ips).
  */
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import type { DeviceLogInput, DriverContext } from '../types';
 import { type DemoDeviceAppMeta, deviceAppInput, type SimApp, type StopReason } from './appSim';
 import { anrReport } from './content';
 import {
   dropboxRecord,
   ipsCrashReport,
+  type IpsCopy,
+  type IpsInput,
+  ipsReportText,
   KUMBARA_CHANNEL_CRASH,
   KUMBARA_WIDGET_NPE,
   kumbaraAnrTraces,
   kumbaraIosFrames,
   logcatFatal,
 } from './crashReports';
-import { ANDROID_SYSTEM, IOS_DEVICE_SYSTEM } from './devices';
+import { ANDROID_SYSTEM, IOS_DEVICE_SYSTEM, IPHONE_DEVICE_UDID } from './devices';
 import { androidLine, iosLine } from './noise';
 import type { Rng } from './rng';
 import type { Scheduler } from './scheduler';
@@ -420,6 +425,9 @@ export class PatiQaAndroid extends DeviceOnlyApp {
 
 /* ────────────────────────────── Kumbara · TestFlight / App Store build on the USB iPhone ────────────────────────────── */
 
+/** Where the App Store / TestFlight build of Kumbara is installed on the USB iPhone. */
+const KUMBARA_IOS_BUNDLE = '/private/var/containers/Bundle/Application/3F2A9C1D-7B4E-4D8A-9E61-5C0B2A7D4F18/Runner.app';
+
 export class KumbaraIos extends DeviceOnlyApp {
   private readonly containerUuid: string;
   private readonly incidentRng: Rng;
@@ -443,25 +451,49 @@ export class KumbaraIos extends DeviceOnlyApp {
   private ips(pid: number, reportTs: number): DeviceLogInput {
     const d = new Date(reportTs);
     const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
-    return ipsCrashReport({
+    const report: IpsInput = {
       bundleId: KUMBARA,
       appName: 'Kumbara',
       process: 'Runner',
+      procPath: `${KUMBARA_IOS_BUNDLE}/Runner`,
       pid,
       version: this.identity.version,
       build: this.identity.build,
+      model: 'iPhone14,5',
       osVersion: '17.6.1',
       osBuild: '21G93',
       reportTs,
       watchStart: this.deps.watchStart,
       incident: this.incidentRng.uuid(true),
-      frames: kumbaraIosFrames(this.incidentRng.int(1, 0x3fff) * 0x4000),
+      frames: kumbaraIosFrames(this.incidentRng.int(1, 0x3fff) * 0x4000, KUMBARA_IOS_BUNDLE),
       exceptionType: 'EXC_BAD_ACCESS',
       signal: 'SIGSEGV',
       subtype: 'KERN_INVALID_ADDRESS at 0x0000000000000010',
-      termination: 'SIGNAL 11 Segmentation fault: 11',
-      file: `Runner-${stamp}.ips`,
-    });
+      codes: '0x0000000000000001, 0x0000000000000010',
+      indicator: 'Segmentation fault: 11',
+      signalNumber: 11,
+      fileName: `Runner-${stamp}.ips`,
+    };
+    return ipsCrashReport(report, this.saveCopy(report));
+  }
+
+  /**
+   * Writes the report where the iOS driver keeps its copies (`<tempDir>/crash/<udid>/`), so the row's
+   * "Download .ips" works in the demo too. Without a writable temp dir the row simply has no copy.
+   */
+  private saveCopy(report: IpsInput): IpsCopy | undefined {
+    const tempDir = this.deps.ctx.tempDir;
+    if (!tempDir || !path.isAbsolute(tempDir)) return undefined;
+    const dir = path.join(tempDir, 'crash', IPHONE_DEVICE_UDID);
+    const file = path.join(dir, report.fileName);
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      writeFileSync(file, ipsReportText(report), { mode: 0o600 });
+    } catch (err) {
+      this.deps.ctx.logger.debug(`demo: could not write ${file}`, err);
+      return undefined;
+    }
+    return { file, reportUrl: `/api/files/crash/${encodeURIComponent(IPHONE_DEVICE_UDID)}/${encodeURIComponent(report.fileName)}` };
   }
 
   private appLabel(pid: number): string {

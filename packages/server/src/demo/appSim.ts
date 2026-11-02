@@ -12,7 +12,7 @@ import type {
   LogLevel,
   MockRule,
   SdkCapability,
-  SdkPlatform,
+  SdkIdentity,
   SdkToServer,
   ServerToSdk,
 } from '@durbun/protocol';
@@ -37,7 +37,7 @@ export interface AppIdentity {
   version: string;
   build: string;
   processName: string;
-  sdk: { name: string; version: string; platform: SdkPlatform };
+  sdk: SdkIdentity;
   /** NetworkEntry.source of its requests. */
   source: string;
   capabilities: SdkCapability[];

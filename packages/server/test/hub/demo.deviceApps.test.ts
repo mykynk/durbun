@@ -3,12 +3,14 @@
  * SDK-less Play / Firebase / TestFlight builds), origins on every line, dropbox and .ips crash records
  * (previous launch + live, with duplicateOf links), device actions on SDK-less apps — all without a device.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceApp, LogEntry } from '@durbun/protocol';
 import { createDemoDriver } from '../../src/demo/index';
+import { isServableCrashFile } from '../../src/http/api';
+import { crashReportEntry, isCrashReport, parseIps } from '../../src/platform/ios/crashReport';
 import { createSdkLayer } from '../../src/sdk/index';
 import type { DeviceDriver, DriverContext, Hub, SdkLayer } from '../../src/types';
 import { silentLogger } from '../../src/util/logger';
@@ -161,8 +163,32 @@ describe('demo device apps (virtual time)', () => {
       error: { type: 'EXC_BAD_ACCESS', message: 'EXC_BAD_ACCESS (SIGSEGV) · KERN_INVALID_ADDRESS at 0x0000000000000010 · Termination: SIGNAL 11 Segmentation fault: 11' },
     });
     expect(ips[0]!.message).toBe('Kumbara 3.1.0 (310) crashed: EXC_BAD_ACCESS (SIGSEGV) · KERN_INVALID_ADDRESS at 0x0000000000000010');
-    expect(ips[0]!.error!.stack).toMatch(/^Thread 0 Crashed:\n0   App\s+0x[0-9a-f]{16} App \+ 0x2c41a8\n/);
-    expect((ips[0]!.data as { file: string }).file).toMatch(/^Runner-\d{4}-\d{2}-\d{2}-\d{6}\.ips$/);
+    expect(ips[0]!.error!.stack).toMatch(/^Thread 0 Crashed \(com\.apple\.main-thread\):\n0   App\s+0x[0-9a-f]{16} App \+ 0x2c41a8\n/);
+    // the copy sits where the iOS driver keeps its copies, and the row links to its download
+    const { file, reportUrl } = ips[0]!.data as { file: string; reportUrl: string };
+    expect(path.dirname(file)).toBe(path.join(tempDir!, 'crash', '00008110-001A2B3C4D5E6F70'));
+    expect(path.basename(file)).toMatch(/^Runner-\d{4}-\d{2}-\d{2}-\d{6}\.ips$/);
+    expect(reportUrl).toBe(`/api/files/crash/00008110-001A2B3C4D5E6F70/${path.basename(file)}`);
+    expect(isServableCrashFile('00008110-001A2B3C4D5E6F70', path.basename(file))).toBe(true);
+    expect(existsSync(file)).toBe(true);
+  });
+
+  it('the demo .ips copy is a real crash report: the iOS driver reads it into the very same row', async () => {
+    vi.useFakeTimers({ now: START });
+    const { hub, ctx, demo } = setup();
+    await demo.start(ctx);
+    await vi.advanceTimersByTimeAsync(150_000); // the old report + the live SIGSEGV at about 2 min
+    const rows = hub.getLogs().filter((l) => l.origin === 'crash-report');
+    expect(rows.map((l) => (l.data as { previousLaunch: boolean }).previousLaunch)).toEqual([true, false]);
+    for (const row of rows) {
+      const data = row.data as { file: string; reportUrl: string };
+      const report = parseIps(readFileSync(data.file, 'utf8'));
+      expect(report).toMatchObject({ incomplete: false, symbolicated: false, bundleId: 'com.mykynk.kumbara', pid: row.pid });
+      expect(isCrashReport(report!)).toBe(true);
+      const driver = crashReportEntry(report!, { watchStart: START.getTime(), file: data.file, now: Date.now() });
+      const { id: _id, deviceId: _device, source: _source, ...demoRow } = row;
+      expect(demoRow).toEqual({ ...driver, data: { reportUrl: data.reportUrl, ...(driver.data as object) } });
+    }
   });
 
   it('over ~4 virtual minutes: live crashes and ANRs with their dropbox / .ips copies, restarts, calm rates', async () => {
@@ -275,6 +301,58 @@ describe('demo device apps (virtual time)', () => {
     const samples = hub.getMetrics().filter((m) => m.deviceId === 'demo:1' && m.pid === ss.pid);
     expect(samples.length).toBeGreaterThanOrEqual(2);
     expect(samples.some((m) => m.fps !== undefined || m.jankyFrames !== undefined)).toBe(false);
+  });
+
+  it('readers tell "nothing found" from "cannot read"; the Flutter sessions say their native layer is attached', async () => {
+    vi.useFakeTimers({ now: START });
+    const { hub, ctx, demo } = setup();
+    await demo.start(ctx);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const readers = (id: string) => hub.getDevice(id)?.readers;
+    expect(readers('demo:1')).toEqual({ crashReports: { status: 'ok', lastOk: START.getTime() } });
+    for (const id of ['demo:2', 'demo:3']) {
+      expect(readers(id)).toMatchObject({ crashReports: { status: 'ok' }, frameStats: { status: 'unsupported', code: 'reader.frameStats.unsupported' } });
+    }
+
+    // Pati QA (Firebase build): no frames from gfxinfo / SurfaceFlinger → the Pixel says it cannot read them
+    const patiQa = app(hub, 'demo:1', 'com.mykynk.pati.staging')!;
+    demo.watchMetrics?.('demo:1', { pid: patiQa.pids[0] }, true);
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(readers('demo:1')).toEqual({
+      crashReports: { status: 'ok', lastOk: START.getTime() },
+      frameStats: {
+        status: 'unavailable',
+        code: 'reader.frameStats.noData',
+        detail: 'SurfaceFlinger lists a SurfaceView of com.mykynk.pati.staging but gives no frame times for it; gfxinfo does not see what a SurfaceView draws',
+      },
+    });
+    expect(hub.getMetrics().filter((m) => m.pid === patiQa.pids[0]).some((m) => m.fps !== undefined)).toBe(false);
+    demo.watchMetrics?.('demo:1', { pid: patiQa.pids[0] }, false);
+
+    // Kumbara (Play build): frames come in → ok again, with the time of the last good read
+    const kumbara = app(hub, 'demo:1', 'com.mykynk.kumbara')!;
+    demo.watchMetrics?.('demo:1', { pid: kumbara.pids[0] }, true);
+    await vi.advanceTimersByTimeAsync(2_100);
+    expect(readers('demo:1')?.frameStats).toEqual({ status: 'ok', lastOk: Date.now() - 100 });
+    expect(hub.getMetrics().filter((m) => m.pid === kumbara.pids[0]).every((m) => m.fps !== undefined)).toBe(true);
+    demo.watchMetrics?.('demo:1', { pid: kumbara.pids[0] }, false);
+
+    // crash readers refresh their lastOk like the drivers (Android every 5 min, iOS every 10 min)
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(readers('demo:1')?.crashReports?.lastOk).toBeGreaterThan(START.getTime() + 590_000);
+    expect(readers('demo:3')?.crashReports?.lastOk).toBeGreaterThan(START.getTime() + 590_000);
+    expect(readers('demo:1')?.frameStats?.status).toBe('ok'); // a crash-reader patch keeps the frame reader
+
+    // demo off and on again: the Pixel starts without a frame-stats state (nothing watched yet)
+    await demo.stop();
+    await demo.start(ctx);
+    expect(readers('demo:1')).toEqual({ crashReports: { status: 'ok', lastOk: Date.now() } });
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const sdkOf = (deviceId: string, id: string) => hub.getApps().find((a) => a.deviceId === deviceId && a.app.id === id)?.sdk;
+    expect(sdkOf('demo:1', 'com.mykynk.pati')?.layers).toEqual(['dart', 'android']);
+    expect(sdkOf('demo:2', 'com.mykynk.pati')?.layers).toEqual(['dart', 'ios']);
+    expect(sdkOf('demo:1', 'com.mykynk.mahalle')).not.toHaveProperty('layers'); // native Android SDK: one layer
   });
 
   it('the USB iPhone sounds like a phone: its own daemon pids, no simulator paths', async () => {
