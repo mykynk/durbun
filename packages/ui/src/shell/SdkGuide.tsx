@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from 'react';
-import { BookOpen, Cable, FolderOpen, Plug, ShieldCheck, Wifi, Zap } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { BookOpen, Cable, FolderOpen, Plug, ShieldAlert, ShieldCheck, Wifi, Zap } from 'lucide-react';
 import { DEFAULT_PORTS } from '@durbun/protocol';
 import { useLanguage, useT } from '../i18n';
-import { isConnected, ui, updateServerSettings, useConnection, useDevices, useServerSettings, useUi, type SdkGuideTab } from '../data';
+import { isConnected, ui, updateServerSettings, useConnection, useDevices, useServerSettings, useUi, type SdkGuideSection, type SdkGuideTab } from '../data';
 import { Dialog, confirm } from '../components/Dialog';
 import { Tabs } from '../components/Tabs';
 import { Button } from '../components/Button';
@@ -46,12 +46,47 @@ export function SdkGuideDialog() {
   );
 }
 
+/** Scroll to the section a link asked for ("İç test derlemesinde aç" → release), once per request. */
+function useSectionScroll(tab: SdkGuideTab) {
+  const section = useUi((s) => s.sdkGuideSection);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!section) return;
+    // 'setup' is the top of the guide: keep the tabs and the "works without the SDK" note in view.
+    if (section === 'setup') {
+      ui.consumeSdkGuideSection();
+      return;
+    }
+    const id = requestAnimationFrame(() => {
+      const el = root.current?.querySelector<HTMLElement>(`[data-sdk-section="${section}"]`);
+      if (el) {
+        el.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+        el.classList.add('is-flash');
+        setTimeout(() => el.classList.remove('is-flash'), 1200);
+      }
+      ui.consumeSdkGuideSection();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [section, tab]);
+  return root;
+}
+
+function Section({ id, title, children }: { id: SdkGuideSection | 'optional'; title: ReactNode; children: ReactNode }) {
+  return (
+    <section className="sdk-section" data-sdk-section={id}>
+      <h3 className="sdk-section__title">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
 function SdkGuideBody({ tab }: { tab: SdkGuideTab }) {
   const t = useT();
   const [repo, setRepo] = usePersistentState('sdk.repoDir', BUILD_REPO_DIR);
   const repoDir = repo.trim().replace(/\/+$/, '') || BUILD_REPO_DIR;
+  const root = useSectionScroll(tab);
   return (
-    <div className="sdk">
+    <div className="sdk" ref={root}>
       <Tabs
         value={tab}
         onChange={(v) => ui.openSdkGuide(v)}
@@ -86,32 +121,61 @@ function FlutterGuide({ repo }: { repo: string }) {
   const lang = useLanguage();
   return (
     <>
-      <Callout tone="info" icon={Zap} title={t('shell.sdk.flutter.zeroTitle')} className="sdk-zero">
+      <Callout
+        tone="info"
+        icon={Zap}
+        title={t('shell.sdk.flutter.zeroTitle')}
+        className="sdk-zero"
+        actions={
+          <Button size="sm" variant="ghost" icon={BookOpen} onClick={() => ui.openDataSources()}>
+            {t('shell.sdk.flutter.sourcesLink')}
+          </Button>
+        }
+      >
         {t('shell.sdk.flutter.zeroBody')}
       </Callout>
-      <ol className="sdk-steps">
-        <Step n={1} title={t('shell.sdk.flutter.add')}>
-          <p className="sdk-p">{t('shell.sdk.flutter.addHint')}</p>
-          <Snippet title="pubspec.yaml" lang="yaml" code={S.flutterPubspec(repo)} />
-        </Step>
-        <Step n={2} title={t('shell.sdk.flutter.wrap')}>
-          <p className="sdk-p">{t('shell.sdk.flutter.wrapHint')}</p>
-          <Snippet title="lib/main.dart" lang="dart" code={S.flutterMain(lang)} />
-        </Step>
-        <Step n={3} title={t('shell.sdk.flutter.use')}>
-          <p className="sdk-p">{t('shell.sdk.flutter.useHint')}</p>
-          <Snippet lang="dart" code={S.flutterUsage(lang)} />
-        </Step>
-        <Step n={4} title={t('shell.sdk.flutter.dio')}>
-          <p className="sdk-p">{t('shell.sdk.flutter.dioHint')}</p>
-          <Snippet title="pubspec.yaml" lang="yaml" code={S.flutterDioPubspec(repo)} />
-          <Snippet lang="dart" code={S.FLUTTER_DIO} />
-        </Step>
-        <Step n={5} title={t('shell.sdk.flutter.noSdk')}>
-          <p className="sdk-p">{t('shell.sdk.flutter.noSdkHint')}</p>
-          <VmAttach />
-        </Step>
-      </ol>
+      <Section id="setup" title={t('shell.sdk.flutter.setupTitle')}>
+        <ol className="sdk-steps">
+          <Step n={1} title={t('shell.sdk.flutter.add')}>
+            <p className="sdk-p">{t('shell.sdk.flutter.addHint')}</p>
+            <Snippet title="pubspec.yaml" lang="yaml" code={S.flutterPubspec(repo)} />
+          </Step>
+          <Step n={2} title={t('shell.sdk.flutter.wrap')}>
+            <p className="sdk-p">{t('shell.sdk.flutter.wrapHint')}</p>
+            <Snippet title="lib/main.dart" lang="dart" code={S.flutterMain(lang)} />
+          </Step>
+        </ol>
+        <p className="sdk-p sdk-done">{t('shell.sdk.flutter.done')}</p>
+      </Section>
+      <Section id="release" title={t('shell.sdk.flutter.releaseTitle')}>
+        <p className="sdk-p">{t('shell.sdk.flutter.releaseHint')}</p>
+        <Snippet lang="shell" code={S.flutterReleaseFlag(lang)} />
+        <Callout tone="warn" icon={ShieldAlert} compact title={t('shell.sdk.flutter.releaseNeverTitle')}>
+          {t('shell.sdk.flutter.releaseNever')}
+        </Callout>
+      </Section>
+      <Section id="native" title={t('shell.sdk.flutter.nativeTitle')}>
+        <p className="sdk-p">{t('shell.sdk.flutter.nativeAndroid')}</p>
+        <Snippet title="android/app/src/main/kotlin/…" lang="kotlin" code={S.flutterNativeAndroid(lang)} />
+        <p className="sdk-p">{t('shell.sdk.flutter.nativeIos')}</p>
+      </Section>
+      <Section id="optional" title={t('shell.sdk.flutter.optionalTitle')}>
+        <ol className="sdk-steps sdk-steps--plain">
+          <Step n={1} title={t('shell.sdk.flutter.use')}>
+            <p className="sdk-p">{t('shell.sdk.flutter.useHint')}</p>
+            <Snippet lang="dart" code={S.flutterUsage(lang)} />
+          </Step>
+          <Step n={2} title={t('shell.sdk.flutter.dio')}>
+            <p className="sdk-p">{t('shell.sdk.flutter.dioHint')}</p>
+            <Snippet title="pubspec.yaml" lang="yaml" code={S.flutterDioPubspec(repo)} />
+            <Snippet lang="dart" code={S.FLUTTER_DIO} />
+          </Step>
+        </ol>
+      </Section>
+      <Section id="vm" title={t('shell.sdk.flutter.noSdk')}>
+        <p className="sdk-p">{t('shell.sdk.flutter.noSdkHint')}</p>
+        <VmAttach />
+      </Section>
     </>
   );
 }
@@ -171,7 +235,7 @@ function AndroidGuide({ repo }: { repo: string }) {
   const t = useT();
   const lang = useLanguage();
   return (
-    <ol className="sdk-steps">
+    <ol className="sdk-steps" data-sdk-section="setup">
       <Step n={1} title={t('shell.sdk.android.modules')}>
         <p className="sdk-p">{t('shell.sdk.android.modulesHint')}</p>
         <Snippet title="settings.gradle.kts" lang="kotlin" code={S.androidSettings(repo)} />
@@ -179,8 +243,10 @@ function AndroidGuide({ repo }: { repo: string }) {
         <Snippet title="app/build.gradle.kts" lang="kotlin" code={S.androidDependencies(lang)} />
       </Step>
       <Step n={2} title={t('shell.sdk.android.start')}>
-        <p className="sdk-p">{t('shell.sdk.android.startHint')}</p>
-        <Snippet lang="kotlin" code={S.androidStart(lang)} />
+        <div data-sdk-section="native">
+          <p className="sdk-p">{t('shell.sdk.android.startHint')}</p>
+          <Snippet lang="kotlin" code={S.androidStart(lang)} />
+        </div>
       </Step>
       <Step n={3} title={t('shell.sdk.android.use')}>
         <p className="sdk-p">{t('shell.sdk.android.useHint')}</p>
@@ -194,7 +260,7 @@ function IosGuide({ repo }: { repo: string }) {
   const t = useT();
   const lang = useLanguage();
   return (
-    <ol className="sdk-steps">
+    <ol className="sdk-steps" data-sdk-section="setup">
       <Step n={1} title={t('shell.sdk.ios.add')}>
         <p className="sdk-p">{t('shell.sdk.ios.addHint')}</p>
         <div className="sdk-path">
@@ -220,7 +286,7 @@ function RnGuide({ repo }: { repo: string }) {
   const t = useT();
   const lang = useLanguage();
   return (
-    <ol className="sdk-steps">
+    <ol className="sdk-steps" data-sdk-section="setup">
       <Step n={1} title={t('shell.sdk.rn.build')}>
         <p className="sdk-p">{t('shell.sdk.rn.buildHint')}</p>
         <Snippet lang="shell" code={S.rnPack(repo, lang)} />
@@ -316,6 +382,10 @@ function ConnectionNotes({ tab }: { tab: SdkGuideTab }) {
           <ShieldCheck size={14} aria-hidden /> {t('shell.sdk.releaseTitle')}
         </h3>
         <p className="sdk-p">{t(`shell.sdk.releaseBy.${tab}`)}</p>
+        <button type="button" className="src-link" onClick={() => ui.openDataSources()}>
+          <BookOpen size={13} aria-hidden />
+          {t('shell.sdk.flutter.sourcesLink')}
+        </button>
       </section>
     </div>
   );

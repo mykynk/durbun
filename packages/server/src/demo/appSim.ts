@@ -5,6 +5,8 @@
  */
 import type {
   AppActionDescriptor,
+  AppBuildType,
+  DeviceApp,
   ErrorInfo,
   Header,
   LogLevel,
@@ -39,10 +41,52 @@ export interface AppIdentity {
   /** NetworkEntry.source of its requests. */
   source: string;
   capabilities: SdkCapability[];
-  device: { model: string; name: string; osVersion: string; apiLevel?: number; manufacturer: string };
+  device: { model: string; name: string; osVersion: string; apiLevel?: number; manufacturer: string; isPhysical?: boolean };
 }
 
 export type StopReason = 'crash' | 'user' | 'restart' | 'clear-data' | 'uninstall' | 'demo-stop';
+
+/** How the demo device reports an installed build (SPEC §10.2 DeviceApp). */
+export interface DemoDeviceAppMeta {
+  buildType: AppBuildType;
+  install: DeviceApp['install'];
+}
+
+/**
+ * What the device actions and the driver need from any simulated app process — with the SDK
+ * (DemoApp) or without it (DeviceOnlyApp).
+ */
+export interface SimApp {
+  readonly deviceId: string;
+  readonly identity: { name: string; bundleId: string; version: string; build: string; processName: string };
+  installed: boolean;
+  readonly running: boolean;
+  readonly pid: number | undefined;
+  launch(reason?: string): boolean;
+  stop(reason: StopReason): void;
+}
+
+/** DeviceApp upsert for a simulated app (identity + how it was installed + live process state). */
+export function deviceAppInput(
+  app: Pick<SimApp, 'deviceId' | 'identity'>,
+  platform: 'android' | 'ios',
+  meta: DemoDeviceAppMeta,
+  state: { pids: number[]; running: boolean },
+): Parameters<DriverContext['hub']['upsertDeviceApp']>[0] {
+  const input: Parameters<DriverContext['hub']['upsertDeviceApp']>[0] = {
+    deviceId: app.deviceId,
+    id: app.identity.bundleId,
+    name: app.identity.name,
+    version: app.identity.version,
+    build: app.identity.build,
+    buildType: meta.buildType,
+    install: { ...meta.install },
+    pids: [...state.pids],
+    running: state.running,
+  };
+  if (platform === 'ios' || app.identity.processName !== app.identity.bundleId) input.processName = app.identity.processName;
+  return input;
+}
 
 export interface CommandOutcome {
   ok: boolean;
@@ -52,11 +96,13 @@ export interface CommandOutcome {
 
 const OUTBOX_LIMIT = 5000;
 
-export abstract class DemoApp {
+export abstract class DemoApp implements SimApp {
   pid: number | undefined;
   appId: string | undefined;
   state: 'stopped' | 'starting' | 'running' = 'stopped';
   installed = true;
+  /** When set, the app is also reported as a DeviceApp (the device's view of the installed build). */
+  deviceApp: DemoDeviceAppMeta | undefined;
   /** Changes on every process start/stop: timers of an old process never fire. */
   protected gen = 0;
   protected mocks: MockRule[] = [];
@@ -137,6 +183,8 @@ export abstract class DemoApp {
     this.nextPid += this.rng.int(37, 420);
     this.launches++;
     const firstLaunch = this.launches === 1;
+    // The device reports the app (with its pid) before anyone sees the process start.
+    this.reportDeviceApp([this.pid], true);
     this.deps.ctx.hub.setProcess({ deviceId: this.deviceId, pid: this.pid, name: this.identity.processName, event: 'started', ts: this.now() });
     this.onProcessStart(reason);
     this.after(this.rng.int(220, 520), () => {
@@ -159,6 +207,15 @@ export abstract class DemoApp {
     if (reason === 'demo-stop') return; // the device goes away; the process did not die
     this.onProcessEnd(reason);
     if (pid !== undefined) this.deps.ctx.hub.setProcess({ deviceId: this.deviceId, pid, name: this.identity.processName, event: 'died', ts: this.now() });
+    if (reason === 'uninstall') {
+      if (this.deviceApp) this.deps.ctx.hub.removeDeviceApps(this.deviceId, [this.identity.bundleId]);
+    } else this.reportDeviceApp([], false);
+  }
+
+  /** The device's view of this build: pids / running plus install source and build type. */
+  reportDeviceApp(pids: number[], running: boolean, extra: { lastActivity?: number } = {}): void {
+    if (!this.deviceApp) return;
+    this.deps.ctx.hub.upsertDeviceApp({ ...deviceAppInput(this, this.deps.platform, this.deviceApp, { pids, running }), ...extra });
   }
 
   /** Transport blip: the SDK loses its connection and reconnects with the same session key. */
@@ -203,7 +260,7 @@ export abstract class DemoApp {
         name: this.identity.device.name,
         osVersion: this.identity.device.osVersion,
         apiLevel: this.identity.device.apiLevel,
-        isPhysical: false,
+        isPhysical: this.identity.device.isPhysical ?? false,
       },
       session: key,
       capabilities: this.identity.capabilities,

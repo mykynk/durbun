@@ -18,6 +18,7 @@ import {
   Trash2,
   VolumeX,
   WrapText,
+  ScrollText,
 } from 'lucide-react';
 import { LOG_LEVELS, type AppSession, type LogEntry, type LogLevel, type LogSource } from '@durbun/protocol';
 import {
@@ -36,7 +37,6 @@ import {
   usePrefs,
   scopeLogCounts,
   useUi,
-  type Scope,
 } from '../../data';
 import {
   SplitPane,
@@ -74,6 +74,7 @@ import { DetailPanel, displayText, entryAsLine } from './components/DetailPanel'
 import { Histogram } from './components/Histogram';
 import { CrashBanner, NewLinesPill, PausedBar, crashTitle } from './components/Banners';
 import { NoLogsState, NoMatchState, type ActiveFilter } from './components/EmptyStates';
+import { ExplainEmpty } from '../../sources';
 import { HighlightRulesDialog, NoiseRulesDialog, SavedFiltersDialog } from './components/RulesDialogs';
 
 const ALL_SOURCES: SourceToggles = { device: true, app: true, system: true };
@@ -94,12 +95,6 @@ function appsSignature(apps: Record<string, AppSession>): string {
     .map((a) => `${a.id}|${a.deviceId}|${a.app.id}|${a.app.name}|${a.app.processName ?? ''}|${a.app.pid ?? ''}|${a.sdk.platform}`)
     .sort()
     .join('\n');
-}
-
-function scopeSignature(scope: Scope, appsSig: string): string {
-  if (scope.kind === 'all') return 'all';
-  if (scope.kind === 'device') return `d:${scope.deviceId}`;
-  return `a:${scope.appId}:${scope.exact ? 1 : 0}:${appsSig}`;
 }
 
 /** Noise predicate with a per-entry cache (scope switches rescan 200k entries). */
@@ -208,7 +203,8 @@ export default function LogsView() {
   const appsRef = useRef(apps);
   appsRef.current = apps;
   const appsSig = useMemo(() => appsSignature(apps), [apps]);
-  const scopeKey = scopeSignature(compiledScope.scope, appsSig);
+  // Membership signature of the scope (changes when its sessions / pids / names change, not on stats churn).
+  const scopeKey = compiledScope.key;
   const scopeRef = useRef(compiledScope);
   scopeRef.current = compiledScope;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -297,8 +293,11 @@ export default function LogsView() {
   const hl = useMemo(() => buildHighlighter(compiledQuery.highlights, highlightRules), [compiledQuery, highlightRules]);
   const impliedProcesses = useMemo(() => {
     const s = new Set<string>();
-    if (compiledScope.scope.kind === 'app' && compiledScope.app) {
-      const key = `${compiledScope.app.deviceId}|${compiledScope.app.app.id}`;
+    const kind = compiledScope.scope.kind;
+    if ((kind === 'app' || kind === 'deviceApp') && compiledScope.deviceId && compiledScope.bundleId) {
+      const key = `${compiledScope.deviceId}|${compiledScope.bundleId}`;
+      s.add(compiledScope.bundleId);
+      if (compiledScope.deviceApp?.processName) s.add(compiledScope.deviceApp.processName);
       for (const a of Object.values(appsRef.current)) {
         if (`${a.deviceId}|${a.app.id}` !== key) continue;
         s.add(a.app.id);
@@ -346,7 +345,26 @@ export default function LogsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appsSig, scopeKey]);
 
-  const appName = useCallback((e: LogEntry) => appForEntry(e)?.app.name, [appForEntry]);
+  const appName = useCallback(
+    (e: LogEntry) => {
+      const sdkName = appForEntry(e)?.app.name;
+      if (sdkName) return sdkName;
+      // SDK-less apps: the name the device reports (iOS display name, Android label when known).
+      const data = e.data as { package?: unknown; bundleId?: unknown; bundleID?: unknown } | undefined;
+      const named = [data?.package, data?.bundleId, data?.bundleID].find((v): v is string => typeof v === 'string' && v.length > 0);
+      const deviceApps = useHub.getState().deviceApps;
+      const pkg = named ?? e.process;
+      if (!pkg) return undefined;
+      const base = pkg.includes(':') ? pkg.slice(0, pkg.indexOf(':')) : pkg;
+      const direct = deviceApps[`${e.deviceId}|${base}`];
+      if (direct) return direct.name || direct.id;
+      // iOS lines name the executable ("Runner"): the app whose live pid it is.
+      if (e.pid !== undefined)
+        for (const d of Object.values(deviceApps)) if (d.deviceId === e.deviceId && d.processName === e.process && d.pids.includes(e.pid)) return d.name || d.id;
+      return undefined;
+    },
+    [appForEntry],
+  );
 
   const d = useMemo<RowDisplay>(
     () => ({ timeFormat, wrap: wrapLines, lang, hl, impliedProcesses, identity, appName }),
@@ -631,15 +649,21 @@ export default function LogsView() {
             ? t('logs.clear.all')
             : scope.kind === 'device'
               ? t('logs.clear.device', { name: deviceDisplayName(useHub.getState().devices[scope.deviceId], scope.deviceId) })
-              : t('logs.clear.app', { name: cs.app?.app.name ?? scope.appId });
+              : scope.kind === 'deviceApp' && !(cs.appIds && cs.appIds.size)
+                ? t('logs.clear.deviceApp', {
+                    name: cs.deviceApp?.name || scope.bundleId,
+                    device: deviceDisplayName(useHub.getState().devices[scope.deviceId], scope.deviceId),
+                  })
+                : t('logs.clear.app', { name: cs.app?.app.name ?? (scope.kind === 'app' ? scope.appId : scope.bundleId) });
         const ok = await confirm({ title: t('logs.clear.title'), message, confirmLabel: t('logs.clear.confirm'), danger: true, icon: Trash2 });
         if (!ok) return;
       }
       try {
         if (scope.kind === 'all') await sendCommand({ name: 'clear', target: 'logs' });
         else if (scope.kind === 'device') await sendCommand({ name: 'clear', target: 'logs', deviceId: scope.deviceId });
+        else if (scope.kind === 'deviceApp' && !(cs.appIds && cs.appIds.size)) await sendCommand({ name: 'clear', target: 'logs', deviceId: scope.deviceId });
         else {
-          const ids = cs.appIds && cs.appIds.size ? [...cs.appIds] : [scope.appId];
+          const ids = cs.appIds && cs.appIds.size ? [...cs.appIds] : scope.kind === 'app' ? [scope.appId] : [];
           await Promise.all(ids.map((appId) => sendCommand({ name: 'clear', target: 'logs', deviceId: cs.deviceId, appId })));
         }
         setPaused(false);
@@ -658,6 +682,10 @@ export default function LogsView() {
     const cs = scopeRef.current;
     if (cs.scope.kind === 'all') return t('shell.scope.all');
     if (cs.scope.kind === 'device') return deviceDisplayName(useHub.getState().devices[cs.scope.deviceId], cs.scope.deviceId);
+    if (cs.scope.kind === 'deviceApp') {
+      const name = cs.app?.app.name || cs.deviceApp?.name || cs.scope.bundleId;
+      return `${name} · ${deviceDisplayName(useHub.getState().devices[cs.scope.deviceId], cs.scope.deviceId)}`;
+    }
     return cs.app ? `${cs.app.app.name} · ${deviceDisplayName(useHub.getState().devices[cs.app.deviceId], cs.app.deviceId)}` : cs.scope.appId;
   }, []);
 
@@ -935,7 +963,7 @@ export default function LogsView() {
                 {filtersActive ? (
                   <NoMatchState inScope={inScope} filters={activeFilters} onClearAll={clearFilters} noiseHidden={hideNoise && snap.counts.noise > 0} onShowNoise={() => setPref('hideNoise', false)} />
                 ) : (
-                  <NoLogsState scope={compiledScope.scope} device={scopeDevice} />
+                  <ExplainEmpty capability="logs" icon={ScrollText} fallback={<NoLogsState scope={compiledScope.scope} device={scopeDevice} />} />
                 )}
               </div>
             ) : (

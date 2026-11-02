@@ -1,8 +1,22 @@
-/** The two demo devices and their background processes. */
-import type { DeviceActionId, DeviceInfo } from '@durbun/protocol';
+/** The demo devices and their background processes. */
+import type { DeviceActionId, DeviceInfo, LogOrigin } from '@durbun/protocol';
 
 export const PIXEL_ID = 'demo:1';
 export const IPHONE_ID = 'demo:2';
+/** A tester's physical iPhone over USB (store / TestFlight build, an Xcode build, crash reports). */
+export const IPHONE_DEVICE_ID = 'demo:3';
+export const DEMO_DEVICE_IDS = [PIXEL_ID, IPHONE_ID, IPHONE_DEVICE_ID] as const;
+
+/**
+ * Device lines of each demo device carry the origin the real driver would set (SPEC §10.2), so the UI's
+ * "where does this come from" texts show what they will show with real devices. The device ids
+ * (`demo:`) and `logs.via: 'demo'` still say it is demo data.
+ */
+export const DEMO_LOG_ORIGIN: Record<string, LogOrigin> = {
+  [PIXEL_ID]: 'logcat',
+  [IPHONE_ID]: 'simctl-log',
+  [IPHONE_DEVICE_ID]: 'idevicesyslog',
+};
 
 export interface DemoProcess {
   pid: number;
@@ -47,6 +61,19 @@ export const IOS_SIM_ACTIONS: DeviceActionId[] = [
   'status-bar',
 ];
 
+/** What a trusted physical iPhone offers (devicectl + idevicescreenshot + idevicesyslog). */
+export const IOS_DEVICE_ACTIONS: DeviceActionId[] = [
+  'list-apps',
+  'app-launch',
+  'app-stop',
+  'app-restart',
+  'app-install',
+  'app-uninstall',
+  'open-url',
+  'screenshot',
+  'logs-restart',
+];
+
 export function pixelDevice(now: number): DeviceInfo {
   return {
     id: PIXEL_ID,
@@ -89,6 +116,27 @@ export function iphoneDevice(now: number): DeviceInfo {
   };
 }
 
+export function iphoneUsbDevice(now: number): DeviceInfo {
+  return {
+    id: IPHONE_DEVICE_ID,
+    platform: 'ios',
+    kind: 'physical',
+    name: 'iPhone 13 · Demo',
+    model: 'iPhone14,5',
+    manufacturer: 'Apple',
+    osVersion: '17.6.1',
+    serial: '00008110-001A2B3C4D5E6F70',
+    connection: 'usb',
+    state: 'online',
+    battery: { level: 64, charging: true },
+    screen: { width: 1170, height: 2532, density: 3 },
+    logs: { status: 'streaming', via: 'demo' },
+    actions: [...IOS_DEVICE_ACTIONS],
+    firstSeen: now,
+    lastSeen: now,
+  };
+}
+
 /** Long-running Android system processes (pid → name). */
 export const ANDROID_SYSTEM = {
   init: { pid: 1, name: 'init' },
@@ -124,5 +172,20 @@ export const IOS_SYSTEM = {
   usernotificationsd: { pid: 341, name: 'usernoted' },
 } as const satisfies Record<string, DemoProcess>;
 
+/** Long-running daemons of the physical iPhone (real devices have small, different pids). */
+export const IOS_DEVICE_SYSTEM = {
+  launchd: { pid: 1, name: 'launchd' },
+  springboard: { pid: 34, name: 'SpringBoard' },
+  backboardd: { pid: 63, name: 'backboardd' },
+  runningboardd: { pid: 29, name: 'runningboardd' },
+  locationd: { pid: 84, name: 'locationd' },
+  mdns: { pid: 118, name: 'mDNSResponder' },
+  nsurlsessiond: { pid: 121, name: 'nsurlsessiond' },
+  tccd: { pid: 132, name: 'tccd' },
+  reportCrash: { pid: 1904, name: 'ReportCrash' },
+  osanalyticshelper: { pid: 1907, name: 'osanalyticshelper' },
+} as const satisfies Record<string, DemoProcess>;
+
 export const ANDROID_PROCESS_LIST: DemoProcess[] = Object.values(ANDROID_SYSTEM);
 export const IOS_PROCESS_LIST: DemoProcess[] = Object.values(IOS_SYSTEM);
+export const IOS_DEVICE_PROCESS_LIST: DemoProcess[] = Object.values(IOS_DEVICE_SYSTEM);

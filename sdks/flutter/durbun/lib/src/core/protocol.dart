@@ -30,6 +30,21 @@ const bool kDurbunReleaseMode = bool.fromEnvironment('dart.vm.product');
 const bool kDurbunProfileMode = bool.fromEnvironment('dart.vm.profile');
 const bool kDurbunDebugMode = !kDurbunReleaseMode && !kDurbunProfileMode;
 
+/// `--dart-define=DURBUN=true|false` given at build time.
+const bool kDurbunDefineGiven = bool.hasEnvironment('DURBUN');
+
+/// Value of `--dart-define=DURBUN=…` (false when not given).
+const bool kDurbunDefine = bool.fromEnvironment('DURBUN');
+
+/// Whether the SDK runs when `DurbunOptions.enabled` is null: debug and
+/// profile builds yes, release builds only with `--dart-define=DURBUN=true`.
+/// `--dart-define=DURBUN=false` turns it off in every build mode.
+bool durbunEnabledByDefault({
+  bool releaseMode = kDurbunReleaseMode,
+  bool defineGiven = kDurbunDefineGiven,
+  bool defineValue = kDurbunDefine,
+}) => defineGiven ? defineValue : !releaseMode;
+
 /// Current time as epoch milliseconds with microsecond precision (device clock).
 double nowEpochMs() => DateTime.now().microsecondsSinceEpoch / 1000.0;
 
@@ -186,6 +201,11 @@ class PendingBody {
 
 /// Key that marks a [PendingBody] map inside an outgoing message.
 const String kPendingBodyMarker = r'$durbunPendingBody';
+
+/// Key of an outgoing message that is already encoded, i.e. a map with this
+/// single key whose value is one JSON object as a string (lines produced by
+/// the native layer of the Flutter plugin). The encoder writes it as is.
+const String kEncodedLineKey = r'$durbunEncodedLine';
 
 /// `[name, value]` header pairs from a map-like iteration.
 typedef HeaderPairs = List<List<String>>;

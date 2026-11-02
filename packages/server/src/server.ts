@@ -175,8 +175,38 @@ async function settle(name: string, fn: () => Promise<unknown>, logger: Logger, 
 
 /* ────────────────────────────── start ────────────────────────────── */
 
-export function startServer(opts: StartServerOptions): Promise<StartedServer> {
-  return startServerWith(opts, defaultFactories);
+/**
+ * Start a complete Dürbün server in this process. This is the programmatic entry used by the CLI and by
+ * embedding hosts such as the Mac app (SPEC §10.7):
+ *
+ *   const server = await startServer({ httpPort: 9750, sdkPort: 9751, demo: false, dataDir, uiDir, verbose: false });
+ *   window.loadURL(server.url);            // http://localhost:<bound port>
+ *   app.on('before-quit', () => server.stop());
+ *
+ * It never calls process.exit, never reads stdin and installs no signal / uncaughtException handlers
+ * (the CLI adds those itself with installShutdownHandlers). It rejects with a ServerStartError
+ * (`code` 'EADDRINUSE' | 'EACCES' | 'hub.failed' | …) when the HTTP port cannot be used; use
+ * probeServer(port) to tell "another Dürbün is already running there" from "another program".
+ * Everything else (missing adb / Xcode, SDK port taken, a driver failing) is reported through
+ * `warnings`, driver status and the doctor, never thrown. `stop()` is idempotent and stops every child
+ * process the drivers started. `httpPort: 0` binds a free port (`url` has the real one).
+ */
+export function startServer(opts: StartServerOptions, extras: StartServerExtras = {}): Promise<StartedServer> {
+  return startServerWith(opts, defaultFactories, extras);
+}
+
+/** Is a Dürbün server answering on this port (GET /api/health)? Resolves with its version, never rejects. */
+export async function probeServer(port: number, timeoutMs = 1_500): Promise<{ version: string } | undefined> {
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) return undefined;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as { ok?: unknown; name?: unknown; version?: unknown };
+    if (body && body.ok === true && body.name === 'durbun') return { version: String(body.version ?? '?') };
+  } catch {
+    /* nothing there, or not HTTP */
+  }
+  return undefined;
 }
 
 export async function startServerWith(opts: StartServerOptions, factories: ServerFactories, extras: StartServerExtras = {}): Promise<StartedServer> {
@@ -253,6 +283,7 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
     hub,
     getDevices: () => hub.getDevices(),
     getApps: () => hub.getApps(),
+    getDeviceApps: () => hub.getDeviceApps(),
     onLogs: (listener) => hub.onLogs(listener),
     sdk,
     settings: () => config.settings,

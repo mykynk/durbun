@@ -12,6 +12,7 @@ import {
   type AppSession,
   type ClearTarget,
   type DeviceActionId,
+  type DeviceApp,
   type DeviceActionResult,
   type DeviceInfo,
   type DriverStatus,
@@ -142,6 +143,7 @@ export class FakeHub implements Hub {
   network = new Map<string, NetworkDetail>();
   metrics: MetricSample[] = [];
   processes: ProcessUpdate[] = [];
+  deviceApps = new Map<string, DeviceApp>();
   settings: ServerSettings;
   notices: UiNotice[] = [];
   cleared: ClearEvent[] = [];
@@ -172,7 +174,18 @@ export class FakeHub implements Hub {
 
   /** Deliver a change to subscribers like the real batcher does. */
   emit(change: Partial<HubChange>): void {
-    const full: HubChange = { logs: [], network: [], devices: [], removedDevices: [], apps: [], metrics: [], processes: [], ...change };
+    const full: HubChange = {
+      logs: [],
+      network: [],
+      devices: [],
+      removedDevices: [],
+      apps: [],
+      metrics: [],
+      processes: [],
+      deviceApps: [],
+      removedDeviceApps: [],
+      ...change,
+    } as HubChange;
     for (const l of this.changeListeners) l(full);
   }
 
@@ -219,6 +232,29 @@ export class FakeHub implements Hub {
   }
   getApp(id: string): AppSession | undefined {
     return this.apps.get(id);
+  }
+  getDeviceApps(): DeviceApp[] {
+    return [...this.deviceApps.values()];
+  }
+  upsertDeviceApp(input: Parameters<Hub['upsertDeviceApp']>[0]): DeviceApp {
+    const key = `${input.deviceId}|${input.id}`;
+    const prev = this.deviceApps.get(key);
+    const { crashReportsDelta: _delta, ...rest } = input;
+    const app: DeviceApp = {
+      buildType: 'unknown',
+      install: { source: 'unknown' },
+      pids: [],
+      running: false,
+      ...prev,
+      ...rest,
+      key,
+      lastActivity: Math.max(prev?.lastActivity ?? 0, input.lastActivity ?? Date.now()),
+    };
+    this.deviceApps.set(key, app);
+    return app;
+  }
+  removeDeviceApps(deviceId: string, ids?: string[]): void {
+    for (const [key, app] of [...this.deviceApps]) if (app.deviceId === deviceId && (!ids || ids.includes(app.id))) this.deviceApps.delete(key);
   }
   registerApp(input: Omit<AppSession, 'id' | 'stats'>): AppSession {
     const app: AppSession = { ...input, id: `app:${this.apps.size + 1}`, stats: { logs: 0, requests: 0, errors: 0 } };
@@ -480,6 +516,7 @@ export function fakeContext(hub: Hub, config: ConfigStore): DriverContext {
     hub,
     getDevices: () => hub.getDevices(),
     getApps: () => hub.getApps(),
+    getDeviceApps: () => hub.getDeviceApps(),
     onLogs: (l) => hub.onLogs(l),
     sdk: { attachStream: () => {}, openVirtual: () => ({}) as VirtualSdkSession },
     settings: () => config.settings,

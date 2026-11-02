@@ -1,0 +1,144 @@
+{
+ "info": {
+  "arguments": [
+   "devicectl",
+   "device",
+   "info",
+   "apps",
+   "--device",
+   "00008130-000A1B2C3D4E001F",
+   "--include-all-apps",
+   "--json-output",
+   "/tmp/durbun-devicectl.json"
+  ],
+  "commandType": "devicectl.device.info.apps",
+  "environment": {
+   "TERM": "xterm-256color"
+  },
+  "jsonVersion": 5,
+  "outcome": "success",
+  "version": "651.32"
+ },
+ "result": {
+  "apps": [
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.apple.mobilesafari",
+    "bundleVersion": "8622.1.22.10.6",
+    "containerAccessible": false,
+    "defaultApp": true,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Safari",
+    "removable": false,
+    "url": "file:///Applications/MobileSafari.app/",
+    "version": "18.0"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.apple.weather",
+    "bundleVersion": "6029.1.3",
+    "containerAccessible": false,
+    "defaultApp": true,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Weather",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/0A1B2C3D-4E5F-4061-8273-94A5B6C7D8E9/Weather.app/",
+    "version": "1.0"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.apple.Preferences",
+    "bundleVersion": "1",
+    "containerAccessible": false,
+    "defaultApp": true,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Settings",
+    "removable": false,
+    "url": "file:///Applications/Preferences.app/",
+    "version": "1.0"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": true,
+    "bundleIdentifier": "com.mykynk.pati",
+    "bundleVersion": "57",
+    "containerAccessible": true,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Pati",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/9F1C2B7A-58D3-4E0B-A6C1-3D27E8F0B941/Runner.app/",
+    "version": "2.3.0"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.mykynk.mahalle",
+    "bundleVersion": "412",
+    "containerAccessible": false,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Mahalle",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/C02A6F1E-7B44-4D9A-9E21-61A5B3D8E7F2/Mahalle.app/",
+    "version": "4.1.0"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.mykynk.kasa",
+    "bundleVersion": "19",
+    "containerAccessible": false,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Kasa",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/4E7D19B0-2C6A-4F83-B5E9-08A1C7D3F562/Runner.app/",
+    "version": "1.0.4"
+   },
+   {
+    "appClip": false,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.burbn.instagram",
+    "bundleVersion": "812004417",
+    "containerAccessible": false,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Instagram",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/77D1E0C2-AB34-4C5D-9E6F-0718293A4B5C/Instagram.app/",
+    "version": "402.0.0"
+   },
+   {
+    "appClip": true,
+    "builtByDeveloper": false,
+    "bundleIdentifier": "com.example.parking.Clip",
+    "bundleVersion": "7",
+    "containerAccessible": false,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Parking",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/1234ABCD-0000-4000-8000-ABCDEF012345/ParkingClip.app/",
+    "version": "1.2"
+   }
+  ],
+  "defaultAppsIncluded": true,
+  "deviceIdentifier": "1F4C0B9E-2A7D-4E61-9C35-8B0D6F2A1E47",
+  "hiddenAppsIncluded": true,
+  "internalAppsIncluded": true,
+  "matchingBundleIdentifier": null,
+  "removableAppsIncluded": true
+ }
+}

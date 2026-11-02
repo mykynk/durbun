@@ -1,0 +1,183 @@
+{
+ "info": {
+  "arguments": [
+   "devicectl",
+   "device",
+   "info",
+   "files",
+   "--device",
+   "00008130-000A1B2C3D4E001F",
+   "--domain-type",
+   "systemCrashLogs",
+   "--json-output",
+   "/tmp/durbun-devicectl.json"
+  ],
+  "commandType": "devicectl.device.info.files",
+  "environment": {
+   "TERM": "xterm-256color"
+  },
+  "jsonVersion": 5,
+  "outcome": "success",
+  "version": "651.32"
+ },
+ "result": {
+  "deviceIdentifier": "1F4C0B9E-2A7D-4E61-9C35-8B0D6F2A1E47",
+  "domain": "systemCrashLogs",
+  "domainIdentifier": null,
+  "files": [
+   {
+    "name": "Assistant",
+    "relativePath": "Assistant",
+    "resources": {
+     "isWritable": false,
+     "isReadable": true,
+     "isDirectory": true,
+     "isHidden": false,
+     "isSymbolicLink": false
+    },
+    "metadata": {
+     "lastModDate": "2026-10-20T07:00:00.000Z",
+     "permissions": 416,
+     "ownerUid": 501,
+     "ownerGid": 501,
+     "size": 96,
+     "extendedAttributes": {}
+    }
+   },
+   {
+    "name": "Runner-2026-11-02-114258.ips",
+    "relativePath": "Runner-2026-11-02-114258.ips",
+    "resources": {
+     "isWritable": false,
+     "isReadable": true,
+     "isDirectory": false,
+     "isHidden": false,
+     "isSymbolicLink": false
+    },
+    "metadata": {
+     "lastModDate": "2026-11-02T08:42:59.000Z",
+     "permissions": 416,
+     "ownerUid": 501,
+     "ownerGid": 501,
+     "size": 18342,
+     "extendedAttributes": {}
+    }
+   },
+   {
+    "name": "Mahalle-2026-11-02-100514.ips",
+    "relativePath": "Mahalle-2026-11-02-100514.ips",
+    "resources": {
+     "isWritable": false,
+     "isReadable": true,
+     "isDirectory": false,
+     "isHidden": false,
+     "isSymbolicLink": false
+    },
+    "metadata": {
+     "lastModDate": "2026-11-02T07:05:15.000Z",
+     "permissions": 416,
+     "ownerUid": 501,
+     "ownerGid": 501,
+     "size": 22104,
+     "extendedAttributes": {}
+    }
+   },
+   {
+    "name": "Runner-2026-10-29-091200.ips",
+    "relativePath": "Runner-2026-10-29-091200.ips",
+    "resources": {
+     "isWritable": false,
+     "isReadable": true,
+     "isDirectory": false,
+     "isHidden": false,
+     "isSymbolicLink": false
+    },
+    "metadata": {
+     "lastModDate": "2026-10-29T06:12:01.000Z",
+     "permissions": 416,
+     "ownerUid": 501,
+     "ownerGid": 501,
+     "size": 17001,
+     "extendedAttributes": {}
+    }
+   },
+   {
+    "name": "JetsamEvent-2026-11-02-084012.ips",
+    "relativePath": "JetsamEvent-2026-11-02-084012.ips",
+    "resources": {
+     "isWritable": false,
+     "isReadable": true,
+     "isDirectory": false,
+     "isHidden": false,
+     "isSymbolicLink": false
+    },
+    "metadata": {
+     "lastModDate": "2026-11-02T05:40:13.000Z",
+     "permissions": 416,
+     "ownerUid": 501,
+     "ownerGid": 501,
+     "size": 120334,
+     "extendedAttributes": {}
+    }
+   },
+   {
+    "name": "MobileSafari-2026-11-02-091201.ips",
+    "relativePath": "MobileSafari-2026-11-02-091201.ips",
+    "resources": {
+     "isWritable": false,
+     "isReadable": true,
+     "isDirectory": false,
+     "isHidden": false,
+     "isSymbolicLink": false
+    },
+    "metadata": {
+     "lastModDate": "2026-11-02T06:12:02.000Z",
+     "permissions": 416,
+     "ownerUid": 501,
+     "ownerGid": 501,
+     "size": 30110,
+     "extendedAttributes": {}
+    }
+   },
+   {
+    "name": "Analytics-2026-11-02-000412.ips.ca.synced",
+    "relativePath": "Analytics-2026-11-02-000412.ips.ca.synced",
+    "resources": {
+     "isWritable": false,
+     "isReadable": true,
+     "isDirectory": false,
+     "isHidden": false,
+     "isSymbolicLink": false
+    },
+    "metadata": {
+     "lastModDate": "2026-11-01T21:04:12.000Z",
+     "permissions": 416,
+     "ownerUid": 501,
+     "ownerGid": 501,
+     "size": 9921,
+     "extendedAttributes": {}
+    }
+   },
+   {
+    "name": "Instagram-2026-11-02-073001.ips",
+    "relativePath": "Retired/Instagram-2026-11-02-073001.ips",
+    "resources": {
+     "isWritable": false,
+     "isReadable": true,
+     "isDirectory": false,
+     "isHidden": false,
+     "isSymbolicLink": false
+    },
+    "metadata": {
+     "lastModDate": "2026-11-02T04:30:02.000Z",
+     "permissions": 416,
+     "ownerUid": 501,
+     "ownerGid": 501,
+     "size": 41223,
+     "extendedAttributes": {}
+    }
+   }
+  ],
+  "username": null
+ }
+}

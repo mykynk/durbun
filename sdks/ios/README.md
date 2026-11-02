@@ -10,6 +10,13 @@ uygulamasına gönderir.
 
 ## Türkçe
 
+> **Flutter uygulaması mı?** Bu paketi ayrıca eklemeyin. Flutter paketi
+> [`package:durbun`](../flutter/durbun/README.md) bu iOS çekirdeğini zaten içinde taşır (URLSession,
+> çökmeler, stdout/stderr) ve Dart tarafı başlattığında çalıştırır; `Durbun.start()` gerekmez. Swift
+> kodundan log için `import durbun` yazın. Bu sayfa yalnızca Flutter'sız (native-only) iOS uygulamaları
+> içindir. Bu klasördeki kaynakları değiştirirseniz `sdks/flutter/durbun` içinde
+> `dart run tool/sync_native.dart` çalıştırın (plugin birebir kopyasını taşır).
+
 ### Neler yakalanır?
 
 | Ne | Nasıl görünür |
@@ -151,6 +158,12 @@ node scripts/generate-mock-vectors.mjs   # mock eşleştirme test vakalarını T
 ---
 
 ## English
+
+> **Flutter app?** Do not add this package separately. The Flutter package
+> [`package:durbun`](../flutter/durbun/README.md) already carries this iOS core (URLSession, crashes,
+> stdout/stderr) and starts it from Dart; no `Durbun.start()` call. Log from Swift with `import durbun`.
+> This page is for native-only iOS apps. After changing the sources here, run
+> `dart run tool/sync_native.dart` in `sdks/flutter/durbun` (the plugin carries an exact copy).
 
 ### What is captured
 

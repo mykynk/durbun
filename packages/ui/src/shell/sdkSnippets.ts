@@ -33,6 +33,22 @@ Future<void> main() async {
 }`;
 }
 
+/** Release switch: only for internal / Firebase builds that are separate from the store build. */
+export function flutterReleaseFlag(lang: Lang): string {
+  return `# ${c(lang, 'Firebase / iç test derlemesi (mağaza derlemesinde ASLA)', 'Firebase / internal build (NEVER for the store build)')}
+flutter build apk --release --dart-define=DURBUN=true
+flutter build ipa --dart-define=DURBUN=true`;
+}
+
+/** Android native layer of a Flutter app: one line on the app's own OkHttp clients. */
+export function flutterNativeAndroid(lang: Lang): string {
+  return `import dev.durbun.DurbunInterceptor
+
+val client = OkHttpClient.Builder()
+    .addInterceptor(DurbunInterceptor())   // ${c(lang, 'tek satır', 'the one line')}
+    .build()`;
+}
+
 export function flutterUsage(lang: Lang): string {
   return `Durbun.log('${c(lang, 'Kullanıcı giriş yaptı', 'User signed in')}', tag: 'auth', data: {'userId': 42});
 Durbun.d('${c(lang, 'Önbellek ısındı', 'Cache warmed up')}');            // v / d / i / w / e / f

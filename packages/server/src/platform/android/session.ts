@@ -1,6 +1,7 @@
 /**
  * One adb device (by serial): state transitions, device info, logcat stream, pid→process map,
- * adb-reverse SDK routing, actions and metrics.
+ * adb-reverse SDK routing, actions and metrics, plus (SPEC §10) the apps the device reports
+ * (DeviceApps), dropbox crash / ANR records and frame stats.
  */
 import type { DeviceActionId, DeviceActionResult, DeviceInfo, DeviceState, LogStreamStatus } from '@durbun/protocol';
 import type { DeviceLogInput, DriverContext, Logger, PortForward } from '../../types';
@@ -11,6 +12,9 @@ import { humanizeModel } from '../shared/text';
 import { every } from '../shared/timing';
 import { androidActionsFor, runAndroidAction } from './actions';
 import type { Adb } from './adb';
+import type { DeviceClock } from './deviceClock';
+import { basePackage, DeviceAppTracker } from './deviceApps';
+import { CrashIndex, createDropboxCursor, DropboxWatcher, type DropboxCursor } from './dropbox';
 import { AndroidLogPipeline, logcatSinceArg, type ProcessEvent } from './logcat';
 import { AndroidMetricsWatcher, type MetricsTarget } from './metrics';
 import {
@@ -32,6 +36,8 @@ export interface AndroidSessionDeps {
   ctx: DriverContext;
   adb: () => Adb | null;
   logger: Logger;
+  /** Dropbox records already reported for this serial (kept by the driver across replugs). */
+  dropboxCursor?: DropboxCursor;
 }
 
 interface StateText {
@@ -98,6 +104,13 @@ export class AndroidDeviceSession {
   private readonly metrics = new Map<string, AndroidMetricsWatcher>();
   private readonly forwards = new Set<number>();
 
+  private readonly clock: DeviceClock = {};
+  private readonly apps: DeviceAppTracker;
+  private readonly crashes: CrashIndex;
+  private readonly dropbox: DropboxWatcher;
+  private watchStart?: number;
+  private unsubLogs?: () => void;
+
   constructor(
     private readonly deps: AndroidSessionDeps,
     row: AdbDeviceRow,
@@ -130,10 +143,43 @@ export class AndroidDeviceSession {
     const hub = deps.ctx.hub;
     this.batcher = new LogBatcher((entries) => hub.pushDeviceLogs(this.id, entries), deps.logger);
     this.pipeline = new AndroidLogPipeline({
-      emit: (e: DeviceLogInput) => this.batcher.push(e),
+      emit: (e: DeviceLogInput) => {
+        e.origin = 'logcat';
+        this.batcher.push(e);
+      },
       onProcessEvent: (ev) => this.onProcessEvent(ev),
       processName: (pid) => this.processName(pid),
     });
+    this.apps = new DeviceAppTracker({
+      adb: deps.adb,
+      serial: this.serial,
+      deviceId: this.id,
+      hub,
+      logger: deps.logger,
+      processes: () => this.processes,
+      clock: this.clock,
+    });
+    this.crashes = new CrashIndex(this.id);
+    this.dropbox = new DropboxWatcher({
+      adb: deps.adb,
+      serial: this.serial,
+      deviceId: this.id,
+      hub,
+      logger: deps.logger,
+      cursor: deps.dropboxCursor ?? createDropboxCursor(),
+      clock: this.clock,
+      watchStart: () => this.watchStart ?? Date.now(),
+      apps: this.apps,
+      crashes: this.crashes,
+    });
+    try {
+      // Live logcat crashes / ANRs (with their hub ids) → de-duplication of dropbox records.
+      this.unsubLogs = deps.ctx.onLogs((entries) => {
+        for (const e of entries) if (e.kind === 'crash' || e.kind === 'anr') this.crashes.add(e);
+      });
+    } catch (e) {
+      deps.logger.debug(`${this.serial}: onLogs subscription failed: ${(e as Error).message}`);
+    }
   }
 
   get isOnline(): boolean {
@@ -193,6 +239,7 @@ export class AndroidDeviceSession {
 
   private async goOnline(): Promise<void> {
     this.online = true;
+    this.watchStart ??= Date.now();
     const gen = ++this.gen;
     this.patch({
       state: 'online',
@@ -206,9 +253,11 @@ export class AndroidDeviceSession {
     this.patch({ actions: this.actions() });
     await this.refreshProcesses();
     if (gen !== this.gen || this.disposed) return;
+    void this.apps.start();
     this.startLogcat();
     await this.startRouter(gen);
     if (gen !== this.gen || this.disposed) return;
+    this.dropbox.start();
     this.timers.push(
       every(30_000, () => this.refreshBattery(), this.deps.logger),
       every(
@@ -227,6 +276,8 @@ export class AndroidDeviceSession {
     this.online = false;
     this.gen += 1;
     this.stopTimers();
+    this.dropbox.stop();
+    this.apps.stop();
     if (wasOnline) {
       await this.stopLogcat();
       await this.router?.stop(false);
@@ -253,6 +304,10 @@ export class AndroidDeviceSession {
     this.gen += 1;
     this.stopTimers();
     clearTimeout(this.psTimer);
+    this.unsubLogs?.();
+    this.unsubLogs = undefined;
+    this.dropbox.stop();
+    this.apps.dispose();
     for (const w of this.metrics.values()) w.stop();
     this.metrics.clear();
     await this.stopLogcat();
@@ -399,6 +454,7 @@ export class AndroidDeviceSession {
           hub.setProcess({ deviceId: this.id, pid, name, event: 'died', ts: now });
         }
       }
+      this.apps.sync();
     } finally {
       this.psRunning = false;
       this.psLastAt = Date.now();
@@ -413,6 +469,7 @@ export class AndroidDeviceSession {
       this.processes.delete(ev.pid);
     }
     this.deps.ctx.hub.setProcess({ deviceId: this.id, pid: ev.pid, name: ev.name, event: ev.event, ts: ev.ts });
+    this.apps.onProcessEvent(ev);
   }
 
   /* ───────────── logcat ───────────── */
@@ -603,6 +660,7 @@ export class AndroidDeviceSession {
         hub: this.deps.ctx.hub,
         logger: this.deps.logger,
         findPid: (name) => this.findPid(name),
+        packageOf: (pid) => basePackage(target.processName ?? (pid !== undefined ? this.processes.get(pid) : undefined)),
       },
       target,
     );

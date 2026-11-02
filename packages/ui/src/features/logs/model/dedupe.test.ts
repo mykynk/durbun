@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LogEntry } from '@durbun/protocol';
-import { crashSignature, dedupeHash, dedupeText, isTwinPair, sameDedupeText, signatureHash } from './dedupe';
+import { crashSignature, dedupeHash, dedupeText, isMarkedDuplicate, isTwinPair, sameDedupeText, signatureHash } from './dedupe';
 
 const entry = (p: Partial<LogEntry> & { message: string }): LogEntry => ({ id: 1, ts: 1_700_000_000_000, deviceId: 'demo:1', source: 'device', level: 'info', tag: 't', ...p });
 
@@ -61,5 +61,16 @@ describe('isTwinPair', () => {
     const crash = entry({ source: 'app', kind: 'crash', message: 'Unhandled exception: x', ts });
     expect(isTwinPair(crash, entry({ tag: 'flutter', message: '[ERROR:flutter/lib/ui/ui_dart_state.cc(198)] Unhandled Exception: x', ts }))).toBe(true);
     expect(isTwinPair(crash, entry({ tag: 'flutter', message: '[ERROR:flutter/lib/ui/ui_dart_state.cc(198)] Unhandled Exception: y', ts }))).toBe(false);
+  });
+});
+
+describe('isMarkedDuplicate (device crash records matched by the server)', () => {
+  it('reads data.duplicateOf as a number or a non-empty string', () => {
+    expect(isMarkedDuplicate({ data: { origin: 'dropbox', package: 'com.mykynk.kumbara', duplicateOf: 48121 } })).toBe(true);
+    expect(isMarkedDuplicate({ data: { origin: 'crash-report', duplicateOf: '48121' } })).toBe(true);
+    expect(isMarkedDuplicate({ data: { origin: 'dropbox', duplicateOf: null } })).toBe(false);
+    expect(isMarkedDuplicate({ data: { origin: 'dropbox', duplicateOf: '' } })).toBe(false);
+    expect(isMarkedDuplicate({ data: 'duplicateOf' })).toBe(false);
+    expect(isMarkedDuplicate({})).toBe(false);
   });
 });

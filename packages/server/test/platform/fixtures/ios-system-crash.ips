@@ -1,0 +1,36 @@
+{"app_name":"MobileSafari","timestamp":"2026-11-02 09:12:01.00 +0300","app_version":"18.0","build_version":"8622.1.22.10.6","platform":2,"bundleID":"com.apple.mobilesafari","bug_type":"309","os_version":"iPhone OS 27.2 (24B8117)","name":"MobileSafari","incident_id":"00112233-4455-6677-8899-AABBCCDDEEFF"}
+{
+  "pid" : 812,
+  "procName" : "MobileSafari",
+  "procPath" : "\/Applications\/MobileSafari.app\/MobileSafari",
+  "exception" : {
+    "type" : "EXC_BAD_ACCESS",
+    "signal" : "SIGSEGV",
+    "codes" : "0x0000000000000001, 0x0000000000000000",
+    "subtype" : "KERN_INVALID_ADDRESS at 0x0000000000000000"
+  },
+  "threads" : [
+    {
+      "triggered" : true,
+      "frames" : [
+        {
+          "imageOffset" : 1024,
+          "symbol" : "objc_msgSend",
+          "symbolLocation" : 32,
+          "imageIndex" : 0
+        }
+      ]
+    }
+  ],
+  "usedImages" : [
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 6442778624,
+      "size" : 278528,
+      "uuid" : "4d5e6f70-8192-3a3b-c4d5-e6f708192a3b",
+      "path" : "\/usr\/lib\/libobjc.A.dylib",
+      "name" : "libobjc.A.dylib"
+    }
+  ]
+}

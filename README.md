@@ -64,6 +64,34 @@ node dist/durbun.mjs [--port 9750] [--sdk-port 9751] [--demo] [--no-open] [--lan
   yalnızca bu Mac'ten erişilebilir.
 - Ayarlar ve mock kuralları `~/.durbun` içinde saklanır.
 
+## Mac uygulaması
+
+Terminal ve komut gerekmez: **Dürbün.app** sunucuyu kendi içinde başlatır ve arayüzü kendi penceresinde
+açar. Çift tıklamak yeterli.
+
+Bir kez derleyin (ilk seferde Electron'u indirir):
+
+```bash
+npm run app:dist
+```
+
+Çıktı `apps/desktop/release/` klasöründe: `Durbun-0.1.0-arm64.dmg` (Apple silicon) ve
+`mac-arm64/Dürbün.app`. DMG'yi açıp Dürbün'ü Uygulamalar klasörüne sürükleyin. Ekip arkadaşlarınıza
+DMG'yi göndermeniz yeterli.
+
+**İlk açılış:** uygulama imzasız (Apple Developer sertifikası yok), bu yüzden macOS ilk seferde uyarır.
+Finder'da Dürbün'e sağ tıklayın → **Aç** → **Aç**. macOS bu seçeneği göstermezse: Sistem Ayarları →
+Gizlilik ve Güvenlik → en altta Dürbün için **Yine de Aç**. Bu yalnızca bir kez gerekir.
+
+- Port 9750 / 9751. Bir Dürbün zaten çalışıyorsa (ör. `npm start`) uygulama onu açar. Port başka bir
+  programdaysa yakındaki boş bir portu kullanır ve bunu menü çubuğundaki simgede söyler.
+- `adb`, `flutter`, `idevicesyslog` gibi araçlar için PATH'i giriş kabuğunuzdan kendisi okur.
+- Ayarlar ve mock kuralları komut satırıyla aynı yerde durur: `~/.durbun`.
+- Pencereyi kapatmak yakalamayı durdurmaz, Dürbün menü çubuğunda çalışmaya devam eder. Tamamen kapatmak
+  için ⌘Q veya menü çubuğu simgesi → **Çık** (sunucu düzgünce durdurulur).
+- Bir şey ters giderse: Yardım → **Tanılama Günlüğünü Göster**.
+- Geliştirirken `npm run app` uygulamayı depodaki `dist/` ile çalıştırır.
+
 ## Uygulamaya SDK ekleme
 
 Cihaz logları SDK olmadan da gelir. Uygulamanın kendi logları, ağ istekleri, performans ölçümleri ve

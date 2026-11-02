@@ -23,6 +23,7 @@ import {
   ScrollText,
   Search,
   Settings,
+  ShieldCheck,
   Smartphone,
   Stethoscope,
   Sun,
@@ -48,6 +49,9 @@ import {
   useScopeStore,
   sortDevices,
   groupApps,
+  appGroupName,
+  buildBadgeOf,
+  explainSources,
   type TabId,
 } from '../data';
 import { Tabs, type TabItem } from '../components/Tabs';
@@ -59,6 +63,7 @@ import { PlatformIcon, SdkBadge, type IconType } from '../components/Icons';
 import { Tooltip } from '../components/Tooltip';
 import { formatClock, formatCompact } from '../lib/format';
 import { appTitle } from './labels';
+import { BuildBadgeChip, ScopeSourcesButton, SourceBadge } from '../sources';
 import { exportHar, exportSession, pickAndImport, setTheme, toggleLanguage, toggleSidebar } from './actions';
 
 export const TAB_ICONS: Record<TabId, IconType> = {
@@ -107,7 +112,7 @@ export function TopBar() {
   const perfLive = usePerfLive();
   const scope = useScope();
   const scopedDevice = useHub((s) => {
-    if (scope.kind === 'device') return s.devices[scope.deviceId];
+    if (scope.kind === 'device' || scope.kind === 'deviceApp') return s.devices[scope.deviceId];
     if (scope.kind === 'app') {
       const app = s.apps[scope.appId];
       return app ? s.devices[app.deviceId] : undefined;
@@ -170,6 +175,7 @@ export function TopBar() {
     <header className="topbar">
       {narrow ? <IconButton icon={PanelLeftOpen} label={t('shell.sidebar.expand')} onClick={toggleSidebar} /> : null}
       <ScopeBreadcrumb />
+      <ScopeSourcesButton className="topbar__sources" />
       <span className="topbar__divider" aria-hidden />
       <Tabs variant="pill" items={items} value={tab} onChange={ui.setTab} idPrefix="main" aria-label={t('shell.tabs.label')} className="topbar__tabs" />
       <span className="grow" />
@@ -200,14 +206,15 @@ function ScopeBreadcrumb() {
   const t = useT();
   const scope = useScope();
   const hint = useScopeStore((s) => s.hint);
-  const { devices, apps } = useHub(useShallow((s) => ({ devices: s.devices, apps: s.apps })));
-  const target = scopeTarget(scope, { devices, apps });
+  const { devices, apps, deviceApps } = useHub(useShallow((s) => ({ devices: s.devices, apps: s.apps, deviceApps: s.deviceApps })));
+  const target = scopeTarget(scope, { devices, apps, deviceApps });
   // Before the first snapshot (or for a vanished target) show what we remember instead of "unknown".
-  const pendingName = scope.kind === 'device' ? scope.deviceId : scope.kind === 'app' ? (hint.bundleId ?? scope.appId) : undefined;
+  const pendingName =
+    scope.kind === 'device' ? scope.deviceId : scope.kind === 'app' ? (hint.bundleId ?? scope.appId) : scope.kind === 'deviceApp' ? scope.bundleId : undefined;
 
   const menuItems = (): MenuItem[] => {
     const list: MenuItem[] = [{ label: t('shell.scope.all'), icon: LayoutGrid, checked: scope.kind === 'all', onSelect: () => setScope({ kind: 'all' }) }];
-    const byDevice = groupApps(Object.values(apps));
+    const byDevice = groupApps(Object.values(apps), Object.values(deviceApps));
     for (const d of sortDevices(Object.values(devices))) {
       const DeviceIcon: IconType = ({ size }) => <PlatformIcon device={d} size={Number(size) || 14} />;
       list.push({ type: 'separator' });
@@ -219,19 +226,26 @@ function ScopeBreadcrumb() {
         onSelect: () => setScope({ kind: 'device', deviceId: d.id }),
       });
       for (const g of byDevice.get(d.id) ?? []) {
-        const selected = scope.kind === 'app' && g.sessions.some((s) => s.id === scope.appId);
+        const selected =
+          (scope.kind === 'app' && g.sessions.some((s) => s.id === scope.appId)) ||
+          (scope.kind === 'deviceApp' && scope.deviceId === g.deviceId && scope.bundleId === g.bundleId);
+        const latest = g.latest;
+        const groupHint = { deviceId: g.deviceId, bundleId: g.bundleId };
         list.push({
-          label: <span className="scope-menu__app">{appTitle(g.latest)}</span>,
+          label: <span className="scope-menu__app">{appGroupName(g)}</span>,
           icon: ChevronRight,
-          hint: <SdkBadge platform={g.latest.sdk.platform} />,
+          hint: latest ? <SdkBadge platform={latest.sdk.platform} /> : <SourceBadge badge="device-only" />,
           checked: selected,
-          onSelect: () => setScope({ kind: 'app', appId: g.latest.id }, { deviceId: g.deviceId, bundleId: g.bundleId }),
+          onSelect: () =>
+            latest ? setScope({ kind: 'app', appId: latest.id }, groupHint) : setScope({ kind: 'deviceApp', deviceId: g.deviceId, bundleId: g.bundleId }, groupHint),
         });
       }
     }
     return list;
   };
 
+  const appName = target.app ? appTitle(target.app) : target.deviceApp?.name || target.bundleId;
+  const isAppScope = scope.kind === 'app' || scope.kind === 'deviceApp';
   let content: ReactNode;
   if (scope.kind === 'all') {
     content = (
@@ -242,26 +256,30 @@ function ScopeBreadcrumb() {
     );
   } else {
     const device = target.device;
+    const input = { device, deviceApp: target.deviceApp, sessions: target.app ? Object.values(apps).filter((a) => a.deviceId === target.app!.deviceId && a.app.id === target.app!.app.id) : [] };
+    const build = isAppScope ? buildBadgeOf(input) : undefined;
     content = (
       <>
         {device ? <PlatformIcon device={device} size={15} className="crumb__icon" /> : <Waypoints size={15} className="crumb__icon" aria-hidden />}
-        <span className={clsx('crumb__text', target.app && 'crumb__text--muted')}>{device ? deviceDisplayName(device) : target.app ? t('shell.scope.unknownDevice') : pendingName}</span>
-        {target.app ? (
+        <span className={clsx('crumb__text', isAppScope && appName && 'crumb__text--muted')}>{device ? deviceDisplayName(device) : isAppScope && appName ? t('shell.scope.unknownDevice') : pendingName}</span>
+        {isAppScope && appName ? (
           <>
             <ChevronRight size={13} className="crumb__sep" aria-hidden />
-            <SdkBadge platform={target.app.sdk.platform} />
-            <span className="crumb__text">{appTitle(target.app)}</span>
-            {scope.kind === 'app' && scope.exact ? <span className="crumb__session tnum">{formatClock(target.app.connectedAt, { ms: false })}</span> : null}
+            {target.app ? <SdkBadge platform={target.app.sdk.platform} /> : <SourceBadge badge={explainSources(input).badge} short />}
+            <span className="crumb__text">{appName}</span>
+            {build ? <BuildBadgeChip badge={build} installer={target.deviceApp?.install.installer} /> : null}
+            {scope.kind === 'app' && scope.exact && target.app ? <span className="crumb__session tnum">{formatClock(target.app.connectedAt, { ms: false })}</span> : null}
           </>
         ) : null}
       </>
     );
   }
 
+  const label = isAppScope && appName ? appName : target.device ? deviceDisplayName(target.device) : t('shell.scope.all');
   return (
     <DropdownMenu items={menuItems} align="start" minWidth={260} aria-label={t('shell.scope.pick')}>
       {(p) => (
-        <button type="button" className="crumb" {...p} aria-label={`${t('shell.scope.label')}: ${target.app ? appTitle(target.app) : target.device ? deviceDisplayName(target.device) : t('shell.scope.all')}`}>
+        <button type="button" className="crumb" {...p} aria-label={`${t('shell.scope.label')}: ${label}`}>
           {content}
           <ChevronDown size={13} className="crumb__chev" aria-hidden />
         </button>
@@ -270,12 +288,20 @@ function ScopeBreadcrumb() {
   );
 }
 
+/** Display name of the scope (export menu labels). */
+function useScopeName(): string | undefined {
+  const scope = useScope();
+  const { devices, apps, deviceApps } = useHub(useShallow((s) => ({ devices: s.devices, apps: s.apps, deviceApps: s.deviceApps })));
+  const target = scopeTarget(scope, { devices, apps, deviceApps });
+  if (target.app) return appTitle(target.app);
+  if (scope.kind === 'deviceApp') return target.device ? deviceDisplayName(target.device) : undefined;
+  return target.device ? deviceDisplayName(target.device) : undefined;
+}
+
 function ImportExportMenu() {
   const t = useT();
   const scope = useScope();
-  const { devices, apps } = useHub(useShallow((s) => ({ devices: s.devices, apps: s.apps })));
-  const target = scopeTarget(scope, { devices, apps });
-  const scopeName = target.app ? appTitle(target.app) : target.device ? deviceDisplayName(target.device) : undefined;
+  const scopeName = useScopeName();
   return (
     <DropdownMenu
       minWidth={280}
@@ -297,9 +323,7 @@ function MoreMenu() {
   const t = useT();
   const theme = usePrefs((s) => s.theme);
   const scope = useScope();
-  const { devices, apps } = useHub(useShallow((s) => ({ devices: s.devices, apps: s.apps })));
-  const target = scopeTarget(scope, { devices, apps });
-  const scopeName = target.app ? appTitle(target.app) : target.device ? deviceDisplayName(target.device) : undefined;
+  const scopeName = useScopeName();
   return (
     <DropdownMenu
       minWidth={260}
@@ -358,6 +382,7 @@ function HelpMenu() {
     () => [
       { label: t('shell.shortcuts.title'), icon: Keyboard, shortcut: '?', onSelect: ui.openShortcuts },
       { label: t('shell.sdk.title'), icon: BookOpen, onSelect: () => ui.openSdkGuide() },
+      { label: t('sources.explainer.title'), icon: ShieldCheck, onSelect: ui.openDataSources },
       { label: t('shell.doctor.title'), icon: Stethoscope, onSelect: ui.openDoctor },
       { type: 'separator' },
       { label: t('shell.about.title'), icon: Info, onSelect: () => ui.openSettings('about') },

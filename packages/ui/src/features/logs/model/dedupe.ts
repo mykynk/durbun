@@ -79,6 +79,18 @@ export function dedupeHash(e: Pick<LogEntry, 'message'>): number {
   return h >>> 1;
 }
 
+/**
+ * Crash / ANR records the device kept itself (Android dropbox, iOS .ips) that the server matched to a live
+ * crash line it already delivered (same pid or package within ±5 s, SPEC §10.3): `data.duplicateOf` = the
+ * live entry's id. Hidden like the other duplicates (shown again when de-duplication is off).
+ */
+export function isMarkedDuplicate(e: Pick<LogEntry, 'data'>): boolean {
+  const d = e.data as { duplicateOf?: unknown } | null | undefined;
+  if (!d || typeof d !== 'object') return false;
+  const v = d.duplicateOf;
+  return (typeof v === 'number' && Number.isFinite(v)) || (typeof v === 'string' && v.length > 0);
+}
+
 /** Entries that can have an app/device twin. */
 export function isDedupeCandidate(e: Pick<LogEntry, 'source' | 'kind' | 'message'>): boolean {
   if (e.source !== 'app' && e.source !== 'device') return false;

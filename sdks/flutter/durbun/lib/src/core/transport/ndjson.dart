@@ -108,6 +108,8 @@ Uint8List? encodeMessageLine(
   int maxFrameBytes = kMaxFrameBytes,
 }) {
   try {
+    final encoded = message[kEncodedLineKey];
+    if (encoded is String) return _encodeLine(encoded, maxFrameBytes);
     resolvePendingBodies(message);
     var bytes = _encode(message);
     if (bytes.length <= maxFrameBytes) return bytes;
@@ -151,6 +153,18 @@ Uint8List? encodeMessageLine(
   }
 }
 
+/// A line the native layer already encoded (one JSON object, no newline).
+Uint8List? _encodeLine(String json, int maxFrameBytes) {
+  final trimmed = json.trimRight();
+  if (trimmed.isEmpty || trimmed.contains('\n')) return null;
+  final encoded = utf8.encode(trimmed);
+  if (encoded.length + 1 > maxFrameBytes) return null;
+  final out = Uint8List(encoded.length + 1);
+  out.setRange(0, encoded.length, encoded);
+  out[encoded.length] = 0x0A;
+  return out;
+}
+
 Uint8List _encode(Map<String, Object?> message) {
   final json = jsonEncode(message, toEncodable: _fallbackEncodable);
   final encoded = utf8.encode(json);
@@ -172,6 +186,8 @@ Object? _fallbackEncodable(Object? value) {
 /// Rough in-memory cost of a queued message (used for the buffer byte budget).
 int estimateMessageCost(Map<String, Object?> message) {
   var cost = 256;
+  final encoded = message[kEncodedLineKey];
+  if (encoded is String) return cost + encoded.length;
   final text = message['message'];
   if (text is String) cost += text.length;
   final body = message['body'];

@@ -1,8 +1,9 @@
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Package } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
 import { Activity, BookOpen, ChevronRight, CirclePause, CloudOff, FlaskConical, LayoutGrid, PanelLeftClose, PanelLeftOpen, Stethoscope, TriangleAlert } from 'lucide-react';
-import type { AppSession, DeviceInfo } from '@durbun/protocol';
+import type { AppSession, DeviceApp, DeviceInfo } from '@durbun/protocol';
 import { useT } from '../i18n';
 import { deviceDisplayName, deviceStateText, logStatusText } from '../i18n/codes';
 import {
@@ -19,10 +20,14 @@ import {
   usePrefs,
   useScope,
   useUi,
+  appGroupName,
+  buildBadgeOf,
+  explainSources,
   type AppGroup,
   type DeviceGroup,
   type Scope,
 } from '../data';
+import { BuildBadgeChip, SourceBadge, WhatCanISeeButton } from '../sources';
 import { DurbunMark, PlatformIcon, SdkBadge } from '../components/Icons';
 import { IconButton } from '../components/Button';
 import { StatusDot } from '../components/Badges';
@@ -30,7 +35,7 @@ import { Spinner } from '../components/Spinner';
 import { Tooltip } from '../components/Tooltip';
 import { usePersistentState } from '../hooks';
 import { formatClock, formatCompact } from '../lib/format';
-import { appTitle, appVersion, connectionLabel, deviceSubtitle, importLabel, isNetworkOnly, stateTone } from './labels';
+import { appVersion, connectionLabel, deviceSubtitle, importLabel, isNetworkOnly, stateTone } from './labels';
 import { setDemo, toggleSidebar } from './actions';
 
 const SECTION_ORDER: DeviceGroup[] = ['live', 'demo', 'import', 'other'];
@@ -270,7 +275,8 @@ function DeviceNode({
   onToggle: () => void;
 }) {
   const t = useT();
-  const appOnDevice = scope.kind === 'app' && groups.some((g) => g.sessions.some((s) => s.id === scope.appId));
+  const appOnDevice =
+    (scope.kind === 'app' && groups.some((g) => g.sessions.some((s) => s.id === scope.appId))) || (scope.kind === 'deviceApp' && scope.deviceId === device.id);
   // Collapsed sidebar hides app rows: highlight the device that holds the selected app instead.
   const selected = (scope.kind === 'device' && scope.deviceId === device.id) || (compact && appOnDevice);
   const imported = device.id.startsWith('import:');
@@ -335,32 +341,79 @@ function DeviceNode({
           <span>{deviceStateText(device)}</span>
         </div>
       ) : null}
-      {expanded && groups.length > 0 && !compact ? (
-        <div role="group" className="sb-apps">
-          {groups.map((g) => (
-            <AppNode key={g.key} group={g} scope={scope} />
-          ))}
-        </div>
+      {expanded && groups.length > 0 && !compact ? <DeviceApps device={device} groups={groups} scope={scope} /> : null}
+    </div>
+  );
+}
+
+/** Above this many apps on one device, apps that are not running fold into "Son açılanlar". */
+const FOLD_ABOVE = 5;
+
+function isGroupSelected(g: AppGroup, scope: Scope): boolean {
+  if (scope.kind === 'deviceApp') return scope.deviceId === g.deviceId && scope.bundleId === g.bundleId;
+  return scope.kind === 'app' && g.sessions.some((s) => s.id === scope.appId);
+}
+
+function DeviceApps({ device, groups, scope }: { device: DeviceInfo; groups: AppGroup[]; scope: Scope }) {
+  const t = useT();
+  const [openRecent, setOpenRecent] = usePersistentState<string[]>('sidebar.openRecent', []);
+  const fold = groups.length > FOLD_ABOVE;
+  const shown = fold ? groups.filter((g) => g.running || g.connected || isGroupSelected(g, scope)) : groups;
+  const folded = fold ? groups.filter((g) => !shown.includes(g)) : [];
+  const recentOpen = openRecent.includes(device.id);
+  return (
+    <div role="group" className="sb-apps">
+      {shown.map((g) => (
+        <AppNode key={g.key} group={g} device={device} scope={scope} />
+      ))}
+      {folded.length > 0 ? (
+        <>
+          <button
+            type="button"
+            className="sb-older sb-recent"
+            aria-expanded={recentOpen}
+            onClick={() => setOpenRecent((list) => (list.includes(device.id) ? list.filter((x) => x !== device.id) : [...list, device.id]))}
+          >
+            <ChevronRight size={11} className={clsx('sb-older__chev', recentOpen && 'is-open')} aria-hidden />
+            {shown.length > 0 ? t('sources.deviceAppsMore', { count: folded.length }) : `${t('sources.recent')} · ${folded.length}`}
+          </button>
+          {recentOpen ? folded.map((g) => <AppNode key={g.key} group={g} device={device} scope={scope} />) : null}
+        </>
       ) : null}
     </div>
   );
 }
 
-function AppNode({ group, scope }: { group: AppGroup; scope: Scope }) {
+/** "3.1.0 (412)" from what the device reports, else from the SDK session. */
+function groupVersion(g: AppGroup): string | undefined {
+  const da: DeviceApp | undefined = g.deviceApp;
+  if (da?.version) return da.build && da.build !== da.version ? `${da.version} (${da.build})` : da.version;
+  return g.latest ? appVersion(g.latest) : undefined;
+}
+
+function AppNode({ group, device, scope }: { group: AppGroup; device: DeviceInfo; scope: Scope }) {
   const t = useT();
   const [showSessions, setShowSessions] = useState(false);
   const latest = group.latest;
   const ids = group.sessions.map((s) => s.id);
-  const selected = scope.kind === 'app' && !scope.exact && ids.includes(scope.appId);
+  const selected = (scope.kind === 'app' && !scope.exact && ids.includes(scope.appId)) || (scope.kind === 'deviceApp' && isGroupSelected(group, scope));
   const exactSelected = scope.kind === 'app' && scope.exact ? scope.appId : null;
   const hint = { deviceId: group.deviceId, bundleId: group.bundleId };
-  const version = appVersion(latest);
+  const name = appGroupName(group);
+  const version = groupVersion(group);
   const older = group.sessions.length - 1;
   const selectSession = (s: AppSession) => setScope({ kind: 'app', appId: s.id, exact: true }, hint);
+  const input = { device, deviceApp: group.deviceApp, sessions: group.sessions };
+  const badge = explainSources(input).badge;
+  const build = buildBadgeOf(input);
+  const live = group.running;
+  const stateText = group.connected ? t('shell.sidebar.appLive') : live ? t('sources.running') : latest ? t('shell.sidebar.appGone') : t('sources.notRunningShort');
+  const select = () =>
+    latest ? setScope({ kind: 'app', appId: latest.id }, hint) : setScope({ kind: 'deviceApp', deviceId: group.deviceId, bundleId: group.bundleId }, hint);
 
   return (
     <div className="sb-app-node">
-      <div className={clsx('sb-row', 'sb-row--app', selected && 'is-selected', !group.connected && 'is-dim')}>
+      <div className={clsx('sb-row', 'sb-row--app', selected && 'is-selected', !live && 'is-dim')}>
         <button
           type="button"
           data-sb-item
@@ -368,19 +421,30 @@ function AppNode({ group, scope }: { group: AppGroup; scope: Scope }) {
           aria-level={2}
           aria-selected={selected}
           className="sb-row__main"
-          onClick={() => setScope({ kind: 'app', appId: latest.id }, hint)}
-          aria-label={`${appTitle(latest)}${version ? ` ${version}` : ''} · ${group.connected ? t('shell.sidebar.appLive') : t('shell.sidebar.appGone')}`}
-          title={`${latest.app.id}${version ? ` · ${version}` : ''}`}
+          onClick={select}
+          aria-label={`${name}${version ? ` ${version}` : ''} · ${stateText}`}
+          title={`${group.bundleId}${version ? ` · ${version}` : ''}`}
         >
-          <SdkBadge platform={latest.sdk.platform} />
+          {latest ? (
+            <SdkBadge platform={latest.sdk.platform} />
+          ) : (
+            <span className="sb-app__glyph" aria-hidden>
+              <Package size={13} />
+            </span>
+          )}
           <span className="sb-row__text">
             <span className="sb-row__title">
-              <span className="truncate">{appTitle(latest)}</span>
-              {version ? <span className="sb-app__ver">{version}</span> : null}
+              <span className="truncate">{name}</span>
+              {version ? <span className="sb-app__ver truncate">{version}</span> : null}
+            </span>
+            <span className="sb-row__subtitle sb-app__badges">
+              <SourceBadge badge={badge} short />
+              {build ? <BuildBadgeChip badge={build} installer={group.deviceApp?.install.installer} /> : null}
             </span>
           </span>
-          <StatusDot tone={group.connected ? 'success' : 'neutral'} pulse={group.connected} size={7} title={group.connected ? t('shell.sidebar.appLive') : t('shell.sidebar.appGone')} className={clsx(!group.connected && 'dot--hollow')} />
+          <StatusDot tone={live ? 'success' : 'neutral'} pulse={group.connected} size={7} title={stateText} className={clsx(!live && 'dot--hollow')} />
         </button>
+        <WhatCanISeeButton groupKey={group.key} className="sb-app__info" />
       </div>
       {older > 0 ? (
         <button type="button" className="sb-older" aria-expanded={showSessions} onClick={() => setShowSessions((v) => !v)}>

@@ -26,9 +26,20 @@ export interface UiDirResolution {
   explicitInvalid?: string;
 }
 
-/** Directory of the running module: dist/ in the bundle, src/http/ when run from source. */
+/**
+ * Directory of the running module: dist/ in the bundle, src/http/ when run from source. Never throws: an
+ * embedding host that re-bundles the server as CommonJS has no `import.meta.url` (it then falls back to
+ * that bundle's `__dirname`, else the working directory; such hosts pass `uiDir` explicitly anyway).
+ */
 export function moduleDir(): string {
-  return path.dirname(fileURLToPath(import.meta.url));
+  try {
+    const url = import.meta.url;
+    if (typeof url === 'string' && url) return path.dirname(fileURLToPath(url));
+  } catch {
+    /* not a file: URL */
+  }
+  // `typeof` is safe for an undeclared identifier (plain ESM has no __dirname).
+  return typeof __dirname === 'string' && __dirname ? __dirname : process.cwd();
 }
 
 function hasIndex(dir: string): boolean {

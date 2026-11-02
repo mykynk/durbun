@@ -1,0 +1,125 @@
+Activity Resolver Table:
+  Non-Data Actions:
+      android.intent.action.MAIN:
+        9b1d2e7 com.mykynk.mahalle/.MainActivity filter 4c0a5f1
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.LAUNCHER"
+
+Receiver Resolver Table:
+  Non-Data Actions:
+      com.google.firebase.MESSAGING_EVENT:
+        0f3e7a2 com.mykynk.mahalle/com.google.firebase.iid.FirebaseInstanceIdReceiver filter 7d21c90
+          Action: "com.google.android.c2dm.intent.RECEIVE"
+
+Service Resolver Table:
+  Non-Data Actions:
+      com.google.firebase.MESSAGING_EVENT:
+        5e8b1c4 com.mykynk.mahalle/com.google.firebase.messaging.FirebaseMessagingService filter a12f6e3
+          Action: "com.google.firebase.MESSAGING_EVENT"
+          mPriority=-500, mOrder=0, mHasStaticPartialTypes=false, mHasDynamicPartialTypes=false
+
+Domain verification status:
+  com.mykynk.mahalle:
+    ID: 3f0b6c4e-2a1d-4a8e-9a55-7d3c1b2e9f10
+    Signatures: [5A:1C:9E:3D:77:B0:42:18:C6:0F:AA:31:6E:D2:8B:49:13:7E:05:C2:9F:64:B8:21:3A:DD:70:E4:15:9C:2B:81]
+    Domain verification state:
+      mahalle.mykynk.com: verified
+
+Key Set Manager:
+  [com.mykynk.mahalle]
+      Signing KeySets: 61
+
+Packages:
+  Package [com.mykynk.mahalle] (b3a7e15):
+    appId=10214
+    pkg=Package{e2c4d9a com.mykynk.mahalle}
+    codePath=/data/app/~~V3mQe8XfWq1rK0pZ7nL2gA==/com.mykynk.mahalle-Hc4w9QeTj1xYb7sK2mN5Rw==
+    resourcePath=/data/app/~~V3mQe8XfWq1rK0pZ7nL2gA==/com.mykynk.mahalle-Hc4w9QeTj1xYb7sK2mN5Rw==
+    legacyNativeLibraryDir=/data/app/~~V3mQe8XfWq1rK0pZ7nL2gA==/com.mykynk.mahalle-Hc4w9QeTj1xYb7sK2mN5Rw==/lib
+    extractNativeLibs=false
+    primaryCpuAbi=arm64-v8a
+    secondaryCpuAbi=null
+    cpuAbiOverride=null
+    versionCode=3104 minSdk=24 targetSdk=34
+    minExtensionVersions=[]
+    versionName=3.1.0
+    hiddenApiEnforcementPolicy=2
+    usesNonSdkApi=false
+    splits=[base, config.arm64_v8a, config.tr, config.xxhdpi]
+    apkSigningVersion=3
+    flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP LARGE_HEAP ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE PRIVATE_FLAG_HAS_DOMAIN_URLS ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    forceQueryable=false
+    dataDir=/data/user/0/com.mykynk.mahalle
+    supportsScreens=[small, medium, large, xlarge, resizeable, anyDensity]
+    usesLibraries:
+      android.ext.adservices
+    usesOptionalLibraries:
+      org.apache.http.legacy
+    timeStamp=2026-10-28 21:14:52
+    lastUpdateTime=2026-10-28 21:14:55
+    installerPackageName=com.android.vending
+    installerPackageUid=10141
+    initiatingPackageName=com.android.vending
+    originatingPackageName=null
+    packageSource=0
+    appMetadataFilePath=null
+    signatures=PackageSignatures{4f9e0b3 version:3, signatures:[d1e2f3a4], past signatures:[]}
+    installPermissionsFixed=true
+    pkgFlags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP LARGE_HEAP ]
+    privatePkgFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE PRIVATE_FLAG_HAS_DOMAIN_URLS ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    apexModuleName=null
+    declared permissions:
+      com.mykynk.mahalle.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: prot=signature, INSTALLED
+    requested permissions:
+      android.permission.INTERNET
+      android.permission.ACCESS_NETWORK_STATE
+      android.permission.POST_NOTIFICATIONS
+      android.permission.WAKE_LOCK
+      com.google.android.c2dm.permission.RECEIVE
+    install permissions:
+      android.permission.INTERNET: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+      android.permission.WAKE_LOCK: granted=true
+      com.google.android.c2dm.permission.RECEIVE: granted=true
+    User 0: ceDataInode=262311 deDataInode=0 installed=true hidden=false suspended=false distractionFlags=0 stopped=false notLaunched=false enabled=0 instant=false virtual=false quarantined=false
+      installReason=4
+      dataDir=/data/user/0/com.mykynk.mahalle
+      firstInstallTime=2026-09-14 10:02:31
+      uninstallReason=0
+      gids=[3003]
+      runtime permissions:
+        android.permission.POST_NOTIFICATIONS: granted=true, flags=[ USER_SET|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+      disabledComponents:
+        com.google.firebase.provider.FirebaseInitProvider
+      enabledComponents:
+        androidx.work.impl.background.systemjob.SystemJobService
+
+Queries:
+  system apps queryable: false
+  queries via forceQueryable:
+  queries via package name:
+    com.mykynk.mahalle:
+      com.google.android.gms
+  queries via component:
+  queryable via interaction:
+    User 0:
+      [com.android.vending,com.google.android.gms]:
+        com.mykynk.mahalle
+
+Package Changes:
+  Sequence number=1174
+  User 0:
+    seq=1102, package=com.mykynk.mahalle
+
+
+Dexopt state:
+  [com.mykynk.mahalle]
+    path: /data/app/~~V3mQe8XfWq1rK0pZ7nL2gA==/com.mykynk.mahalle-Hc4w9QeTj1xYb7sK2mN5Rw==/base.apk
+      arm64: [status=speed-profile] [reason=bg-dexopt] [primary-abis: arm64]
+        [location is /data/app/~~V3mQe8XfWq1rK0pZ7nL2gA==/com.mykynk.mahalle-Hc4w9QeTj1xYb7sK2mN5Rw==/oat/arm64/base.odex]
+
+
+Compiler stats:
+  [com.mykynk.mahalle]
+     base.apk - 4211

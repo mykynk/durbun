@@ -61,7 +61,7 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
                     ts = startWall.toDouble(),
                     method = method,
                     url = url,
-                    headers = requestHeaders(request),
+                    headers = requestHeaders(core, request),
                     body = captureRequestBody(core, request),
                     source = SOURCE,
                 ),
@@ -145,7 +145,7 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
                     ts = endTs(startWall, startNs),
                     status = action.status,
                     statusText = statusText,
-                    headers = action.headers.map { it.first to redact(it.first, it.second) },
+                    headers = action.headers.map { it.first to redact(core, it.first, it.second) },
                     body = body,
                     protocol = null,
                     remoteAddress = null,
@@ -244,7 +244,7 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
                 ts = endTs(startWall, startNs),
                 status = code,
                 statusText = response.message.ifEmpty { reasonPhrase(code) },
-                headers = headerList(response.headers),
+                headers = headerList(core, response.headers),
                 body = body,
                 protocol = response.protocol.toString(),
                 remoteAddress = remoteAddress(chain),
@@ -255,8 +255,8 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         )
     }
 
-    private fun requestHeaders(request: Request): List<Header> {
-        val list = headerList(request.headers).toMutableList()
+    private fun requestHeaders(core: DurbunCore, request: Request): List<Header> {
+        val list = headerList(core, request.headers).toMutableList()
         val body = request.body ?: return list
         // OkHttp adds these from the body after application interceptors run; show them like the wire does.
         if (request.header("Content-Type") == null) {
@@ -269,17 +269,22 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         return list
     }
 
-    private fun headerList(headers: Headers): List<Header> {
+    private fun headerList(core: DurbunCore, headers: Headers): List<Header> {
         val list = ArrayList<Header>(headers.size)
         for (i in 0 until headers.size) {
             val name = headers.name(i)
-            list += name to redact(name, headers.value(i))
+            list += name to redact(core, name, headers.value(i))
         }
         return list
     }
 
-    private fun redact(name: String, value: String): String =
-        if (redactedHeaders.isNotEmpty() && name.lowercase() in redactedHeaders) REDACTED else value
+    /** Redacts the interceptor's own header names and the core-wide ones (Flutter's `redactHeaders`). */
+    private fun redact(core: DurbunCore, name: String, value: String): String {
+        val extra = core.redactedHeaders
+        if (redactedHeaders.isEmpty() && extra.isEmpty()) return value
+        val lower = name.lowercase()
+        return if (lower in redactedHeaders || lower in extra) REDACTED else value
+    }
 
     /* ───────────── bodies ───────────── */
 

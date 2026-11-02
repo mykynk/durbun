@@ -4,23 +4,26 @@
 
 Dürbün, cihaz Mac'e takılıyken (veya simülatör/emülatörde) uygulamanın **tüm
 loglarını, hatalarını ve ağ trafiğini** tek bir canlı ekranda gösteren masaüstü
-aracıdır. Bu paket uygulamanın içinden Dürbün'e veri gönderir: uygulama logları,
-`print` çıktıları, Flutter hataları, çökmeler, özel event'ler, dart:io HTTP
-istekleri (gövdeleriyle), FPS / jank / bellek / CPU ölçümleri. Masaüstündeki
-mock kurallarını uygular ve masaüstünden gelen komutları (debug paint, yavaş
-animasyon, widget ağacı dökümü…) çalıştırır.
+aracıdır. Bu paket uygulamanın içinden Dürbün'e veri gönderir. Bir **Flutter
+plugin'idir**: Dart tarafının yanında Android (Kotlin) ve iOS (Swift) native
+katmanlarını da taşır. Tek kurulum hem Flutter hem native katmanı kapsar;
+katman başına ayrı SDK kurmanız gerekmez.
 
-## Kurulum
+## Kurulum: 2 adım
 
-`pubspec.yaml` (path dependency — paket pub.dev'de yayınlanmadı):
+**1. `pubspec.yaml`**
 
 ```yaml
 dependencies:
   durbun:
     path: ../durbun/sdks/flutter/durbun   # Dürbün reposunun bulunduğu yere göre
+    # veya git ile:
+    # git:
+    #   url: <dürbün-repo-adresi>
+    #   path: sdks/flutter/durbun
 ```
 
-`main.dart`:
+**2. `main.dart`**
 
 ```dart
 import 'package:durbun/durbun.dart';
@@ -34,11 +37,92 @@ Future<void> main() async {
 }
 ```
 
+Bu kadar. Native tarafta başlatma kodu yok: Dart tarafı çalıştığında Android
+ve iOS katmanlarını kendisi başlatır, kapalıyken onlar da kapalı kalır.
+`Durbun.start()` gibi native bir çağrı **gerekmez** (Flutter uygulamasında
+yapılırsa yok sayılır).
+
+**İsteğe bağlı, Android'de OkHttp kullanan native kodunuz varsa tek satır:**
+
+```kotlin
+import dev.durbun.DurbunInterceptor
+
+val client = OkHttpClient.Builder()
+    .addInterceptor(DurbunInterceptor())   // ← bu satır
+    .build()
+```
+
+Dürbün kapalıyken (release) bu interceptor isteği hiç dokunmadan geçirir.
+iOS'ta URLSession trafiği (paylaşılan ve kendi oturumlarınız, Alamofire,
+cupertino_http) **otomatik** yakalanır, ek satır gerekmez.
+
 `Durbun.run` bir zone açar: `print` çıktılarını ve yakalanmamış hataları da alır.
 Zone istemiyorsanız: `Durbun.init(); runApp(const MyApp());` (bu durumda yalnızca
 `debugPrint` yakalanır, zone hataları `PlatformDispatcher.onError` üzerinden gelir).
 
-Kod içinden log ve event:
+## Release, Firebase ve mağaza derlemeleri
+
+| Derleme | Dürbün |
+|---|---|
+| `flutter run` (debug), profile | **Açık**, kendiliğinden |
+| Release (mağaza) | **Kapalı.** Soket açılmaz, kanca kurulmaz, native katman başlatılmaz. Dart kodu derleyicinin ağaç sarsmasıyla (tree shaking) neredeyse tamamen düşer |
+| Release + `--dart-define=DURBUN=true` | **Açık** — örneğin yalnızca Firebase App Distribution'a giden test derlemesi |
+| `--dart-define=DURBUN=false` | Her modda kapalı (ör. profile ölçümü) |
+| `DurbunOptions(enabled: true/false)` | Her şeyin önüne geçer |
+
+```bash
+# Testçilere giden derleme (Firebase):
+flutter build apk --release --dart-define=DURBUN=true
+flutter build ipa --release --dart-define=DURBUN=true
+# Mağaza derlemesi: hiçbir şey eklemeyin.
+flutter build appbundle --release
+```
+
+- Firebase ve mağaza aynı binary ise (bazı projelerde öyle) **define kullanmayın**:
+  o binary mağazaya da gider. Dürbün masaüstü bu durumda yine cihazın verdiği
+  her şeyi gösterir (cihaz logları, çökme kayıtları, Android süreç/kare
+  istatistikleri) ve ağ/mock'un neden görünmediğini açıklar.
+- Flavor kullanıyorsanız define'ı yalnızca test flavor'ının derleme komutuna
+  ekleyin ya da `DurbunOptions(enabled: appFlavor == 'qa')` yazın.
+- Android: release'de açacaksanız ana manifestte `INTERNET` izni olmalı (ağ
+  kullanan her uygulamada zaten vardır; plugin kendisi izin eklemez).
+- Boyut (Flutter 3.38, sayaç uygulaması, başka bir plugin'i zaten olan uygulamaya
+  eklenince, DURBUN kapalı release): Android arm64 APK **+34 KB**; iOS `.app`
+  **+868 KB** sıkıştırılmamış / **+278 KB** zip (`durbun.framework`; mağaza
+  dağıtımında semboller ayıklanınca küçülür).
+
+## Veriler nereden gelir?
+
+Hepsi uygulamanın içinden ve **tek bağlantıdan** gider; masaüstünde tek bir
+uygulama oturumu ("SDK" rozeti) olarak görünür. Araya proxy girmez, bu yüzden
+SSL pinning'e dokunulmaz.
+
+| Kaynak | Ne gönderir | Ne zaman |
+|---|---|---|
+| Dart SDK (bu paket) | Dart logları, `print`, Flutter hataları, Dart çökmeleri, dart:io HTTP (package:http, Dio varsayılan adaptörü, `NetworkImage`), FPS/jank/bellek, `flutter.*` araçları | Dürbün açıkken |
+| Android native katmanı (bu plugin içinde) | Kotlin/Java `Durbun.log`, yakalanmamış Kotlin/Java çökmeleri, OkHttp (`DurbunInterceptor` ile), Wi-Fi'de (adb yokken) uygulamanın kendi logcat'i, `android.dumpThreads` / `android.gc` araçları | Dart tarafı başlatınca |
+| iOS native katmanı (bu plugin içinde) | URLSession trafiği (otomatik), Objective-C istisnaları ve Swift çökmeleri, Swift `print`/stdout/stderr, `Durbun.log` (Swift), `ios.*` araçları | Dart tarafı başlatınca |
+| SDK'sız (eski build, mağaza build'i) | Cihaz logları, sistem çökme kayıtları, Android süreç/kare istatistikleri — masaüstü bunları cihazdan okur | Her zaman |
+
+Native çökmeler: Android'de çökme anında doğrudan masaüstüne gider; masaüstüne
+o an ulaşılamazsa bir sonraki açılışta **"Previous launch crashed — …"** olarak
+gelir. iOS'ta ana thread dışındaki istisnalar anında, ana thread'deki istisnalar
+ve sinyal çökmeleri (force-unwrap, EXC_BAD_ACCESS) bir sonraki açılışta
+**"Crash in previous launch: …"** olarak gelir.
+
+Native koddan log:
+
+```kotlin
+import dev.durbun.Durbun
+Durbun.i("payment", "3DS tamamlandı", data = mapOf("orderId" to 42))
+```
+
+```swift
+import durbun
+Durbun.info("3DS tamamlandı", tag: "payment", data: ["orderId": 42])
+```
+
+## Kod içinden log ve event (Dart)
 
 ```dart
 Durbun.log('Kullanıcı giriş yaptı', tag: 'auth', data: {'userId': 42});
@@ -80,7 +164,7 @@ Logger.root.onRecord.listen((r) => Durbun.log(
 ));
 ```
 
-## Neler yakalanır?
+## Dart tarafında neler yakalanır?
 
 | Kaynak | Nasıl | Masaüstünde |
 |---|---|---|
@@ -122,48 +206,56 @@ dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı sat�
 
 ## Release güvenliği
 
-- Varsayılan: debug ve profile derlemelerinde **açık**, release derlemelerinde ve
-  `flutter test` içinde **kapalı** (tüm çağrılar no-op). `enabled: true` her
-  yerde zorla açar, `enabled: false` kapatır.
-- SDK uygulamaya asla hata fırlatmaz; tüm iç hatalar yutulur.
+- Varsayılanlar yukarıdaki tabloda. `flutter test` içinde de kapalıdır
+  (`enabled: true` ile açılır).
+- SDK uygulamaya asla hata fırlatmaz; tüm iç hatalar yutulur (native katman dahil).
 - JSON kodlama, gövde base64/gzip işlemleri ve soket I/O arka plan isolate'ta
   çalışır; kuyruklar sınırlıdır (5 000 mesaj, ~48 MB), gövdeler `maxBodyBytes`
-  (varsayılan 1 MB) ile kesilir.
-- Web'de derlenir ama hiçbir şey yapmaz.
-- Android: Flutter şablonu `INTERNET` iznini debug ve profile manifestlerine
-  ekler; release'de SDK'yı `enabled: true` ile zorlarsanız izni ana manifeste
-  de ekleyin.
+  (varsayılan 1 MB) ile kesilir. Native katmanın mesajları Dart'a küçük paketler
+  hâlinde, sınırlı bir tamponla iletilir.
+- Web'de ve masaüstü platformlarda native katman yoktur; Dart tarafı çalışır.
+- Hot restart: native katman yeni oturumla yeniden başlar.
 
 ## Seçenekler (`DurbunOptions`)
 
 | Seçenek | Varsayılan | Açıklama |
 |---|---|---|
-| `enabled` | `null` (debug/profile'da açık) | `true` = her yerde aç |
+| `enabled` | `null` | `null`: debug/profile açık, release yalnızca `--dart-define=DURBUN=true` ile; `true`/`false` her şeyi ezer |
 | `host` / `port` | `null` / `9751` | Wi-Fi için masaüstü adresi (`'ip'` veya `'ip:port'`) |
-| `captureNetwork` | `true` | dart:io HTTP yakalama + mock'lar |
-| `capturePrint` | `auto` | `auto` / `always` / `never` |
-| `captureErrors` | `true` | Flutter hataları ve çökmeler |
+| `captureNetwork` | `true` | dart:io HTTP yakalama + mock'lar (iOS'ta URLSession yakalamayı da açar/kapatır) |
+| `capturePrint` | `auto` | `auto` / `always` / `never` (`never` native stdout/logcat iletimini de kapatır) |
+| `captureErrors` | `true` | Flutter hataları ve çökmeler (native çökmeler dahil) |
 | `metrics` | `true` | FPS, jank, bellek, CPU |
 | `maxBufferedMessages` | `5000` | bağlantı yokken tutulan mesaj sayısı |
-| `redactHeaders` | `[]` | değeri `••••` ile gizlenecek başlıklar, ör. `['authorization']` |
-| `appId` / `appName` / `appVersion` | otomatik | Android'de sürüm otomatik okunamaz → `appVersion` verin |
+| `redactHeaders` | `[]` | değeri gizlenecek başlıklar, ör. `['authorization']` — OkHttp ve URLSession istekleri dahil |
+| `appId` / `appName` / `appVersion` | otomatik | Android'de sürüm/derleme numarasını artık native katman okur; yalnızca ezmek için verin |
 | `waitForDesktop` | `0` | `run` uygulamayı başlatmadan önce bu kadar bekler (açılıştaki isteklere mock uygulansın diye) |
 | `listenForUsb` | `true` | iOS cihazda usbmux dinleyicisi |
 | `useBackgroundIsolate` | `true` | taşıma katmanı arka plan isolate'ta |
 
 ## Sınırlar
 
-- **cupertino_http / cronet_http / Dio `NativeAdapter`** dart:io kullanmaz →
-  yakalanmaz. Dio kullanıyorsanız `sdks/flutter/durbun_dio` paketindeki
-  `DurbunDioInterceptor(dio: dio)` ekleyin; diğerleri yakalanmaz.
-- Arka plan isolate'larındaki (`compute`, `Isolate.run`) HTTP istekleri ve
+- Android'de **cronet_http / Dio `NativeAdapter`** dart:io'yu ve OkHttp'yi
+  kullanmaz → Dio için `sdks/flutter/durbun_dio` paketindeki
+  `DurbunDioInterceptor(dio: dio)` ekleyin. iOS'ta bunlar URLSession üzerinden
+  native katmanca yakalanır (`DurbunDioInterceptor` o istekleri ikinci kez
+  bildirmez).
+- Arka plan isolate'larındaki (`compute`, `Isolate.run`) Dart HTTP istekleri ve
   loglar yakalanmaz (her isolate'ın kendi `HttpOverrides`'ı vardır).
-- `Durbun.run/init`'ten **önce** oluşturulmuş `HttpClient`'lar sarılmaz (ör.
-  çok erken oluşturulan statik istemciler).
+- `Durbun.run/init`'ten **önce** oluşturulmuş `HttpClient`'lar sarılmaz.
 - WebSocket: yalnızca el sıkışma (101) görünür, mesajlar görünmez.
 - `dart:developer` `log()` çağrıları SDK'dan değil, masaüstünün Dart VM Service
   bağlantısından (debug) gelir.
 - FPS yalnızca çizim yapılırken raporlanır (boşta bekleyen uygulama "0 FPS" görünmez).
+- Aynı süreçte birden fazla Flutter engine varsa native katmanı yalnızca ilk
+  başlatan engine kullanır.
+- Native-only (Flutter'sız) uygulamalar `sdks/android` ve `sdks/ios` SDK'larını
+  kullanır; Flutter uygulamasına ikisini ayrıca eklemeyin (sınıflar çakışır).
+
+## Saf Dart (Flutter'sız)
+
+`package:durbun/durbun_core.dart` (`DurbunClient.start(...)`) Flutter'sız Dart
+programlarında aynen çalışır; plugin'in native tarafı onlar için devreye girmez.
 
 ## Geliştirme
 
@@ -174,6 +266,7 @@ flutter test --concurrency=2
 dart run tool/smoke.dart --dry-run      # masaüstü olmadan uçtan uca kontrol
 dart run tool/smoke.dart                # çalışan Dürbün masaüstüne karşı (127.0.0.1:9751)
 dart run tool/smoke.dart --port 9751 --linger 60   # bağlı kalır: Cihaz sekmesinden smoke.* araçlarını deneyin
+dart run tool/sync_native.dart          # sdks/ios değiştiyse iOS kopyasını tazeler
 ```
 
 `--linger` süresince smoke uygulaması her saniye metrik gönderir ve masaüstünden şu araçlar çalışır:
@@ -181,7 +274,16 @@ dart run tool/smoke.dart --port 9751 --linger 60   # bağlı kalır: Cihaz sekme
 (`{path, method, body}` ile SDK üzerinden yeni bir istek — Mock'lar sekmesindeki kuralların uygulandığını
 görmek için).
 
-Örnek uygulama: [`example/`](example/).
+Native çekirdekler kopyalanmadan taşınır: Android derlemesi
+`sdks/android/durbun/src/main`'i Gradle `sourceSets` ile doğrudan derler
+(`android/build.gradle`). CocoaPods ve Swift Package Manager plugin klasörü
+dışındaki dosyaları derleyemediği için iOS çekirdeği
+`ios/durbun/Sources/durbun/Core`'da birebir kopya olarak durur;
+`sdks/ios/Sources/Durbun` değişince `dart run tool/sync_native.dart` çalıştırın.
+`test/native_sync_test.dart` kopya eskidiğinde başarısız olur.
+
+Örnek uygulama: [`example/`](example/). (Xcode 27 iOS 15 altını kabul etmediği
+için örneğin iOS hedefi 15.0'dır.)
 
 ---
 
@@ -191,17 +293,16 @@ görmek için).
 
 Dürbün is a desktop tool that shows **all logs, errors and network traffic** of
 an app running on a device plugged into the Mac (or a simulator/emulator) in one
-live view. This package sends data from inside the app: app logs, `print`
-output, Flutter errors, crashes, custom events, dart:io HTTP traffic (with
-bodies), FPS / jank / memory / CPU. It applies the desktop's mock rules and runs
-desktop commands (debug paint, slow animations, widget tree dump…).
+live view. This package is a **Flutter plugin**: besides the Dart SDK it carries
+the native Android (Kotlin) and iOS (Swift) layers, so one install covers both
+Flutter and native code.
 
-## Install
+## Setup: 2 steps
 
 ```yaml
 dependencies:
   durbun:
-    path: ../durbun/sdks/flutter/durbun
+    path: ../durbun/sdks/flutter/durbun   # or a git: dependency with path: sdks/flutter/durbun
 ```
 
 ```dart
@@ -213,15 +314,59 @@ Future<void> main() async {
 }
 ```
 
+No native init call: the Dart side starts the Android/iOS layers when it runs
+and leaves them off otherwise (a native `Durbun.start()` is not needed and is
+ignored in Flutter apps). Optional on Android, if your native code uses OkHttp:
+`.addInterceptor(DurbunInterceptor())` (`import dev.durbun.DurbunInterceptor`) —
+a pass-through while Dürbün is off. iOS URLSession traffic (shared and custom
+sessions, Alamofire, cupertino_http) is captured automatically.
+
 Without a zone: `Durbun.init(); runApp(const MyApp());` (then only `debugPrint`
 is captured). API: `Durbun.log(message, tag:, data:, error:, stackTrace:)`,
 `Durbun.v/d/i/w/e/f`, `Durbun.event(name, props)`, `Durbun.isConnected`,
 `Durbun.connection` (stream), `Durbun.addAction(DurbunAction.button/toggle/select)`.
-Using `package:logging`? Forward records with
-`Logger.root.onRecord.listen((r) => Durbun.log(r.message, tag: r.loggerName, error: r.error, stackTrace: r.stackTrace, level: …))`
-(see the Turkish section for the level mapping).
+Native logs: Kotlin `Durbun.i("tag", "message", data = …)` (`dev.durbun.Durbun`),
+Swift `Durbun.info("message", tag: "tag")` (`import durbun`).
 
-## What is captured
+## Release, Firebase and store builds
+
+- debug / profile: **on** automatically;
+- release: **off** — no socket, no hooks, the native layer is never started, and
+  the Dart code is almost entirely tree-shaken away;
+- release + `--dart-define=DURBUN=true`: **on** (e.g. only the Firebase App
+  Distribution build for testers — never for store builds);
+- `--dart-define=DURBUN=false`: off in every mode;
+- `DurbunOptions(enabled: …)` overrides everything (e.g. `enabled: appFlavor == 'qa'`).
+
+If a project ships the same binary to Firebase and the store, do not use the
+define; the desktop still shows what the device exposes (device logs, crash
+records, Android process/frame stats) and explains why network/mocks are missing.
+Release builds with Dürbün on need `INTERNET` in the main Android manifest
+(every networked app has it; the plugin adds no permission).
+Size (Flutter 3.38 counter app that already has another plugin, release, DURBUN
+off): Android arm64 APK **+34 KB**; iOS `.app` **+868 KB** uncompressed /
+**+278 KB** zipped (`durbun.framework`, smaller once symbols are stripped for
+distribution).
+
+## Where the data comes from
+
+Everything leaves the app over **one connection** and shows up as one app
+session ("SDK" badge). No proxy is involved, so SSL pinning is untouched.
+
+| Source | Sends | When |
+|---|---|---|
+| Dart SDK | Dart logs, `print`, Flutter errors, Dart crashes, dart:io HTTP, FPS/jank/memory, `flutter.*` tools | while Dürbün is on |
+| Android layer (in this plugin) | Kotlin/Java `Durbun.log`, uncaught Kotlin/Java crashes, OkHttp (with `DurbunInterceptor`), the app's own logcat over Wi-Fi (no adb), `android.*` tools | once Dart starts it |
+| iOS layer (in this plugin) | URLSession traffic (automatic), Objective-C exceptions and Swift crashes, Swift `print`/stdout/stderr, Swift `Durbun.log`, `ios.*` tools | once Dart starts it |
+| No SDK (old / store builds) | device logs, system crash records, Android process/frame stats, read by the desktop | always |
+
+Native crashes: Android sends them to the desktop at crash time; if the desktop
+cannot be reached they arrive on the next launch as **"Previous launch crashed —
+…"**. iOS: exceptions off the main thread arrive live; main-thread exceptions
+and signal crashes (force unwrap, EXC_BAD_ACCESS) arrive on the next launch as
+**"Crash in previous launch: …"**.
+
+## What the Dart side captures
 
 App logs; `print`/`debugPrint` (only when the desktop cannot see device logs, so
 lines are never duplicated — `capturePrint: auto`); `FlutterError.onError`
@@ -245,23 +390,22 @@ Wi-Fi: `DurbunOptions(host: '192.168.1.20')` or
 iOS 14+ add `NSLocalNetworkUsageDescription` to `Info.plist`. While offline the
 SDK keeps the last 5 000 messages and reconnects with 0.5 s → 3 s backoff.
 
-## Release safety
-
-On in debug/profile, **off in release builds and in `flutter test`** unless
-`enabled: true`. Never throws into the app. Encoding and socket I/O run on a
-background isolate with bounded queues. Compiles to a no-op on the web.
-Android: Flutter's template declares `INTERNET` in the debug and profile
-manifests; if you force the SDK on in release, add it to the main manifest too.
-
 ## Limits
 
-cupertino_http / cronet_http / Dio `NativeAdapter` bypass dart:io: use
-`DurbunDioInterceptor` from `sdks/flutter/durbun_dio` for Dio, others are not
-captured. Traffic in background isolates is not captured. `HttpClient`s created
-before `Durbun.run/init` are not wrapped. WebSockets: handshake only.
-`dart:developer` `log()` comes from the desktop's VM-service bridge (debug), not
-from this SDK. Android app versions cannot be detected without plugins
-(`appVersion` option).
+On Android, cronet_http / Dio `NativeAdapter` bypass both dart:io and OkHttp:
+use `DurbunDioInterceptor` from `sdks/flutter/durbun_dio` for Dio. On iOS they run
+on URLSession and are captured by the native layer (`DurbunDioInterceptor` does
+not report them twice). Traffic in background isolates is not captured.
+`HttpClient`s created before `Durbun.run/init` are not wrapped. WebSockets:
+handshake only. `dart:developer` `log()` comes from the desktop's VM-service
+bridge (debug). With several Flutter engines in one process only the first one
+that starts Dürbün gets the native layer. Native-only apps use `sdks/android` /
+`sdks/ios`; do not add those to a Flutter app as well (duplicate classes).
+
+## Pure Dart
+
+`package:durbun/durbun_core.dart` (`DurbunClient.start(...)`) keeps working in
+Dart programs without Flutter; the plugin's native side is not involved.
 
 ## Development
 
@@ -271,3 +415,11 @@ needed) or `dart run tool/smoke.dart` against a running desktop
 offers the actions `smoke.ping`, `smoke.verbose` (toggle), `smoke.theme` (select)
 and `smoke.request` (`{path, method, body}` — makes one more request through the
 SDK, e.g. to watch a mock rule apply).
+
+The native cores are not copied by hand: Android compiles
+`sdks/android/durbun/src/main` directly through Gradle `sourceSets`
+(`android/build.gradle`). CocoaPods and Swift Package Manager cannot compile
+files outside the plugin folder, so the iOS core is an exact copy in
+`ios/durbun/Sources/durbun/Core`; run `dart run tool/sync_native.dart` after
+changing `sdks/ios/Sources/Durbun` — `test/native_sync_test.dart` fails when the
+copy is stale.

@@ -1,0 +1,17 @@
++0300
+Europe/Istanbul
+___DURBUN_PKGS___
+package:com.mykynk.pati
+package:com.mykynk.mahalle
+package:com.example.native
+package:com.whatsapp
+package:dev.firebase.appdistribution
+___DURBUN_PKGS___
+package:com.android.systemui
+package:com.google.android.gms
+package:com.android.vending
+package:com.google.android.apps.nexuslauncher
+package:com.android.phone
+package:android
+package:com.android.shell
+package:com.google.android.webview

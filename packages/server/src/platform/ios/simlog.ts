@@ -74,6 +74,7 @@ export function parseSimLogLine(line: string, nowMs = Date.now()): DeviceLogInpu
   const category = ev.category || undefined;
   const entry: DeviceLogInput = {
     ts: (ev.timestamp && parseUnifiedTimestamp(ev.timestamp)) || nowMs,
+    origin: 'simctl-log',
     level: type === 'lossEvent' ? 'warn' : (LEVELS[ev.messageType ?? 'Default'] ?? 'info'),
     tag: subsystem ?? sender ?? process ?? 'log',
     message: ev.eventMessage ?? '',

@@ -2,12 +2,18 @@
  * External tool resolution (SPEC §5.5 "Tool resolution").
  *
  *  adb:            settings.adbPath → $ANDROID_HOME|$ANDROID_SDK_ROOT/platform-tools/adb →
- *                  ~/Library/Android/sdk/platform-tools/adb → adb on PATH
+ *                  `flutter config --android-sdk` (~/.flutter_settings) → ~/Library/Android/sdk/platform-tools/adb →
+ *                  adb on PATH (+ /opt/homebrew/bin, /usr/local/bin) → other well-known SDK folders
+ *                  (Homebrew android-commandlinetools / android-sdk, the android-platform-tools cask, ~/Android/Sdk)
  *  idevicesyslog / idevicescreenshot / iproxy:
  *                  settings.idevicesyslogPath (siblings for the other tools) → PATH (+ /opt/homebrew/bin,
  *                  /usr/local/bin) → Flutter's cache (<flutter>/bin/cache/artifacts/…), run with
  *                  DYLD_LIBRARY_PATH = artifacts/{libimobiledevice,libimobiledeviceglue,libplist,libusbmuxd,openssl}
  *  xcrun simctl / devicectl: availability probed without triggering the CLT install dialog.
+ *
+ * An app started from Finder / the Dock (the Mac app) gets launchd's minimal PATH, so the well-known
+ * install folders are checked directly instead of relying on the shell profile. Every check is a
+ * synchronous stat / readdir (no child processes), so resolution stays fast at startup.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,6 +35,15 @@ export interface ResolvedTool {
 export interface ResolveEnv {
   env: NodeJS.ProcessEnv;
   home: string;
+  /** Package-manager prefixes checked for well-known installs (default /opt/homebrew, /usr/local). */
+  prefixes?: string[];
+}
+
+/** Homebrew on Apple silicon, then Intel / manual installs. */
+export const DEFAULT_PREFIXES = ['/opt/homebrew', '/usr/local'];
+
+function prefixesOf(renv: ResolveEnv): string[] {
+  return renv.prefixes ?? DEFAULT_PREFIXES;
 }
 
 export function defaultResolveEnv(): ResolveEnv {
@@ -52,14 +67,17 @@ export function isExecutableFile(p: string): boolean {
   }
 }
 
-export function pathDirs(env: NodeJS.ProcessEnv): string[] {
+export function pathDirs(env: NodeJS.ProcessEnv, prefixes: readonly string[] = DEFAULT_PREFIXES): string[] {
   const dirs = (env.PATH ?? '').split(path.delimiter).filter(Boolean);
-  for (const extra of ['/opt/homebrew/bin', '/usr/local/bin']) if (!dirs.includes(extra)) dirs.push(extra);
+  for (const prefix of prefixes) {
+    const extra = path.join(prefix, 'bin');
+    if (!dirs.includes(extra)) dirs.push(extra);
+  }
   return dirs;
 }
 
 export function findOnPath(name: string, renv: ResolveEnv): string | null {
-  for (const dir of pathDirs(renv.env)) {
+  for (const dir of pathDirs(renv.env, prefixesOf(renv))) {
     const p = path.join(expandHome(dir, renv.home), name);
     if (isExecutableFile(p)) return p;
   }
@@ -82,11 +100,64 @@ export function resolveAdb(settings: Pick<ServerSettings, 'adbPath'>, renv = def
       if (isExecutableFile(p)) return { path: p, source: 'env', detail: note };
     }
   }
+  const flutterSdk = flutterConfiguredAndroidSdk(renv);
+  if (flutterSdk) {
+    const p = path.join(flutterSdk, 'platform-tools', 'adb');
+    if (isExecutableFile(p)) return { path: p, source: 'sdk', detail: joinNotes('Android SDK from `flutter config --android-sdk`', note) };
+  }
   const sdk = path.join(renv.home, 'Library', 'Android', 'sdk', 'platform-tools', 'adb');
   if (isExecutableFile(sdk)) return { path: sdk, source: 'sdk', detail: note };
   const onPath = findOnPath('adb', renv);
   if (onPath) return { path: onPath, source: 'path', detail: note };
+  for (const { root, label } of wellKnownAndroidSdks(renv)) {
+    const p = path.join(root, 'platform-tools', 'adb');
+    if (isExecutableFile(p)) return { path: p, source: 'sdk', detail: joinNotes(`from ${label} (${root})`, note) };
+  }
   return null;
+}
+
+function joinNotes(a: string, b: string | undefined): string {
+  return b ? `${a} · ${b}` : a;
+}
+
+/** `android-sdk` from Flutter's settings file (written by `flutter config --android-sdk <dir>`). */
+export function flutterConfiguredAndroidSdk(renv: ResolveEnv): string | undefined {
+  for (const file of [path.join(renv.home, '.flutter_settings'), path.join(renv.home, '.config', 'flutter', 'settings')]) {
+    try {
+      const json = JSON.parse(fs.readFileSync(file, 'utf8')) as { 'android-sdk'?: unknown };
+      const dir = json['android-sdk'];
+      if (typeof dir === 'string' && dir.trim()) return expandHome(dir.trim(), renv.home);
+    } catch {
+      /* missing or not JSON */
+    }
+  }
+  return undefined;
+}
+
+/** Android SDK folders other installers use (checked after PATH). */
+export function wellKnownAndroidSdks(renv: ResolveEnv): { root: string; label: string }[] {
+  const out: { root: string; label: string }[] = [];
+  for (const prefix of prefixesOf(renv)) {
+    out.push({ root: path.join(prefix, 'share', 'android-commandlinetools'), label: 'Homebrew android-commandlinetools' });
+    out.push({ root: path.join(prefix, 'share', 'android-sdk'), label: 'Homebrew android-sdk' });
+    // `brew install --cask android-platform-tools`: <prefix>/Caskroom/android-platform-tools/<version>/platform-tools
+    const cask = path.join(prefix, 'Caskroom', 'android-platform-tools');
+    for (const version of listVersionsDesc(cask)) out.push({ root: path.join(cask, version), label: `Homebrew android-platform-tools ${version}` });
+  }
+  out.push({ root: path.join(renv.home, 'Android', 'Sdk'), label: '~/Android/Sdk' });
+  return out;
+}
+
+/** Sub-folder names of `dir`, newest version first ([] when missing). */
+function listVersionsDesc(dir: string): string[] {
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((v) => !v.startsWith('.'))
+      .sort((a, b) => compareVersionsDesc(a, b));
+  } catch {
+    return [];
+  }
 }
 
 /* ───────────── Flutter cache ───────────── */
@@ -119,19 +190,35 @@ export function findFlutterRoots(renv = defaultResolveEnv()): string[] {
     }
   }
   if (renv.env.FLUTTER_ROOT) add(expandHome(renv.env.FLUTTER_ROOT, renv.home));
-  add(path.join(renv.home, 'fvm', 'default'));
-  const versionsDir = path.join(renv.home, 'fvm', 'versions');
-  try {
-    const versions = fs
-      .readdirSync(versionsDir)
-      .filter((v) => !v.startsWith('.'))
-      .sort((a, b) => compareVersionsDesc(a, b));
-    for (const v of versions) add(path.join(versionsDir, v));
-  } catch {
-    /* no fvm */
+  // fvm: the global default first, then every installed version (newest first). FVM_CACHE_PATH (fvm 3)
+  // and FVM_HOME (fvm 2) move the cache; ~/fvm is the default, ~/.fvm the fvm 1/2 one.
+  const fvmDirs = [
+    renv.env.FVM_CACHE_PATH,
+    renv.env.FVM_HOME,
+    path.join(renv.home, 'fvm'),
+    path.join(renv.home, '.fvm'),
+  ].filter((d): d is string => typeof d === 'string' && d.length > 0);
+  for (const dir of fvmDirs) add(path.join(expandHome(dir, renv.home), 'default'));
+  for (const dir of fvmDirs) {
+    const versionsDir = path.join(expandHome(dir, renv.home), 'versions');
+    for (const v of listVersionsDesc(versionsDir)) add(path.join(versionsDir, v));
   }
   add(path.join(renv.home, 'flutter'));
   add(path.join(renv.home, 'development', 'flutter'));
+  add(path.join(renv.home, 'Developer', 'flutter'));
+  add(path.join(renv.home, 'dev', 'flutter'));
+  add(path.join(renv.home, 'sdk', 'flutter'));
+  add(path.join(renv.home, 'sdks', 'flutter'));
+  // puro / asdf version managers.
+  add(path.join(renv.home, '.puro', 'envs', 'stable', 'flutter'));
+  const asdf = path.join(renv.home, '.asdf', 'installs', 'flutter');
+  for (const v of listVersionsDesc(asdf)) add(path.join(asdf, v));
+  // `brew install --cask flutter`: <prefix>/Caskroom/flutter/<version>/flutter
+  for (const prefix of prefixesOf(renv)) {
+    const cask = path.join(prefix, 'Caskroom', 'flutter');
+    for (const v of listVersionsDesc(cask)) add(path.join(cask, v, 'flutter'));
+    add(path.join(prefix, 'share', 'flutter'));
+  }
   return roots;
 }
 

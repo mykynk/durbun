@@ -1,10 +1,11 @@
 /**
  * Change batching: everything the hub changes is queued here and flushed to subscribers every
  * `intervalMs` (or immediately once `maxQueuedLogs` logs are waiting). Network entries, devices, apps and
- * processes are coalesced by id (latest state wins); logs and metric samples are delivered in order.
+ * processes and device apps are coalesced by id/key (latest state wins); logs and metric samples are delivered in order.
  */
-import type { AppSession, DeviceInfo, LogEntry, MetricSample, NetworkEntry, ProcessUpdate } from '@durbun/protocol';
+import type { AppSession, DeviceApp, DeviceInfo, LogEntry, MetricSample, NetworkEntry, ProcessUpdate } from '@durbun/protocol';
 import type { HubChange, Logger } from '../types';
+import { copyDeviceApp } from './deviceApps';
 
 /** A single HubChange never carries more logs than this (huge imports are split). */
 export const MAX_LOGS_PER_CHANGE = 5000;
@@ -17,6 +18,8 @@ export class ChangeBatcher {
   private apps = new Map<string, AppSession>();
   private metrics: MetricSample[] = [];
   private processes = new Map<string, ProcessUpdate>();
+  private deviceApps = new Map<string, DeviceApp>();
+  private removedDeviceApps = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private flushing = false;
   private disposed = false;
@@ -80,6 +83,18 @@ export class ChangeBatcher {
     this.schedule();
   }
 
+  deviceAppChanged(app: DeviceApp): void {
+    this.removedDeviceApps.delete(app.key);
+    this.deviceApps.set(app.key, app);
+    this.schedule();
+  }
+
+  deviceAppRemoved(key: string): void {
+    this.deviceApps.delete(key);
+    this.removedDeviceApps.add(key);
+    this.schedule();
+  }
+
   /** Delivers everything queued right now (no-op when empty or while already flushing). */
   flush(): void {
     if (this.timer) {
@@ -98,6 +113,8 @@ export class ChangeBatcher {
         apps: [...this.apps.values()].map((a) => ({ ...a, stats: { ...a.stats } })),
         metrics: this.metrics,
         processes: [...this.processes.values()],
+        deviceApps: [...this.deviceApps.values()].map(copyDeviceApp),
+        removedDeviceApps: [...this.removedDeviceApps],
       };
       this.logs = [];
       this.network = new Map();
@@ -106,6 +123,8 @@ export class ChangeBatcher {
       this.apps = new Map();
       this.metrics = [];
       this.processes = new Map();
+      this.deviceApps = new Map();
+      this.removedDeviceApps = new Set();
 
       if (logs.length <= MAX_LOGS_PER_CHANGE) {
         change.logs = logs;
@@ -122,6 +141,8 @@ export class ChangeBatcher {
             apps: [],
             metrics: [],
             processes: [],
+            deviceApps: [],
+            removedDeviceApps: [],
           });
         }
       }
@@ -141,6 +162,8 @@ export class ChangeBatcher {
     this.apps.clear();
     this.metrics = [];
     this.processes.clear();
+    this.deviceApps.clear();
+    this.removedDeviceApps.clear();
   }
 
   dispose(): void {
@@ -159,7 +182,9 @@ export class ChangeBatcher {
       this.removedDevices.size === 0 &&
       this.apps.size === 0 &&
       this.metrics.length === 0 &&
-      this.processes.size === 0
+      this.processes.size === 0 &&
+      this.deviceApps.size === 0 &&
+      this.removedDeviceApps.size === 0
     );
   }
 

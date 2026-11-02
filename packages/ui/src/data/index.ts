@@ -43,6 +43,10 @@ export {
   groupApps,
   appGroupOf,
   appGroupKey,
+  appGroupName,
+  deviceAppKey,
+  useDeviceApp,
+  sameDeviceAppIgnoringActivity,
   deviceGroup,
   isDeviceUsable,
   isImportedDevice,
@@ -51,17 +55,28 @@ export {
   DESKTOP_DEVICE_ID,
 } from './stores/hub';
 export type { HubState, AppGroup, DeviceGroup } from './stores/hub';
-export { useScope, useScopeStore, getScope, setScope, scopeEquals, ALL_SCOPE } from './stores/scope';
+export { useScope, useScopeStore, getScope, setScope, scopeEquals, deviceAppScope, ALL_SCOPE } from './stores/scope';
 export type { Scope, ScopeHint } from './stores/scope';
 export { useMocks, saveMocks, useServerSettings, updateServerSettings } from './stores/server';
 export type { MocksState, ServerSettingsState } from './stores/server';
 export { usePrefs, getPrefs, flushPrefs, defaultPrefs, DEFAULT_NOISE_RULES, HIGHLIGHT_COLORS, TAB_IDS } from './stores/prefs';
 export type { UiPrefs, ThemePref, Density, TimeFormat, TabId, NoiseRule, HighlightRule, HighlightColor } from './stores/prefs';
 export { useUi, ui } from './stores/ui';
-export type { UiState, SettingsSection, SdkGuideTab, UiFocus, MockRuleDraft } from './stores/ui';
+export type { UiState, SettingsSection, SdkGuideTab, SdkGuideSection, UiFocus, MockRuleDraft } from './stores/ui';
 
 /* scope helpers */
-export { compileScope, entryInScope, networkInScope, useCompiledScope, scopeLogCounts, scopeNetworkCounts, scopeTarget } from './scope';
+export {
+  compileScope,
+  entryInScope,
+  networkInScope,
+  useCompiledScope,
+  scopeLogCounts,
+  scopeNetworkCounts,
+  scopeTarget,
+  scopeSignature,
+  scopeAppRef,
+  scopeDeviceId,
+} from './scope';
 export type { CompiledScope, ScopeTarget } from './scope';
 export { compileNoiseRules } from './noise';
 
@@ -74,5 +89,20 @@ export * as api from './api';
 export { ApiError } from './api';
 
 /* "what can I see / where from / why not" (SPEC §10) */
-export { explainSources } from './explain';
-export type { ExplainCapability, ExplainStatus, ExplainSource, ExplainReason, ExplainAction, ExplainRow, ExplainInput, ExplainBadge, ExplainResult } from './explain';
+export { explainSources, explainContext, explainRow, buildBadgeOf, buildKindOf, EXPLAIN_CAPABILITIES } from './explain';
+export type {
+  ExplainCapability,
+  ExplainStatus,
+  ExplainSource,
+  ExplainReason,
+  ExplainAction,
+  ExplainRow,
+  ExplainInput,
+  ExplainBadge,
+  ExplainResult,
+  ExplainContext,
+  ExplainPlatform,
+  ExplainTransport,
+  ExplainBuild,
+  BuildBadge,
+} from './explain';

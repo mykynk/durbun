@@ -5,7 +5,7 @@
  */
 import type { AppActionDescriptor, Header } from '@durbun/protocol';
 import type { DeviceLogInput } from '../types';
-import { type AppDeps, type CommandOutcome, DemoApp, type StopReason } from './appSim';
+import { type AppDeps, type AppIdentity, type CommandOutcome, DemoApp, type StopReason } from './appSim';
 import {
   DART_NULL_CHECK_STACK,
   DART_PAYMENT_STACK,
@@ -94,7 +94,8 @@ export class PatiApp extends DemoApp {
   private jankBoost = 0;
   private cpuBoost = 0;
 
-  constructor(deps: AppDeps) {
+  /** `variant`: another device than the default demo phones (e.g. the USB iPhone). */
+  constructor(deps: AppDeps, variant: { device?: AppIdentity['device']; firstPid?: number } = {}) {
     const ios = deps.platform === 'ios';
     super(
       deps,
@@ -107,11 +108,13 @@ export class PatiApp extends DemoApp {
         sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter' },
         source: 'dart:io',
         capabilities: ['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands'],
-        device: ios
-          ? { model: 'iPhone17,1', name: 'iPhone 16 Pro', osVersion: '18.2', manufacturer: 'Apple' }
-          : { model: 'Pixel 8', name: 'Pixel 8', osVersion: '15', apiLevel: 35, manufacturer: 'Google' },
+        device:
+          variant.device ??
+          (ios
+            ? { model: 'iPhone17,1', name: 'iPhone 16 Pro', osVersion: '18.2', manufacturer: 'Apple' }
+            : { model: 'Pixel 8', name: 'Pixel 8', osVersion: '15', apiLevel: 35, manufacturer: 'Google' }),
       },
-      ios ? 48_213 : 8421,
+      variant.firstPid ?? (ios ? 48_213 : 8421),
     );
     this.containerUuid = deps.rng.uuid(true);
     // The iPhone build is a fresh install: it shows the login flow; the Android one has a saved session.

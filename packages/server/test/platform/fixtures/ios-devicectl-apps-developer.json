@@ -1,0 +1,45 @@
+{
+ "info": {
+  "arguments": [
+   "devicectl",
+   "device",
+   "info",
+   "apps",
+   "--device",
+   "00008130-000A1B2C3D4E001F",
+   "--json-output",
+   "/tmp/durbun-devicectl.json"
+  ],
+  "commandType": "devicectl.device.info.apps",
+  "environment": {
+   "TERM": "xterm-256color"
+  },
+  "jsonVersion": 5,
+  "outcome": "success",
+  "version": "651.32"
+ },
+ "result": {
+  "apps": [
+   {
+    "appClip": false,
+    "builtByDeveloper": true,
+    "bundleIdentifier": "com.mykynk.pati",
+    "bundleVersion": "57",
+    "containerAccessible": true,
+    "defaultApp": false,
+    "hidden": false,
+    "internalApp": false,
+    "name": "Pati",
+    "removable": true,
+    "url": "file:///private/var/containers/Bundle/Application/9F1C2B7A-58D3-4E0B-A6C1-3D27E8F0B941/Runner.app/",
+    "version": "2.3.0"
+   }
+  ],
+  "defaultAppsIncluded": false,
+  "deviceIdentifier": "1F4C0B9E-2A7D-4E61-9C35-8B0D6F2A1E47",
+  "hiddenAppsIncluded": false,
+  "internalAppsIncluded": false,
+  "matchingBundleIdentifier": null,
+  "removableAppsIncluded": true
+ }
+}

@@ -1444,3 +1444,19 @@
     padding-left: 12px;
   }
 }
+
+/* Device crash records (Android dropbox, iOS .ips — SPEC §10.3). */
+.lg-crash__src--record {
+  color: var(--text-muted);
+}
+.lg-unsym {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-subtle);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}

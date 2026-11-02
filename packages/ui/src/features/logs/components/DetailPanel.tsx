@@ -10,7 +10,9 @@ import { formatTxtEntry } from '../model/export';
 import { parseStack } from '../model/frames';
 import type { QueryField } from '../model/queryEdit';
 import { systemText } from '../model/systemText';
-import type { LogRow } from '../model/types';
+import { isPreviousLaunch, type LogRow } from '../model/types';
+import type { ExplainSource } from '../../../data';
+import { entryOrigin, entrySourceText, isDeviceCrashRecord, isUnsymbolicated, sourceHint } from '../../../sources/text';
 import { StackLines, type RowDisplay } from './LogRow';
 
 export interface DetailPanelProps {
@@ -62,6 +64,20 @@ const KIND_QUERY: Partial<Record<NonNullable<LogEntry['kind']>, string>> = {
   marker: 'marker',
 };
 
+
+/** Log origin → the source whose one-line description explains it (tooltip on the metadata row). */
+const ORIGIN_HINT: Partial<Record<string, ExplainSource>> = {
+  logcat: 'logcat',
+  idevicesyslog: 'idevicesyslog',
+  'simctl-log': 'simctl-log',
+  sdk: 'sdk',
+  'vm-service': 'vm-service',
+  dropbox: 'dropbox',
+  'crash-report': 'crash-report',
+  demo: 'demo',
+  import: 'import',
+};
+
 interface MetaRow {
   key: string;
   label: string;
@@ -94,7 +110,21 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
   const meta: MetaRow[] = [];
   meta.push({ key: 'time', label: t('logs.detail.fields.time'), value: preciseTime(e.ts), copy: new Date(e.ts).toISOString() });
   meta.push({ key: 'level', label: t('logs.detail.fields.level'), value: <LevelBadge level={e.level} variant="text" />, copy: e.level, filter: { field: 'level', value: e.level } });
-  meta.push({ key: 'source', label: t('logs.detail.fields.source'), value: t(`logs.source.row.${e.source}`), copy: e.source, filter: { field: 'source', value: e.source } });
+  const origin = entryOrigin(e);
+  const originHint = origin && ORIGIN_HINT[origin] ? sourceHint(ORIGIN_HINT[origin]!) : undefined;
+  meta.push({
+    key: 'source',
+    label: t('logs.detail.fields.source'),
+    value: <span title={originHint}>{entrySourceText(e)}</span>,
+    copy: origin ?? e.source,
+    filter: { field: 'source', value: e.source },
+  });
+  if (isDeviceCrashRecord(e)) {
+    const notes = [t('sources.crash.fromDevice')];
+    if (isPreviousLaunch(e)) notes.push(t('logs.row.previousLaunch'));
+    if (isUnsymbolicated(e)) notes.push(t('sources.crash.unsymbolicated'));
+    meta.push({ key: 'record', label: t('sources.crash.recordLabel'), value: <span title={t('sources.crash.fromDeviceTip')}>{notes.join(' · ')}</span>, copy: notes.join(' · ') });
+  }
   meta.push({ key: 'kind', label: t('logs.detail.fields.kind'), value: kindLabel, copy: e.kind ?? 'text', filter: e.kind && KIND_QUERY[e.kind] ? { field: 'is', value: KIND_QUERY[e.kind]! } : undefined });
   if (e.tag) meta.push({ key: 'tag', label: t('logs.detail.fields.tag'), value: e.tag, copy: e.tag, filter: { field: 'tag', value: e.tag } });
   if (e.process) meta.push({ key: 'process', label: t('logs.detail.fields.process'), value: e.process, copy: e.process, filter: { field: 'process', value: e.process } });

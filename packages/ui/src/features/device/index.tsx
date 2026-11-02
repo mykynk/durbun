@@ -89,13 +89,14 @@ export default function DeviceView() {
 
   const candidates = useMemo(() => devices.filter((d) => d.id !== 'desktop'), [devices]);
   let deviceId: string | undefined;
-  if (scope.kind === 'device') deviceId = scope.deviceId;
+  if (scope.kind === 'device' || scope.kind === 'deviceApp') deviceId = scope.deviceId;
   else if (scope.kind === 'app') deviceId = apps[scope.appId]?.deviceId;
   else if (chosen && candidates.some((d) => d.id === chosen)) deviceId = chosen;
   else if (candidates.length === 1) deviceId = candidates[0]!.id;
   const device = useDevice(deviceId);
   const showPicker = scope.kind === 'all' && (picking || !device);
-  const preferredAppId = scope.kind === 'app' ? apps[scope.appId]?.app.id : undefined;
+  const preferredAppId = scope.kind === 'app' ? apps[scope.appId]?.app.id : scope.kind === 'deviceApp' ? scope.bundleId : undefined;
+  const scopedDeviceAppName = useHub((s) => (scope.kind === 'deviceApp' ? s.deviceApps[`${scope.deviceId}|${scope.bundleId}`]?.name || scope.bundleId : undefined));
 
   // Leave the picker when the scope narrows to a device.
   useEffect(() => {
@@ -175,7 +176,13 @@ export default function DeviceView() {
             {t('device.picker.change')}
           </Button>
         ) : scope.kind !== 'all' && device ? (
-          <span className="dv-scope-hint">{scope.kind === 'app' && apps[scope.appId] ? t('device.picker.appScope', { app: apps[scope.appId]!.app.name }) : t('device.picker.fromScope')}</span>
+          <span className="dv-scope-hint">
+            {scope.kind === 'app' && apps[scope.appId]
+              ? t('device.picker.appScope', { app: apps[scope.appId]!.app.name })
+              : scopedDeviceAppName
+                ? t('device.picker.appScope', { app: scopedDeviceAppName })
+                : t('device.picker.fromScope')}
+          </span>
         ) : null}
       </Toolbar>
       <div className="dv-scroll scroll-y fill">

@@ -228,6 +228,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
       processes: hub.getProcesses(),
       metrics: hub.getMetrics(),
       logCount: hub.getLogCount(),
+      deviceApps: hub.getDeviceApps(),
     }),
   });
 

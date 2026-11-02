@@ -6,6 +6,12 @@
 
 ## Türkçe
 
+> **Flutter uygulaması mı?** Bu SDK'yı ayrıca eklemeyin. Flutter paketi
+> [`package:durbun`](../flutter/durbun/README.md) bu Android çekirdeğini zaten içinde taşır ve Dart
+> tarafı başlattığında çalıştırır (`Durbun.start` çağrısı gerekmez). Native kodunuzda OkHttp varsa tek
+> satır yeter: `.addInterceptor(DurbunInterceptor())`. Bu sayfa yalnızca Flutter'sız (native-only)
+> Android uygulamaları içindir.
+
 Dürbün Android SDK'sı, uygulamanızın **loglarını, OkHttp ağ trafiğini (başlıklar, gövdeler, süreler),
 çökmelerini, olaylarını ve performans ölçümlerini** (CPU, bellek, FPS, takılan kareler) Mac'teki Dürbün
 masaüstü uygulamasına **canlı** gönderir. Masaüstünden mock tanımlayabilir (sahte yanıt, gecikme, zaman aşımı /
@@ -208,6 +214,11 @@ Mock eşleştirme testi, protokoldeki referans `mockRuleMatches` fonksiyonundan 
 ---
 
 ## English
+
+> **Flutter app?** Do not add this SDK separately. The Flutter package
+> [`package:durbun`](../flutter/durbun/README.md) already carries this Android core and starts it from
+> Dart (no `Durbun.start` call). If your native code uses OkHttp, one line is enough:
+> `.addInterceptor(DurbunInterceptor())`. This page is for native-only Android apps.
 
 The Dürbün Android SDK streams your app's **logs, OkHttp traffic (headers, bodies, timings), crashes, custom
 events and performance metrics** (CPU, memory, FPS, janky frames) to the Dürbün desktop app on your Mac, live.

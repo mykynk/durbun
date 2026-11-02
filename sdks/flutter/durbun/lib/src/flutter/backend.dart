@@ -40,6 +40,9 @@ abstract class DurbunBackend {
   /// Whether dart:io `HttpClient` traffic is captured right now.
   bool get capturesDartIo;
 
+  /// Whether the plugin's native layer captures URLSession traffic (iOS).
+  bool get capturesUrlSession;
+
   /// Mock rule applying to a request made outside dart:io, if any.
   DurbunMockDecision? findMock(String method, Uri url);
 

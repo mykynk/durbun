@@ -2,7 +2,8 @@
 ///
 /// Only needed when Dio uses an adapter that bypasses dart:io (e.g.
 /// `NativeAdapter` from native_dio_adapter, cupertino_http, cronet_http).
-/// Dio's default `IOHttpClientAdapter` is already captured by `package:durbun`.
+/// Dio's default `IOHttpClientAdapter` is already captured by `package:durbun`,
+/// and on iOS so is every URLSession-based adapter (the plugin's native layer).
 ///
 /// ```dart
 /// final dio = Dio()..httpClientAdapter = NativeAdapter();
@@ -41,6 +42,18 @@ class DurbunDioInterceptor extends Interceptor {
     return name == 'IOHttpClientAdapter' || name == 'DefaultHttpClientAdapter';
   }
 
+  /// Adapters built on URLSession (native_dio_adapter's `NativeAdapter` /
+  /// `CupertinoAdapter` on iOS). package:durbun's iOS layer already captures
+  /// URLSession traffic and applies mocks to it, so these requests are left
+  /// to it (no duplicates). On Android `NativeAdapter` uses Cronet, which the
+  /// native layer does not see, so it is still reported here.
+  bool get _usesUrlSessionAdapter {
+    final d = dio;
+    if (d == null || !DurbunNetwork.capturesUrlSession) return false;
+    final name = d.httpClientAdapter.runtimeType.toString();
+    return name == 'NativeAdapter' || name == 'CupertinoAdapter';
+  }
+
   @override
   Future<void> onRequest(
     RequestOptions options,
@@ -49,7 +62,8 @@ class DurbunDioInterceptor extends Interceptor {
     var handled = false;
     try {
       if (!Durbun.isEnabled ||
-          (_usesDartIoAdapter && DurbunNetwork.capturesDartIo)) {
+          (_usesDartIoAdapter && DurbunNetwork.capturesDartIo) ||
+          _usesUrlSessionAdapter) {
         handled = true;
         handler.next(options);
         return;

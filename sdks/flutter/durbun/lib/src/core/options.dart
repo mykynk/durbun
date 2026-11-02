@@ -28,9 +28,19 @@ class DurbunOptions {
     this.useBackgroundIsolate = true,
   });
 
-  /// `null` (default) = on in debug and profile builds, off in release builds
-  /// and inside `flutter test`. `true` forces the SDK on everywhere (including
-  /// release builds), `false` turns it off.
+  /// Whether the SDK runs. `null` (default):
+  ///
+  /// * debug and profile builds: on;
+  /// * release builds: off, unless built with `--dart-define=DURBUN=true`
+  ///   (e.g. only the tester build you hand out via Firebase App Distribution:
+  ///   `flutter build apk --release --dart-define=DURBUN=true`). Never use
+  ///   that define for store builds;
+  /// * `--dart-define=DURBUN=false` turns it off in every build mode;
+  /// * inside `flutter test`: off.
+  ///
+  /// `true` / `false` override all of the above. The plugin's native layer
+  /// (Kotlin / Swift) follows this decision: when the SDK is off it opens no
+  /// sockets and installs no hooks.
   final bool? enabled;
 
   /// Desktop address for Wi-Fi (LAN) connections, e.g. `192.168.1.20` or

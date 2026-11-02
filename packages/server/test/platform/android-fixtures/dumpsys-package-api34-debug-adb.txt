@@ -1,0 +1,72 @@
+Activity Resolver Table:
+  Non-Data Actions:
+      android.intent.action.MAIN:
+        3a9f0c1 com.mykynk.pati/.MainActivity filter 8e2d4b7
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.LAUNCHER"
+
+Key Set Manager:
+  [com.mykynk.pati]
+      Signing KeySets: 74
+
+Packages:
+  Package [com.mykynk.pati] (6d1c0e8):
+    appId=10190
+    pkg=Package{1f7a3b5 com.mykynk.pati}
+    codePath=/data/app/~~kZ4yP1qR8sT2uV6wX0yA3Q==/com.mykynk.pati-Lm9nO2pQ5rS8tU1vW4xY7g==
+    resourcePath=/data/app/~~kZ4yP1qR8sT2uV6wX0yA3Q==/com.mykynk.pati-Lm9nO2pQ5rS8tU1vW4xY7g==
+    legacyNativeLibraryDir=/data/app/~~kZ4yP1qR8sT2uV6wX0yA3Q==/com.mykynk.pati-Lm9nO2pQ5rS8tU1vW4xY7g==/lib
+    extractNativeLibs=true
+    primaryCpuAbi=arm64-v8a
+    secondaryCpuAbi=null
+    cpuAbiOverride=null
+    versionCode=1 minSdk=21 targetSdk=34
+    minExtensionVersions=[]
+    versionName=1.4.0-dev
+    hiddenApiEnforcementPolicy=0
+    usesNonSdkApi=false
+    splits=[base]
+    apkSigningVersion=2
+    flags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    forceQueryable=false
+    dataDir=/data/user/0/com.mykynk.pati
+    supportsScreens=[small, medium, large, xlarge, resizeable, anyDensity]
+    timeStamp=2026-11-02 11:41:07
+    lastUpdateTime=2026-11-02 11:41:09
+    packageSource=0
+    appMetadataFilePath=null
+    signatures=PackageSignatures{0b6e2d9 version:2, signatures:[9e8d7c6b], past signatures:[]}
+    installPermissionsFixed=true
+    pkgFlags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    privatePkgFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    apexModuleName=null
+    requested permissions:
+      android.permission.INTERNET
+      android.permission.ACCESS_NETWORK_STATE
+    install permissions:
+      android.permission.INTERNET: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+    User 0: ceDataInode=262877 deDataInode=0 installed=true hidden=false suspended=false distractionFlags=0 stopped=false notLaunched=false enabled=0 instant=false virtual=false quarantined=false
+      installReason=0
+      dataDir=/data/user/0/com.mykynk.pati
+      firstInstallTime=2026-10-20 09:30:12
+      uninstallReason=0
+      gids=[3003]
+      runtime permissions:
+
+Package Changes:
+  Sequence number=1180
+  User 0:
+    seq=1179, package=com.mykynk.pati
+
+
+Dexopt state:
+  [com.mykynk.pati]
+    path: /data/app/~~kZ4yP1qR8sT2uV6wX0yA3Q==/com.mykynk.pati-Lm9nO2pQ5rS8tU1vW4xY7g==/base.apk
+      arm64: [status=verify] [reason=install-dm] [primary-abis: arm64]
+
+
+Compiler stats:
+  [com.mykynk.pati]
+     base.apk - 1207

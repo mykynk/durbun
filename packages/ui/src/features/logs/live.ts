@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { LogEntry } from '@durbun/protocol';
 import { isCrashEntry, logStore, useConnection } from '../../data';
-import { isTwinPair } from './model/dedupe';
+import { isMarkedDuplicate, isTwinPair } from './model/dedupe';
+import { isPreviousLaunch } from './model/types';
+import { isDeviceCrashRecord } from '../../sources/text';
 
 /**
  * Live vs history. After every (re)connect the server replays its buffer as `history` before live
@@ -34,6 +36,15 @@ export interface LiveCrashState {
  * Watches the store for LIVE crash / ANR / Flutter-error entries in scope. Runs outside React rendering
  * (store subscription, own cursor) and also while the view is paused or hidden.
  */
+/**
+ * Crash rows that must not raise the banner: device crash records the server matched to a live line
+ * (`data.duplicateOf`), and records of crashes from before Dürbün started watching (old news, not live).
+ */
+export function isQuietCrashRecord(e: LogEntry): boolean {
+  if (e.data === undefined) return false;
+  return isMarkedDuplicate(e) || (isDeviceCrashRecord(e) && isPreviousLaunch(e));
+}
+
 export function useLiveCrashes(scope: (e: LogEntry) => boolean, scopeKey: string, onCrash?: (e: LogEntry) => void): [LiveCrashState, (id: number) => void] {
   const [state, setState] = useState<LiveCrashState>({ list: [], dismissedId: 0 });
   const onCrashRef = useLatest(onCrash);
@@ -65,7 +76,7 @@ export function useLiveCrashes(scope: (e: LogEntry) => boolean, scopeKey: string
       const found: LogEntry[] = [];
       for (let i = from; i < entries.length; i++) {
         const e = entries[i]!;
-        if (isCrashEntry(e) && isLiveEntry(e) && scope(e)) found.push(e);
+        if (isCrashEntry(e) && isLiveEntry(e) && scope(e) && !isQuietCrashRecord(e)) found.push(e);
       }
       cursor = entries[entries.length - 1]!.id;
       if (found.length === 0) return;

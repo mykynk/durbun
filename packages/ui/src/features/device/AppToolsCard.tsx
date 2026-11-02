@@ -7,6 +7,7 @@ import { hasMessage, useT } from '../../i18n';
 import { describeError } from './codes';
 import { ACTION_GROUP_ORDER, actionGroups, appActionParams, builtinLabelId, dumpReply, isDumpAction, isDumpMessage } from './model';
 import { DeviceCard } from './useAction';
+import { ExplainCallout, pickEmptyReason, useScopeExplain } from '../../sources';
 
 interface DumpState {
   title: string;
@@ -64,6 +65,10 @@ export function AppToolsCard({ sessions, preferredAppId }: { sessions: readonly 
     const id = setTimeout(() => setOverrides((m) => new Map([...m].filter(([, o]) => o.until > Date.now()))), Math.max(50, next - Date.now()));
     return () => clearTimeout(id);
   }, [overrides]);
+
+  // The scoped app cannot have in-app tools (no SDK / store build): say why and what would enable them.
+  const scopeExplain = useScopeExplain();
+  const toolsStructural = scopeExplain.kind !== 'none' && pickEmptyReason('tools', scopeExplain).structural;
 
   const live = sessions
     .filter((s) => s.connected && s.actions.length > 0)
@@ -128,7 +133,9 @@ export function AppToolsCard({ sessions, preferredAppId }: { sessions: readonly 
 
   return (
     <DeviceCard section="tools" title={t('device.tools.title')} icon={Wrench} description={t('device.tools.description')}>
-      {live.length === 0 ? (
+      {live.length === 0 && toolsStructural ? (
+        <ExplainCallout capability="tools" className="dv-explain" />
+      ) : live.length === 0 ? (
         <div className="dv-empty-inline">
           <p className="dv-muted">{t('device.tools.empty')}</p>
           <p className="dv-hint">{t('device.tools.emptyHint')}</p>
@@ -138,6 +145,8 @@ export function AppToolsCard({ sessions, preferredAppId }: { sessions: readonly 
         </div>
       ) : (
         <div className="dv-tools">
+          {/* The scoped app has no tools of its own (other apps on the device do): say so above theirs. */}
+          {toolsStructural ? <ExplainCallout capability="tools" className="dv-explain" /> : null}
           {live.map((s) => (
             <section key={s.id} className="dv-tools__app" aria-label={s.app.name}>
               <header className="dv-tools__head">

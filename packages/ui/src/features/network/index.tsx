@@ -58,6 +58,7 @@ import { ReplayDialog } from './components/ReplayDialog';
 import { CompareDialog } from './components/CompareDialog';
 import { copyEntryAs, copyUrl, createMockFrom, downloadHarFor, harFileName, replayRequest, showInLogs } from './actions';
 import { useBodySearch } from './useBodySearch';
+import { ExplainEmpty } from '../../sources';
 import './i18n';
 import './network.css';
 
@@ -70,7 +71,11 @@ export default function NetworkView() {
   // `useCompiledScope` returns a new object whenever any app's stats change (every batch); the row
   // index must only rebuild when the scope's MEMBERSHIP changes, so key it on what the predicate uses.
   const scopeKey =
-    compiled.scope.kind === 'all' ? 'all' : compiled.scope.kind === 'device' ? `d:${compiled.scope.deviceId}` : `a:${[...(compiled.appIds ?? [])].sort().join(',')}`;
+    compiled.scope.kind === 'all'
+      ? 'all'
+      : compiled.scope.kind === 'device'
+        ? `d:${compiled.scope.deviceId}`
+        : `a:${compiled.deviceId ?? ''}|${compiled.bundleId ?? ''}:${[...(compiled.appIds ?? [])].sort().join(',')}`;
   const inScope = useMemo(() => compiled.network, [scopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const noNetworkCapability = useHub((s) => {
     const ids = compiled.appIds;
@@ -458,6 +463,10 @@ export default function NetworkView() {
   ) : scopeTotal === 0 && compiled.scope.kind === 'device' && compiled.scope.deviceId === 'desktop' ? (
     <EmptyState size="lg" icon={RotateCw} title={t('network.empty.desktopTitle')} description={t('network.empty.desktopDescription')} />
   ) : scopeTotal === 0 ? (
+      <ExplainEmpty
+        capability="network"
+        icon={ArrowLeftRight}
+        fallback={
       <EmptyState
         size="lg"
         icon={ArrowLeftRight}
@@ -480,6 +489,8 @@ export default function NetworkView() {
           <li>{t('network.empty.tipMocks')}</li>
         </ul>
       </EmptyState>
+        }
+      />
     ) : (
       <EmptyState
         size="md"

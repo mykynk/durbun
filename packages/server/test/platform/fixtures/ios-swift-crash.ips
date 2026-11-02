@@ -1,0 +1,247 @@
+{"app_name":"Runner","timestamp":"2026-11-02 11:42:58.00 +0300","app_version":"2.3.0","slice_uuid":"0f1e2d3c-4b5a-3978-8796-a5b4c3d2e1f0","adam_id":"0","build_version":"57","platform":2,"bundleID":"com.mykynk.pati","share_with_app_devs":0,"is_first_party":0,"bug_type":"309","os_version":"iPhone OS 27.2 (24B8117)","roots_installed":0,"name":"Runner","incident_id":"D3B1F0A2-6C4E-4B7D-9E21-58F3A6C0B7E4"}
+{
+  "uptime" : 41000,
+  "procRole" : "Foreground",
+  "version" : 2,
+  "userID" : 501,
+  "deployVersion" : 210,
+  "modelCode" : "iPhone16,2",
+  "coalitionID" : 1287,
+  "osVersion" : {
+    "isEmbedded" : true,
+    "train" : "iPhone OS 27.2",
+    "releaseType" : "User",
+    "build" : "24B8117"
+  },
+  "captureTime" : "2026-11-02 11:42:58.7712 +0300",
+  "codeSigningMonitor" : 2,
+  "incident" : "D3B1F0A2-6C4E-4B7D-9E21-58F3A6C0B7E4",
+  "pid" : 1234,
+  "translated" : false,
+  "cpuType" : "ARM-64",
+  "roots_installed" : 0,
+  "bug_type" : "309",
+  "procLaunch" : "2026-11-02 11:41:02.1180 +0300",
+  "procStartAbsTime" : 981237712044,
+  "procExitAbsTime" : 984418305187,
+  "procName" : "Runner",
+  "procPath" : "\/private\/var\/containers\/Bundle\/Application\/9F1C2B7A-58D3-4E0B-A6C1-3D27E8F0B941\/Runner.app\/Runner",
+  "bundleInfo" : {
+    "CFBundleShortVersionString" : "2.3.0",
+    "CFBundleVersion" : "57",
+    "CFBundleIdentifier" : "com.mykynk.pati"
+  },
+  "storeInfo" : {
+    "deviceIdentifierForVendor" : "5B0E6F4A-1C2D-4E3F-8A9B-7C6D5E4F3A2B",
+    "thirdParty" : true
+  },
+  "parentProc" : "launchd",
+  "parentPid" : 1,
+  "coalitionName" : "com.mykynk.pati",
+  "crashReporterKey" : "a2c4e6f8b0d1e3f5a7c9e1b3d5f7a9c1e3b5d7f9",
+  "lowPowerMode" : 0,
+  "developerMode" : 1,
+  "codeSigningID" : "com.mykynk.pati",
+  "codeSigningTeamID" : "8KQ3X5S2LM",
+  "codeSigningFlags" : 570450689,
+  "codeSigningValidationCategory" : 3,
+  "codeSigningTrustLevel" : 4,
+  "instructionByteStream" : {
+    "beforePC" : "AAAAAA==",
+    "atPC" : "IAAg1A=="
+  },
+  "bootSessionUUID" : "0B1C2D3E-4F50-6172-8394-A5B6C7D8E9F0",
+  "basebandVersion" : "1.70.01",
+  "exception" : {
+    "codes" : "0x0000000000000001, 0x00000001026fd0a4",
+    "rawCodes" : [
+      1,
+      4335849636
+    ],
+    "type" : "EXC_BREAKPOINT",
+    "signal" : "SIGTRAP"
+  },
+  "termination" : {
+    "flags" : 0,
+    "code" : 5,
+    "namespace" : "SIGNAL",
+    "indicator" : "Trace\/BPT trap: 5",
+    "byProc" : "exc handler",
+    "byPid" : 1234
+  },
+  "os_fault" : {
+    "process" : "Runner"
+  },
+  "asi" : {
+    "libswiftCore.dylib" : [
+      "Runner\/BasketViewModel.swift:42: Fatal error: Unexpectedly found nil while unwrapping an Optional value"
+    ]
+  },
+  "faultingThread" : 0,
+  "threads" : [
+    {
+      "triggered" : true,
+      "id" : 312455,
+      "threadState" : {
+        "x" : [
+          {
+            "value" : 0
+          }
+        ],
+        "pc" : {
+          "value" : 4335849636
+        }
+      },
+      "queue" : "com.apple.main-thread",
+      "frames" : [
+        {
+          "imageOffset" : 53412,
+          "imageIndex" : 0
+        },
+        {
+          "imageOffset" : 51080,
+          "imageIndex" : 0
+        },
+        {
+          "imageOffset" : 48916,
+          "imageIndex" : 0
+        },
+        {
+          "imageOffset" : 2241188,
+          "symbol" : "-[UIApplication sendAction:to:from:forEvent:]",
+          "symbolLocation" : 96,
+          "imageIndex" : 4
+        },
+        {
+          "imageOffset" : 2240960,
+          "symbol" : "-[UIControl sendAction:to:forEvent:]",
+          "symbolLocation" : 108,
+          "imageIndex" : 4
+        },
+        {
+          "imageOffset" : 541772,
+          "symbol" : "__CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__",
+          "symbolLocation" : 28,
+          "imageIndex" : 5
+        },
+        {
+          "imageOffset" : 98312,
+          "imageIndex" : 0
+        },
+        {
+          "imageOffset" : 92244,
+          "symbol" : "start",
+          "symbolLocation" : 2724,
+          "imageIndex" : 6
+        }
+      ]
+    },
+    {
+      "id" : 312470,
+      "frames" : [
+        {
+          "imageOffset" : 3412,
+          "symbol" : "__workq_kernreturn",
+          "symbolLocation" : 8,
+          "imageIndex" : 6
+        }
+      ]
+    }
+  ],
+  "usedImages" : [
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 4302635008,
+      "size" : 81920,
+      "uuid" : "0f1e2d3c-4b5a-3978-8796-a5b4c3d2e1f0",
+      "path" : "\/private\/var\/containers\/Bundle\/Application\/9F1C2B7A-58D3-4E0B-A6C1-3D27E8F0B941\/Runner.app\/Runner",
+      "name" : "Runner",
+      "CFBundleIdentifier" : "com.mykynk.pati",
+      "CFBundleShortVersionString" : "2.3.0",
+      "CFBundleVersion" : "57"
+    },
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 4310171648,
+      "size" : 13926400,
+      "uuid" : "4c5d6e7f-8091-3a2b-bc4d-5e6f708192a3",
+      "path" : "\/private\/var\/containers\/Bundle\/Application\/9F1C2B7A-58D3-4E0B-A6C1-3D27E8F0B941\/Runner.app\/Frameworks\/Flutter.framework\/Flutter",
+      "name" : "Flutter",
+      "CFBundleIdentifier" : "io.flutter.flutter",
+      "CFBundleShortVersionString" : "1.0",
+      "CFBundleVersion" : "1.0"
+    },
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 4327210496,
+      "size" : 9879552,
+      "uuid" : "8e9fa0b1-c2d3-34e5-86f7-08192a3b4c5d",
+      "path" : "\/private\/var\/containers\/Bundle\/Application\/9F1C2B7A-58D3-4E0B-A6C1-3D27E8F0B941\/Runner.app\/Frameworks\/App.framework\/App",
+      "name" : "App",
+      "CFBundleIdentifier" : "com.mykynk.pati.app",
+      "CFBundleShortVersionString" : "1.0",
+      "CFBundleVersion" : "1"
+    },
+    {
+      "source" : "S",
+      "arch" : "arm64e",
+      "base" : 6491152384,
+      "size" : 4513792,
+      "uuid" : "6d7e8f90-a1b2-33c4-95d6-e7f8091a2b3c",
+      "path" : "\/usr\/lib\/swift\/libswiftCore.dylib",
+      "name" : "libswiftCore.dylib"
+    },
+    {
+      "source" : "S",
+      "arch" : "arm64e",
+      "base" : 6536298496,
+      "size" : 33325056,
+      "uuid" : "1a2b3c4d-5e6f-3708-9a1b-2c3d4e5f6071",
+      "path" : "\/System\/Library\/PrivateFrameworks\/UIKitCore.framework\/UIKitCore",
+      "name" : "UIKitCore",
+      "CFBundleIdentifier" : "com.apple.UIKitCore",
+      "CFBundleShortVersionString" : "1.0",
+      "CFBundleVersion" : "9126.1.101"
+    },
+    {
+      "source" : "S",
+      "arch" : "arm64e",
+      "base" : 6450839552,
+      "size" : 5537792,
+      "uuid" : "2b3c4d5e-6f70-3819-a2b3-c4d5e6f70819",
+      "path" : "\/System\/Library\/Frameworks\/CoreFoundation.framework\/CoreFoundation",
+      "name" : "CoreFoundation",
+      "CFBundleIdentifier" : "com.apple.CoreFoundation",
+      "CFBundleShortVersionString" : "6.9",
+      "CFBundleVersion" : "4040.1.401"
+    },
+    {
+      "source" : "P",
+      "arch" : "arm64e",
+      "base" : 4370792448,
+      "size" : 540672,
+      "uuid" : "3c4d5e6f-7081-392a-b3c4-d5e6f708192a",
+      "path" : "\/usr\/lib\/dyld",
+      "name" : "dyld"
+    }
+  ],
+  "sharedCache" : {
+    "base" : 6442450944,
+    "size" : 4980736000,
+    "uuid" : "c8d9e0f1-a2b3-34c5-96d7-e8f9a0b1c2d3"
+  },
+  "vmSummary" : "ReadOnly portion of Libraries: Total=1.8G resident=0K(0%) swapped_out_or_unallocated=1.8G(100%)\nWritable regions: Total=820.6M written=1442K(0%) resident=1442K(0%) swapped_out=0K(0%) unallocated=819.2M(100%)\n",
+  "legacyInfo" : {
+    "threadTriggered" : {
+      "queue" : "com.apple.main-thread"
+    }
+  },
+  "logWritingSignature" : "2b9f0c6e1d4a8b7c5e3f1a2d4c6b8a0e9f7d5c3b",
+  "trialInfo" : {
+    "rollouts" : [],
+    "experiments" : []
+  }
+}

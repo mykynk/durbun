@@ -18,6 +18,7 @@ import { ShortcutsDialog } from './shell/ShortcutsDialog';
 import { SettingsDialog } from './shell/SettingsDialog';
 import { DoctorDialog } from './shell/DoctorDialog';
 import { SdkGuideDialog } from './shell/SdkGuide';
+import { DataSourcesDialog } from './sources';
 import { DropImport } from './shell/DropImport';
 import { useGlobalCommands } from './shell/globalCommands';
 
@@ -60,6 +61,7 @@ export function App() {
       <SettingsDialog />
       <DoctorDialog />
       <SdkGuideDialog />
+      <DataSourcesDialog />
       <DropImport />
       <ConfirmHost />
       <ContextMenuHost />

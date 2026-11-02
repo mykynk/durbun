@@ -78,6 +78,8 @@ export function collectChanges(hub: Hub): { changes: HubChange[]; stop: () => vo
       apps: changes.flatMap((c) => c.apps),
       metrics: changes.flatMap((c) => c.metrics),
       processes: changes.flatMap((c) => c.processes),
+      deviceApps: changes.flatMap((c) => c.deviceApps),
+      removedDeviceApps: changes.flatMap((c) => c.removedDeviceApps),
     }),
   };
 }

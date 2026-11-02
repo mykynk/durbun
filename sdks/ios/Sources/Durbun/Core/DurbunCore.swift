@@ -5,6 +5,8 @@ struct NetworkCapturePolicy {
     var active = false
     var interceptUploadTasks = true
     var ignoredHosts: [String] = []
+    /// Lower-cased header names whose values are replaced before they leave the device.
+    var redactedHeaders: Set<String> = []
 
     func ignores(host: String) -> Bool {
         guard !ignoredHosts.isEmpty else { return false }
@@ -54,6 +56,9 @@ final class DurbunCore {
     private var crashCapture = false
     private var requestCounter = 0
     private var foregroundObserver: NSObjectProtocol?
+    /// Hosted mode (Flutter plugin): the Dart SDK owns the connection; messages go through the relay.
+    private var relay: HostRelay?
+    private var hostLink: HostLink?
 
     init() {
         let builtins = BuiltinActions()
@@ -63,7 +68,12 @@ final class DurbunCore {
         }
         commands.onChange = { [weak self] in
             guard let self, self.isRunning else { return }
-            self.send(WireMessage.actions(self.commands.descriptors()))
+            if let link = self.lock.withLock({ self.hostLink }) {
+                // The host owns hello.actions: it merges ours with its own list.
+                link.actionsChanged(self.describeActionsJSON())
+            } else {
+                self.send(WireMessage.actions(self.commands.descriptors()))
+            }
         }
     }
 
@@ -75,6 +85,8 @@ final class DurbunCore {
     var mockRules: [MockRule] { lock.withLock { mocks } }
     var networkPolicy: NetworkCapturePolicy { lock.withLock { policy } }
     var appIdentifier: String? { lock.withLock { environment?.app.id } }
+    /// True while running hosted by the Flutter plugin.
+    var isHosted: Bool { lock.withLock { running && relay != nil } }
 
     /// Diagnostics/tests: active link origin, bound USB listener port, buffered message count.
     var transportSnapshot: (activeOrigin: Transport.Origin?, listenerPort: UInt16?, buffered: Int)? {
@@ -84,8 +96,16 @@ final class DurbunCore {
     func nextRequestId() -> String {
         lock.withLock {
             requestCounter += 1
-            return String(requestCounter)
+            // Hosted: the Dart side numbers its own dart:io requests in the same session.
+            return relay != nil ? "ios-\(requestCounter)" : String(requestCounter)
         }
+    }
+
+    /// Headers with the redacted names' values replaced (hosted mode: Flutter's `redactHeaders`).
+    func redacting(_ headers: [(String, String)]) -> [(String, String)] {
+        let names = lock.withLock { policy.redactedHeaders }
+        guard !names.isEmpty else { return headers }
+        return headers.map { names.contains($0.0.lowercased()) ? ($0.0, "••••") : $0 }
     }
 
     // MARK: Lifecycle
@@ -102,6 +122,10 @@ final class DurbunCore {
         lifecycle.lock()
         defer { lifecycle.unlock() }
         guard options.enabled else { return }
+        if isHosted {
+            Diagnostics.info("Durbun.start() is not needed in Flutter apps: package:durbun already runs the native layer.")
+            return
+        }
         guard Self.buildAllowsRunning || options.allowInReleaseBuilds else {
             Diagnostics.info("Dürbün is disabled in non-DEBUG builds (set allowInReleaseBuilds to force it).")
             return
@@ -171,15 +195,108 @@ final class DurbunCore {
         }
     }
 
+    /// Hosted mode, started by the Flutter plugin: no socket, no metrics (Flutter reports frames itself).
+    /// URLSession capture, crash capture and stdout/stderr capture run as usual; every message goes to
+    /// `link`, and the desktop state comes from `applyHostState`. Returns false when it cannot run.
+    @discardableResult
+    func startHosted(options: DurbunOptions, link: HostLink, redactedHeaders: Set<String> = []) -> Bool {
+        lifecycle.lock()
+        defer { lifecycle.unlock() }
+        guard options.enabled else { return false }
+        if isRunning { stop() }
+        lock.withLock { generation += 1 }
+        let environment = AppEnvironment.current()
+        let relay = HostRelay(link: link, maxMessages: max(1, options.maxBufferedMessages))
+        lock.withLock {
+            running = true
+            connected = false
+            config = .defaults
+            mocks = []
+            requestCounter = 0
+            self.environment = environment
+            self.transport = nil
+            self.relay = relay
+            self.hostLink = link
+            policy = NetworkCapturePolicy(
+                active: options.captureNetwork,
+                interceptUploadTasks: options.interceptUploadTasks,
+                ignoredHosts: options.ignoredHosts.map { $0.lowercased() },
+                redactedHeaders: Set(redactedHeaders.map { $0.lowercased() })
+            )
+        }
+        if options.captureNetwork { NetworkCapture.install() }
+        if options.captureCrashes {
+            CrashCapture.install()
+            lock.withLock { crashCapture = true }
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                for report in CrashCapture.prepareAndTakePendingReports() { self?.send(report) }
+            }
+        }
+        if options.captureStdout {
+            let capture = StdioCapture { [weak self] entries in self?.sendStdio(entries) }
+            if capture.start() { lock.withLock { stdio = capture } }
+        }
+        return true
+    }
+
+    /// Desktop state from the host: `{connected, config, mocks, …}` (JSON). Missing fields keep
+    /// their previous value.
+    func applyHostState(_ json: String) {
+        guard let data = json.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return }
+        lock.withLock {
+            guard running, relay != nil else { return }
+            if let newConfig = object["config"] as? [String: Any] {
+                config = SdkConfig(json: newConfig, fallback: config)
+            }
+            if object["mocks"] != nil { mocks = MockRule.parseList(object["mocks"]) }
+            if let isConnected = object["connected"] as? Bool { connected = isConnected }
+        }
+    }
+
+    /// A desktop `command` forwarded by the host (JSON); the result goes back as `command.result`.
+    func handleHostCommand(_ json: String) {
+        guard let data = json.data(using: .utf8), case let .command(id, name, params)? = ServerMessage.parse(data)
+        else { return }
+        let generation = lock.withLock { self.generation }
+        handle(.command(id: id, name: name, params: params), generation: generation)
+    }
+
+    /// Native action descriptors as a JSON array (merged by the host into its hello).
+    func describeActionsJSON() -> String {
+        let line = JSONWriter.line(.array(commands.descriptors().map(\.json)))
+        return String(decoding: line.dropLast(), as: UTF8.self)
+    }
+
+    /// Capabilities the native layer adds to the host's session.
+    func hostedCapabilities(options: DurbunOptions) -> [String] {
+        var capabilities = ["logs", "events", "commands"]
+        if options.captureNetwork { capabilities += ["network", "mocks"] }
+        if options.captureCrashes { capabilities.append("crash") }
+        return capabilities
+    }
+
+    /// `hello.app` fields as the bundle reports them.
+    var hostedAppInfo: [String: String] {
+        let app = (lock.withLock { environment } ?? AppEnvironment.current()).app
+        var info: [String: String] = ["name": app.name, "id": app.id]
+        if let version = app.version { info["version"] = version }
+        if let build = app.build { info["build"] = build }
+        return info
+    }
+
     func stop() {
         lifecycle.lock()
         defer { lifecycle.unlock() }
-        let (transport, stdio, metrics, crash, observer) = lock.withLock {
-            () -> (Transport?, StdioCapture?, MetricsReporter?, Bool, NSObjectProtocol?) in
-            let result = (self.transport, self.stdio, self.metrics, crashCapture, foregroundObserver)
+        let (transport, stdio, metrics, crash, observer, relay) = lock.withLock {
+            () -> (Transport?, StdioCapture?, MetricsReporter?, Bool, NSObjectProtocol?, HostRelay?) in
+            let result = (self.transport, self.stdio, self.metrics, crashCapture, foregroundObserver, self.relay)
             generation += 1
             running = false
             connected = false
+            self.relay = nil
+            self.hostLink = nil
             self.transport = nil
             self.stdio = nil
             self.metrics = nil
@@ -195,6 +312,7 @@ final class DurbunCore {
         if crash { CrashCapture.uninstall() }
         NetworkCapture.uninstall()
         transport?.stop()
+        relay?.stop()
     }
 
     /// Re-attempts the connection when the app comes back to the foreground (iOS suspends sockets).
@@ -212,12 +330,17 @@ final class DurbunCore {
     // MARK: Sending
 
     func send(_ message: JSONValue) {
-        let transport = lock.withLock { running ? self.transport : nil }
-        transport?.send(message)
+        let (transport, relay) = lock.withLock { running ? (self.transport, self.relay) : (nil, nil) }
+        if let relay {
+            relay.enqueue(JSONWriter.line(message))
+        } else {
+            transport?.send(message)
+        }
     }
 
     func flush(timeout: TimeInterval) -> Bool {
-        let transport = lock.withLock { running ? self.transport : nil }
+        let (transport, relay) = lock.withLock { running ? (self.transport, self.relay) : (nil, nil) }
+        if let relay { return relay.flush(timeout: timeout) }
         return transport?.flush(timeout: timeout) ?? false
     }
 
@@ -268,7 +391,10 @@ final class DurbunCore {
     }
 
     private func sendStdio(_ entries: [StdioCapture.Entry]) {
+        let hosted = lock.withLock { relay != nil }
         for entry in entries {
+            // Hosted by Flutter: the engine echoes Dart's print() as "flutter: …"; Dart sends those itself.
+            if hosted && entry.text.hasPrefix("flutter: ") { continue }
             let firstLine = entry.text.prefix(while: { $0 != "\n" })
             let classification = OutputFormatting.classify(String(firstLine))
             sendLog(

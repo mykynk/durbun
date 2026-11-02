@@ -195,6 +195,11 @@ abstract final class DurbunNetwork {
   /// go through dart:io must not be reported a second time).
   static bool get capturesDartIo => Durbun._backend.capturesDartIo;
 
+  /// Whether the plugin's iOS layer already captures URLSession traffic (and
+  /// applies mocks to it): adapters built on URLSession (cupertino_http,
+  /// `NativeAdapter` on iOS) must not report those requests again.
+  static bool get capturesUrlSession => Durbun._backend.capturesUrlSession;
+
   /// The mock rule from the desktop that applies to [method] [url], if any.
   static DurbunMockDecision? findMock(String method, Uri url) =>
       Durbun._backend.findMock(method, url);

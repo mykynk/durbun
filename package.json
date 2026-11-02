@@ -21,6 +21,9 @@
     "build": "npm run build -w @durbun/ui && npm run build -w @durbun/server",
     "start": "node dist/durbun.mjs",
     "demo": "node dist/durbun.mjs --demo",
+    "app": "npm --prefix apps/desktop run dev",
+    "app:dist": "npm run build && npm --prefix apps/desktop run dist",
+    "app:test": "npm --prefix apps/desktop test",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

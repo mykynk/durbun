@@ -1,0 +1,7 @@
+com.android.systemui.ImageWallpaper#0
+com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity#0
+SurfaceView - com.mykynk.pati/com.mykynk.pati.MainActivity#0
+Background for -SurfaceView - com.mykynk.pati/com.mykynk.pati.MainActivity#0
+com.mykynk.pati/com.mykynk.pati.MainActivity#0
+NavigationBar0#0
+StatusBar#0

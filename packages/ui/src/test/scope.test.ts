@@ -138,7 +138,7 @@ describe('device and app grouping', () => {
     const groups = groupApps(Object.values(apps));
     const pixel = groups.get(PIXEL)!;
     const pati = pixel.find((g) => g.bundleId === 'com.mykynk.pati')!;
-    expect(pati.latest.id).toBe('app:2');
+    expect(pati.latest?.id).toBe('app:2');
     expect(pati.sessions.map((s) => s.id)).toEqual(['app:2', 'app:1']);
     expect(groups.get(SIM)).toHaveLength(1);
   });

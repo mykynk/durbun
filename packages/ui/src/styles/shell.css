@@ -306,6 +306,60 @@
   color: var(--text-subtle);
   flex-shrink: 0;
 }
+.sb-row--app .sb-row__subtitle {
+  margin-top: 2px;
+}
+.sb-row--app .sb-app__ver {
+  flex-shrink: 3;
+  min-width: 0;
+}
+.sb-app__badges {
+  gap: 4px;
+  overflow: hidden;
+}
+.sb-app__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-subtle);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.sb-row--app .sb-row__main {
+  padding-right: 26px;
+}
+.sb-row--app > .sb-row__main > .dot {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  margin-top: -3.5px;
+}
+.sb-app__info {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+.sb-row--app:hover .sb-app__info,
+.sb-row--app:focus-within .sb-app__info,
+.sb-row--app.is-selected .sb-app__info,
+.sb-app__info.is-open {
+  opacity: 1;
+}
+.sb-row--app:hover > .sb-row__main > .dot,
+.sb-row--app:focus-within > .sb-row__main > .dot,
+.sb-row--app.is-selected > .sb-row__main > .dot,
+.sb-row--app:has(.sb-app__info.is-open) > .sb-row__main > .dot {
+  visibility: hidden;
+}
+.sb-recent {
+  margin-top: 2px;
+}
 .sb-older {
   display: inline-flex;
   align-items: center;
@@ -1734,6 +1788,37 @@
 }
 .sdk-zero {
   margin-bottom: 18px;
+}
+.sdk-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 0 18px;
+  border-top: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: background var(--dur) var(--ease);
+}
+.sdk-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.sdk-section.is-flash {
+  background: var(--accent-soft);
+}
+.sdk-section__title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text);
+}
+.sdk-done {
+  padding-left: 34px;
+  color: var(--success);
+}
+.sdk-steps--plain {
+  gap: 16px;
+}
+.sdk-note .src-link {
+  align-self: flex-start;
 }
 .host-chip--button {
   padding: 0 8px;

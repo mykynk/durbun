@@ -1,0 +1,57 @@
+{"app_name":"Runner","timestamp":"2021-03-14 10:21:33.00 +0300","app_version":"1.8.0","slice_uuid":"0f1e2d3c-4b5a-3978-8796-a5b4c3d2e1f0","adam_id":0,"build_version":"31","bundleID":"com.mykynk.pati","share_with_app_devs":false,"is_first_party":false,"bug_type":"109","os_version":"iPhone OS 14.4 (18D52)","incident_id":"1B2C3D4E-5F60-4718-92A3-B4C5D6E7F809","name":"Runner"}
+Incident Identifier: 1B2C3D4E-5F60-4718-92A3-B4C5D6E7F809
+CrashReporter Key:   9f8e7d6c5b4a39281706f5e4d3c2b1a098f7e6d5
+Hardware Model:      iPhone12,1
+Process:             Runner [2215]
+Path:                /private/var/containers/Bundle/Application/5E8A1F2B-3C4D-4E5F-8A9B-0C1D2E3F4A5B/Runner.app/Runner
+Identifier:          com.mykynk.pati
+Version:             31 (1.8.0)
+Code Type:           ARM-64 (Native)
+Role:                Foreground
+Parent Process:      launchd [1]
+Coalition:           com.mykynk.pati [812]
+
+
+Date/Time:           2021-03-14 10:21:33.4516 +0300
+Launch Time:         2021-03-14 10:20:01.1203 +0300
+OS Version:          iPhone OS 14.4 (18D52)
+Release Type:        User
+Baseband Version:    2.04.04
+Report Version:      104
+
+Exception Type:  EXC_BAD_ACCESS (SIGSEGV)
+Exception Subtype: KERN_INVALID_ADDRESS at 0x0000000000000010
+VM Region Info: 0x10 is not in any region.  Bytes before following region: 4339843056
+      REGION TYPE                 START - END      [ VSIZE] PRT/MAX SHRMOD  REGION DETAIL
+      UNUSED SPACE AT START
+--->
+      __TEXT                   102ac8000-102ad0000 [   32K] r-x/r-x SM=COW  ...Runner.app/Runner
+
+Termination Signal: Segmentation fault: 11
+Termination Reason: Namespace SIGNAL, Code 0xb
+Terminating Process: exc handler [2215]
+Triggered by Thread:  0
+
+Thread 0 name:  Dispatch queue: com.apple.main-thread
+Thread 0 Crashed:
+0   Runner                        	0x0000000102acb1a0 0x102ac8000 + 12704
+1   Runner                        	0x0000000102acb9c4 0x102ac8000 + 14788
+2   UIKitCore                     	0x00000001a41b0a74 -[UIApplication sendAction:to:from:forEvent:] + 96
+3   UIKitCore                     	0x00000001a3fe4a40 -[UIControl sendAction:to:forEvent:] + 108
+4   CoreFoundation                	0x00000001a19f9a7c __CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + 28
+5   Runner                        	0x0000000102ac9e30 0x102ac8000 + 7728
+6   libdyld.dylib                 	0x00000001a16b5cf8 start + 4
+
+Thread 1:
+0   libsystem_kernel.dylib        	0x00000001c0e9e1ac __workq_kernreturn + 8
+1   libsystem_pthread.dylib       	0x00000001dbe4c3e4 _pthread_wqthread + 308
+
+Thread 0 crashed with ARM Thread State (64-bit):
+    x0: 0x0000000000000000   x1: 0x0000000000000010   x2: 0x0000000000000001   x3: 0x0000000000000000
+    pc: 0x0000000102acb1a0 cpsr: 0x60000000
+   esr: 0x92000006 (Data Abort) byte read Translation fault
+
+Binary Images:
+0x102ac8000 - 0x102acffff Runner arm64  <0f1e2d3c4b5a39788796a5b4c3d2e1f0> /var/containers/Bundle/Application/5E8A1F2B-3C4D-4E5F-8A9B-0C1D2E3F4A5B/Runner.app/Runner
+0x1a3f5a000 - 0x1a5229fff UIKitCore arm64e  <1a2b3c4d5e6f37089a1b2c3d4e5f6071> /System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore
+0x1a1958000 - 0x1a1d18fff CoreFoundation arm64e  <2b3c4d5e6f703819a2b3c4d5e6f70819> /System/Library/Frameworks/CoreFoundation.framework/CoreFoundation

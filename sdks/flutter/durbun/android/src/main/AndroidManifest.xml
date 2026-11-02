@@ -1,0 +1,3 @@
+<!-- No permissions: in a Flutter app the native layer never opens a socket (the Dart side owns the
+     connection). Release builds that turn Dürbün on need INTERNET, which networked apps already declare. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

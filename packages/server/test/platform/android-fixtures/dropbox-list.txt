@@ -1,0 +1,46 @@
+Drop box contents: 143 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+Searching for: data_app_crash
+
+2026-10-31 09:12:00 data_app_crash (text, 1655 bytes)
+    Process: com.whatsapp/PID: 22031/UID: 10204/Flags: 0x38c83e44/Package: com.w ...
+2026-11-01 18:02:44 data_app_crash (text, 2316 bytes)
+    Process: com.mykynk.pati/PID: 30121/UID: 10190/Flags: 0x38c8be44/Package ...
+2026-11-02 11:43:03 data_app_crash (text, 1874 bytes)
+    Process: com.mykynk.pati/PID: 4321/UID: 10190/Flags: 0x38c8be46/Package: ...
+___DURBUN_DROPBOX___
+Drop box contents: 143 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+Searching for: data_app_anr
+
+2026-11-02 11:44:58 data_app_anr (compressed text, 61442 bytes)
+    Process: com.mykynk.pati/PID: 4400/UID: 10190/Frozen: false/Flags: 0x3 ...
+___DURBUN_DROPBOX___
+Drop box contents: 143 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+Searching for: data_app_native_crash
+
+2026-11-02 11:43:10 data_app_native_crash (text, 9822 bytes)
+    Process: com.example.native/PID: 5001/UID: 10191/Flags: 0x30c8be44/Package: c ...
+___DURBUN_DROPBOX___
+Drop box contents: 143 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+Searching for: SYSTEM_TOMBSTONE
+
+2026-11-02 10:15:20 SYSTEM_TOMBSTONE (compressed text, 18320 bytes)
+    Build: google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys/H ...
+2026-11-02 11:43:11 SYSTEM_TOMBSTONE (compressed text, 24511 bytes)
+    Build: google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys/H ...
+2026-11-02 11:43:11 SYSTEM_TOMBSTONE (no file)

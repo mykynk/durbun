@@ -247,16 +247,30 @@ export class AndroidNoise {
   }
 }
 
+/** The daemons iOS noise lines come from (pids differ between the simulator and a physical iPhone). */
+export type IosNoiseDaemons = Record<'backboardd' | 'mdns' | 'nsurlsessiond' | 'locationd' | 'springboard' | 'runningboardd' | 'tccd', { pid: number }>;
+
+/** Where app bundles live: inside the simulator's data folder on the Mac, or on the phone itself. */
+const SIM_BUNDLE_ROOT = '/Users/deniz/Library/Developer/CoreSimulator/Devices/5E1D3A7B-2C4F-4B8E-9A61-0D7F3C2B1A90/data/Containers/Bundle/Application';
+export const DEVICE_BUNDLE_ROOT = '/private/var/containers/Bundle/Application';
+
 export class IosNoise {
   private connSeq = 2;
   private resolverSeq = 40;
+  private readonly d: IosNoiseDaemons;
+  private readonly bundleRoot: string;
 
   constructor(
     private readonly rng: Rng,
     private readonly foreground: () => ForegroundApp | undefined,
     /** Stable bundle container UUID for runningboard lines. */
     private readonly appUuid: string,
-  ) {}
+    /** Defaults: the simulator's daemons and bundle folder. */
+    opts: { daemons?: IosNoiseDaemons; bundleRoot?: string } = {},
+  ) {
+    this.d = opts.daemons ?? I;
+    this.bundleRoot = opts.bundleRoot ?? SIM_BUNDLE_ROOT;
+  }
 
   next(): DeviceLogInput[] {
     const fg = this.foreground();
@@ -287,7 +301,7 @@ export class IosNoise {
   private hid(): DeviceLogInput[] {
     return [
       iosLine(
-        I.backboardd.pid,
+        this.d.backboardd.pid,
         'backboardd',
         'debug',
         'com.apple.BackBoard',
@@ -300,11 +314,11 @@ export class IosNoise {
   private mdns(fg: ForegroundApp | undefined): DeviceLogInput[] {
     const r = ++this.resolverSeq;
     const hash = this.rng.hex(8).toUpperCase();
-    const client = fg ? `${fg.pid} (Runner)` : `${I.nsurlsessiond.pid} (nsurlsessiond)`;
+    const client = fg ? `${fg.pid} (Runner)` : `${this.d.nsurlsessiond.pid} (nsurlsessiond)`;
     const now = Date.now();
     return [
-      iosLine(I.mdns.pid, 'mDNSResponder', 'info', 'com.apple.mDNSResponder', 'Default', `[R${r}] getaddrinfo start -- flags: 0xC000D000, ifindex: 0, protocols: 0, hostname: <mask.hash: '${hash}'>, options: 0x0 {}, client pid: ${client}`, now),
-      iosLine(I.mdns.pid, 'mDNSResponder', 'info', 'com.apple.mDNSResponder', 'Default', `[R${r}] getaddrinfo stop -- hostname: <mask.hash: '${hash}'>, client pid: ${client}, duration: 0.0${this.rng.int(12, 89)}s`, now + this.rng.int(10, 80)),
+      iosLine(this.d.mdns.pid, 'mDNSResponder', 'info', 'com.apple.mDNSResponder', 'Default', `[R${r}] getaddrinfo start -- flags: 0xC000D000, ifindex: 0, protocols: 0, hostname: <mask.hash: '${hash}'>, options: 0x0 {}, client pid: ${client}`, now),
+      iosLine(this.d.mdns.pid, 'mDNSResponder', 'info', 'com.apple.mDNSResponder', 'Default', `[R${r}] getaddrinfo stop -- hostname: <mask.hash: '${hash}'>, client pid: ${client}, duration: 0.0${this.rng.int(12, 89)}s`, now + this.rng.int(10, 80)),
     ];
   }
 
@@ -313,11 +327,11 @@ export class IosNoise {
     const message = this.rng.chance(0.5)
       ? `{"msg":"client authorization status", "Client":"${client}:", "AuthorizationStatus":"kCLAuthorizationStatusAuthorizedWhenInUse(4)", "Accuracy":"full"}`
       : `{"msg":"CLLocationManager", "event":"activity", "_cmd":"requestLocation", "client":"${client}", "desiredAccuracy":-1, "distanceFilter":-1, "hasLocation":true}`;
-    return [iosLine(I.locationd.pid, 'locationd', 'info', 'com.apple.locationd.Core', 'Client', message)];
+    return [iosLine(this.d.locationd.pid, 'locationd', 'info', 'com.apple.locationd.Core', 'Client', message)];
   }
 
   private xpc(fg: ForegroundApp | undefined): DeviceLogInput[] {
-    const pid = fg?.pid ?? I.springboard.pid;
+    const pid = fg?.pid ?? this.d.springboard.pid;
     const proc = fg ? 'Runner' : 'SpringBoard';
     const name = this.rng.pick(['com.apple.cfprefsd.daemon', 'com.apple.lsd.mapdb', 'com.apple.coremedia.routingcontext.xpc', 'com.apple.UIKit.KeyboardManagement.hosted']);
     return [iosLine(pid, proc, 'debug', 'com.apple.xpc', '', `[0x6000${this.rng.hex(8)}] activating connection: mach=true listener=false peer=false name=${name}`)];
@@ -327,7 +341,7 @@ export class IosNoise {
     const scene = fg ? `${fg.bundleId}-default` : 'com.apple.springboard';
     return [
       iosLine(
-        I.springboard.pid,
+        this.d.springboard.pid,
         'SpringBoard',
         'info',
         'com.apple.FrontBoard',
@@ -338,7 +352,7 @@ export class IosNoise {
   }
 
   private sqlite(): DeviceLogInput[] {
-    return [iosLine(I.springboard.pid, 'SpringBoard', 'error', 'com.apple.libsqlite3', 'logging', 'cannot open file at line 49446 of [1b37c146ee]')];
+    return [iosLine(this.d.springboard.pid, 'SpringBoard', 'error', 'com.apple.libsqlite3', 'logging', 'cannot open file at line 49446 of [1b37c146ee]')];
   }
 
   private uiEvent(fg: ForegroundApp): DeviceLogInput[] {
@@ -351,11 +365,11 @@ export class IosNoise {
   }
 
   private runningboard(fg: ForegroundApp): DeviceLogInput[] {
-    const rb = I.runningboardd.pid;
+    const rb = this.d.runningboardd.pid;
     const variants = [
       `Calculated state for ${this.app(fg)}: running-active (role: UserInteractiveFocal) (endowments: <private>)`,
       `[${this.app(fg)}] Set jetsam priority to 100 [0] flag[1]`,
-      `Acquiring assertion targeting [${this.app(fg)}] from originator [osservice<com.apple.SpringBoard>:${I.springboard.pid}] with description <RBSAssertionDescriptor| "FBScene" ID:${rb}-${I.springboard.pid}-${this.rng.int(1000, 9999)} target:${fg.pid} attributes:[<RBSDomainAttribute| domain:"com.apple.frontboard" name:"Visibility" sourceEnvironment:"(null)">]>`,
+      `Acquiring assertion targeting [${this.app(fg)}] from originator [osservice<com.apple.SpringBoard>:${this.d.springboard.pid}] with description <RBSAssertionDescriptor| "FBScene" ID:${rb}-${this.d.springboard.pid}-${this.rng.int(1000, 9999)} target:${fg.pid} attributes:[<RBSDomainAttribute| domain:"com.apple.frontboard" name:"Visibility" sourceEnvironment:"(null)">]>`,
     ];
     return [iosLine(rb, 'runningboardd', 'info', 'com.apple.runningboard', this.rng.pick(['monitor', 'process', 'assertion']), this.rng.pick(variants))];
   }
@@ -390,12 +404,12 @@ export class IosNoise {
   private tcc(fg: ForegroundApp): DeviceLogInput[] {
     return [
       iosLine(
-        I.tccd.pid,
+        this.d.tccd.pid,
         'tccd',
         'info',
         'com.apple.TCC',
         'access',
-        `AUTHREQ_ATTRIBUTION: msgID=${fg.pid}.${this.rng.int(1, 40)}, attribution={responsible={TCCDProcess: identifier=${fg.bundleId}, pid=${fg.pid}, auid=501, euid=501, binary_path=/Users/deniz/Library/Developer/CoreSimulator/Devices/5E1D3A7B-2C4F-4B8E-9A61-0D7F3C2B1A90/data/Containers/Bundle/Application/${this.appUuid}/Runner.app/Runner}}, service=kTCCServicePhotos`,
+        `AUTHREQ_ATTRIBUTION: msgID=${fg.pid}.${this.rng.int(1, 40)}, attribution={responsible={TCCDProcess: identifier=${fg.bundleId}, pid=${fg.pid}, auid=501, euid=501, binary_path=${this.bundleRoot}/${this.appUuid}/Runner.app/Runner}}, service=kTCCServicePhotos`,
       ),
     ];
   }

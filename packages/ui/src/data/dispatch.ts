@@ -2,7 +2,7 @@ import { PROTOCOL_VERSION, type ClearTarget, type ServerSettings, type ServerToU
 import { logStore } from './logStore';
 import { networkStore } from './networkStore';
 import { metricsStore } from './metricsStore';
-import { hubActions, useHub, appGroupKey } from './stores/hub';
+import { hubActions, useHub, appGroupKey, deviceAppKey } from './stores/hub';
 import { useConnection } from './stores/connection';
 import { setMocksFromServer, setServerSettingsFromServer } from './stores/server';
 import { ALL_SCOPE, setScope, useScopeStore } from './stores/scope';
@@ -17,10 +17,18 @@ function applyLimits(settings: ServerSettings): void {
 /** Make sure the scope still points at something that exists (after resync / device removal). */
 export function validateScope(): void {
   const { scope, hint } = useScopeStore.getState();
-  const { devices, apps } = useHub.getState();
+  const { devices, apps, deviceApps } = useHub.getState();
   if (scope.kind === 'all') return;
   if (scope.kind === 'device') {
     if (!devices[scope.deviceId]) setScope(ALL_SCOPE);
+    return;
+  }
+  if (scope.kind === 'deviceApp') {
+    const key = deviceAppKey(scope.deviceId, scope.bundleId);
+    // The app stays in scope while its device is there and someone (device report or SDK session) knows it.
+    if (deviceApps[key] || Object.values(apps).some((a) => appGroupKey(a) === key)) return;
+    if (devices[scope.deviceId]) setScope({ kind: 'device', deviceId: scope.deviceId });
+    else setScope(ALL_SCOPE);
     return;
   }
   const app = apps[scope.appId];
@@ -33,6 +41,11 @@ export function validateScope(): void {
       .sort((a, b) => Number(b.connected) - Number(a.connected) || b.connectedAt - a.connectedAt);
     if (candidates[0]) {
       setScope({ kind: 'app', appId: candidates[0].id }, hint);
+      return;
+    }
+    // No session any more (server restarted), but the device still reports the app: keep it in scope.
+    if (deviceApps[deviceAppKey(hint.deviceId, hint.bundleId)]) {
+      setScope({ kind: 'deviceApp', deviceId: hint.deviceId, bundleId: hint.bundleId }, hint);
       return;
     }
   }
@@ -100,6 +113,7 @@ export function handleServerMessage(msg: ServerToUi): void {
         apps: msg.apps ?? [],
         drivers: msg.drivers ?? [],
         processes: msg.processes ?? [],
+        deviceApps: msg.deviceApps ?? [],
       });
       networkStore.upsert(msg.network ?? [], { history: true });
       metricsStore.push(msg.metrics ?? []);
@@ -122,6 +136,9 @@ export function handleServerMessage(msg: ServerToUi): void {
       if (msg.devices?.length) hubActions.upsertDevices(msg.devices);
       if (msg.apps?.length) hubActions.upsertApps(msg.apps);
       if (msg.processes?.length) hubActions.applyProcesses(msg.processes);
+      if (msg.deviceApps?.length) hubActions.upsertDeviceApps(msg.deviceApps);
+      // A removed device app stays in scope until the next resync (its rows are still on screen).
+      if (msg.removedDeviceApps?.length) hubActions.removeDeviceApps(msg.removedDeviceApps);
       if (msg.logs?.length) logStore.append(msg.logs);
       if (msg.network?.length) networkStore.upsert(msg.network);
       if (msg.metrics?.length) metricsStore.push(msg.metrics);

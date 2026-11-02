@@ -1,0 +1,21 @@
+{
+  "name": "durbun-desktop",
+  "productName": "Dürbün",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dürbün for macOS — starts the Dürbün server and opens its UI in one window",
+  "author": "Dürbün",
+  "type": "module",
+  "main": "out/main.mjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dist": "node scripts/dist.mjs",
+    "test": "node ../../node_modules/vitest/vitest.mjs run",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0"
+  }
+}

@@ -6,6 +6,7 @@ import dev.durbun.DurbunAction
 import dev.durbun.DurbunOptions
 import dev.durbun.internal.CrashHandler
 import dev.durbun.internal.DurbunCore
+import dev.durbun.internal.HostLink
 import dev.durbun.internal.LogcatForwarder
 import dev.durbun.internal.PendingCrashStore
 
@@ -40,6 +41,42 @@ internal object AndroidRuntime {
         )
         return core
     }
+
+    /**
+     * Hosted mode (Flutter plugin): no socket, no metrics sampler (Flutter sends its own frame metrics);
+     * crash handler, logcat forwarding (Wi-Fi only) and the OkHttp interceptor work as usual.
+     */
+    fun startHosted(
+        context: Context,
+        options: DurbunOptions,
+        actions: Collection<DurbunAction>,
+        link: HostLink,
+        redactedHeaders: Set<String>,
+    ): DurbunCore {
+        val hostedOptions = options.copy(captureMetrics = false)
+        val env = AndroidEnvironment(context, hostedOptions)
+        val core = DurbunCore(hostedOptions, env, host = link)
+        core.redactedHeaders = redactedHeaders
+        core.crashStore = PendingCrashStore { env.storageDir }
+        actions.forEach(core::addAction)
+        if (hostedOptions.captureLogcat) {
+            core.logcat = LogcatForwarder(
+                pid = env.pid,
+                modernLogcat = Build.VERSION.SDK_INT >= 24,
+                logger = env.logger,
+            ) { entry -> core.forwardLogcat(entry.ts, entry.level, entry.tag, entry.message, entry.tid) }
+        }
+        if (hostedOptions.captureCrashes) CrashHandler.install(core)
+        core.start()
+        env.logger.info(
+            "Dürbün ${dev.durbun.Durbun.VERSION} native layer started for ${env.appId} (pid ${env.pid}); " +
+                "it reports through the Flutter SDK's connection.",
+        )
+        return core
+    }
+
+    /** `hello.app` as the Android side knows it (label, versionName, versionCode). */
+    fun appInfo(core: DurbunCore): Map<String, Any?> = core.appInfo()
 
     fun stop(core: DurbunCore) {
         CrashHandler.uninstall(core)

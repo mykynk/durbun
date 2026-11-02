@@ -3,8 +3,18 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DeviceActionId, DeviceActionResult, InstalledApp } from '@durbun/protocol';
 import type { DriverContext } from '../types';
-import type { DemoApp } from './appSim';
-import { ANDROID_ACTIONS, ANDROID_SYSTEM, IOS_SIM_ACTIONS, IOS_SYSTEM, IPHONE_ID, PIXEL_ID } from './devices';
+import type { SimApp } from './appSim';
+import {
+  ANDROID_ACTIONS,
+  ANDROID_SYSTEM,
+  IOS_DEVICE_ACTIONS,
+  IOS_DEVICE_SYSTEM,
+  IOS_SIM_ACTIONS,
+  IOS_SYSTEM,
+  IPHONE_DEVICE_ID,
+  IPHONE_ID,
+  PIXEL_ID,
+} from './devices';
 import { MahalleApp } from './mahalle';
 import { androidLine, iosLine } from './noise';
 import { PatiApp } from './pati';
@@ -24,13 +34,16 @@ export interface DemoRuntime {
   ctx: DriverContext;
   rng: Rng;
   sched: Scheduler;
-  apps: DemoApp[];
+  apps: SimApp[];
   deviceState: Map<string, DeviceUiState>;
 }
 
 const ANDROID_INSTALLED: InstalledApp[] = [
   { id: 'com.mykynk.pati', name: 'Pati', version: '2.4.1', debuggable: true },
   { id: 'com.mykynk.mahalle', name: 'Mahalle', version: '5.12.0', debuggable: true },
+  { id: 'com.mykynk.kumbara', name: 'Kumbara', version: '3.1.0' },
+  { id: 'com.mykynk.pati.staging', name: 'Pati QA', version: '2.5.0-rc.2' },
+  { id: 'dev.firebase.appdistribution', name: 'App Tester', version: '24.4.0' },
   { id: 'com.android.chrome', name: 'Chrome', version: '130.0.6723.102' },
   { id: 'com.google.android.youtube', name: 'YouTube', version: '19.44.38' },
   { id: 'com.google.android.apps.maps', name: 'Maps', version: '11.150.0102' },
@@ -42,6 +55,12 @@ const ANDROID_SYSTEM_APPS: InstalledApp[] = [
   { id: 'com.google.android.apps.nexuslauncher', name: 'Pixel Launcher', version: '15', system: true },
 ];
 const IOS_INSTALLED: InstalledApp[] = [{ id: 'com.mykynk.pati', name: 'Pati', version: '2.4.1', debuggable: true }];
+/** The tester's iPhone: an App Store / TestFlight build and an Xcode build (devicectl marks developer apps). */
+const IOS_DEVICE_INSTALLED: InstalledApp[] = [
+  { id: 'com.mykynk.kumbara', name: 'Kumbara', version: '3.1.0' },
+  { id: 'com.mykynk.pati', name: 'Pati', version: '2.4.1', debuggable: true },
+  { id: 'com.apple.TestFlight', name: 'TestFlight', version: '3.7.1' },
+];
 const IOS_SYSTEM_APPS: InstalledApp[] = [
   { id: 'com.apple.mobilesafari', name: 'Safari', version: '18.2', system: true },
   { id: 'com.apple.Preferences', name: 'Settings', version: '18.2', system: true },
@@ -87,15 +106,20 @@ export async function runDemoAction(
   params: Record<string, unknown>,
 ): Promise<DeviceActionResult> {
   const android = deviceId === PIXEL_ID;
-  const ios = deviceId === IPHONE_ID;
+  const sim = deviceId === IPHONE_ID;
+  const iphone = deviceId === IPHONE_DEVICE_ID;
+  const ios = sim || iphone;
   if (!android && !ios) return fail(`Unknown demo device: ${deviceId}`, 'device.unknown');
-  const supported = android ? ANDROID_ACTIONS : IOS_SIM_ACTIONS;
+  const supported = android ? ANDROID_ACTIONS : sim ? IOS_SIM_ACTIONS : IOS_DEVICE_ACTIONS;
   if (!supported.includes(action)) {
     return fail(
-      action === 'screen-record' ? 'Screen recording is not available for demo devices' : `"${action}" is not supported on ${android ? 'Android' : 'the iOS simulator'}`,
+      action === 'screen-record'
+        ? 'Screen recording is not available for demo devices'
+        : `"${action}" is not supported on ${android ? 'Android' : sim ? 'the iOS simulator' : 'a physical iPhone'}`,
       'demo.unsupportedAction',
     );
   }
+  const installedList = android ? ANDROID_INSTALLED : sim ? IOS_INSTALLED : IOS_DEVICE_INSTALLED;
   const state = rt.deviceState.get(deviceId) ?? { appearance: 'light', fontScale: 1, animations: true, statusBar: 'reset', shots: 0 };
   rt.deviceState.set(deviceId, state);
   const apps = rt.apps.filter((a) => a.deviceId === deviceId);
@@ -105,11 +129,11 @@ export async function runDemoAction(
 
   switch (action) {
     case 'screenshot': {
-      const [width, height] = android ? [540, 1200] : [402, 874];
+      const [width, height] = android ? [540, 1200] : sim ? [402, 874] : [390, 844];
       state.shots++;
-      const png = screenshotPng({ width, height, platform: android ? 'android' : 'ios', dark: state.appearance === 'dark', seed: state.shots * 3 + (android ? 0 : 1) });
+      const png = screenshotPng({ width, height, platform: android ? 'android' : 'ios', dark: state.appearance === 'dark', seed: state.shots * 3 + (android ? 0 : sim ? 1 : 2) });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const fileName = `screenshot-${android ? 'pixel-8' : 'iphone-16-pro'}-demo-${stamp}-${state.shots}.png`;
+      const fileName = `screenshot-${android ? 'pixel-8' : sim ? 'iphone-16-pro' : 'iphone-13'}-demo-${stamp}-${state.shots}.png`;
       const file = path.join(rt.ctx.tempDir, fileName);
       try {
         await mkdir(rt.ctx.tempDir, { recursive: true });
@@ -126,7 +150,8 @@ export async function runDemoAction(
       if (android) {
         push([androidLine(ss, ss + 21, 'info', 'ActivityTaskManager', `START u0 {act=android.intent.action.VIEW dat=${url} flg=0x10000000 cmp=com.mykynk.pati/.MainActivity} from uid 2000 (BAL_ALLOW_PERMISSION) result code=0`)]);
       } else {
-        push([iosLine(IOS_SYSTEM.springboard.pid, 'SpringBoard', 'info', 'com.apple.FrontBoard', 'Common', `Opening URL ${url} for scene com.mykynk.pati-default`)]);
+        const springboard = sim ? IOS_SYSTEM.springboard.pid : IOS_DEVICE_SYSTEM.springboard.pid;
+        push([iosLine(springboard, 'SpringBoard', 'info', 'com.apple.FrontBoard', 'Common', `Opening URL ${url} for scene com.mykynk.pati-default`)]);
       }
       pati?.handleDeepLink(url);
       return ok(`Opened ${url}`);
@@ -134,8 +159,7 @@ export async function runDemoAction(
 
     case 'list-apps': {
       const includeSystem = params.includeSystem === true;
-      const base = android ? ANDROID_INSTALLED : IOS_INSTALLED;
-      const installed = base.filter((a) => {
+      const installed = installedList.filter((a) => {
         const app = apps.find((x) => x.identity.bundleId === a.id);
         return !app || app.installed;
       });
@@ -151,7 +175,7 @@ export async function runDemoAction(
       if (!appId) return fail('Missing "appId"', 'params.invalid');
       const app = apps.find((a) => a.identity.bundleId === appId);
       if (!app) {
-        const known = [...(android ? ANDROID_INSTALLED : IOS_INSTALLED), ...(android ? ANDROID_SYSTEM_APPS : IOS_SYSTEM_APPS)].some((a) => a.id === appId);
+        const known = [...installedList, ...(android ? ANDROID_SYSTEM_APPS : IOS_SYSTEM_APPS)].some((a) => a.id === appId);
         return known ? ok(`${action} ${appId} (simulated)`) : fail(`${appId} is not installed on this device`, 'app.notInstalled');
       }
       if (!app.installed && action !== 'app-uninstall') return fail(`${appId} is not installed (install it again first)`, 'app.notInstalled');
@@ -174,6 +198,8 @@ export async function runDemoAction(
         default:
           app.stop('uninstall');
           app.installed = false;
+          // stop() is a no-op for an app that is not running: the device no longer has it either way.
+          rt.ctx.hub.removeDeviceApps(deviceId, [app.identity.bundleId]);
           return ok(`Uninstalled ${app.identity.name}`);
       }
     }
@@ -255,7 +281,7 @@ export async function runDemoAction(
       const lat = num(params, 'lat');
       const lon = num(params, 'lon');
       if (lat === undefined || lon === undefined || Math.abs(lat) > 90 || Math.abs(lon) > 180) return fail('"lat" and "lon" must be valid coordinates', 'params.invalid');
-      if (ios) push([iosLine(IOS_SYSTEM.locationd.pid, 'locationd', 'info', 'com.apple.locationd.Core', 'Client', `{"msg":"simulated location", "lat":${lat}, "lon":${lon}, "source":"simctl"}`)]);
+      if (sim) push([iosLine(IOS_SYSTEM.locationd.pid, 'locationd', 'info', 'com.apple.locationd.Core', 'Client', `{"msg":"simulated location", "lat":${lat}, "lon":${lon}, "source":"simctl"}`)]);
       pati?.handleLocation(lat, lon);
       return ok(`Location set to ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
     }

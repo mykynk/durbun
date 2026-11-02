@@ -1,0 +1,186 @@
+{"app_name":"Runner","timestamp":"2026-11-02 14:31:09.00 +0300","app_version":"2.4.0","slice_uuid":"c1d2e3f4-a5b6-37c8-99d0-e1f2a3b4c5d6","build_version":"60","platform":7,"bundleID":"com.mykynk.pati","share_with_app_devs":0,"is_first_party":0,"bug_type":"309","os_version":"macOS 27.2 (26B123)","roots_installed":0,"name":"Runner","incident_id":"F0E1D2C3-B4A5-4697-8899-AABBCCDDEEFF"}
+{
+  "uptime" : 370000,
+  "procRole" : "Foreground",
+  "version" : 2,
+  "userID" : 502,
+  "deployVersion" : 210,
+  "modelCode" : "Mac16,7",
+  "coalitionID" : 534901,
+  "osVersion" : {
+    "train" : "macOS 27.2",
+    "build" : "26B123",
+    "releaseType" : "User"
+  },
+  "captureTime" : "2026-11-02 14:31:09.5520 +0300",
+  "codeSigningMonitor" : 2,
+  "incident" : "F0E1D2C3-B4A5-4697-8899-AABBCCDDEEFF",
+  "pid" : 48211,
+  "translated" : false,
+  "cpuType" : "ARM-64",
+  "procLaunch" : "2026-11-02 14:30:41.1003 +0300",
+  "procStartAbsTime" : 9012345678901,
+  "procExitAbsTime" : 9013012345678,
+  "procName" : "Runner",
+  "procPath" : "\/Users\/USER\/*\/Runner.app\/Runner",
+  "bundleInfo" : {
+    "CFBundleShortVersionString" : "2.4.0",
+    "CFBundleVersion" : "60",
+    "CFBundleIdentifier" : "com.mykynk.pati"
+  },
+  "storeInfo" : {
+    "deviceIdentifierForVendor" : "22B94B96-569D-513C-ADAD-0EC5B099838D",
+    "thirdParty" : true
+  },
+  "parentProc" : "launchd_sim",
+  "parentPid" : 47012,
+  "coalitionName" : "com.apple.CoreSimulator.SimDevice.7B1E9C2A-4D3F-4A8B-9C6D-2E5F8A1B3C4D",
+  "crashReporterKey" : "C47A155C-F6BF-1471-3763-8CFFA1BDBC11",
+  "developerMode" : 1,
+  "responsiblePid" : 46990,
+  "responsibleProc" : "SimulatorTrampoline",
+  "codeSigningID" : "com.mykynk.pati",
+  "codeSigningTeamID" : "",
+  "codeSigningFlags" : 570425857,
+  "codeSigningValidationCategory" : 10,
+  "codeSigningTrustLevel" : 4294967295,
+  "bootSessionUUID" : "C459F42A-0FCA-43CD-9BFD-C5470BB4C742",
+  "sip" : "enabled",
+  "vmRegionInfo" : "0x10 is not in any region.  Bytes before following region: 4341546992",
+  "exception" : {
+    "codes" : "0x0000000000000001, 0x0000000000000010",
+    "rawCodes" : [
+      1,
+      16
+    ],
+    "type" : "EXC_BAD_ACCESS",
+    "signal" : "SIGSEGV",
+    "subtype" : "KERN_INVALID_ADDRESS at 0x0000000000000010"
+  },
+  "termination" : {
+    "flags" : 0,
+    "code" : 11,
+    "namespace" : "SIGNAL",
+    "indicator" : "Segmentation fault: 11",
+    "byProc" : "exc handler",
+    "byPid" : 48211
+  },
+  "extMods" : {
+    "caller" : {
+      "thread_create" : 0,
+      "thread_set_state" : 0,
+      "task_for_pid" : 0
+    },
+    "system" : {
+      "thread_create" : 0,
+      "thread_set_state" : 0,
+      "task_for_pid" : 0
+    },
+    "targeted" : {
+      "thread_create" : 0,
+      "thread_set_state" : 0,
+      "task_for_pid" : 0
+    },
+    "warnings" : 0
+  },
+  "faultingThread" : 0,
+  "threads" : [
+    {
+      "triggered" : true,
+      "id" : 9911,
+      "queue" : "com.apple.main-thread",
+      "frames" : [
+        {
+          "imageOffset" : 22016,
+          "symbol" : "BasketCell.configure(with:)",
+          "symbolLocation" : 312,
+          "sourceFile" : "BasketCell.swift",
+          "sourceLine" : 48,
+          "imageIndex" : 0
+        },
+        {
+          "imageOffset" : 21120,
+          "symbol" : "BasketViewController.tableView(_:cellForRowAt:)",
+          "symbolLocation" : 220,
+          "sourceFile" : "BasketViewController.swift",
+          "sourceLine" : 91,
+          "imageIndex" : 0
+        },
+        {
+          "imageOffset" : 5240880,
+          "symbol" : "-[UITableView _createPreparedCellForRowAtIndexPath:willDisplay:]",
+          "symbolLocation" : 704,
+          "imageIndex" : 4
+        }
+      ]
+    }
+  ],
+  "usedImages" : [
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 4341547008,
+      "size" : 65536,
+      "uuid" : "c1d2e3f4-a5b6-37c8-99d0-e1f2a3b4c5d6",
+      "path" : "\/Users\/USER\/*\/Runner.app\/Runner",
+      "name" : "Runner",
+      "CFBundleIdentifier" : "com.mykynk.pati",
+      "CFBundleShortVersionString" : "2.4.0",
+      "CFBundleVersion" : "60"
+    },
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 4342808576,
+      "size" : 376832,
+      "uuid" : "37387001-d149-3088-8738-1d79ed9c1394",
+      "path" : "\/Volumes\/VOLUME\/*\/dyld_sim",
+      "name" : "dyld_sim"
+    },
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 4363124736,
+      "size" : 31981568,
+      "uuid" : "d2e3f4a5-b6c7-38d9-a0e1-f2a3b4c5d6e7",
+      "path" : "\/Users\/USER\/*\/Runner.app\/Frameworks\/Flutter.framework\/Flutter",
+      "name" : "Flutter",
+      "CFBundleIdentifier" : "io.flutter.flutter",
+      "CFBundleShortVersionString" : "1.0",
+      "CFBundleVersion" : "1.0"
+    },
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 4413210624,
+      "size" : 32768,
+      "uuid" : "e3f4a5b6-c7d8-39e0-b1f2-a3b4c5d6e7f8",
+      "path" : "\/Volumes\/VOLUME\/*\/libsystem_platform.dylib",
+      "name" : "libsystem_platform.dylib"
+    },
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 6536298496,
+      "size" : 33325056,
+      "uuid" : "1a2b3c4d-5e6f-3708-9a1b-2c3d4e5f6071",
+      "path" : "\/Volumes\/VOLUME\/*\/UIKitCore.framework\/UIKitCore",
+      "name" : "UIKitCore",
+      "CFBundleIdentifier" : "com.apple.UIKitCore",
+      "CFBundleShortVersionString" : "1.0",
+      "CFBundleVersion" : "9126.1.101"
+    }
+  ],
+  "sharedCache" : {
+    "base" : 6442450944,
+    "size" : 4980736000,
+    "uuid" : "c8d9e0f1-a2b3-34c5-96d7-e8f9a0b1c2d3"
+  },
+  "vmSummary" : "ReadOnly portion of Libraries: Total=1.8G resident=0K(0%) swapped_out_or_unallocated=1.8G(100%)\nWritable regions: Total=820.6M written=1442K(0%) resident=1442K(0%) swapped_out=0K(0%) unallocated=819.2M(100%)\n",
+  "legacyInfo" : {
+    "threadTriggered" : {
+      "queue" : "com.apple.main-thread"
+    }
+  },
+  "logWritingSignature" : "2b9f0c6e1d4a8b7c5e3f1a2d4c6b8a0e9f7d5c3b"
+}

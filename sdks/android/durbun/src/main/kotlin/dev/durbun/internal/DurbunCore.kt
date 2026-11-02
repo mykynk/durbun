@@ -16,11 +16,15 @@ import java.util.concurrent.atomic.AtomicLong
  * One SDK session (one app process launch): builds protocol messages, owns the transport, applies the
  * desktop's config / mock rules / commands, and drives optional platform plug-ins (metrics, logcat).
  * Plain JVM code — Android specifics come in through [Environment], [MetricsSampler] and [LogcatController].
+ *
+ * With a [host] (hosted mode, used by the Flutter plugin) the core opens no socket: messages go to the host,
+ * which sends them on its own connection, and the desktop state arrives through [applyHostState].
  */
 internal class DurbunCore(
     val options: DurbunOptions,
     private val env: Environment,
     timing: Transport.Timing = Transport.Timing(),
+    private val host: HostLink? = null,
 ) : Transport.Listener {
     val logger: InternalLogger get() = env.logger
     val appId: String get() = env.appId
@@ -33,6 +37,17 @@ internal class DurbunCore(
         maxChars = MAX_BUFFER_CHARS,
     )
     private val transport = Transport(this::endpoints, this::helloLine, this, queue, env.logger, timing)
+    private val relay: HostRelay? = host?.let { HostRelay(queue, it, env.logger, onStart = ::drainPendingCrashes) }
+
+    @Volatile
+    private var hostState = HostState()
+
+    /** True when another SDK (the Flutter plugin) owns the desktop connection. */
+    val isHosted: Boolean get() = host != null
+
+    /** Header names (lower case) redacted in every captured request, on top of the interceptor's own. */
+    @Volatile
+    var redactedHeaders: Set<String> = emptySet()
     private val actions = ActionRegistry()
     private val requestSeq = AtomicLong()
     private val recentLogs = RecentLogs()
@@ -68,7 +83,7 @@ internal class DurbunCore(
     private var metricsTask: ScheduledFuture<*>? = null
     private var metricsIntervalMs = 0L
 
-    val isConnected: Boolean get() = transport.isConnected
+    val isConnected: Boolean get() = if (host != null) hostState.connected else transport.isConnected
 
     /** Effective body capture switch (app override wins over the desktop setting). */
     val captureBodies: Boolean get() = options.captureBodies ?: config.captureBodies
@@ -77,11 +92,12 @@ internal class DurbunCore(
     val maxBodyBytes: Int get() = (options.maxBodyBytes ?: config.maxBodyBytes).coerceIn(0, MAX_BODY_BYTES)
 
     fun start() {
-        transport.start()
+        if (relay != null) relay.start() else transport.start()
     }
 
     fun stop() {
         if (!stopped.compareAndSet(false, true)) return
+        relay?.stop()
         transport.stop()
         stopMetrics()
         synchronized(metricsLock) {
@@ -149,17 +165,68 @@ internal class DurbunCore(
     /** A line from this app's own logcat (only while the desktop has no device logs). */
     fun forwardLogcat(ts: Long, level: Level, tag: String, message: String, tid: Int?) {
         if (stopped.get()) return
+        // Hosted by Flutter: Dart's own print capture already sends the `flutter` lines.
+        if (host != null && tag == FLUTTER_TAG) return
         if (recentLogs.isDuplicate(level.wireName, message, ts)) return
         send(Wire.log(ts = ts, level = level.wireName, tag = tag, message = message, kind = "text", tid = tid))
     }
 
     fun addAction(action: DurbunAction) {
         actions.add(action)
-        if (isConnected) sendActions()
+        if (host != null || isConnected) sendActions()
     }
 
     fun removeAction(id: String) {
-        if (actions.remove(id) && isConnected) sendActions()
+        if (actions.remove(id) && (host != null || isConnected)) sendActions()
+    }
+
+    /* ───────────── hosted mode (Flutter plugin) ───────────── */
+
+    /**
+     * Desktop state from the host: `{connected, via, appId, config, mocks, hello}` (JSON). Unknown or missing
+     * fields keep their previous value.
+     */
+    fun applyHostState(stateJson: String) {
+        if (host == null || stopped.get()) return
+        try {
+            val state = Json.parseObject(stateJson) ?: return
+            state.obj("config")?.let { config = SdkConfig.from(it, config) }
+            state.list("mocks")?.let { mockRules = MockRule.listFromJson(it) }
+            state.str("appId")?.let { serverAppId = it }
+            val previous = hostState
+            val connected = state.bool("connected") ?: previous.connected
+            hostState = HostState(
+                connected = connected,
+                endpoint = if (state.containsKey("via")) HostState.parseVia(state.str("via")) else previous.endpoint,
+                helloLine = state.obj("hello")?.let { Json.encode(it) } ?: previous.helloLine,
+            )
+            if (connected) applyRuntimeConfig() else if (previous.connected) stopMetrics()
+        } catch (t: Throwable) {
+            logger.warn("Could not apply the desktop state from Flutter", t)
+        }
+    }
+
+    /** A desktop `command` the host forwarded (JSON); the result goes back as `command.result`. */
+    fun handleHostCommand(commandJson: String) {
+        if (stopped.get()) return
+        val message = Json.parseObject(commandJson) ?: return
+        handleCommand(message)
+    }
+
+    /** Native action descriptors (JSON array) — what the host merges into its own `hello.actions`. */
+    fun describeActionsJson(): String = Json.encode(actions.descriptors())
+
+    /** `hello.app` as this platform reports it. */
+    fun appInfo(): Map<String, Any?> = env.appInfo()
+
+    /** Capabilities the native side adds to the host's session. */
+    fun hostedCapabilities(): List<String> = capabilities()
+
+    /** Command names besides the action ids that this core answers. */
+    fun hostedCommands(): List<String> = listOf(ActionRegistry.DUMP_THREADS, ActionRegistry.GC)
+
+    private fun drainPendingCrashes() {
+        crashStore?.drain()?.forEach(this::sendPreviousCrash)
     }
 
     /* ───────────── network capture support ───────────── */
@@ -175,7 +242,44 @@ internal class DurbunCore(
      * Stored on disk when it cannot be delivered, and sent on the next launch.
      */
     fun reportCrash(thread: Thread, error: Throwable) {
-        val line = Wire.log(
+        val line = crashLine(thread, error)
+        if (host != null) {
+            reportCrashHosted(line)
+            return
+        }
+        send(line)
+        val delivered = try {
+            val connected = transport.isConnected || transport.awaitConnected(CRASH_CONNECT_WAIT_MS)
+            connected && transport.awaitDrained(CRASH_FLUSH_WAIT_MS)
+        } catch (_: InterruptedException) {
+            false
+        }
+        if (!delivered) crashStore?.save(line)
+    }
+
+    /**
+     * Hosted mode: the host (Dart) may never run again — a crash on the main thread blocks it — so the report
+     * goes directly to the desktop on a short-lived connection with the host's own hello (same app session).
+     * When that fails it is stored and sent on the next launch ("Previous launch crashed — …").
+     */
+    private fun reportCrashHosted(line: String) {
+        val state = hostState
+        val endpoint = state.endpoint
+        val hello = state.helloLine
+        val delivered = if (state.connected && endpoint != null && hello != null) {
+            try {
+                EmergencyDelivery.deliver(endpoint, hello, line)
+            } catch (_: Throwable) {
+                false
+            }
+        } else {
+            false
+        }
+        if (!delivered) crashStore?.save(line)
+    }
+
+    private fun crashLine(thread: Thread, error: Throwable): String {
+        return Wire.log(
             ts = env.nowMs(),
             level = Level.FATAL.wireName,
             tag = CRASH_TAG,
@@ -185,14 +289,6 @@ internal class DurbunCore(
             kind = "crash",
             tid = env.currentTid(),
         )
-        send(line)
-        val delivered = try {
-            val connected = transport.isConnected || transport.awaitConnected(CRASH_CONNECT_WAIT_MS)
-            connected && transport.awaitDrained(CRASH_FLUSH_WAIT_MS)
-        } catch (_: InterruptedException) {
-            false
-        }
-        if (!delivered) crashStore?.save(line)
     }
 
     private fun sendPreviousCrash(line: String) {
@@ -223,7 +319,7 @@ internal class DurbunCore(
     /* ───────────── Transport.Listener ───────────── */
 
     override fun onIoThreadStarted() {
-        crashStore?.drain()?.forEach(this::sendPreviousCrash)
+        drainPendingCrashes()
     }
 
     override fun onConnected(endpoint: Transport.Endpoint, welcome: Map<String, Any?>) {
@@ -312,7 +408,19 @@ internal class DurbunCore(
 
     private fun describe(t: Throwable): String = t.message?.takeIf { it.isNotBlank() } ?: t.javaClass.simpleName
 
-    private fun sendActions() = send(Wire.actions(actions.descriptors()))
+    private fun sendActions() {
+        val link = host
+        if (link != null) {
+            // The host owns hello.actions: it merges ours with its own and publishes the full list.
+            try {
+                link.actionsChanged(describeActionsJson())
+            } catch (t: Throwable) {
+                logger.warn("Could not hand the action list to Flutter", t)
+            }
+        } else {
+            send(Wire.actions(actions.descriptors()))
+        }
+    }
 
     private fun dumpThreads(): Map<String, Any?> {
         val traces = Thread.getAllStackTraces()
@@ -448,6 +556,7 @@ internal class DurbunCore(
     companion object {
         const val SDK_TAG = "durbun"
         const val CRASH_TAG = "crash"
+        const val FLUTTER_TAG = "flutter"
         const val LOOPBACK = "127.0.0.1"
         const val EMULATOR_HOST = "10.0.2.2"
 

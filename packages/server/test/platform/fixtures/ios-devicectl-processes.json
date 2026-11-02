@@ -1,0 +1,54 @@
+{
+ "info": {
+  "arguments": [
+   "devicectl",
+   "device",
+   "info",
+   "processes",
+   "--device",
+   "00008130-000A1B2C3D4E001F",
+   "--json-output",
+   "/tmp/durbun-devicectl.json"
+  ],
+  "commandType": "devicectl.device.info.processes",
+  "environment": {
+   "TERM": "xterm-256color"
+  },
+  "jsonVersion": 5,
+  "outcome": "success",
+  "version": "651.32"
+ },
+ "result": {
+  "deviceIdentifier": "1F4C0B9E-2A7D-4E61-9C35-8B0D6F2A1E47",
+  "runningProcesses": [
+   {
+    "processIdentifier": 1,
+    "executable": "file:///sbin/launchd"
+   },
+   {
+    "processIdentifier": 34,
+    "executable": "file:///usr/libexec/backboardd"
+   },
+   {
+    "processIdentifier": 57,
+    "executable": "file:///System/Library/CoreServices/SpringBoard.app/SpringBoard"
+   },
+   {
+    "processIdentifier": 1234,
+    "executable": "file:///private/var/containers/Bundle/Application/9F1C2B7A-58D3-4E0B-A6C1-3D27E8F0B941/Runner.app/Runner"
+   },
+   {
+    "processIdentifier": 1290,
+    "executable": "file:///private/var/containers/Bundle/Application/9F1C2B7A-58D3-4E0B-A6C1-3D27E8F0B941/Runner.app/PlugIns/NotificationService.appex/NotificationService"
+   },
+   {
+    "processIdentifier": 2210,
+    "executable": "file:///private/var/containers/Bundle/Application/C02A6F1E-7B44-4D9A-9E21-61A5B3D8E7F2/Mahalle.app/Mahalle"
+   },
+   {
+    "processIdentifier": 2301,
+    "executable": "file:///Applications/MobileSafari.app/MobileSafari"
+   }
+  ]
+ }
+}

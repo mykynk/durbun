@@ -45,6 +45,7 @@ import {
 import { RuleList } from './components/RuleList';
 import { RuleEditor, type KnownApp } from './components/RuleEditor';
 import { CapabilityHints, ImportDialog, type PendingImport } from './components/Extras';
+import { ExplainCallout, pickEmptyReason, useScopeExplain } from '../../sources';
 import './i18n';
 import './mocks.css';
 
@@ -80,8 +81,15 @@ export default function MocksView() {
   );
   const allApps = useMemo(() => Object.values(useHub.getState().apps).sort((a, b) => b.connectedAt - a.connectedAt), [appsSig]); // eslint-disable-line react-hooks/exhaustive-deps
   const compiled = useCompiledScope();
+  // The scoped app cannot apply mocks (no SDK / VM service only): say why instead of the capability bar.
+  const scopeExplain = useScopeExplain();
+  const mocksStructural = pickEmptyReason('mocks', scopeExplain).structural && scopeExplain.kind !== 'none';
   const scopeKey =
-    compiled.scope.kind === 'all' ? 'all' : compiled.scope.kind === 'device' ? `d:${compiled.scope.deviceId}` : `a:${[...(compiled.appIds ?? [])].sort().join(',')}`;
+    compiled.scope.kind === 'all'
+      ? 'all'
+      : compiled.scope.kind === 'device'
+        ? `d:${compiled.scope.deviceId}`
+        : `a:${compiled.deviceId ?? ''}|${compiled.bundleId ?? ''}:${[...(compiled.appIds ?? [])].sort().join(',')}`;
   const [query, setQuery] = useState('');
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [saving, setSaving] = useState(false);
@@ -353,7 +361,7 @@ export default function MocksView() {
           <span>{enabledCount > 0 ? t('mocks.master.active', { count: enabledCount }) : t('mocks.master.inactive')}</span>
         </div>
       ) : null}
-      <CapabilityHints apps={scopedApps} />
+      {mocksStructural ? <ExplainCallout capability="mocks" className="mk-explain" /> : <CapabilityHints apps={scopedApps} />}
       <SplitPane id="mocks.editor" sizedPane="second" defaultSize={600} minSize={420} maxSize={0.72} collapsed={editor ? null : 'second'} onOverlayDismiss={() => void closeEditor()} className="mk-split">
         <div className="mk-listpane">
           {!loaded ? (

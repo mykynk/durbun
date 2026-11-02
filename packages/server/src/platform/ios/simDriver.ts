@@ -1,7 +1,8 @@
 /**
  * iOS simulator driver: polls `xcrun simctl list devices booted -j` every 3 s; per booted simulator
  * streams `log stream --style ndjson` (restarted when the scope/level settings change) and offers
- * simctl actions + host-ps metrics.
+ * simctl actions + host-ps metrics. Phase 3 (SPEC §10): DeviceApps (simctl listapps + host ps) and
+ * crash reports (~/Library/Logs/DiagnosticReports, matched to the simulator's UDID).
  */
 import type {
   DeviceActionId,
@@ -20,7 +21,11 @@ import { fail } from '../shared/files';
 import { FlutterErrorGrouper } from '../shared/flutter';
 import { Poller } from '../shared/timing';
 import { probeXcodeTools, type XcodeTools } from '../tools';
+import { IosAppTracker, type AppSource } from './appTracker';
+import { crashReportEntry, type IpsReport } from './crashReport';
 import { HostProcessMetrics } from './hostMetrics';
+import { simAppSource } from './simApps';
+import { SimCrashWatcher } from './simCrashes';
 import { runSimAction, SIM_ACTIONS } from './simActions';
 import { parseBootedDevices, simctl, XCRUN, type BootedSimulator } from './simctl';
 import { parseSimLogLine, simLogStreamArgs } from './simlog';
@@ -34,6 +39,26 @@ interface SimDeps {
   isBooted: (udid: string) => boolean;
   /** Fresh `simctl list devices booted` check (also nudges the poller). */
   checkBooted: (udid: string) => Promise<boolean>;
+  crashes: SimCrashWatcher;
+  appSource: (udid: string) => AppSource;
+  timing: IosSimTiming;
+}
+
+/** Polling intervals of the phase-3 watchers (tests shorten them). */
+export interface IosSimTiming {
+  appsEveryMs: number;
+  processesEveryMs: number;
+}
+
+export const DEFAULT_IOS_SIM_TIMING: IosSimTiming = { appsEveryMs: 3 * 60_000, processesEveryMs: 5000 };
+
+export interface IosSimDriverOptions {
+  /** Folders with macOS crash reports (default ~/Library/Logs/DiagnosticReports + Retired). */
+  diagnosticReportDirs?: string[];
+  /** Tests: fake app listing / process source per simulator. */
+  appSource?: (udid: string) => AppSource;
+  timing?: Partial<IosSimTiming>;
+  crashScanMs?: number;
 }
 
 class SimulatorSession {
@@ -47,6 +72,9 @@ class SimulatorSession {
   private disposed = false;
   private readonly seenPids = new Map<number, string>();
   private readonly metrics = new Map<string, HostProcessMetrics>();
+  private readonly watchStart = Date.now();
+  private readonly apps: IosAppTracker;
+  private unsubCrashes?: () => void;
 
   constructor(
     private readonly deps: SimDeps,
@@ -73,6 +101,20 @@ class SimulatorSession {
     const hub = deps.ctx.hub;
     this.batcher = new LogBatcher((entries) => hub.pushDeviceLogs(this.id, entries), deps.logger);
     this.flutter = new FlutterErrorGrouper((e) => this.batcher.push(e));
+    this.apps = new IosAppTracker({
+      deviceId: this.id,
+      hub,
+      getDeviceApps: () => deps.ctx.getDeviceApps(),
+      source: deps.appSource(sim.udid),
+      logger: deps.logger,
+      installedEveryMs: deps.timing.appsEveryMs,
+      runningEveryMs: deps.timing.processesEveryMs,
+      retryMs: Math.min(30_000, deps.timing.appsEveryMs),
+      triggerGapMs: Math.min(2000, deps.timing.processesEveryMs),
+      // `log stream` is limited to user apps by default: an unknown process name means a new install
+      // (read on every line: the scope setting can change while the simulator runs).
+      relistOnUnknownProcess: () => deps.ctx.settings().iosSimLogScope !== 'all',
+    });
   }
 
   get label(): string {
@@ -82,6 +124,15 @@ class SimulatorSession {
   start(): void {
     this.deps.ctx.hub.upsertDevice({ ...this.info });
     this.startStream();
+    this.apps.start();
+    this.unsubCrashes = this.deps.crashes.register(this.sim.udid, (report, file) => this.onCrashReport(report, file));
+  }
+
+  private onCrashReport(report: IpsReport, file: string): void {
+    if (this.disposed) return;
+    const known = report.bundleId ? this.apps.app(report.bundleId) : undefined;
+    this.batcher.push(crashReportEntry(report, { watchStart: this.watchStart, file, ...(known?.name ? { appName: known.name } : {}) }));
+    this.apps.onCrash(report);
   }
 
   private patch(patch: Partial<DeviceInfo>): void {
@@ -101,6 +152,7 @@ class SimulatorSession {
       if (this.seenPids.size > 5000) this.seenPids.clear();
       this.deps.ctx.hub.setProcess({ deviceId: this.id, pid: entry.pid, name: entry.process, event: 'seen', ts: entry.ts });
     }
+    this.apps.onLog(entry);
     this.flutter.push(entry);
   }
 
@@ -225,6 +277,9 @@ class SimulatorSession {
     this.disposed = true;
     for (const m of this.metrics.values()) m.stop();
     this.metrics.clear();
+    this.unsubCrashes?.();
+    // Marks the apps not running at once; an in-flight simctl/ps call is awaited after the device state.
+    const apps = this.apps.stop();
     await this.stream?.stop();
     this.flutter.flushAll();
     this.batcher.dispose();
@@ -233,6 +288,7 @@ class SimulatorSession {
     } else {
       this.deps.ctx.hub.markDeviceDisconnected(this.id, 'Dürbün stopped watching simulators', 'device.driverStopped');
     }
+    await apps;
   }
 }
 
@@ -249,6 +305,27 @@ export class IosSimDriver implements DeviceDriver {
   private logKey = '';
   private pollProblem?: string;
   private polls = 0;
+  private readonly crashes: SimCrashWatcher;
+  private readonly timing: IosSimTiming;
+  private readonly appSource: (udid: string) => AppSource;
+
+  constructor(opts: IosSimDriverOptions = {}) {
+    // Delegates to the driver logger, which only exists after start().
+    const logger: Logger = {
+      debug: (m, ...a) => this.logger.debug(m, ...a),
+      info: (m, ...a) => this.logger.info(m, ...a),
+      warn: (m, ...a) => this.logger.warn(m, ...a),
+      error: (m, ...a) => this.logger.error(m, ...a),
+      child: (scope) => this.logger.child(scope),
+    };
+    this.crashes = new SimCrashWatcher({
+      logger,
+      ...(opts.diagnosticReportDirs ? { dirs: opts.diagnosticReportDirs } : {}),
+      ...(opts.crashScanMs ? { intervalMs: opts.crashScanMs } : {}),
+    });
+    this.timing = { ...DEFAULT_IOS_SIM_TIMING, ...opts.timing };
+    this.appSource = opts.appSource ?? simAppSource;
+  }
 
   async start(ctx: DriverContext): Promise<void> {
     if (this.running) return;
@@ -274,6 +351,7 @@ export class IosSimDriver implements DeviceDriver {
     this.sessions.clear();
     this.booted.clear();
     await Promise.all(sessions.map((s) => s.dispose('stopped')));
+    await this.crashes.stop();
   }
 
   status(): DriverStatus {
@@ -389,6 +467,9 @@ export class IosSimDriver implements DeviceDriver {
           logger: this.logger,
           isBooted: (udid) => this.booted.has(udid),
           checkBooted: (udid) => this.checkBooted(udid),
+          crashes: this.crashes,
+          appSource: this.appSource,
+          timing: this.timing,
         },
         sim,
       );

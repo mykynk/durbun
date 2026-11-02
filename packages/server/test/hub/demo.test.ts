@@ -25,6 +25,7 @@ function setup(mocks: MockRule[] = []): { hub: Hub; sdk: SdkLayer; ctx: DriverCo
     hub: h,
     getDevices: () => h.getDevices(),
     getApps: () => h.getApps(),
+    getDeviceApps: () => h.getDeviceApps(),
     onLogs: (l) => h.onLogs(l),
     sdk,
     settings: () => settings,
@@ -59,6 +60,7 @@ describe('demo driver (real time)', () => {
     await demo.start(ctx); // idempotent
     expect(demo.status().active).toBe(true);
     expect(demo.owns('demo:1')).toBe(true);
+    expect(demo.owns('demo:3')).toBe(true);
     expect(demo.owns('android:R5CT')).toBe(false);
     await sleep(2200);
 
@@ -66,6 +68,7 @@ describe('demo driver (real time)', () => {
     expect(devices.map((d) => `${d.id} ${d.name} ${d.platform} ${d.kind} ${d.state}`).sort()).toEqual([
       'demo:1 Pixel 8 · Demo android emulator online',
       'demo:2 iPhone 16 Pro · Demo ios simulator online',
+      'demo:3 iPhone 13 · Demo ios physical online',
     ]);
     const apps = hub.getApps();
     expect(apps.map((a) => `${a.deviceId} ${a.app.id} ${a.sdk.platform} ${a.transport} ${a.connected}`).sort()).toEqual([

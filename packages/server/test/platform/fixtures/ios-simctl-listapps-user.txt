@@ -1,0 +1,61 @@
+{
+    "com.apple.mobilesafari" =     {
+        ApplicationType = System;
+        Bundle = "file:///Library/Developer/CoreSimulator/Volumes/iOS_24B8117/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS%2027.2.simruntime/Contents/Resources/RuntimeRoot/Applications/MobileSafari.app/";
+        CFBundleDisplayName = Safari;
+        CFBundleExecutable = MobileSafari;
+        CFBundleIdentifier = "com.apple.mobilesafari";
+        CFBundleName = Safari;
+        CFBundleShortVersionString = "18.0";
+        CFBundleVersion = "8622.1.22.10.6";
+        IsAppClip = 0;
+        IsDeveloperApp = 0;
+        IsFirstParty = 1;
+        IsHidden = 0;
+        IsRemovable = 0;
+        Path = "/Library/Developer/CoreSimulator/Volumes/iOS_24B8117/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.2.simruntime/Contents/Resources/RuntimeRoot/Applications/MobileSafari.app";
+        SBAppTags =         (
+        );
+    };
+    "com.mykynk.pati" =     {
+        ApplicationType = User;
+        Bundle = "file:///Users/dev/Library/Developer/CoreSimulator/Devices/7B1E9C2A-4D3F-4A8B-9C6D-2E5F8A1B3C4D/data/Containers/Bundle/Application/3C9E7A41-0B2D-4F6E-8A15-C7D9E2B4F608/Runner.app/";
+        BundleContainer = "file:///Users/dev/Library/Developer/CoreSimulator/Devices/7B1E9C2A-4D3F-4A8B-9C6D-2E5F8A1B3C4D/data/Containers/Bundle/Application/3C9E7A41-0B2D-4F6E-8A15-C7D9E2B4F608/";
+        CFBundleDisplayName = Pati;
+        CFBundleExecutable = Runner;
+        CFBundleIdentifier = "com.mykynk.pati";
+        CFBundleName = Pati;
+        CFBundleShortVersionString = "2.4.0";
+        CFBundleVersion = 60;
+        DataContainer = "file:///Users/dev/Library/Developer/CoreSimulator/Devices/7B1E9C2A-4D3F-4A8B-9C6D-2E5F8A1B3C4D/data/Containers/Data/Application/A8F1D2C3-4B5E-46F7-9081-2A3B4C5D6E7F/";
+        GroupContainers =         {
+        };
+        IsAppClip = 0;
+        IsDeveloperApp = 1;
+        IsFirstParty = 0;
+        IsHidden = 0;
+        IsRemovable = 1;
+        Path = "/Users/dev/Library/Developer/CoreSimulator/Devices/7B1E9C2A-4D3F-4A8B-9C6D-2E5F8A1B3C4D/data/Containers/Bundle/Application/3C9E7A41-0B2D-4F6E-8A15-C7D9E2B4F608/Runner.app";
+        SBAppTags =         (
+        );
+        SignerIdentity = "Apple Development: Yusuf Kaynak (8KQ3X5S2LM)";
+    };
+    "com.mykynk.mahalle" =     {
+        ApplicationType = User;
+        Bundle = "file:///Users/dev/Library/Developer/CoreSimulator/Devices/7B1E9C2A-4D3F-4A8B-9C6D-2E5F8A1B3C4D/data/Containers/Bundle/Application/5D0F8B52-1C3E-4A7F-9B26-D8EAF3C5A719/Mahalle.app/";
+        CFBundleDisplayName = Mahalle;
+        CFBundleExecutable = Mahalle;
+        CFBundleIdentifier = "com.mykynk.mahalle";
+        CFBundleName = Mahalle;
+        CFBundleShortVersionString = "4.1.0";
+        CFBundleVersion = 412;
+        IsAppClip = 0;
+        IsDeveloperApp = 0;
+        IsFirstParty = 0;
+        IsHidden = 0;
+        IsRemovable = 1;
+        Path = "/Users/dev/Library/Developer/CoreSimulator/Devices/7B1E9C2A-4D3F-4A8B-9C6D-2E5F8A1B3C4D/data/Containers/Bundle/Application/5D0F8B52-1C3E-4A7F-9B26-D8EAF3C5A719/Mahalle.app";
+        SBAppTags =         (
+        );
+    };
+}

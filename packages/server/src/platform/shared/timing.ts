@@ -112,3 +112,16 @@ export function every(ms: number, fn: () => void | Promise<void>, logger?: Logge
   t.unref?.();
   return () => clearInterval(t);
 }
+
+/** Wrap an async function so its calls run one at a time, in call order (failures do not block the queue). */
+export function serialize<A extends unknown[], R>(fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return (...args: A) => {
+    const next = tail.then(
+      () => fn(...args),
+      () => fn(...args),
+    );
+    tail = next.catch(() => undefined);
+    return next;
+  };
+}

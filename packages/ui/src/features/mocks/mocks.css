@@ -740,3 +740,9 @@
   flex-direction: column;
   gap: 2px;
 }
+
+/* Why mocks cannot apply to the scoped app (SPEC §10.5). */
+.mk-explain {
+  margin: 8px 14px;
+  flex-shrink: 0;
+}

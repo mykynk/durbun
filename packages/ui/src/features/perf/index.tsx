@@ -27,6 +27,7 @@ import {
 } from '../../components';
 import { useLanguage, useT } from '../../i18n';
 import { describeError } from '../device/codes';
+import { ExplainEmpty, mainPidOf, useScopeExplain } from '../../sources';
 import { requestDeviceSection } from '../device/request';
 import './i18n';
 import './perf.css';
@@ -60,7 +61,10 @@ import type { AnnotationType } from './traffic';
 const SYNC_KEY = 'durbun-perf';
 
 function scopeKeyOf(scope: Scope): string {
-  return scope.kind === 'all' ? 'all' : scope.kind === 'device' ? `d:${scope.deviceId}` : `a:${scope.appId}`;
+  if (scope.kind === 'all') return 'all';
+  if (scope.kind === 'device') return `d:${scope.deviceId}`;
+  if (scope.kind === 'deviceApp') return `da:${scope.deviceId}|${scope.bundleId}`;
+  return `a:${scope.appId}`;
 }
 
 function without(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
@@ -87,6 +91,7 @@ export default function PerfView() {
   const devices = useHub((s) => s.devices);
   const processes = useHub((s) => s.processes);
   const colors = useChartColors();
+  const scopeExplain = useScopeExplain();
 
   const [storedWindow, setWindow] = usePersistentState<PerfWindow>('perf.window', '5m');
   const win: PerfWindow = isPerfWindow(storedWindow) ? storedWindow : '5m';
@@ -232,7 +237,14 @@ export default function PerfView() {
   const options = useMemo(
     () =>
       buildOptions({
-        scopeDeviceIds: scope.kind === 'all' ? null : scope.kind === 'device' ? [scope.deviceId] : apps[scope.appId] ? [apps[scope.appId]!.deviceId] : [],
+        scopeDeviceIds:
+          scope.kind === 'all'
+            ? null
+            : scope.kind === 'device' || scope.kind === 'deviceApp'
+              ? [scope.deviceId]
+              : apps[scope.appId]
+                ? [apps[scope.appId]!.deviceId]
+                : [],
         apps,
         devices,
         processes,
@@ -386,10 +398,31 @@ export default function PerfView() {
   );
 
   if (!target) {
+    const pickProcess = () => {
+      setPickerProcesses(true);
+      setPickerOpen(true);
+    };
     return (
       <div className="pf fill col">
         {toolbar}
         <div className="pf-empty scroll-y fill">
+          <ExplainEmpty
+            capability="metrics"
+            icon={Gauge}
+            includePartial
+            onAction={(a) => {
+              if (a !== 'startProcessMetrics') return false;
+              // Measure the scoped app's process here (polling starts with the pick).
+              const item = scopeExplain.items[0];
+              const main = item ? mainPidOf(item.group) : undefined;
+              if (!item || !main) {
+                pickProcess();
+                return true;
+              }
+              selectTarget({ kind: 'process', deviceId: item.group.deviceId, pid: main.pid, name: main.name });
+              return true;
+            }}
+            fallback={
           <EmptyState
             icon={Gauge}
             size="lg"
@@ -413,6 +446,8 @@ export default function PerfView() {
                   {t('perf.empty.sdkGuide')}
                 </Button>
               </>
+            }
+          />
             }
           />
         </div>

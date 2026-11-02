@@ -9,6 +9,9 @@ import type { InstalledApp } from '@durbun/protocol';
 import { run } from '../exec';
 import { XCRUN } from './simctl';
 
+/** Injectable devicectl invocation (tests pass a fake). */
+export type DevicectlRunner = (args: string[], timeoutMs?: number) => Promise<DevicectlResult>;
+
 export interface DevicectlResult {
   ok: boolean;
   json?: Record<string, unknown>;
@@ -69,12 +72,17 @@ function result(json: Record<string, unknown> | undefined): Record<string, unkno
 export interface DevicectlApp {
   bundleIdentifier: string;
   name?: string;
+  /** CFBundleShortVersionString (falls back to bundleVersion when absent). */
   version?: string;
+  /** CFBundleVersion (the build number). */
+  bundleVersion?: string;
   url?: string;
   builtByDeveloper?: boolean;
   removable?: boolean;
   defaultApp?: boolean;
   hidden?: boolean;
+  internalApp?: boolean;
+  appClip?: boolean;
 }
 
 export function parseDevicectlApps(json: Record<string, unknown> | undefined): DevicectlApp[] {
@@ -87,7 +95,10 @@ export function parseDevicectlApps(json: Record<string, unknown> | undefined): D
       bundleIdentifier: a.bundleIdentifier,
       ...(typeof a.name === 'string' ? { name: a.name } : {}),
       ...(typeof a.version === 'string' ? { version: a.version } : typeof a.bundleVersion === 'string' ? { version: a.bundleVersion } : {}),
+      ...(typeof a.bundleVersion === 'string' ? { bundleVersion: a.bundleVersion } : {}),
       ...(typeof a.url === 'string' ? { url: a.url } : {}),
+      ...(typeof a.internalApp === 'boolean' ? { internalApp: a.internalApp } : {}),
+      ...(typeof a.appClip === 'boolean' ? { appClip: a.appClip } : {}),
       ...(typeof a.builtByDeveloper === 'boolean' ? { builtByDeveloper: a.builtByDeveloper } : {}),
       ...(typeof a.removable === 'boolean' ? { removable: a.removable } : {}),
       ...(typeof a.defaultApp === 'boolean' ? { defaultApp: a.defaultApp } : {}),
@@ -212,4 +223,68 @@ export async function probeDevicectlCaps(force = false): Promise<DevicectlCaps> 
     openURL: /^\s*openURL\b/m.test(procText),
   };
   return capsCache;
+}
+
+/**
+ * devicectl dates: ISO strings in current fields ("2026-11-01T23:05:19.000Z"), seconds since
+ * 2001-01-01 (Foundation reference date) in deprecated ones (815267119). → epoch ms.
+ */
+export function devicectlDate(v: unknown): number | undefined {
+  if (typeof v === 'string' && v.trim()) {
+    const t = Date.parse(v);
+    return Number.isFinite(t) ? t : undefined;
+  }
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+    if (v > 1e11) return v; // already ms
+    if (v < 1.2e9) return (v + 978_307_200) * 1000; // reference date (2001) seconds
+    return v * 1000;
+  }
+  return undefined;
+}
+
+export interface DevicectlFile {
+  name: string;
+  /** Path inside the domain (what `copy from --source` takes). */
+  relativePath: string;
+  isDirectory: boolean;
+  size?: number;
+  modified?: number;
+}
+
+/**
+ * `devicectl device info files --domain-type <d>` JSON: result.files[] = {name, relativePath,
+ * resources?, metadata?: {isDirectory, lastModDate, size, …}} (key names verified against the
+ * CoreDeviceClientJSONSupport strings of devicectl 651.32; the nesting is read leniently).
+ */
+export function parseDevicectlFiles(json: Record<string, unknown> | undefined): DevicectlFile[] {
+  const r = result(json);
+  const list = Array.isArray(r.files) ? r.files : Array.isArray(r.items) ? r.items : [];
+  const out: DevicectlFile[] = [];
+  for (const raw of list as unknown[]) {
+    if (!raw || typeof raw !== 'object') continue;
+    const f = raw as Record<string, unknown>;
+    const scopes = [f, f.metadata, f.resources, f.attributes].filter(
+      (x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x),
+    );
+    const pick = (key: string): unknown => {
+      for (const s of scopes) if (s[key] !== undefined) return s[key];
+      return undefined;
+    };
+    const rel = typeof f.relativePath === 'string' ? f.relativePath : typeof f.path === 'string' ? f.path : undefined;
+    const name = typeof f.name === 'string' && f.name ? f.name : rel ? rel.split('/').pop() : undefined;
+    if (!name) continue;
+    const dirFlag = pick('isDirectory');
+    const type = pick('type') ?? pick('fileType');
+    const isDirectory = dirFlag === true || type === 'directory' || type === 'NSFileTypeDirectory';
+    const size = pick('size');
+    const modified = devicectlDate(pick('lastModDate') ?? pick('lastModificationDate') ?? pick('modificationDate') ?? pick('creationDate'));
+    out.push({
+      name,
+      relativePath: (rel ?? name).replace(/^\/+/, ''),
+      isDirectory,
+      ...(typeof size === 'number' ? { size } : {}),
+      ...(modified !== undefined ? { modified } : {}),
+    });
+  }
+  return out;
 }

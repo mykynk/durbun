@@ -46,8 +46,13 @@ object Durbun {
     @JvmOverloads
     fun start(context: Context, options: DurbunOptions = DurbunOptions()) {
         synchronized(lock) {
-            if (core != null) {
-                Log.w(TAG, "Durbun.start() was already called; ignoring the second call.")
+            val existing = core
+            if (existing != null) {
+                if (existing.isHosted) {
+                    Log.i(TAG, "Durbun.start() is not needed in Flutter apps: package:durbun already runs the native layer.")
+                } else {
+                    Log.w(TAG, "Durbun.start() was already called; ignoring the second call.")
+                }
                 return
             }
             if (!options.enabled) return
@@ -153,6 +158,47 @@ object Durbun {
     }
 
     internal fun coreOrNull(): DurbunCore? = core
+
+    /** Actions added with [addAction] so far (the Flutter plugin hands them to its hosted core). */
+    internal fun pendingActions(): List<DurbunAction> = synchronized(lock) { actions.values.toList() }
+
+    /**
+     * Installs a core hosted by the Flutter plugin, so [log], [event] and [DurbunInterceptor] report through
+     * the Flutter SDK's connection. A core started with [start] before (same process) is stopped first: the
+     * Flutter side owns the session. Returns the core that was replaced, if any.
+     */
+    internal fun attachHosted(hosted: DurbunCore): DurbunCore? {
+        val previous = synchronized(lock) {
+            val p = core
+            core = hosted
+            p
+        }
+        if (previous != null && previous !== hosted) {
+            try {
+                AndroidRuntime.stop(previous)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Dürbün did not stop the previous session cleanly.", t)
+            }
+        }
+        return previous
+    }
+
+    /** Removes [hosted] if it is still the active core (Flutter stopped or the engine went away). */
+    internal fun detachHosted(hosted: DurbunCore) {
+        val removed = synchronized(lock) {
+            if (core === hosted) {
+                core = null
+                true
+            } else {
+                false
+            }
+        }
+        try {
+            AndroidRuntime.stop(hosted)
+        } catch (t: Throwable) {
+            if (removed) Log.w(TAG, "Dürbün did not stop cleanly.", t)
+        }
+    }
 
     /** Unit tests install a plain-JVM core without Android. */
     internal fun installForTesting(testCore: DurbunCore?) {

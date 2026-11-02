@@ -1,5 +1,5 @@
 import type { LogEntry } from '@durbun/protocol';
-import { DupIndex, crashSignature, dedupeHash, isDedupeCandidate, signatureHash, type DupCandidate } from './dedupe';
+import { DupIndex, crashSignature, dedupeHash, isDedupeCandidate, isMarkedDuplicate, signatureHash, type DupCandidate } from './dedupe';
 import { HistogramIndex } from './histogram';
 import { F_COUNT_NOISE, F_COUNT_SRC, F_MARKER, F_NOHIST, F_NOISY, F_SRC_MASK, F_VISIBLE, Ledger, SEV_SHIFT } from './ledger';
 import { isPreviousLaunch, isStructural, rankOf, severityOf, type LogRow, type RowFilter, type Severity, type SourceCounts, type StoreView } from './types';
@@ -194,6 +194,8 @@ export class RowModel {
       flags |= F_COUNT_NOISE;
     }
     let visible = srcOn && !(noisy && f.hideNoise);
+    // A device crash record the server already matched to a live crash line (`data.duplicateOf`).
+    if (visible && f.dedupe && e.data !== undefined && isMarkedDuplicate(e)) visible = false;
 
     // App-vs-device duplicates (same text, or the same crash told in the SDK's and the device's words).
     let twinSelf = false;

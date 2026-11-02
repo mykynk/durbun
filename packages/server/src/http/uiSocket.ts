@@ -28,7 +28,7 @@ export interface UiChannelDeps {
   logger: Logger;
   /** Builds the hello message (server info + effective settings). */
   hello(): ServerToUi;
-  /** Builds the snapshot message (devices, apps, network, mocks, drivers, processes, metrics, logCount). */
+  /** Builds the snapshot message (devices, apps, network, mocks, drivers, processes, metrics, logCount, deviceApps). */
   snapshot(): ServerToUi;
   router: {
     handle(command: unknown, client: CommandClient): Promise<CommandReply>;
@@ -55,7 +55,7 @@ class UiClient {
 export function batchFromChange(change: Partial<HubChange>): BatchMessage | null {
   const msg: BatchMessage = { type: 'batch' };
   let any = false;
-  const keys = ['logs', 'network', 'devices', 'removedDevices', 'apps', 'metrics', 'processes'] as const;
+  const keys = ['logs', 'network', 'devices', 'removedDevices', 'apps', 'metrics', 'processes', 'deviceApps', 'removedDeviceApps'] as const;
   for (const key of keys) {
     const value = change[key];
     if (Array.isArray(value) && value.length > 0) {

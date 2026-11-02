@@ -21,6 +21,8 @@ export function scopeExportParams(scope: Scope): { deviceId?: string; appId?: st
     const app = useHub.getState().apps[scope.appId];
     return { deviceId: app?.deviceId, appId: scope.appId };
   }
+  // An SDK-less app has no app id on the server: export its device (its lines are on it).
+  if (scope.kind === 'deviceApp') return { deviceId: scope.deviceId };
   return {};
 }
 
@@ -90,7 +92,8 @@ export async function setDemo(enabled: boolean): Promise<void> {
 /** Marker in the log stream (on the scoped device when there is one). */
 export async function addMarker(label?: string): Promise<void> {
   const scope = getScope();
-  const deviceId = scope.kind === 'device' ? scope.deviceId : scope.kind === 'app' ? useHub.getState().apps[scope.appId]?.deviceId : undefined;
+  const deviceId =
+    scope.kind === 'device' || scope.kind === 'deviceApp' ? scope.deviceId : scope.kind === 'app' ? useHub.getState().apps[scope.appId]?.deviceId : undefined;
   try {
     await sendCommand({ name: 'marker.add', label, deviceId });
   } catch (err) {

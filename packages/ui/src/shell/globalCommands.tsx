@@ -4,6 +4,7 @@ import { translate } from '../i18n/core';
 import { deviceDisplayName } from '../i18n/codes';
 import {
   TAB_IDS,
+  appGroupName,
   groupApps,
   reconnectNow,
   setScope,
@@ -20,7 +21,7 @@ import { useCommands, useShortcut } from '../hooks';
 import type { PaletteCommand } from '../lib/commands';
 import { PlatformIcon, sdkLabel, type IconType } from '../components/Icons';
 import { TAB_ICONS } from './TopBar';
-import { appTitle, deviceSubtitle } from './labels';
+import { deviceSubtitle } from './labels';
 import { addMarker, clearEverything, exportHar, exportSession, pickAndImport, setDemo, setTheme, toggleLanguage, toggleSidebar } from './actions';
 
 const TAB_KEYWORDS: Record<TabId, string[]> = {
@@ -41,6 +42,7 @@ export function useGlobalCommands(): void {
   const t = useT();
   const devices = useHub((s) => s.devices);
   const apps = useHub((s) => s.apps);
+  const deviceApps = useHub((s) => s.deviceApps);
   const status = useConnection((s) => s.status);
   const demo = useDemoActive();
   const theme = usePrefs((s) => s.theme);
@@ -79,17 +81,30 @@ export function useGlobalCommands(): void {
           run: () => setScope({ kind: 'device', deviceId: d.id }),
         };
       }),
-    ...[...groupApps(Object.values(apps)).values()].flat().map(
-      (g): PaletteCommand => ({
-        id: `scope.app.${g.key}`,
-        title: appTitle(g.latest),
-        subtitle: `${deviceDisplayName(devices[g.deviceId], g.deviceId)} · ${sdkLabel(g.latest.sdk.platform)}`,
-        group: scopeGroup,
-        icon: TAB_ICONS.device,
-        keywords: ['scope', 'kapsam', g.bundleId],
-        run: () => setScope({ kind: 'app', appId: g.latest.id }, { deviceId: g.deviceId, bundleId: g.bundleId }),
+    ...[...groupApps(Object.values(apps), Object.values(deviceApps)).values()]
+      .flat()
+      .filter((g) => devices[g.deviceId])
+      .map((g): PaletteCommand => {
+        const latest = g.latest;
+        const hint = { deviceId: g.deviceId, bundleId: g.bundleId };
+        return {
+          id: `scope.app.${g.key}`,
+          title: appGroupName(g),
+          subtitle: `${deviceDisplayName(devices[g.deviceId], g.deviceId)} · ${latest ? sdkLabel(latest.sdk.platform) : t('sources.badge.device-only')}`,
+          group: scopeGroup,
+          icon: TAB_ICONS.device,
+          keywords: ['scope', 'kapsam', g.bundleId],
+          run: () => (latest ? setScope({ kind: 'app', appId: latest.id }, hint) : setScope({ kind: 'deviceApp', deviceId: g.deviceId, bundleId: g.bundleId }, hint)),
+        };
       }),
-    ),
+    {
+      id: 'sources.explainer',
+      title: t('sources.explainer.title'),
+      group: general,
+      icon: BookOpen,
+      keywords: ['source', 'kaynak', 'sdk', 'ssl', 'pinning', 'nereden', 'where', 'store', 'mağaza', 'firebase'],
+      run: ui.openDataSources,
+    },
     { id: 'settings', title: t('shell.settings.title'), group: general, icon: Settings, shortcut: 'Mod+,', keywords: ['preferences', 'tercihler', ...both('shell.settings.title')], priority: 10, run: () => ui.openSettings() },
     { id: 'doctor', title: t('shell.doctor.title'), group: general, icon: Stethoscope, keywords: ['doctor', 'adb', 'xcode', 'idevicesyslog', ...both('shell.doctor.title')], priority: 9, run: ui.openDoctor },
     ...(['flutter', 'android', 'ios', 'react-native'] as const).map(

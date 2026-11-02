@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { Apple, BookOpen, CircleCheck, CircleMinus, FlaskConical, MonitorSmartphone, Stethoscope, TriangleAlert, Zap } from 'lucide-react';
+import { Apple, BookOpen, CircleCheck, CircleMinus, FlaskConical, MonitorSmartphone, ShieldCheck, Stethoscope, TriangleAlert, Zap } from 'lucide-react';
+import '../sources/text';
 import type { DriverStatus, ToolCheck } from '@durbun/protocol';
 import { useT } from '../i18n';
 import { driverStatusText } from '../i18n/codes';
@@ -181,6 +182,9 @@ export function Onboarding() {
         <div className="onboarding__links">
           <Button variant="ghost" icon={BookOpen} onClick={() => ui.openSdkGuide()}>
             {t('shell.sdk.title')}
+          </Button>
+          <Button variant="ghost" icon={ShieldCheck} onClick={ui.openDataSources}>
+            {t('sources.general')}
           </Button>
           <Button variant="ghost" icon={Stethoscope} onClick={ui.openDoctor}>
             {t('shell.doctor.title')}

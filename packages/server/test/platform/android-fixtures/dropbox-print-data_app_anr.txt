@@ -1,0 +1,55 @@
+Drop box contents: 143 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+Searching for: data_app_anr 2026-11-02 11:44:58
+
+========================================
+2026-11-02 11:44:58 data_app_anr (compressed text, 61442 bytes)
+Process: com.mykynk.pati
+PID: 4400
+UID: 10190
+Frozen: false
+Flags: 0x38c8be46
+Package: com.mykynk.pati v1 (1.4.0-dev)
+Foreground: Yes
+Activity: com.mykynk.pati/.MainActivity
+Subject: Input dispatching timed out (ActivityRecord{a1b2c3 u0 com.mykynk.pati/.MainActivity t42} is not responding. Waited 5001ms for FocusEvent(hasFocus=true))
+Build: google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys
+Loading-Progress: 1.0
+Dropped-Count: 0
+
+CPU usage from 0ms to 5123ms later (2026-11-02 11:44:52.811 to 2026-11-02 11:44:57.934):
+  98% 4400/com.mykynk.pati: 96% user + 1.9% kernel / faults: 412 minor
+  21% 612/system_server: 12% user + 8.8% kernel / faults: 2210 minor
+0.4% TOTAL: 0.2% user + 0.1% kernel + 0% iowait
+
+----- pid 4400 at 2026-11-02 11:44:53.012345678+0300 -----
+Cmd line: com.mykynk.pati
+Build fingerprint: 'google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys'
+ABI: 'arm64'
+Build type: optimized
+suspend all histogram:	Sum: 1.215ms 99% C.I. 4us-218.880us Avg: 30.375us Max: 286us
+DALVIK THREADS (27):
+"main" prio=5 tid=1 Runnable
+  | group="main" sCount=0 ucsCount=0 flags=0 obj=0x72d0f0d8 self=0xb400007a2be0e380
+  | sysTid=4400 nice=-10 cgrp=top-app sched=0/0 handle=0x7c1b40a4f8
+  | state=R schedstat=( 5012345678 1234567 812 ) utm=496 stm=5 core=6 HZ=100
+  | stack=0x7fe91d2000-0x7fe91d4000 stackSize=8188KB
+  | held mutexes= "mutator lock"(shared held)
+  at com.mykynk.pati.PaymentRepository.computeHash(PaymentRepository.kt:88)
+  at com.mykynk.pati.MainActivity.onPayClicked(MainActivity.kt:55)
+  at com.mykynk.pati.MainActivity.$r8$lambda$Xk2(MainActivity.kt:0)
+  at android.view.View.performClick(View.java:7659)
+  at android.view.View$PerformClick.run(View.java:30219)
+  at android.os.Handler.handleCallback(Handler.java:958)
+  at android.os.Looper.loop(Looper.java:294)
+  at android.app.ActivityThread.main(ActivityThread.java:8177)
+
+"Signal Catcher" daemon prio=10 tid=5 Runnable
+  | group="system" sCount=0 ucsCount=0 flags=0 obj=0x12c401e8 self=0xb400007a2be1a0a0
+  | sysTid=4410 nice=-20 cgrp=top-app sched=0/0 handle=0x7a2c4ffcb0
+  native: #00 pc 000000000053a6e0  /apex/com.android.art/lib64/libart.so (art::DumpNativeStack+108)
+
+----- end 4400 -----

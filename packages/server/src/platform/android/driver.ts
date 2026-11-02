@@ -10,6 +10,7 @@ import { fail } from '../shared/files';
 import { Poller } from '../shared/timing';
 import { resolveAdb, type ResolvedTool } from '../tools';
 import { Adb } from './adb';
+import { createDropboxCursor, type DropboxCursor } from './dropbox';
 import { parseAdbDevices } from './parsers';
 import { AndroidDeviceSession } from './session';
 
@@ -30,6 +31,8 @@ export class AndroidDriver implements DeviceDriver {
   private poller?: Poller;
   private running = false;
   private readonly sessions = new Map<string, AndroidDeviceSession>();
+  /** Dropbox records already reported, per serial — a replugged phone does not repeat old crashes. */
+  private readonly dropboxCursors = new Map<string, DropboxCursor>();
   private unsubSettings?: () => void;
   private adbPathSetting?: string;
 
@@ -213,7 +216,12 @@ export class AndroidDriver implements DeviceDriver {
       seen.add(row.serial);
       let session = this.sessions.get(row.serial);
       if (!session) {
-        session = new AndroidDeviceSession({ ctx: this.ctx, adb: () => this.adb, logger: this.logger }, row);
+        let cursor = this.dropboxCursors.get(row.serial);
+        if (!cursor) this.dropboxCursors.set(row.serial, (cursor = createDropboxCursor()));
+        session = new AndroidDeviceSession(
+          { ctx: this.ctx, adb: () => this.adb, logger: this.logger, dropboxCursor: cursor },
+          row,
+        );
         this.sessions.set(row.serial, session);
         session.announce();
         this.logger.info(`Android device attached: ${row.serial} (${row.state})`);

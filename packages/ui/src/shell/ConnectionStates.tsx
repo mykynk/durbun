@@ -84,7 +84,7 @@ export function DeviceAttentionBanner() {
   const t = useT();
   const scope = useScope();
   const device = useHub((s) => {
-    if (scope.kind === 'device') return s.devices[scope.deviceId];
+    if (scope.kind === 'device' || scope.kind === 'deviceApp') return s.devices[scope.deviceId];
     if (scope.kind === 'app') {
       const a = s.apps[scope.appId];
       return a ? s.devices[a.deviceId] : undefined;

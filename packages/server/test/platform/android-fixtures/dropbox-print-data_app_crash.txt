@@ -1,0 +1,67 @@
+Drop box contents: 143 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+Searching for: data_app_crash 2026-11-01 18:02:44
+
+========================================
+2026-11-01 18:02:44 data_app_crash (text, 2316 bytes)
+Process: com.mykynk.pati
+PID: 30121
+UID: 10190
+Flags: 0x38c8be44
+Package: com.mykynk.pati v41 (1.3.2)
+Foreground: Yes
+Process-Runtime: 48213
+Build: google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys
+Crash-Handler: com.android.internal.os.RuntimeInit$KillApplicationHandler
+Loading-Progress: 1.0
+Dropped-Count: 0
+
+java.lang.RuntimeException: Unable to start activity ComponentInfo{com.mykynk.pati/com.mykynk.pati.MainActivity}: java.lang.IllegalStateException: Boom
+	at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:3782)
+	at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:3922)
+	at android.app.servertransaction.LaunchActivityItem.execute(LaunchActivityItem.java:103)
+	at android.os.Handler.dispatchMessage(Handler.java:106)
+	at android.os.Looper.loopOnce(Looper.java:205)
+	at android.os.Looper.loop(Looper.java:294)
+	at android.app.ActivityThread.main(ActivityThread.java:8177)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:552)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:971)
+Caused by: java.lang.IllegalStateException: Boom
+	at com.mykynk.pati.MainActivity.onCreate(MainActivity.kt:21)
+	at android.app.Activity.performCreate(Activity.java:8595)
+	at android.app.Activity.performCreate(Activity.java:8573)
+	at android.app.Instrumentation.callActivityOnCreate(Instrumentation.java:1456)
+	at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:3764)
+	... 12 more
+
+___DURBUN_DROPBOX___
+Drop box contents: 143 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+Searching for: data_app_crash 2026-11-02 11:43:03
+
+========================================
+2026-11-02 11:43:03 data_app_crash (text, 1874 bytes)
+Process: com.mykynk.pati
+PID: 4321
+UID: 10190
+Flags: 0x38c8be46
+Package: com.mykynk.pati v1 (1.4.0-dev)
+Foreground: Yes
+Process-Runtime: 2513
+Build: google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys
+Crash-Handler: com.android.internal.os.RuntimeInit$KillApplicationHandler
+Loading-Progress: 1.0
+Dropped-Count: 0
+
+java.lang.IllegalStateException: Boom
+	at com.mykynk.pati.MainActivity.onCreate(MainActivity.kt:21)
+	at android.app.Activity.performCreate(Activity.java:8595)
+	at android.app.ActivityThread.main(ActivityThread.java:8177)
+

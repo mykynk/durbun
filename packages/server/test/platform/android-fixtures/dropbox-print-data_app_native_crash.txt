@@ -1,0 +1,43 @@
+Drop box contents: 143 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+Searching for: data_app_native_crash 2026-11-02 11:43:10
+
+========================================
+2026-11-02 11:43:10 data_app_native_crash (text, 9822 bytes)
+Process: com.example.native
+PID: 5001
+UID: 10191
+Flags: 0x30c8be44
+Package: com.example.native v20026 (2.0.26)
+Foreground: Yes
+Process-Runtime: 12904
+Build: google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys
+Loading-Progress: 1.0
+Dropped-Count: 0
+
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+Build fingerprint: 'google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys'
+Revision: 'MP1.0'
+ABI: 'arm64'
+Timestamp: 2026-11-02 11:43:10.123456789+0300
+Process uptime: 12s
+Cmdline: com.example.native
+pid: 5001, tid: 5023, name: RenderThread  >>> com.example.native <<<
+uid: 10191
+tagged_addr_ctrl: 0000000000000001 (PR_TAGGED_ADDR_ENABLE)
+pac_enabled_keys: 000000000000000f (PR_PAC_APIAKEY, PR_PAC_APIBKEY, PR_PAC_APDAKEY, PR_PAC_APDBKEY)
+signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0000000000000000
+Cause: null pointer dereference
+    x0  0000000000000000  x1  0000007fe0c5d3a8  x2  0000000000000004  x3  0000007a1b2c3d40
+    sp  0000007a0e7fd2f0  lr  0000007a1f04ee70  pc  0000007a1f04ee8c  pst 0000000060001000
+
+backtrace:
+      #00 pc 000000000004ee8c  /data/app/~~x0q1w2e3r4t5y6u7i8o9pA==/com.example.native-y1u2i3o4p5a6s7d8f9g0hQ==/lib/arm64/libnative.so (crash_now+12) (BuildId: 4f1d2c3b4a5968778695a4b3c2d1e0f9)
+      #01 pc 000000000004ef10  /data/app/~~x0q1w2e3r4t5y6u7i8o9pA==/com.example.native-y1u2i3o4p5a6s7d8f9g0hQ==/lib/arm64/libnative.so (Java_com_example_native_Bridge_render+64) (BuildId: 4f1d2c3b4a5968778695a4b3c2d1e0f9)
+      #02 pc 0000000000377030  /apex/com.android.art/lib64/libart.so (art_quick_generic_jni_trampoline+144) (BuildId: 735f12f804f88d62a2cb437261076ff7)
+
+memory near x1 ([stack:5023]):
+    0000007fe0c5d3a0 0000000000000000 0000000000000000  ................

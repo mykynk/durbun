@@ -34,6 +34,7 @@ import { frameDisplayText, parseStack, type AppIdentity, type StackLine } from '
 import { highlightSegments, type Highlighter } from '../model/highlight';
 import { systemText } from '../model/systemText';
 import { isPreviousLaunch, type LogRow } from '../model/types';
+import { entrySourceText, isDeviceCrashRecord, isUnsymbolicated } from '../../../sources/text';
 import type { TimeFormat } from '../../../data';
 
 /** Expansion bits per row. */
@@ -97,7 +98,7 @@ export function HlText({ text, hl, max = MAX_LINE }: { text: string; hl: Highlig
 function SourceIcon({ e }: { e: LogEntry }) {
   const Icon = e.source === 'device' ? Smartphone : e.source === 'app' ? Box : Binoculars;
   return (
-    <span className="lg-src" title={t(`logs.source.row.${e.source}`)}>
+    <span className="lg-src" title={entrySourceText(e)}>
       <Icon size={12} aria-hidden />
     </span>
   );
@@ -429,6 +430,8 @@ function CrashRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
   const frames = a.frames;
   const kindLabel = c.kind === 'crash' ? t('logs.kind.crash') : c.kind === 'anr' ? t('logs.kind.anr') : t('logs.kind.flutterError');
   const who = d.appName(e) ?? e.process ?? e.tag;
+  // Android dropbox / iOS .ips: a record the device kept itself (any build, no SDK needed).
+  const record = isDeviceCrashRecord(e);
   return (
     <div
       className={clsx('lg-row lg-crash', `lg-crash--${c.kind}`, selected && 'is-selected', flash && 'is-flash', open && 'is-expanded')}
@@ -446,11 +449,16 @@ function CrashRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
           <span className="lg-crash__meta">
             <span className="lg-crash__kind">{kindLabel}</span>
             {who ? <span>{who}</span> : null}
-            <SourceLabel e={e} />
+            <SourceLabel e={e} record={record} />
             {c.previousLaunch ? (
-              <span className="lg-prev" title={t('logs.row.previousLaunchTip')}>
+              <span className="lg-prev" title={record ? t('sources.crash.previousLaunchTip') : t('logs.row.previousLaunchTip')}>
                 <History size={11} aria-hidden />
                 {t('logs.row.previousLaunch')} · {formatClock(e.ts)}
+              </span>
+            ) : null}
+            {record && isUnsymbolicated(e) ? (
+              <span className="lg-unsym" title={t('sources.crash.unsymbolicatedTip')}>
+                {t('sources.crash.unsymbolicated')}
               </span>
             ) : null}
             {row.twin ? (
@@ -478,8 +486,18 @@ function CrashRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
   );
 }
 
-function SourceLabel({ e }: { e: LogEntry }) {
-  return <span className="lg-crash__src">{t(`logs.source.row.${e.source}`)}</span>;
+function SourceLabel({ e, record }: { e: LogEntry; record: boolean }) {
+  if (record)
+    return (
+      <span className="lg-crash__src lg-crash__src--record" title={`${entrySourceText(e)} · ${t('sources.crash.fromDeviceTip')}`}>
+        {t('sources.crash.fromDevice')}
+      </span>
+    );
+  return (
+    <span className="lg-crash__src" title={entrySourceText(e)}>
+      {t(`logs.source.row.${e.source}`)}
+    </span>
+  );
 }
 
 /* ───────────── separators ───────────── */

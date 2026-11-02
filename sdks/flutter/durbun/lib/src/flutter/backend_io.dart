@@ -18,12 +18,29 @@ import 'backend.dart';
 import 'commands.dart';
 import 'error_hooks.dart';
 import 'metrics.dart';
+import 'native_bridge.dart';
 
 DurbunBackend createDurbunBackend() => IoDurbunBackend();
 
-/// Whether the SDK should run for [options] (see [DurbunOptions.enabled]).
-bool resolveDurbunEnabled(DurbunOptions options) =>
-    options.enabled ?? (!kReleaseMode && !isFlutterTestEnvironment);
+/// Whether the SDK should run for [options] (see [DurbunOptions.enabled]):
+/// an explicit `enabled` wins; otherwise debug/profile builds are on, release
+/// builds only with `--dart-define=DURBUN=true` (and `DURBUN=false` turns it
+/// off everywhere). Never on inside `flutter test` unless `enabled: true`.
+/// The native layer of the plugin follows this decision.
+bool resolveDurbunEnabled(
+  DurbunOptions options, {
+  bool releaseMode = kReleaseMode,
+  bool defineGiven = kDurbunDefineGiven,
+  bool defineValue = kDurbunDefine,
+  bool? inFlutterTest,
+}) =>
+    options.enabled ??
+    (durbunEnabledByDefault(
+          releaseMode: releaseMode,
+          defineGiven: defineGiven,
+          defineValue: defineValue,
+        ) &&
+        !(inFlutterTest ?? isFlutterTestEnvironment));
 
 class IoDurbunBackend implements DurbunBackend {
   DurbunClient? _client;
@@ -34,8 +51,15 @@ class IoDurbunBackend implements DurbunBackend {
   Timer? _guardian;
   DebugPrintCallback? _originalDebugPrint;
   DebugPrintCallback? _ourDebugPrint;
+  NativeBridge? _native;
+
+  /// Test hook: builds the bridge to the plugin's native layer.
+  static NativeBridge Function(DurbunClient client)? debugNativeBridgeFactory;
 
   DurbunClient? get client => _client;
+
+  /// The plugin's native layer, when it attached.
+  NativeBridge? get nativeBridge => _native;
 
   @override
   bool get isActive => _client != null && !_client!.isDisposed;
@@ -49,13 +73,26 @@ class IoDurbunBackend implements DurbunBackend {
   void _setUp(DurbunOptions options, {required bool zoneCapturesPrint}) {
     if (isActive || !resolveDurbunEnabled(options)) return;
     try {
+      // The first hello waits (≤ 1.5 s) for the native layer, so its
+      // capabilities, actions and app version are in it.
+      final nativeReady = Completer<void>();
       final client = DurbunClient.start(
         options,
         sdkPlatform: 'flutter',
         extraCapabilities: const <String>[SdkCapability.metrics],
+        helloGate: nativeReady.future,
       );
       _client = client;
       _options = options;
+      client.runInternal(() {
+        final bridge = _native =
+            (debugNativeBridgeFactory ?? NativeBridge.new)(client);
+        unawaited(
+          bridge.start(options).whenComplete(() {
+            if (!nativeReady.isCompleted) nativeReady.complete();
+          }),
+        );
+      });
       client.runInternal(() {
         final capture = _printCapture = PrintCapture(
           mode: options.capturePrint,
@@ -215,6 +252,9 @@ class IoDurbunBackend implements DurbunBackend {
     if (client == null) return;
     _guardian?.cancel();
     _guardian = null;
+    final native = _native;
+    _native = null;
+    if (native != null) await native.stop();
     _metrics?.dispose();
     _metrics = null;
     _errors?.dispose();
@@ -234,6 +274,10 @@ class IoDurbunBackend implements DurbunBackend {
 
   @override
   bool get capturesDartIo => isActive && (_options?.captureNetwork ?? false);
+
+  @override
+  bool get capturesUrlSession =>
+      isActive && (_native?.info?.capturesUrlSession ?? false);
 
   @override
   DurbunMockDecision? findMock(String method, Uri url) {

@@ -46,11 +46,17 @@ class DurbunClient implements HttpCaptureHost {
   ///
   /// [extraCapabilities] are advertised on top of logs/events/commands and the
   /// option-driven ones (the Flutter glue adds `metrics`).
+  ///
+  /// [helloGate]: when given, the first `hello` is held back until it
+  /// completes (at most [kHelloGateTimeout]) so information that arrives
+  /// asynchronously — the native layer's capabilities, actions and app
+  /// version from the Flutter plugin — is already in it.
   static DurbunClient start(
     DurbunOptions options, {
     String sdkPlatform = 'flutter',
     List<String> extraCapabilities = const <String>[],
     TransportConfig? transportConfig,
+    Future<void>? helloGate,
   }) {
     final existing = _current;
     if (existing != null && !existing._disposed) return existing;
@@ -80,10 +86,13 @@ class DurbunClient implements HttpCaptureHost {
         zone: zone,
       );
       _current = client;
-      client._start(transportConfig);
+      client._start(transportConfig, helloGate);
     });
     return client;
   }
+
+  /// Longest time the first `hello` waits for [start]'s `helloGate`.
+  static const Duration kHelloGateTimeout = Duration(milliseconds: 1500);
 
   final DurbunOptions options;
   final String sdkPlatform;
@@ -110,6 +119,14 @@ class DurbunClient implements HttpCaptureHost {
   Completer<void>? _mocksReady;
   int _netSeq = 0;
 
+  /// False while the first hello is held back (see `helloGate`).
+  bool _helloReleased = true;
+
+  /// Raw `mocks` JSON from the desktop (forwarded to the native layer as is).
+  Object? _rawMocks;
+  NativePart? _native;
+  final List<void Function()> _stateListeners = <void Function()>[];
+
   DurbunConnection _connection = DurbunConnection.disconnected;
   final StreamController<DurbunConnection> _connectionController =
       StreamController<DurbunConnection>.broadcast(sync: false);
@@ -121,7 +138,7 @@ class DurbunClient implements HttpCaptureHost {
 
   /* ───────────────────────────── lifecycle ───────────────────────────── */
 
-  void _start(TransportConfig? override) {
+  void _start(TransportConfig? override, Future<void>? helloGate) {
     final config = override ?? _transportConfig();
     _transport = Transport.start(
       config,
@@ -129,8 +146,28 @@ class DurbunClient implements HttpCaptureHost {
       useIsolate: options.useBackgroundIsolate,
       zone: _zone,
     );
-    _transport.setHello(_buildHello());
+    if (helloGate == null) {
+      _transport.setHello(_buildHello());
+    } else {
+      _helloReleased = false;
+      helloGate
+          .timeout(kHelloGateTimeout, onTimeout: () {})
+          .catchError((Object _) {})
+          .whenComplete(_releaseHello);
+    }
     if (options.captureNetwork) DurbunHttpOverrides.ensureInstalled(this);
+  }
+
+  void _releaseHello() {
+    if (_helloReleased || _disposed) return;
+    _helloReleased = true;
+    _refreshHello();
+  }
+
+  void _refreshHello() {
+    if (_disposed || !_helloReleased) return;
+    _transport.setHello(_buildHello());
+    _notifyState();
   }
 
   TransportConfig _transportConfig() {
@@ -179,6 +216,8 @@ class DurbunClient implements HttpCaptureHost {
     DurbunHttpOverrides.uninstall(this);
     _resolveMocksReady();
     _configListeners.clear();
+    _stateListeners.clear();
+    _native = null;
     if (identical(_current, this)) _current = null;
     await _transport.close();
     _setConnection(DurbunConnection.disconnected);
@@ -369,13 +408,16 @@ class DurbunClient implements HttpCaptureHost {
 
   List<Map<String, Object?>> describeActions() => <Map<String, Object?>>[
     for (final a in _actions.values) a.describe(),
+    ...?_native?.actions,
   ];
 
   /// Re-sends action descriptors (current values) and refreshes the hello.
   void publishActions() {
     if (_disposed) return;
-    _transport.setHello(_buildHello());
-    if (_connection.connected) _send(buildActionsUpdate(describeActions()));
+    _refreshHello();
+    if (_connection.connected && _helloReleased) {
+      _send(buildActionsUpdate(describeActions()));
+    }
   }
 
   Future<void> _handleCommand(Map<String, Object?> message) async {
@@ -390,6 +432,17 @@ class DurbunClient implements HttpCaptureHost {
         : <String, Object?>{};
     final action = _actions[name];
     final handler = _commands[name];
+    final native = _native;
+    if (action == null && handler == null && native != null &&
+        native.handles(name)) {
+      // The native layer answers with its own `command.result` (same id).
+      try {
+        native.forwardCommand(message);
+      } catch (e) {
+        _send(buildCommandResult(id: id, ok: false, error: '$e'));
+      }
+      return;
+    }
     if (action == null && handler == null) {
       _send(
         buildCommandResult(id: id, ok: false, error: 'Unknown command: $name'),
@@ -438,6 +491,7 @@ class DurbunClient implements HttpCaptureHost {
           _diagnostic('disconnected (${event.length > 1 ? event[1] : ''})');
         }
         _setConnection(DurbunConnection.disconnected);
+        _notifyState();
       case TransportEvents.message:
         final message = event[1];
         if (message is Map) _onServerMessage(message.cast<String, Object?>());
@@ -450,6 +504,7 @@ class DurbunClient implements HttpCaptureHost {
     final welcome = ServerWelcome.fromJson(json);
     _appId = welcome.appId.isEmpty ? null : welcome.appId;
     _mocks = welcome.mocks;
+    _rawMocks = json['mocks'];
     _everConnected = true;
     _handshakeInFlight = false;
     _firstRoundDone = true;
@@ -464,14 +519,18 @@ class DurbunClient implements HttpCaptureHost {
     );
     _resolveMocksReady();
     _diagnostic('connected to ${welcome.server} via $via');
+    _notifyState();
   }
 
   void _onServerMessage(Map<String, Object?> message) {
     switch (message['type']) {
       case 'mocks':
         _mocks = MockRule.listFromJson(message['rules']);
+        _rawMocks = message['rules'];
+        _notifyState();
       case 'config':
         _setConfig(SdkConfig.fromJson(message['config'], fallback: _config));
+        _notifyState();
       case 'command':
         unawaited(_handleCommand(message));
       case 'welcome':
@@ -503,6 +562,65 @@ class DurbunClient implements HttpCaptureHost {
     final c = _mocksReady;
     _mocksReady = null;
     if (c != null && !c.isCompleted) c.complete();
+  }
+
+  /* ───────────────────────────── native layer (Flutter plugin) ───────────────────────────── */
+
+  /// Joins the native layer (Kotlin / Swift core hosted by the Flutter
+  /// plugin) to this session: its capabilities, actions and app info go into
+  /// `hello`, its commands are forwarded to it. Replaces a previous part.
+  void attachNative(NativePart part) {
+    if (_disposed) return;
+    _native = part;
+    _refreshHello();
+    if (_connection.connected && _helloReleased) {
+      _send(buildActionsUpdate(describeActions()));
+    }
+  }
+
+  /// The native layer's action list changed (values or entries).
+  void updateNativeActions(List<Map<String, Object?>> actions) {
+    final native = _native;
+    if (native == null || _disposed) return;
+    _native = native.withActions(actions);
+    publishActions();
+  }
+
+  /// Whether a native layer is attached.
+  bool get hasNative => _native != null;
+
+  /// Sends a message the native layer already encoded as one JSON object
+  /// (no trailing newline). It shares this client's buffer and connection.
+  void sendEncoded(String jsonLine) {
+    if (_disposed || jsonLine.isEmpty) return;
+    _send(<String, Object?>{kEncodedLineKey: jsonLine});
+  }
+
+  /// Called whenever connection, config, mocks or hello change.
+  void addStateListener(void Function() listener) =>
+      _stateListeners.add(listener);
+
+  void removeStateListener(void Function() listener) =>
+      _stateListeners.remove(listener);
+
+  /// Current desktop state as one JSON-like map (for the native layer):
+  /// `{connected, via, appId, config, mocks, hello}`.
+  Map<String, Object?> describeState() => <String, Object?>{
+    'connected': _connection.connected,
+    'via': _connection.via,
+    'appId': _appId,
+    'config': _config.toJson(),
+    'mocks': _rawMocks ?? const <Object?>[],
+    // Without `ts`, so an unchanged state encodes identically.
+    'hello': _buildHello()..remove('ts'),
+  };
+
+  void _notifyState() {
+    for (final l in List<void Function()>.of(_stateListeners)) {
+      try {
+        l();
+      } catch (_) {}
+    }
   }
 
   /* ───────────────────────────── HttpCaptureHost ───────────────────────────── */
@@ -557,10 +675,28 @@ class DurbunClient implements HttpCaptureHost {
     if (options.captureErrors) SdkCapability.crash,
     for (final c in extraCapabilities)
       if (c != SdkCapability.metrics || options.metrics) c,
+    ...?_native?.capabilities,
   ];
 
+  Map<String, Object?> _appJson() {
+    final json = app.toJson(pid: pid, debug: kDurbunDebugMode);
+    final native = _native?.app;
+    if (native == null) return json;
+    // The native layer reads the package manager / bundle, which is more
+    // accurate than what pure Dart can detect; explicit options still win.
+    void take(String key, bool overridden) {
+      final value = native[key];
+      if (!overridden && value is String && value.isNotEmpty) json[key] = value;
+    }
+
+    take('name', options.appName != null);
+    take('version', options.appVersion != null);
+    take('build', false);
+    return json;
+  }
+
   Map<String, Object?> _buildHello() => buildHello(
-    app: app.toJson(pid: pid, debug: kDurbunDebugMode),
+    app: _appJson(),
     device: device.toJson(),
     session: session,
     capabilities: _capabilities().toSet().toList(),
@@ -585,6 +721,9 @@ class DurbunClient implements HttpCaptureHost {
     return sb.toString();
   }
 
+  /// SDK-internal diagnostics (debug level: IDE / DevTools console only).
+  static void diagnostic(String message) => _diagnostic(message);
+
   static void _diagnostic(String message) {
     // dart:developer log: visible in the IDE / DevTools console, never in the
     // device log stream (so it cannot echo back into Dürbün as noise).
@@ -592,4 +731,44 @@ class DurbunClient implements HttpCaptureHost {
       developer.log(message, name: 'durbun');
     } catch (_) {}
   }
+}
+
+/// What the native layer (Kotlin / Swift core inside the Flutter plugin)
+/// contributes to the Dart session.
+class NativePart {
+  NativePart({
+    required this.platform,
+    this.capabilities = const <String>[],
+    this.actions = const <Map<String, Object?>>[],
+    this.commands = const <String>{},
+    this.app,
+    required this.forwardCommand,
+  });
+
+  /// `android` | `ios`.
+  final String platform;
+  final List<String> capabilities;
+  final List<Map<String, Object?>> actions;
+
+  /// Command names the native layer answers besides its action ids.
+  final Set<String> commands;
+
+  /// Native app info (`name`, `version`, `build`), when known.
+  final Map<String, Object?>? app;
+
+  /// Hands a desktop `command` message to the native layer, which answers
+  /// with its own `command.result`.
+  final void Function(Map<String, Object?> command) forwardCommand;
+
+  bool handles(String name) =>
+      commands.contains(name) || actions.any((a) => a['id'] == name);
+
+  NativePart withActions(List<Map<String, Object?>> next) => NativePart(
+    platform: platform,
+    capabilities: capabilities,
+    actions: next,
+    commands: commands,
+    app: app,
+    forwardCommand: forwardCommand,
+  );
 }

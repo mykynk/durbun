@@ -20,3 +20,6 @@ captures/
 .swiftpm/
 *.xcodeproj/xcuserdata/
 DerivedData/
+# Mac app (apps/desktop)
+apps/desktop/out/
+apps/desktop/release/

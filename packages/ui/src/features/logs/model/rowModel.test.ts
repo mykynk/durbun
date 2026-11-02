@@ -449,4 +449,29 @@ describe('RowModel: lookups and pause', () => {
     // generous bound for CI machines; typically ~40–80 ms
     expect(full).toBeLessThan(2000);
   });
+
+  it('hides device crash records the server matched to a live crash (data.duplicateOf), unless de-duplication is off', () => {
+    const live = { message: 'FATAL EXCEPTION: main\nProcess: com.mykynk.kumbara, PID: 12873\njava.lang.IllegalStateException: sepet boş', kind: 'crash' as const, level: 'fatal' as const, origin: 'logcat' as const, pid: 12873 };
+    const record = {
+      message: 'Process: com.mykynk.kumbara\nPID: 12873\njava.lang.IllegalStateException: sepet boş',
+      kind: 'crash' as const,
+      level: 'fatal' as const,
+      tag: 'data_app_crash',
+      origin: 'dropbox' as const,
+      data: { origin: 'dropbox', package: 'com.mykynk.kumbara', process: 'com.mykynk.kumbara', pid: 12873, reportTs: 1, previousLaunch: false, duplicateOf: 1 },
+    };
+    const older = { ...record, data: { origin: 'dropbox', package: 'com.mykynk.kumbara', reportTs: 0, previousLaunch: true } };
+    const on = setup();
+    on.store.add(live);
+    on.store.add(record);
+    on.store.add(older);
+    on.model.sync(on.store);
+    expect(on.model.rows.map((r) => r.e.tag)).toEqual(['app', 'data_app_crash']);
+    expect((on.model.rows[1]!.e.data as { previousLaunch: boolean }).previousLaunch).toBe(true);
+    const off = setup({ dedupe: false });
+    off.store.add(live);
+    off.store.add(record);
+    off.model.sync(off.store);
+    expect(off.model.rows).toHaveLength(2);
+  });
 });

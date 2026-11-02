@@ -49,6 +49,9 @@ class FakeNativeAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+/// Named like native_dio_adapter's URLSession-based adapter on iOS.
+class NativeAdapter extends FakeNativeAdapter {}
+
 void main() {
   late FakeDesktop desktop;
   late FakeSdkConnection conn;
@@ -181,5 +184,17 @@ void main() {
       hasLength(1),
     );
     await server.close(force: true);
+  });
+
+  test('a NativeAdapter is still reported when no native layer captures URLSession', () async {
+    // On iOS with the plugin, DurbunNetwork.capturesUrlSession is true and the
+    // native layer reports these requests instead; here (no plugin) it is false.
+    expect(DurbunNetwork.capturesUrlSession, isFalse);
+    final adapter = NativeAdapter();
+    final res = await nativeDio(adapter).get<Map<String, dynamic>>('/users?via=native');
+    expect(res.data!['users'], isNotEmpty);
+    final (req, end) = await net('/users?via=native');
+    expect(req['source'], 'dio');
+    expect(end['status'], 200);
   });
 }

@@ -1,0 +1,43 @@
+{"bug_type":"298","timestamp":"2026-11-02 08:40:12.00 +0300","os_version":"iPhone OS 27.2 (24B8117)","roots_installed":0,"incident_id":"ABCDEF01-2345-6789-ABCD-EF0123456789"}
+{
+  "crashReporterKey" : "a2c4e6f8b0d1e3f5a7c9e1b3d5f7a9c1e3b5d7f9",
+  "kernel" : "Darwin Kernel Version 27.2.0",
+  "product" : "iPhone16,2",
+  "incident" : "ABCDEF01-2345-6789-ABCD-EF0123456789",
+  "date" : "2026-11-02 08:40:12.47 +0300",
+  "build" : "iPhone OS 27.2 (24B8117)",
+  "timeDelta" : 6,
+  "memoryStatus" : {
+    "compressorSize" : 81224,
+    "pageSize" : 16384
+  },
+  "largestProcess" : "Runner",
+  "genCounter" : 0,
+  "processes" : [
+    {
+      "uuid" : "0f1e2d3c-4b5a-3978-8796-a5b4c3d2e1f0",
+      "states" : [
+        "frontmost"
+      ],
+      "killDelta" : 21114,
+      "genCount" : 0,
+      "age" : 1488803880,
+      "purgeable" : 0,
+      "fds" : 50,
+      "coalition" : 1287,
+      "rpages" : 194001,
+      "priority" : 0,
+      "reason" : "per-process-limit",
+      "physicalPages" : {
+        "internal" : [
+          180110,
+          3022
+        ]
+      },
+      "pid" : 1240,
+      "cpuTime" : 41.2,
+      "name" : "Runner",
+      "lifetimeMax" : 196000
+    }
+  ]
+}

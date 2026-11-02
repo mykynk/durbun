@@ -4,6 +4,8 @@ import { TAB_IDS, usePrefs, type TabId } from './prefs';
 
 export type SettingsSection = 'appearance' | 'logs' | 'network' | 'connection' | 'about';
 export type SdkGuideTab = 'flutter' | 'android' | 'ios' | 'react-native';
+/** Sections of the SDK guide a link can scroll to. */
+export type SdkGuideSection = 'setup' | 'release' | 'native' | 'vm';
 
 /** Global (non-persisted) UI state: active tab and which global screens are open. */
 export interface UiState {
@@ -13,6 +15,10 @@ export interface UiState {
   settings: SettingsSection | null;
   doctor: boolean;
   sdkGuide: SdkGuideTab | null;
+  /** Section of the SDK guide to scroll to when it opens (consumed by the guide). */
+  sdkGuideSection: SdkGuideSection | null;
+  /** "Veriler nereden gelir?" — the general explainer of data sources. */
+  dataSources: boolean;
   /** Narrow layout (< 900 px): sidebar is an overlay. */
   narrow: boolean;
   /** Sidebar overlay open (narrow layout only). */
@@ -56,6 +62,8 @@ export const useUi = create<UiState>()(() => ({
   settings: null,
   doctor: false,
   sdkGuide: null,
+  sdkGuideSection: null,
+  dataSources: false,
   narrow: typeof window !== 'undefined' ? window.innerWidth < 900 : false,
   sidebarOverlay: false,
   focus: null,
@@ -81,8 +89,12 @@ export const ui = {
   closeSettings: () => useUi.setState({ settings: null }),
   openDoctor: () => useUi.setState({ doctor: true, palette: false }),
   closeDoctor: () => useUi.setState({ doctor: false }),
-  openSdkGuide: (tab: SdkGuideTab = 'flutter') => useUi.setState({ sdkGuide: tab, palette: false }),
-  closeSdkGuide: () => useUi.setState({ sdkGuide: null }),
+  openSdkGuide: (tab: SdkGuideTab = 'flutter', section: SdkGuideSection | null = null) =>
+    useUi.setState({ sdkGuide: tab, sdkGuideSection: section, palette: false, dataSources: false }),
+  closeSdkGuide: () => useUi.setState({ sdkGuide: null, sdkGuideSection: null }),
+  consumeSdkGuideSection: () => useUi.setState({ sdkGuideSection: null }),
+  openDataSources: () => useUi.setState({ dataSources: true, palette: false }),
+  closeDataSources: () => useUi.setState({ dataSources: false }),
   setSidebarOverlay: (open: boolean) => useUi.setState({ sidebarOverlay: open }),
 
   /** Switch to Logs and select/scroll to the log row with this id. */

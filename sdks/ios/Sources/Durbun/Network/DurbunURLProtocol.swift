@@ -126,7 +126,7 @@ final class DurbunURLProtocol: URLProtocol {
             contentType: HTTPHeaders.value("Content-Type", in: headers),
             limit: config.captureBodies ? config.maxBodyBytes : 0
         )
-        core.send(WireMessage.netRequest(id: id, ts: ts, method: method, url: url, headers: headers, body: wireBody))
+        core.send(WireMessage.netRequest(id: id, ts: ts, method: method, url: url, headers: core.redacting(headers), body: wireBody))
         let deferred: JSONValue? = state.withLock {
             requestSent = true
             defer { deferredFinal = nil }
@@ -375,7 +375,7 @@ final class DurbunURLProtocol: URLProtocol {
             ts: Clock.nowMs(),
             status: status,
             statusText: HTTPStatusText.text(for: status),
-            headers: headers,
+            headers: DurbunCore.shared.redacting(headers),
             body: wireBody,
             protocolName: timing.protocolName,
             remoteAddress: timing.remoteAddress,

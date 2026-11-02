@@ -182,9 +182,21 @@ export function createFakeContext(overrides: Partial<SdkConfig> = {}): FakeConte
       notice: (n) => {
         ctx.notices.push(n);
       },
+      upsertDeviceApp: (input) => ({
+        key: `${input.deviceId}|${input.id}`,
+        deviceId: input.deviceId,
+        id: input.id,
+        buildType: input.buildType ?? 'unknown',
+        install: input.install ?? { source: 'unknown' },
+        pids: input.pids ?? [],
+        running: input.running ?? false,
+        lastActivity: input.lastActivity ?? Date.now(),
+      }),
+      removeDeviceApps: () => {},
     },
     getDevices: () => ctx.devices,
     getApps: () => ctx.apps,
+    getDeviceApps: () => [],
     onLogs: (listener) => {
       logListeners.add(listener);
       return () => logListeners.delete(listener);

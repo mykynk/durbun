@@ -106,6 +106,7 @@ export function parseSyslogLine(line: string, names: readonly string[], nowMs = 
   const level = LEVELS[b[3]!] ?? 'info';
   const entry: DeviceLogInput = {
     ts: syslogTime(h[1]!, h[2]!, h[3]!, h[4]!, h[5]!, h[6], nowMs),
+    origin: 'idevicesyslog',
     level,
     tag: image || process,
     message: b[4] ?? '',
@@ -169,7 +170,7 @@ export class SyslogLineParser {
         return;
       }
       if (!r.text.trim()) return;
-      this.emit({ ts: Date.now(), level: 'info', tag: 'syslog', message: r.text });
+      this.emit({ ts: Date.now(), origin: 'idevicesyslog', level: 'info', tag: 'syslog', message: r.text });
       return;
     }
     this.flush();

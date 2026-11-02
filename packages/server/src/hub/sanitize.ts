@@ -6,6 +6,7 @@ import type {
   LogEntry,
   LogKind,
   LogLevel,
+  LogOrigin,
   LogSource,
   NetworkDetail,
   WireBody,
@@ -16,6 +17,18 @@ const LEVELS = new Set<string>(LOG_LEVELS);
 const KINDS = new Set<string>(['text', 'crash', 'anr', 'flutter-error', 'event', 'network', 'lifecycle', 'marker']);
 const SOURCES = new Set<string>(['device', 'app', 'system']);
 const NET_STATES = new Set<string>(['pending', 'complete', 'failed', 'cancelled']);
+const ORIGINS = new Set<string>([
+  'logcat',
+  'idevicesyslog',
+  'simctl-log',
+  'sdk',
+  'vm-service',
+  'dropbox',
+  'crash-report',
+  'durbun',
+  'demo',
+  'import',
+] satisfies LogOrigin[]);
 
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -28,6 +41,11 @@ export function normLevel(level: unknown): LogLevel {
 
 export function normKind(kind: unknown): LogKind | undefined {
   return typeof kind === 'string' && KINDS.has(kind) ? (kind as LogKind) : undefined;
+}
+
+/** A known LogOrigin, else undefined (unknown values are dropped rather than passed to the UI). */
+export function normOrigin(origin: unknown): LogOrigin | undefined {
+  return typeof origin === 'string' && ORIGINS.has(origin) ? (origin as LogOrigin) : undefined;
 }
 
 export function toMessage(v: unknown): string {
@@ -88,6 +106,8 @@ export function sanitizeImportedLog(v: unknown): LogEntry | undefined {
   }
   const kind = normKind(v.kind);
   if (kind) entry.kind = kind;
+  // Imported lines keep where they originally came from; files from older servers say 'import'.
+  entry.origin = normOrigin(v.origin) ?? 'import';
   if (v.data !== undefined) entry.data = v.data;
   if (isRecord(v.error)) {
     entry.error = {};

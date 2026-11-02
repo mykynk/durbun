@@ -1,3 +1,18 @@
+## Unreleased (phase 3)
+
+- `durbun` is now a Flutter plugin (Android `dev.durbun.flutter.DurbunFlutterPlugin`,
+  iOS `DurbunFlutterPlugin`) that carries the native cores: Android compiles
+  `sdks/android/durbun` through Gradle sourceSets, iOS carries an exact copy of
+  `sdks/ios/Sources/Durbun` (`tool/sync_native.dart`, drift test).
+- The Dart side starts the native layer over the `dev.durbun/native` method
+  channel (no native init call). Native crashes, Kotlin/Swift logs, OkHttp
+  (`DurbunInterceptor`) and iOS URLSession traffic go out over the Dart
+  connection (one app session, merged capabilities/actions, native app
+  version/build in `hello`).
+- Enablement: debug/profile on; release only with `--dart-define=DURBUN=true`;
+  `DURBUN=false` turns it off; `enabled:` still wins. The native layer follows.
+- `DurbunNetwork.capturesUrlSession` (used by durbun_dio to avoid duplicates).
+
 ## 0.1.0
 
 - First version of the Dürbün Flutter SDK: `Durbun.run` / `Durbun.init`, app

@@ -1,0 +1,15 @@
+Display 4619827259835644672 HWC layers:
+ScreenDecorOverlayBottom#59
+ScreenDecorOverlay#57
+NavigationBar0#51
+StatusBar#48
+com.mykynk.pati/com.mykynk.pati.MainActivity#1418
+SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity]@0#1421
+SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity]@0(BLAST)#1422
+Background for SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity]@0#1423
+ActivityRecord{e1f2a3b u0 com.mykynk.pati/.MainActivity t87}#1410
+Task=87#1409
+com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity#312
+SurfaceView[com.mykynk.patisserie/com.mykynk.patisserie.MainActivity](BLAST)#1501
+WindowedMagnification:0:31#20
+Wallpaper BBQ wrapper#91

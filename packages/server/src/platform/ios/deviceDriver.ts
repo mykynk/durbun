@@ -2,9 +2,12 @@
  * Physical iOS devices over usbmux: a persistent Listen connection for Attached/Detached/Paired,
  * lockdown GetValue (no session) for name/model/OS (devicectl enrichment), idevicesyslog for logs,
  * SDK tunnels to on-device ports 9752–9755, devicectl actions and a usbmux port bridge.
+ * Phase 3 (SPEC §10): DeviceApps (devicectl apps/processes + syslog process names) and crash reports
+ * (devicectl systemCrashLogs) for every build, with or without the SDK.
  */
 import fs from 'node:fs';
 import net from 'node:net';
+import path from 'node:path';
 import type { Duplex } from 'node:stream';
 import {
   DEFAULT_PORTS,
@@ -22,10 +25,14 @@ import { run, StreamProcess, type StreamExitInfo } from '../exec';
 import { LogBatcher } from '../shared/batcher';
 import { fail } from '../shared/files';
 import { FlutterErrorGrouper } from '../shared/flutter';
-import { Backoff, every, Poller } from '../shared/timing';
+import { Backoff, every, Poller, serialize } from '../shared/timing';
 import { probeXcodeTools, resolveIdeviceTool, type ResolvedTool } from '../tools';
-import { devicectl, parseDevicectlDevices, probeDevicectlCaps, type DevicectlCaps } from './devicectl';
+import { IosAppTracker } from './appTracker';
+import { crashReportEntry, type IpsReport } from './crashReport';
+import { devicectl, parseDevicectlDevices, probeDevicectlCaps, type DevicectlCaps, type DevicectlRunner } from './devicectl';
 import { iosDeviceActions, runIosDeviceAction } from './deviceActions';
+import { devicectlAppSource } from './deviceApps';
+import { DeviceCrashWatcher } from './deviceCrashes';
 import { lockdownGetValues, type LockdownValues } from './lockdown';
 import { SyslogLineParser } from './syslog';
 import {
@@ -81,7 +88,28 @@ interface DriverShared {
   syslogTool: () => ResolvedTool | null;
   screenshotTool: () => ResolvedTool | null;
   caps: () => DevicectlCaps;
+  /** Background devicectl calls (apps, processes, crash reports), one at a time. */
+  devicectl: DevicectlRunner;
+  timing: IosDeviceTiming;
+  /** Crash files already handled per device udid (kept across re-plugs so crashes are reported once). */
+  crashSeen: (udid: string) => Set<string>;
 }
+
+/** Polling intervals of the phase-3 watchers (tests shorten them). */
+export interface IosDeviceTiming {
+  appsEveryMs: number;
+  processesEveryMs: number;
+  crashesEveryMs: number;
+  /** Delay before the first crash scan (lets the first app listing finish). */
+  crashStartDelayMs: number;
+}
+
+export const DEFAULT_IOS_DEVICE_TIMING: IosDeviceTiming = {
+  appsEveryMs: 5 * 60_000,
+  processesEveryMs: 30_000,
+  crashesEveryMs: 60_000,
+  crashStartDelayMs: 3000,
+};
 
 class IosDeviceSession {
   readonly id: string;
@@ -101,6 +129,10 @@ class IosDeviceSession {
   private pairingRetry?: NodeJS.Timeout;
   private readonly tunnels = new Map<number, TunnelState>();
   private readonly seenPids = new Map<number, string>();
+  /** Crash reports older than this are from before Dürbün watched the device (previousLaunch). */
+  private readonly watchStart = Date.now();
+  private apps?: IosAppTracker;
+  private crashes?: DeviceCrashWatcher;
 
   constructor(
     private readonly shared: DriverShared,
@@ -214,10 +246,50 @@ class IosDeviceSession {
     this.shared.ctx.hub.upsertDevice({ ...this.info });
     if (this.trusted) {
       if (syslogTool) this.startSyslog();
+      this.startAppWatch();
     } else {
       this.watchPairing();
     }
     void this.enrichFromDevicectl();
+  }
+
+  /** DeviceApps + crash reports through devicectl (needs Xcode 15+ and a trusted device). */
+  private startAppWatch(): void {
+    if (this.disposed || this.apps || !this.shared.caps().available) return;
+    const { ctx, logger, timing } = this.shared;
+    const apps = new IosAppTracker({
+      deviceId: this.id,
+      hub: ctx.hub,
+      getDeviceApps: () => ctx.getDeviceApps(),
+      source: devicectlAppSource(this.udid, this.shared.devicectl),
+      logger,
+      installedEveryMs: timing.appsEveryMs,
+      runningEveryMs: timing.processesEveryMs,
+      retryMs: Math.min(60_000, timing.appsEveryMs),
+      triggerGapMs: Math.min(10_000, timing.processesEveryMs),
+    });
+    this.apps = apps;
+    this.crashes = new DeviceCrashWatcher({
+      udid: this.udid,
+      devicectl: this.shared.devicectl,
+      destDir: path.join(ctx.tempDir, 'crash', this.udid),
+      logger,
+      isInteresting: (name) => apps.isInteresting(name),
+      onReport: (report, file) => this.onCrashReport(report, file),
+      intervalMs: timing.crashesEveryMs,
+      seen: this.shared.crashSeen(this.udid),
+    });
+    apps.start();
+    // Let the first app listing finish so crash files can be filtered by app name.
+    const t = setTimeout(() => this.crashes?.start(), timing.crashStartDelayMs);
+    t.unref?.();
+  }
+
+  private onCrashReport(report: IpsReport, file: string): void {
+    if (this.disposed) return;
+    const known = report.bundleId ? this.apps?.app(report.bundleId) : undefined;
+    this.batcher.push(crashReportEntry(report, { watchStart: this.watchStart, file, ...(known?.name ? { appName: known.name } : {}) }));
+    this.apps?.onCrash(report);
   }
 
   private applyLockdown(v: LockdownValues): void {
@@ -235,7 +307,7 @@ class IosDeviceSession {
 
   private async enrichFromDevicectl(): Promise<void> {
     if (!this.shared.caps().available) return;
-    const r = await devicectl(['list', 'devices'], 30_000);
+    const r = await this.shared.devicectl(['list', 'devices'], 30_000);
     if (!r.ok || this.disposed) return;
     const d = parseDevicectlDevices(r.json).find((x) => x.udid === this.udid);
     if (!d) return;
@@ -276,6 +348,7 @@ class IosDeviceSession {
     });
     this.logsStatus = syslogTool ? 'starting' : 'unavailable';
     if (syslogTool) this.startSyslog();
+    this.startAppWatch();
   }
 
   /* ───────────── logs ───────────── */
@@ -286,6 +359,7 @@ class IosDeviceSession {
       if (this.seenPids.size > 5000) this.seenPids.clear();
       this.shared.ctx.hub.setProcess({ deviceId: this.id, pid: entry.pid, name: entry.process, event: 'seen', ts: entry.ts });
     }
+    this.apps?.onLog(entry);
     this.flutter.push(entry);
   }
 
@@ -489,13 +563,18 @@ class IosDeviceSession {
     clearTimeout(this.pairingRetry);
     for (const st of this.tunnels.values()) st.active?.destroy();
     this.tunnels.clear();
+    // Stop the devicectl watchers now (apps → not running) but do not hold the device state back for a
+    // devicectl call that is still running (it can take up to its timeout on an unplugged device).
+    const watchers = Promise.all([this.crashes?.stop(), this.apps?.stop()]);
     await this.syslog?.stop();
     this.parser.flush();
     this.flutter.flushAll();
     this.batcher.dispose();
-    if (!this.started) return;
-    if (reason === 'disconnected') this.shared.ctx.hub.markDeviceDisconnected(this.id);
-    else this.shared.ctx.hub.markDeviceDisconnected(this.id, 'Dürbün stopped watching iOS devices', 'device.driverStopped');
+    if (this.started) {
+      if (reason === 'disconnected') this.shared.ctx.hub.markDeviceDisconnected(this.id);
+      else this.shared.ctx.hub.markDeviceDisconnected(this.id, 'Dürbün stopped watching iOS devices', 'device.driverStopped');
+    }
+    await watchers;
   }
 }
 
@@ -510,6 +589,10 @@ export interface IosDeviceDriverOptions {
   socketPath?: string;
   /** Probe/use `xcrun devicectl` (default true; tests turn it off). */
   useDevicectl?: boolean;
+  /** Tests: a fake devicectl for the background watchers (implies devicectl is available). */
+  devicectl?: DevicectlRunner;
+  /** Tests: shorter polling intervals. */
+  timing?: Partial<IosDeviceTiming>;
 }
 
 export class IosDeviceDriver implements DeviceDriver {
@@ -533,10 +616,15 @@ export class IosDeviceDriver implements DeviceDriver {
   private shared?: DriverShared;
 
   private readonly useDevicectl: boolean;
+  private readonly fakeDevicectl?: DevicectlRunner;
+  private readonly timing: IosDeviceTiming;
+  private readonly crashSeen = new Map<string, Set<string>>();
 
   constructor(opts: IosDeviceDriverOptions = {}) {
     this.client = new UsbmuxClient({ socketPath: opts.socketPath ?? USBMUXD_SOCKET });
     this.useDevicectl = opts.useDevicectl ?? true;
+    this.fakeDevicectl = opts.devicectl;
+    this.timing = { ...DEFAULT_IOS_DEVICE_TIMING, ...opts.timing };
   }
 
   async start(ctx: DriverContext): Promise<void> {
@@ -545,7 +633,9 @@ export class IosDeviceDriver implements DeviceDriver {
     this.logger = ctx.logger.child('ios-device');
     this.running = true;
     this.resolveTools(ctx.settings());
-    if (this.useDevicectl) {
+    if (this.fakeDevicectl) {
+      this.caps = { available: true, screenshot: false, screenRecord: false, openURL: false };
+    } else if (this.useDevicectl) {
       const xcode = await probeXcodeTools();
       this.caps = xcode.devicectl ? await probeDevicectlCaps() : NO_CAPS;
     }
@@ -556,6 +646,16 @@ export class IosDeviceDriver implements DeviceDriver {
       syslogTool: () => this.syslogTool,
       screenshotTool: () => this.screenshotTool,
       caps: () => this.caps,
+      devicectl: serialize(this.fakeDevicectl ?? ((args: string[], timeoutMs?: number) => devicectl(args, timeoutMs))),
+      timing: this.timing,
+      crashSeen: (udid) => {
+        let set = this.crashSeen.get(udid);
+        if (!set) {
+          set = new Set();
+          this.crashSeen.set(udid, set);
+        }
+        return set;
+      },
     };
     this.unsubSettings = ctx.onSettings((s) => void this.onSettings(s));
     await this.connectListen();
@@ -652,7 +752,7 @@ export class IosDeviceDriver implements DeviceDriver {
       ...(caps.version ? { version: caps.version } : {}),
       detail: caps.available
         ? `screenshot: ${caps.screenshot ? 'yes' : 'no'} · screen recording: ${caps.screenRecord ? 'yes' : 'no'}`
-        : 'Install Xcode 15 or newer to launch/stop/install apps on iOS devices',
+        : 'Install Xcode 15 or newer to see installed apps and crash reports and to launch/stop/install apps on iOS devices',
       ...(caps.available ? {} : { fix: 'Install Xcode from the App Store' }),
     });
     checks.push({

@@ -935,3 +935,8 @@
 .dv-page__callout {
   flex-shrink: 0;
 }
+
+/* Why the scoped app has no in-app tools (SPEC §10.5). */
+.dv-explain {
+  margin: 0;
+}

@@ -7,8 +7,10 @@
 import type {
   AppSession,
   ClearTarget,
+  DeviceApp,
   DeviceInfo,
   LogEntry,
+  LogOrigin,
   MetricSample,
   NetworkDetail,
   NetworkEntry,
@@ -21,6 +23,7 @@ import { levelRank } from '@durbun/protocol';
 import type { ClearEvent, CreateHubOptions, DeviceLogInput, Hub, HubChange, SystemLogInput } from '../types';
 import { SERVER_VERSION } from '../version';
 import { ChangeBatcher } from './batcher';
+import { copyDeviceApp, deviceAppKey, DeviceAppStore } from './deviceApps';
 import {
   appConnectedLine,
   appDisconnectedLine,
@@ -38,6 +41,7 @@ import {
   isRecord,
   normKind,
   normLevel,
+  normOrigin,
   sanitizeImportedApp,
   sanitizeImportedDevice,
   sanitizeImportedLog,
@@ -58,6 +62,12 @@ const ERROR_RANK = levelRank('error');
 const MAX_PROCESSES_PER_DEVICE = 4096;
 
 const pidKey = (deviceId: string, pid: number) => `${deviceId}\u0000${pid}`;
+/** Where lines of an app session come from (SPEC §10.2): the VM service, an imported file, else the SDK. */
+const appOrigin = (app: AppSession): LogOrigin =>
+  app.transport === 'vm-service' ? 'vm-service' : app.transport === 'import' ? 'import' : 'sdk';
+
+/** Session files written by this server also carry the device apps (optional, ignored by older servers). */
+type SessionExportWithApps = SessionExport & { deviceApps?: DeviceApp[] };
 const sessionIndexKey = (deviceId: string, sessionKey: string) => `${deviceId}\u0000${sessionKey}`;
 const copyApp = (app: AppSession): AppSession => ({ ...app, stats: { ...app.stats } });
 const limitsFrom = (s: ServerSettings): NetworkLimits => ({
@@ -94,6 +104,10 @@ export function createHub(opts: CreateHubOptions): Hub {
   const batcher = new ChangeBatcher(HUB_BATCH_INTERVAL_MS, HUB_MAX_QUEUED_LOGS, logger);
   const network = new NetworkStore(limitsFrom(settings), (entry) => batcher.networkChanged(entry));
   const metrics = new MetricsStore();
+  const deviceApps = new DeviceAppStore({
+    onChange: (app) => batcher.deviceAppChanged(app),
+    onRemove: (key) => batcher.deviceAppRemoved(key),
+  });
 
   const clearedListeners = new Set<(event: ClearEvent) => void>();
   const noticeListeners = new Set<(notice: UiNotice) => void>();
@@ -129,6 +143,7 @@ export function createHub(opts: CreateHubOptions): Hub {
       ts: Date.now(),
       deviceId,
       source: 'system',
+      origin: 'durbun',
       level: normLevel(input.level ?? 'info'),
       tag: 'durbun',
       message: toMessage(input.message),
@@ -172,6 +187,14 @@ export function createHub(opts: CreateHubOptions): Hub {
     devices.set(next.id, next);
     batcher.deviceChanged(next);
     emitDeviceTransition(prev, next, detail);
+    // Nothing on a device that went offline / unplugged can be confirmed running; its apps stay listed
+    // (device facts). A device that is gone (disconnected) starts from scratch when it comes back; one that
+    // was only offline / unauthorized gets the last reported pids back unless its driver reported meanwhile
+    // (drivers whose session survives, e.g. iOS re-trust, only report pid changes).
+    if (next.state === 'disconnected') {
+      if (prev?.state !== 'disconnected') deviceApps.markDeviceStopped(next.id);
+    } else if (prev?.state === 'online' && next.state !== 'online') deviceApps.markDeviceStopped(next.id, true);
+    else if (prev && prev.state !== 'online' && next.state === 'online') deviceApps.resumeDevice(next.id);
   }
 
   function rememberAppNames(app: AppSession): void {
@@ -254,6 +277,7 @@ export function createHub(opts: CreateHubOptions): Hub {
   function removeDevice(id: string): void {
     devices.delete(id);
     processes.delete(id);
+    deviceApps.remove(id);
     for (const [appId, app] of [...apps]) {
       if (app.deviceId !== id) continue;
       apps.delete(appId);
@@ -297,6 +321,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     const next: DeviceInfo = { ...prev, state: 'disconnected', lastSeen: Date.now(), stateDetail: detail, stateCode: code };
     if (prev.logs.status === 'streaming' || prev.logs.status === 'starting') next.logs = { ...prev.logs, status: 'stopped' };
     storeDevice(prev, next, detail);
+    deviceApps.markDeviceStopped(id);
   }
 
   /* ───────────── logs & processes ───────────── */
@@ -317,6 +342,10 @@ export function createHub(opts: CreateHubOptions): Hub {
         tag: typeof input.tag === 'string' ? input.tag : '',
         message: toMessage(input.message),
       };
+      // Drivers name their exact origin (logcat, idevicesyslog, …); unknown values are dropped.
+      const origin = normOrigin(input.origin);
+      if (origin) entry.origin = origin;
+      else delete entry.origin;
       if (entry.pid !== undefined) {
         if (!entry.process && procs) {
           const p = procs.get(entry.pid);
@@ -334,6 +363,7 @@ export function createHub(opts: CreateHubOptions): Hub {
       out.push(entry);
     }
     appendLogs(out);
+    deviceApps.noteLogs(deviceId, out);
   }
 
   function setProcess(update: Omit<ProcessUpdate, 'ts'> & { ts?: number }): void {
@@ -356,6 +386,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     map.delete(update.pid); // re-insert so iteration order follows recency (pruning drops the oldest)
     map.set(update.pid, next);
     batcher.processChanged(next);
+    if (event !== 'seen') deviceApps.noteProcess(update.deviceId, update.pid, next.name);
 
     const key = pidKey(update.deviceId, update.pid);
     const mappedAppId = appByPid.get(key);
@@ -498,6 +529,21 @@ export function createHub(opts: CreateHubOptions): Hub {
       const a = apps.get(id);
       return a ? copyApp(a) : undefined;
     },
+    getDeviceApps: () => deviceApps.list(),
+
+    upsertDeviceApp(input) {
+      if (disposed) {
+        const deviceId = typeof input?.deviceId === 'string' ? input.deviceId : '';
+        const id = typeof input?.id === 'string' ? input.id : '';
+        return { key: deviceAppKey(deviceId, id), deviceId, id, buildType: 'unknown', install: { source: 'unknown' }, pids: [], running: false, lastActivity: Date.now() };
+      }
+      return deviceApps.upsert(input);
+    },
+
+    removeDeviceApps(deviceId, ids) {
+      if (disposed) return;
+      deviceApps.remove(deviceId, ids);
+    },
 
     registerApp,
     patchApp,
@@ -518,6 +564,7 @@ export function createHub(opts: CreateHubOptions): Hub {
         deviceId: app.deviceId,
         appId,
         source: 'app',
+        origin: appOrigin(app),
         level,
         tag: typeof log.tag === 'string' && log.tag.length > 0 ? log.tag : 'app',
         message: toMessage(log.message),
@@ -548,6 +595,7 @@ export function createHub(opts: CreateHubOptions): Hub {
         deviceId: app.deviceId,
         appId,
         source: 'app',
+        origin: appOrigin(app),
         level: 'info',
         tag: 'network',
         message: `${entry.method} ${entry.url}`,
@@ -599,6 +647,7 @@ export function createHub(opts: CreateHubOptions): Hub {
         ts: entry.startTs,
         deviceId: DESKTOP_DEVICE_ID,
         source: 'system',
+        origin: 'durbun',
         level: 'info',
         tag: 'network',
         message: `${entry.method} ${entry.url}`,
@@ -706,7 +755,14 @@ export function createHub(opts: CreateHubOptions): Hub {
         for (const l of logList) if (l.deviceId) ids.add(l.deviceId);
         deviceList = [...ids].map((id) => devices.get(id)).filter((d): d is DeviceInfo => !!d).map((d) => ({ ...d }));
       }
-      return {
+      // Device apps of the exported devices (an app-scoped export keeps only that app's bundle id).
+      const exportedDevices = new Set(deviceList.map((d) => d.id));
+      const scopedBundle = appId ? apps.get(appId) : undefined;
+      const deviceAppList = deviceApps
+        .values()
+        .filter((a) => exportedDevices.has(a.deviceId) && (!scopedBundle || (a.deviceId === scopedBundle.deviceId && a.id === scopedBundle.app.id)))
+        .map(copyDeviceApp);
+      const out: SessionExportWithApps = {
         format: 'durbun-session',
         version: 1,
         exportedAt: Date.now(),
@@ -717,6 +773,8 @@ export function createHub(opts: CreateHubOptions): Hub {
         network: networkList,
         metrics: metrics.all(inScope),
       };
+      if (deviceAppList.length > 0) out.deviceApps = deviceAppList;
+      return out;
     },
 
     importSession(data: SessionExport, label: string): { deviceIds: string[] } {
@@ -836,8 +894,27 @@ export function createHub(opts: CreateHubOptions): Hub {
       }
       batcher.metricsAdded(samples);
       for (const app of appMap.values()) batcher.appChanged(app);
+
+      // Device apps travel with their (imported) device: a snapshot, nothing runs any more.
+      let importedDeviceApps = 0;
+      for (const raw of list((data as SessionExportWithApps).deviceApps)) {
+        if (!isRecord(raw) || typeof raw.deviceId !== 'string' || typeof raw.id !== 'string' || !raw.id) continue;
+        const deviceId = deviceMap.get(raw.deviceId);
+        if (!deviceId) continue;
+        const crashReports = finite(raw.crashReports);
+        deviceApps.upsert({
+          ...(raw as Partial<DeviceApp>),
+          deviceId,
+          id: raw.id,
+          pids: [],
+          running: false,
+          lastActivity: finite(raw.lastActivity) ?? now,
+          crashReportsDelta: crashReports !== undefined && crashReports > 0 ? crashReports : undefined,
+        });
+        importedDeviceApps++;
+      }
       logger.info(
-        `imported "${labelText}": ${createdDevices.length} device(s), ${appMap.size} app(s), ${imported.length} log(s), ${netIdMap.size} request(s)`,
+        `imported "${labelText}": ${createdDevices.length} device(s), ${appMap.size} app(s), ${imported.length} log(s), ${netIdMap.size} request(s), ${importedDeviceApps} device app(s)`,
       );
       return { deviceIds: createdDevices };
     },
@@ -875,6 +952,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      deviceApps.dispose();
       batcher.dispose();
       clearedListeners.clear();
       noticeListeners.clear();

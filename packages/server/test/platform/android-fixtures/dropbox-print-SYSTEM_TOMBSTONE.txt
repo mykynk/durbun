@@ -1,0 +1,66 @@
+Drop box contents: 143 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+Searching for: SYSTEM_TOMBSTONE 2026-11-02 10:15:20
+
+========================================
+2026-11-02 10:15:20 SYSTEM_TOMBSTONE (compressed text, 18320 bytes)
+Build: google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys
+Hardware: oriole
+Revision: MP1.0
+Bootloader: slider-1.3-11139386
+Radio: g5123b-130914-240205-B-11405587
+Kernel: Linux version 5.10.198-android13-4-00050-g12f3388846c3-ab11920634 (build-user@build-host) (Android (8508608, based on r450784e) clang version 14.0.7, LLD 14.0.7) #1 SMP PREEMPT Mon Jun 3 12:00:00 UTC 2024
+
+Dropped-Count: 0
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+Build fingerprint: 'google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys'
+Revision: 'MP1.0'
+ABI: 'arm64'
+Timestamp: 2026-11-02 10:15:19.882331007+0300
+Process uptime: 3021s
+Cmdline: /vendor/bin/hw/android.hardware.camera.provider@2.7-service-google
+pid: 1203, tid: 1288, name: CameraHalThread  >>> /vendor/bin/hw/android.hardware.camera.provider@2.7-service-google <<<
+uid: 1047
+signal 6 (SIGABRT), code -1 (SI_QUEUE), fault addr --------
+Abort message: 'Check failed: stream != nullptr'
+
+backtrace:
+      #00 pc 000000000005c2f4  /apex/com.android.runtime/lib64/bionic/libc.so (abort+164) (BuildId: 2e9e3c4b9c1a1d2b3c4d5e6f7a8b9c0d)
+
+___DURBUN_DROPBOX___
+Drop box contents: 143 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+Searching for: SYSTEM_TOMBSTONE 2026-11-02 11:43:11
+
+========================================
+2026-11-02 11:43:11 SYSTEM_TOMBSTONE (compressed text, 24511 bytes)
+Build: google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys
+Hardware: oriole
+Revision: MP1.0
+Bootloader: slider-1.3-11139386
+Radio: g5123b-130914-240205-B-11405587
+Kernel: Linux version 5.10.198-android13-4-00050-g12f3388846c3-ab11920634 (build-user@build-host) (Android (8508608, based on r450784e) clang version 14.0.7, LLD 14.0.7) #1 SMP PREEMPT Mon Jun 3 12:00:00 UTC 2024
+
+Dropped-Count: 0
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+Build fingerprint: 'google/oriole/oriole:14/UQ1A.240205.004/11269751:user/release-keys'
+Revision: 'MP1.0'
+ABI: 'arm64'
+Timestamp: 2026-11-02 11:43:10.123456789+0300
+Process uptime: 12s
+Cmdline: com.example.native
+pid: 5001, tid: 5023, name: RenderThread  >>> com.example.native <<<
+uid: 10191
+signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0000000000000000
+Cause: null pointer dereference
+
+backtrace:
+      #00 pc 000000000004ee8c  /data/app/~~x0q1w2e3r4t5y6u7i8o9pA==/com.example.native-y1u2i3o4p5a6s7d8f9g0hQ==/lib/arm64/libnative.so (crash_now+12) (BuildId: 4f1d2c3b4a5968778695a4b3c2d1e0f9)
+      #01 pc 000000000004ef10  /data/app/~~x0q1w2e3r4t5y6u7i8o9pA==/com.example.native-y1u2i3o4p5a6s7d8f9g0hQ==/lib/arm64/libnative.so (Java_com_example_native_Bridge_render+64) (BuildId: 4f1d2c3b4a5968778695a4b3c2d1e0f9)
+

@@ -165,8 +165,9 @@ Counters & rates (throttled hooks): `useScopedLogCounts(throttleMs = 250)`,
 | `useConnection` | see 4.1 |
 | `useHub` | `{ devices: Record<id, DeviceInfo>, apps: Record<id, AppSession>, drivers: DriverStatus[], processes: Record<deviceId, Record<pid, ProcessUpdate>> }` |
 | `useDevices()` / `useDevice(id)` | sorted device list (live → demo → imported; disconnected last) / one device |
-| `useApps()` / `useApp(id)` / `useAppGroups()` | sessions; `AppGroup` = sessions of one bundle id on one device (`latest`, `sessions` newest first, `connected`) |
+| `useApps()` / `useApp(id)` / `useAppGroups()` | sessions; `AppGroup` = one app on one device: its sessions (`latest?` — undefined for SDK-less apps, `sessions` newest first, `connected`) joined with the device's report (`deviceApp?`, `running`, `lastActivity`). `groupApps(apps, deviceApps)`; order: running first (by name), then most recently active. `appGroupName(g)` |
 | `useDrivers()`, `useDemoActive()`, `useProcessName(deviceId, pid)`, `useIsEmpty()` | `useDemoActive()` follows the demo driver's live status |
+| `useHub(s => s.deviceApps)` / `useDeviceApp(key)` | apps the **device** reports (SPEC §10, `DeviceApp`, key `'<deviceId>\|<bundle id>'` = `deviceAppKey()`), with or without an SDK. Activity-only bumps (`lastActivity` < 10 s) are coalesced and do not re-render |
 | `isImportedDevice(id)`, `isNetworkDevice(id)`, `isReadOnlyDevice(id)`, `DESKTOP_DEVICE_ID` | virtual-device helpers (see 4.6) |
 | `useScope()` / `setScope(scope, hint?)` / `getScope()` | current scope (see 4.4); persisted; validated after every resync |
 | `useMocks(s => s.rules)` / `saveMocks(rules): Promise<MockRule[]>` | mock rules; `saveMocks` = `mocks.set` (optimistic, reverts on error) |
@@ -190,13 +191,18 @@ Write with `usePrefs.getState().setPref(key, value)` / `updatePrefs(patch)`. `DE
 ### 4.4 Scope
 
 ```ts
-type Scope = { kind: 'all' } | { kind: 'device'; deviceId: string } | { kind: 'app'; appId: string; exact?: boolean };
-const compiled = useCompiledScope();     // memoized on scope + apps
+type Scope =
+  | { kind: 'all' } | { kind: 'device'; deviceId: string }
+  | { kind: 'app'; appId: string; exact?: boolean }
+  | { kind: 'deviceApp'; deviceId: string; bundleId: string };   // SDK-less app the device reports
+const compiled = useCompiledScope();     // stable until the scope's MEMBERSHIP changes (compiled.key) — not on stats churn
 compiled.logs(entry); compiled.network(entry); compiled.metrics(series);
-compiled.deviceId; compiled.appIds; compiled.app
-compileScope(scope, { apps }) / entryInScope(entry, scope) / networkInScope(entry, scope)
+compiled.key; compiled.deviceId; compiled.bundleId; compiled.appIds; compiled.app; compiled.deviceApp
+compileScope(scope, { apps, deviceApps?, processes? }) / entryInScope(entry, scope) / networkInScope(entry, scope)
 scopeLogCounts(compiled, logStore) / scopeNetworkCounts(compiled, networkStore)
+scopeSignature(scope, hub) / scopeAppRef(scope, hub) / scopeDeviceId(scope, hub) / scopeTarget(scope, hub) → { device, app, deviceApp, bundleId }
 ```
+Use `compiled.key` as the memo key for scans (it changes when the app's sessions, pids or process names change).
 
 - **device**: entries of that device. Markers are visible in every scope. Network entries replayed from
   the desktop (`deviceId: 'desktop'`) are visible in every scope.
@@ -207,6 +213,26 @@ scopeLogCounts(compiled, logStore) / scopeNetworkCounts(compiled, networkStore)
   app's process are included.
 - **app with `exact: true`** (picked from "earlier sessions" in the sidebar): only that session; device lines
   match by pid when the session has one.
+- **deviceApp** (an app row without an SDK session — store / Firebase / old builds): device lines whose `pid` is
+  one of the app's pids (`DeviceApp.pids` + pids the process list attributed to it), or whose `process` is the bundle
+  id / `"<id>:…"` / `DeviceApp.processName`, device crash records naming the package (`data.package|bundleId`), plus
+  every SDK / VM session of the same app that connects later. A process name another app on the device shares
+  (iOS "Runner") matches only together with the app's own pid. App scopes also include the device's report of the
+  app. Log counters for device-app scopes are counted by predicate, incrementally. Persisted like the others; after a
+  resync it stays while the device reports the app (or a session exists), else falls back to the device.
+
+### 4.4b "Where does this come from?" (SPEC §10.5, `src/sources/`)
+
+- `explainSources({ device, deviceApp, sessions })` (`data/explain.ts`, pure, the only place the rules live) →
+  `{ badge, rows[logs|network|metrics|crashes|mocks|tools] {status, sources, reasons, actions}, notes, context }`.
+  Extra exports: `buildBadgeOf()`, `buildKindOf()`, `explainContext()`, `explainRow()`.
+- `src/sources/`: `useAppExplain(groupKey)`, `useScopeExplain()`, `pickEmptyReason(capability, scope, {includePartial})`,
+  `<SourceBadge badge short?>`, `<BuildBadgeChip>`, `<SourcesPanel item>`, `<WhatCanISeeButton groupKey>` (the ⓘ popover),
+  `<ScopeSourcesButton>` (top bar), `<ExplainEmpty capability fallback onAction? includePartial?>` (renders the reasons when
+  the scoped app(s) structurally cannot have the capability, else `fallback`), `<ExplainCallout capability>`,
+  `<DataSourcesDialog>` ("Veriler nereden gelir?", `ui.openDataSources()`), texts: `reasonText(reason, ctx, capability?)`,
+  `entrySourceText(entry)` / `originLabel(origin)` (log origins), `isDeviceCrashRecord`, `isUnsymbolicated`.
+- `ui.openSdkGuide(tab, section?)` scrolls to `'release' | 'native' | 'vm'` (`data-sdk-section` in the guide).
 
 ### 4.5 Commands (WS) and REST
 

@@ -605,7 +605,7 @@ registerMessages('shell', {
         body: 'Gerçekçi demo verisiyle Dürbün’ü hemen deneyin: loglar, ağ istekleri, çökmeler ve metrikler.',
         button: 'Demo verisiyle dene',
       },
-      sdkNote: 'Yapılandırılmış loglar, olaylar, mock’lar ve release benzeri derlemelerdeki çökmeler için uygulamanıza Dürbün SDK’sını ekleyin.',
+      sdkNote: 'Cihaz logları ve çökme kayıtları SDK olmadan da gelir. Uygulamanın kendi verisi (yapılandırılmış loglar, ağ istekleri, mock’lar) için Dürbün SDK’sını ekleyin ya da Flutter uygulamasını debug olarak çalıştırın.',
     },
     sdk: {
       title: 'SDK kurulumu',
@@ -618,20 +618,32 @@ registerMessages('shell', {
       },
       repoDir: 'Dürbün klasörü',
       flutter: {
-        zeroTitle: 'SDK olmadan da çalışır',
+        zeroTitle: 'SDK olmadan da çok şey görünür',
         zeroBody:
-          'flutter run ile başlatılan debug uygulamalar Dart VM Service üzerinden otomatik bağlanır: loglar (dart:developer log() dahil), ağ istekleri ve kare süreleri gelir. SDK bunlara yapılandırılmış loglar, olaylar, mock’lar, profile ve release benzeri derlemelerde çökmeler ve uygulama içi komutlar ekler.',
+          'Telefonu USB ile takmak yeterli: cihaz logları ve çökme kayıtları her sürümde (eski, Firebase ve mağaza sürümleri dahil) gelir. flutter run ile başlatılan debug uygulamalar ayrıca Dart VM Service üzerinden kendiliğinden bağlanır: loglar, ağ istekleri ve kare süreleri. SDK bunlara yapılandırılmış loglar, mock’lar, uygulama içi araçlar ve iç test derlemelerinde tüm veriyi ekler.',
+        sourcesLink: 'Veriler nereden gelir?',
+        setupTitle: 'Kurulum: iki adım',
         add: 'Paketi ekleyin',
-        addHint: 'Paket pub.dev’de yok; bu depodaki sdks/flutter/durbun klasöründen yol bağımlılığı olarak eklenir.',
+        addHint: 'Paket pub.dev’de yok; bu depodaki sdks/flutter/durbun klasöründen yol bağımlılığı olarak eklenir. Android ve iOS tarafı pakete dahildir; ayrıca native kurulum gerekmez.',
         wrap: 'main() içinde başlatın',
         wrapHint:
-          'Durbun.run bir zone açar: print çıktısını, yakalanmamış hataları ve dart:io HTTP trafiğini (http, Dio’nun varsayılan adaptörü, resimler) yakalar. Debug ve profile derlemelerinde açık, release’te ve flutter test içinde kapalıdır.',
+          'Durbun.run print çıktısını, yakalanmamış hataları ve dart:io HTTP trafiğini (http, Dio’nun varsayılan adaptörü, resimler) yakalar; native katman Dart ile birlikte açılır. Debug ve profile derlemelerinde açık, release’te ve flutter test içinde kapalıdır.',
+        done: 'Bu kadar. Uygulama açıldığında kenar çubuğunda SDK rozetiyle görünür.',
+        releaseTitle: 'Release, Firebase ve mağaza derlemeleri',
+        releaseHint: 'Release derlemelerinde SDK kapalıdır. Firebase / iç test derlemesi mağaza derlemesinden ayrı bir derlemeyse SDK’yı yalnızca o derlemede açın:',
+        releaseNeverTitle: 'Mağaza derlemelerinde asla',
+        releaseNever:
+          'SDK, uygulamanın loglarını ve ağ trafiğini bilgisayara açan bir geliştirici kapısıdır; mağazaya giden derlemede kapalı kalmalı. Firebase sürümü mağaza sürümüyle aynı derlemeyse onda da açmayın: o sürümde cihaz logları ve çökme kayıtları yine görünür.',
+        nativeTitle: 'Native katman (Kotlin / Swift)',
+        nativeAndroid: 'Android: Kotlin tarafındaki kendi OkHttp istemcilerinize tek satır ekleyin (Retrofit’e de bu client’ı verin). Native loglar ve çökmeler ek ayar olmadan gelir.',
+        nativeIos: 'iOS: URLSession istekleri kendiliğinden yakalanır; bir şey eklemeniz gerekmez.',
+        optionalTitle: 'İsteğe bağlı',
         use: 'Log ve olay gönderin',
         useHint: 'Seviye kısayolları: Durbun.v / d / i / w / e / f. Map ve List verileri masaüstünde JSON ağacı olarak açılır.',
-        dio: 'Dio native adaptörle çalışıyorsa (isteğe bağlı)',
+        dio: 'Dio native adaptörle çalışıyorsa',
         dioHint:
           'Dio’nun varsayılan adaptörü zaten yakalanır. NativeAdapter, cupertino_http ve cronet_http dart:io’yu atladığı için bu interceptor’ı ekleyin; dio: parametresi sayesinde varsayılan adaptörden geçen istekler iki kez kaydedilmez.',
-        noSdk: 'Elle bağlanma (SDK’sız, yalnızca debug)',
+        noSdk: 'SDK’sız debug: Dart VM Service’e elle bağlanma',
         noSdkHint: 'Otomatik bağlanma kapalıysa ya da bağlantı kurulamadıysa VM Service adresini veya flutter run çıktısının tamamını yapıştırın.',
       },
       android: {
@@ -684,7 +696,7 @@ registerMessages('shell', {
       releaseTitle: 'Release güvenliği',
       release: 'SDK’lar release/production derlemelerinde (açıkça zorlanmadıkça) hiçbir şey yapmaz ve uygulamayı yavaşlatmaz.',
       releaseBy: {
-        flutter: 'SDK release derlemelerinde ve flutter test içinde kapalıdır (enabled: true ile zorlanmadıkça) ve uygulamaya asla hata fırlatmaz.',
+        flutter: 'SDK release derlemelerinde ve flutter test içinde kapalıdır; release’te yalnızca --dart-define=DURBUN=true ile açılır (iç test derlemeleri için, mağaza için asla). Uygulamaya asla hata fırlatmaz.',
         android: 'Release’te durbun-noop kullanılır: kod, thread ya da soket yoktur. durbun yanlışlıkla release’e girse bile debuggable olmayan uygulamada çalışmaz.',
         ios: 'Durbun.start() çağrısını #if DEBUG içine alın; SDK DEBUG olmadan derlendiğinde de (allowInReleaseBuilds verilmedikçe) hiçbir şey yapmaz.',
         'react-native': 'enabled varsayılanı __DEV__’dir: release’te hiçbir yama kurulmaz ve bağlantı açılmaz.',
@@ -1166,7 +1178,7 @@ registerMessages('shell', {
         body: 'Try Dürbün right away with realistic demo data: logs, network requests, crashes and metrics.',
         button: 'Try with demo data',
       },
-      sdkNote: 'Add the Dürbün SDK to your app for structured logs, events, mocks and crashes in release-like builds.',
+      sdkNote: 'Device logs and crash records come in without the SDK. For the app’s own data (structured logs, network requests, mocks) add the Dürbün SDK or run the Flutter app as a debug build.',
     },
     sdk: {
       title: 'SDK setup',
@@ -1179,20 +1191,32 @@ registerMessages('shell', {
       },
       repoDir: 'Dürbün folder',
       flutter: {
-        zeroTitle: 'Works without the SDK too',
+        zeroTitle: 'A lot shows up without the SDK',
         zeroBody:
-          'Debug apps started with flutter run attach automatically through the Dart VM Service: logs (including dart:developer log()), network requests and frame timings. The SDK adds structured logs, events, mocks, crashes in profile and release-like builds, and in-app commands.',
+          'Plugging the phone in over USB is enough: device logs and crash records come in for every build (old, Firebase and store builds included). Debug apps started with flutter run also attach automatically through the Dart VM Service: logs, network requests and frame timings. The SDK adds structured logs, mocks, in-app tools, and all data in internal builds.',
+        sourcesLink: 'Where does the data come from?',
+        setupTitle: 'Setup: two steps',
         add: 'Add the package',
-        addHint: 'The package is not on pub.dev; it is added as a path dependency from this repository’s sdks/flutter/durbun folder.',
+        addHint: 'The package is not on pub.dev; it is added as a path dependency from this repository’s sdks/flutter/durbun folder. The Android and iOS parts are included; no separate native setup.',
         wrap: 'Start it in main()',
         wrapHint:
-          'Durbun.run opens a zone: it captures print output, uncaught errors and dart:io HTTP traffic (http, Dio’s default adapter, images). On in debug and profile builds, off in release builds and in flutter test.',
+          'Durbun.run captures print output, uncaught errors and dart:io HTTP traffic (http, Dio’s default adapter, images); the native layer turns on together with Dart. On in debug and profile builds, off in release builds and in flutter test.',
+        done: 'That’s it. When the app starts, it shows up in the sidebar with an SDK badge.',
+        releaseTitle: 'Release, Firebase and store builds',
+        releaseHint: 'The SDK is off in release builds. If the Firebase / internal build is separate from the store build, turn the SDK on in that build only:',
+        releaseNeverTitle: 'Never in store builds',
+        releaseNever:
+          'The SDK is a developer door that opens the app’s logs and network traffic to a computer; it must stay off in builds that go to a store. If the Firebase build is the same build as the store one, leave it off there too: device logs and crash records still show up for it.',
+        nativeTitle: 'Native layer (Kotlin / Swift)',
+        nativeAndroid: 'Android: add one line to your own OkHttp clients on the Kotlin side (and give that client to Retrofit too). Native logs and crashes come in without extra setup.',
+        nativeIos: 'iOS: URLSession requests are captured automatically; nothing to add.',
+        optionalTitle: 'Optional',
         use: 'Send logs and events',
         useHint: 'Level shortcuts: Durbun.v / d / i / w / e / f. Maps and lists show up as a JSON tree on the desktop.',
-        dio: 'If Dio uses a native adapter (optional)',
+        dio: 'If Dio uses a native adapter',
         dioHint:
           'Dio’s default adapter is already captured. NativeAdapter, cupertino_http and cronet_http bypass dart:io, so add this interceptor; thanks to the dio: parameter, requests that still go through the default adapter are not recorded twice.',
-        noSdk: 'Attach manually (no SDK, debug only)',
+        noSdk: 'Debug without the SDK: attach the Dart VM Service manually',
         noSdkHint: 'If auto-attach is off or could not connect, paste the VM Service URL or the whole flutter run output.',
       },
       android: {
@@ -1245,7 +1269,7 @@ registerMessages('shell', {
       releaseTitle: 'Release safety',
       release: 'SDKs do nothing in release/production builds (unless explicitly forced) and never slow the app down.',
       releaseBy: {
-        flutter: 'The SDK is off in release builds and in flutter test (unless enabled: true) and never throws into your app.',
+        flutter: 'The SDK is off in release builds and in flutter test; in release it turns on only with --dart-define=DURBUN=true (for internal builds, never for the store). It never throws into your app.',
         android: 'Release builds use durbun-noop: no code, threads or sockets. Even if durbun slips into a release build, it does nothing in a non-debuggable app.',
         ios: 'Wrap Durbun.start() in #if DEBUG; the SDK itself also does nothing when compiled without DEBUG (unless allowInReleaseBuilds).',
         'react-native': 'enabled defaults to __DEV__: release builds install no patches and open no connection.',

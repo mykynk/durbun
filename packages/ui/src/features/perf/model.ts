@@ -94,13 +94,21 @@ export function hasMetricsCapability(a: Pick<AppSession, 'capabilities'>): boole
  * capability that connected most recently (else the most recent one that has metric samples).
  */
 export function defaultTarget(
-  scope: { kind: 'all' } | { kind: 'device'; deviceId: string } | { kind: 'app'; appId: string },
+  scope: { kind: 'all' } | { kind: 'device'; deviceId: string } | { kind: 'app'; appId: string } | { kind: 'deviceApp'; deviceId: string; bundleId: string },
   apps: Record<string, AppSession>,
   hasSamples: (app: AppSession) => boolean = () => false,
 ): PerfTarget | null {
   if (scope.kind === 'app') {
     const app = apps[scope.appId];
     return app ? appTargetOf(app) : null;
+  }
+  if (scope.kind === 'deviceApp') {
+    // An app the device reports: its SDK / VM session when one exists; otherwise nothing is picked on its own
+    // (process polling is an explicit choice — the empty state explains and offers it).
+    const sessions = Object.values(apps)
+      .filter((a) => a.deviceId === scope.deviceId && a.app.id === scope.bundleId)
+      .sort((a, b) => Number(b.connected) - Number(a.connected) || b.connectedAt - a.connectedAt);
+    return sessions[0] ? appTargetOf(sessions[0]) : null;
   }
   const list = Object.values(apps).filter((a) => scope.kind === 'all' || a.deviceId === scope.deviceId);
   const rank = (a: AppSession) => (a.connected && hasMetricsCapability(a) ? 3 : hasSamples(a) ? 2 : hasMetricsCapability(a) ? 1 : 0);

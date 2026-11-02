@@ -55,6 +55,9 @@ class _StubBackend implements DurbunBackend {
   bool get capturesDartIo => false;
 
   @override
+  bool get capturesUrlSession => false;
+
+  @override
   DurbunMockDecision? findMock(String method, Uri url) => null;
 
   @override
