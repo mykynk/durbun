@@ -245,6 +245,12 @@ REST:
 | `GET /api/doctor` | `ToolCheck[]` (all drivers' `checks()` + ports + node version) |
 | `POST /api/upload?name=<file>` (raw body, ≤ 2 GB streamed to tempDir) | `{ file }` server path to pass to `app-install` |
 | `GET /api/files/:name` | files saved in tempDir (screenshots, recordings) |
+| `GET /api/files/crash/:udid/:name` | copied iOS crash reports (phase 3): udid `/^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/`, name `/^[A-Za-z0-9_][A-Za-z0-9._-]{0,199}\.ips$/i` without `..`, realpath must stay inside `<tempDir>/crash/<udid>/`; always `Content-Disposition: attachment`, `text/plain`, `nosniff`; same /api access rules |
+
+The UI document, every static file, 304s and the "please build the UI" page carry a Content-Security-Policy:
+scripts only from the server (inline scripts are hashed at startup and re-hashed when index.html changes; no
+`'unsafe-inline'` for scripts), `connect-src` names `ws://<Host>`, `img-src` / `media-src` allow `blob:` and
+`data:`, plus `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`.
 
 ### 5.5 Platform drivers (`src/platform/**`, owner server-platform)
 
@@ -850,6 +856,13 @@ impossible and the UI says so plainly (`noOutsideNetwork`), without blaming the 
   `lastActivity = reportTs` for them); at most 2000 apps (the least recently active non-running one goes).
 - Export writes `SessionExport.deviceApps` (an app-scoped export keeps that bundle id only); import puts them on
   the `import:` devices as not running.
+- Android `DeviceApp.name` comes from `cmd package resolve-activity` `nonLocalizedLabel` (Android 7+, literal
+  labels only; `@string/…` labels stay undefined because there is no aapt on the device). Unplugging a phone or
+  stopping the driver keeps its DeviceApps (not running); they are removed only on uninstall, or by the hub when
+  the device itself is removed.
+- The hub merges `readers` per reader id: a patch for one reader keeps the others, `null` / `undefined` removes
+  one, `code` / `detail` belong to the state they came with, `lastOk` carries over until a newer one; imports keep
+  sanitized readers. `hello.sdk.layers` keeps only known values, deduplicated, in order (imports keep them).
 
 ### 10.3 Crash reports (any build)
 - Android `dumpsys dropbox --print <tag>` for `data_app_crash`, `data_app_anr`, `data_app_native_crash`,
@@ -872,14 +885,27 @@ impossible and the UI says so plainly (`noOutsideNetwork`), without blaming the 
   `Content-Disposition: attachment`); the UI offers "İndir (.ips)" and says how to symbolicate.
 - Reader state: drivers report `DeviceInfo.readers.crashReports` (`ok` / `unavailable` / `unsupported` +
   `reader.crashReports.<reason>` code + English detail) so "no crash reports" and "crash reports cannot be read
-  here" never look the same (§10.8).
+  here" never look the same (§10.8). Android reports a failure at once before the first good read, afterwards
+  only after two failed polls in a row.
+- Android counting: one crash counts once in `crashReports` (a `data_app_native_crash` + `SYSTEM_TOMBSTONE` pair
+  linked to the same live entry is one crash).
+- iOS dedupe: only `.ips` entries are marked. A copied report gets `data.duplicateOf` when an earlier live row
+  matches it — a device line with "*** Terminating app due to uncaught exception" or an SDK native crash row
+  ('Uncaught exception …' / 'Crash in previous launch: …') — with the same pid within 60 s or the same bundle id
+  within 10 s. A live row that arrives after the report was pushed is not de-duplicated.
+- Real devicectl facts (checked on an iPhone 15 Pro Max, iOS 27.2, devicectl 651.32): the `systemCrashLogs`
+  listing `name` is a path (`Retired/…`); the `bug_type` / `LogType` extended attributes are used as a pre-filter;
+  `ProxiedDevice-<id>/` folders hold a paired Apple Watch's reports and are skipped; `copy from --destination` is a
+  file path. Copy names match `^[A-Za-z0-9][A-Za-z0-9._-]{0,155}\.ips$`.
 
 ### 10.4 Android frame stats (any build)
 `dumpsys gfxinfo <pkg>` (+ `reset`) every 2 s for native UI; for Flutter's SurfaceView use
 `dumpsys SurfaceFlinger --latency '<layer>'` (find the layer with `dumpsys SurfaceFlinger --list`).
 → `MetricSample{source:'adb', fps, jankyFrames}`. If neither yields data (permissions/OS), emit nothing
 and let the UI explain (`frameStatsApproximate`), and set `DeviceInfo.readers.frameStats` to `unavailable`
-(`reader.frameStats.noData`); iOS reports `unsupported` (§10.8).
+(`reader.frameStats.noData`) after about 10 s of a live watched process without frames; iOS reports
+`unsupported` (§10.8). Android 15 prints `--list` entries as `RequestedLayerState{<name> parentId=…}`; a
+SurfaceView (Flutter) app never falls back to gfxinfo's decor frames for its fps.
 
 ### 10.5 Source transparency in the UI (`packages/ui/src/data/explain.ts`, frozen contract)
 - `explainSources({device, deviceApp, sessions})` → `{badge, rows}`: one row per capability (logs,
@@ -900,7 +926,16 @@ and let the UI explain (`frameStatsApproximate`), and set `DeviceInfo.readers.fr
 - `install.source = 'other-store'` is worded from `install.installer` (package installer → "APK elle kuruldu",
   Samsung → Galaxy Store, Huawei → AppGallery, Xiaomi → GetApps, Amazon → Appstore, else the installer id);
   `adb` also covers Android Studio / `flutter run`; the iOS badge reads "Store / TestFlight / ad-hoc" (iOS
-  cannot tell App Store, TestFlight and ad-hoc installs apart).
+  cannot tell App Store, TestFlight and ad-hoc installs apart). A hand-installed APK (package installer) gets the
+  `apk` build badge and counts as an internal build, not a store build.
+- The demo is explained like the device and build each demo app stands for (`ExplainContext.demo` + a
+  `demoData` note), never as all-'demo' rows.
+- Reasons added in phase 3: `crashReportsUnavailable`, `frameStatsUnavailable` (from `DeviceInfo.readers`),
+  `nativeLayerActive`, `nativeLayerMissing` (from `sdk.layers`), `demoData`; source `native-layer`; build badge
+  `apk` and `otherStoreKind()`. Reader codes get UI text under `code.reader.*`; a test fails when a server
+  source emits a `reader.*` literal without TR / EN text.
+- Sidebar folding on crowded phones: connected, selected and running developer builds and apps active within
+  the last 3 minutes stay visible; the rest fold under "N uygulama daha".
 
 ### 10.6 One-step SDK (`sdks/**`)
 - `durbun` becomes a Flutter **plugin** (Android + iOS) that carries the native cores; native side is
@@ -923,6 +958,10 @@ and let the UI explain (`frameStatsApproximate`), and set `DeviceInfo.readers.fr
   next-launch delivery stays the fallback. Native metrics are off in hosted mode (Flutter metrics only).
 - `hello.sdk.layers` says which layers feed the session (`['dart']`, plus `'android'` / `'ios'` when the native
   core attached); the UI uses it to say native crashes / logs / URLSession are covered (§10.8).
+- The on-device listener (iOS, usbmux path) binds its port only once the hello is ready, so an early desktop is
+  refused (and retries) instead of being accepted and dropped.
+- `durbun_dio` recognizes the dart:io adapter by type (survives `--obfuscate`); its iOS NativeAdapter dedupe is
+  name-based, so obfuscated iOS builds may show those requests twice (never lose them).
 
 ### 10.7 Mac app (`apps/desktop`, Electron, unsigned for now)
 One click: the app starts the server in-process (programmatic entry built from `startServer`), opens
@@ -941,13 +980,19 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
   `ServerStartError.code === 'EADDRINUSE'`.
 - Desktop-only styles live in the UI under `html[data-desktop='mac']` (+ `html[data-desktop-fullscreen]`), set
   by the app's preload: drag areas, the traffic-light inset, compact mode.
+- Attach: when a Dürbün already answers on the port the app opens a window on it; when that server stops, the app
+  takes over with its own server; a version mismatch shows a tray notice. Port rules: a port held on 0.0.0.0
+  counts as busy; on `EADDRINUSE` the app tries 9760, 9770, 9780, then an OS-assigned port.
+- Variables taken from the login shell: PATH, ANDROID_HOME, ANDROID_SDK_ROOT, ANDROID_ADB_SERVER_PORT,
+  FLUTTER_ROOT, FVM_CACHE_PATH, FVM_HOME, DEVELOPER_DIR, JAVA_HOME. A login shell that times out or fails is shown
+  (tray / diagnostic log), not only logged.
 
 ### 10.8 Contracts added while reviewing phase 3 (lead)
 - `DeviceInfo.readers?: Partial<Record<'crashReports' | 'frameStats', DeviceReaderState>>`,
   `DeviceReaderState = {status: 'ok' | 'unavailable' | 'unsupported', code?, detail?, lastOk?}`. `ok` means an
   empty result is real; `unavailable` = tried and failed; `unsupported` = impossible on this device/OS. Codes
   are `reader.<readerId>.<reason>`: `reader.crashReports.dropboxRefused`, `reader.crashReports.devicectlMissing`,
-  `reader.crashReports.failed`, `reader.frameStats.noData`, `reader.frameStats.unsupported` (drivers may add
+  `reader.crashReports.developerModeOff` (iOS, detail = devicectl's error line), `reader.crashReports.failed`, `reader.frameStats.noData`, `reader.frameStats.unsupported` (drivers may add
   more; the UI falls back to `detail`). The hub merges `readers` per reader id on `upsertDevice` / `patchDevice`.
 - `SdkIdentity = {name, version, platform, layers?: ('dart' | 'android' | 'ios')[]}` is the type of
   `SdkHello.sdk` and `AppSession.sdk`; the server keeps only known layer values.
