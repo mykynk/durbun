@@ -18,6 +18,9 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:durbun/durbun.dart';
 
+import 'src/dart_io_adapter_stub.dart'
+    if (dart.library.io) 'src/dart_io_adapter.dart';
+
 /// Reports Dio requests to Dürbün and applies its mock rules
 /// (`respond` → resolved without a network call, `delay` → waits, `fail` →
 /// the matching [DioException]: connectionTimeout / connectionError /
@@ -37,16 +40,17 @@ class DurbunDioInterceptor extends Interceptor {
 
   bool get _usesDartIoAdapter {
     final d = dio;
-    if (d == null) return false;
-    final name = d.httpClientAdapter.runtimeType.toString();
-    return name == 'IOHttpClientAdapter' || name == 'DefaultHttpClientAdapter';
+    return d != null && usesDartIoHttpClient(d.httpClientAdapter);
   }
 
   /// Adapters built on URLSession (native_dio_adapter's `NativeAdapter` /
   /// `CupertinoAdapter` on iOS). package:durbun's iOS layer already captures
   /// URLSession traffic and applies mocks to it, so these requests are left
   /// to it (no duplicates). On Android `NativeAdapter` uses Cronet, which the
-  /// native layer does not see, so it is still reported here.
+  /// native layer does not see, so it is still reported here. Matched by name
+  /// (no dependency on native_dio_adapter): in `--obfuscate` builds the names
+  /// are minified, so such requests are reported by both layers rather than
+  /// risk losing them.
   bool get _usesUrlSessionAdapter {
     final d = dio;
     if (d == null || !DurbunNetwork.capturesUrlSession) return false;

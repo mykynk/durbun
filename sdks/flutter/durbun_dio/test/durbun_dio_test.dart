@@ -52,6 +52,10 @@ class FakeNativeAdapter implements HttpClientAdapter {
 /// Named like native_dio_adapter's URLSession-based adapter on iOS.
 class NativeAdapter extends FakeNativeAdapter {}
 
+/// The dart:io adapter under another class name, as an app subclass or an
+/// `--obfuscate` build (minified class names) presents it.
+class RenamedIoAdapter extends IOHttpClientAdapter {}
+
 void main() {
   late FakeDesktop desktop;
   late FakeSdkConnection conn;
@@ -181,6 +185,25 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 200));
     expect(
       conn.ofType('net.request').where((m) => (m['url']! as String).endsWith('/io-path')),
+      hasLength(1),
+    );
+    await server.close(force: true);
+  });
+
+  test('the dart:io adapter is recognized by type, not by its class name', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((req) => req.response
+      ..headers.contentType = ContentType.json
+      ..write('{"ok":true}')
+      ..close());
+    final dio = Dio()..httpClientAdapter = RenamedIoAdapter();
+    dio.interceptors.add(DurbunDioInterceptor(dio: dio));
+    await dio.get<Map<String, dynamic>>('http://127.0.0.1:${server.port}/renamed-io');
+    final (req, _) = await net('/renamed-io');
+    expect(req['source'], 'dart:io');
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(
+      conn.ofType('net.request').where((m) => (m['url']! as String).endsWith('/renamed-io')),
       hasLength(1),
     );
     await server.close(force: true);
