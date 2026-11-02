@@ -540,6 +540,12 @@ export interface ServerSettings {
   logcatTail: number;
   iosSimLogScope: 'apps' | 'all';
   iosSimLogLevel: 'default' | 'info' | 'debug';
+  /**
+   * Physical iPhones (idevicesyslog): 'apps' keeps lines of third-party apps (DeviceApp pids / process names)
+   * plus crash-related system lines; 'all' keeps every daemon (~1000 lines/s on a busy phone). Optional for
+   * older servers; absent = 'apps'.
+   */
+  iosDeviceLogScope?: 'apps' | 'all';
   autoAttachVmService: boolean;
   /** App ids whose process start/stop is announced in the log stream (besides SDK apps). */
   watchedApps: string[];
@@ -559,6 +565,7 @@ export const DEFAULT_SETTINGS: ServerSettings = {
   logcatTail: 2_000,
   iosSimLogScope: 'apps',
   iosSimLogLevel: 'info',
+  iosDeviceLogScope: 'apps',
   autoAttachVmService: true,
   watchedApps: [],
   allowLan: false,
