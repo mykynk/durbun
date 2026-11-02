@@ -106,6 +106,22 @@ describe('device-app scope (SDK-less apps)', () => {
     expect(c.logs({ ...dropbox, id: nextId++, data: { origin: 'dropbox', package: 'com.whatsapp' } })).toBe(false);
   });
 
+  it('a crash record’s package decides even when its pid is dead or its process is a shared "Runner"', () => {
+    // Kumbara (TestFlight) crashed and is gone; Pati (Xcode) is also "Runner" and still running.
+    const gone = { ...RUNNER_A, pids: [], running: false };
+    const h = hub({ deviceApps: { [gone.key]: gone, [RUNNER_B.key]: RUNNER_B, [KUMBARA.key]: KUMBARA } });
+    const ips = log({ deviceId: IPHONE, origin: 'crash-report', kind: 'crash', level: 'fatal', tag: 'crash-report', process: 'Runner', pid: 811, data: { origin: 'crash-report', bundleId: 'com.mykynk.kumbara', previousLaunch: false, symbolicated: false } });
+    expect(compileScope({ kind: 'deviceApp', deviceId: IPHONE, bundleId: 'com.mykynk.kumbara' }, h).logs(ips)).toBe(true);
+    expect(compileScope({ kind: 'deviceApp', deviceId: IPHONE, bundleId: 'com.mykynk.pati' }, h).logs(ips)).toBe(false);
+    // Android: a tombstone record of this launch carries the (dead) pid but no process name.
+    const tomb = log({ origin: 'dropbox', kind: 'crash', level: 'fatal', tag: 'SYSTEM_TOMBSTONE', pid: 12000, data: { origin: 'dropbox', package: 'com.mykynk.kumbara', pid: 12000 } });
+    expect(compileScope(scope, h).logs(tomb)).toBe(true);
+    // ActivityManager reports the ANR from system_server's process; data.package names the app.
+    const anr = log({ kind: 'anr', level: 'error', tag: 'ActivityManager', process: 'system_server', pid: 1520, data: { reporterPid: 1520, package: 'com.mykynk.kumbara:push' } });
+    expect(compileScope(scope, h).logs(anr)).toBe(true);
+    expect(compileScope({ kind: 'deviceApp', deviceId: PIXEL, bundleId: 'com.mykynk.pati' }, h).logs(anr)).toBe(false);
+  });
+
   it('pids of earlier runs come from the process list', () => {
     const procs: Record<number, ProcessUpdate> = {
       11000: { deviceId: PIXEL, pid: 11000, name: 'com.mykynk.kumbara', event: 'died', ts: 1 },

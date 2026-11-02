@@ -131,7 +131,13 @@ function crashPackage(e: LogEntry): string | undefined {
   const d = e.data as { package?: unknown; bundleId?: unknown; bundleID?: unknown } | null | undefined;
   if (!d || typeof d !== 'object') return undefined;
   const v = d.package ?? d.bundleId ?? d.bundleID;
-  return typeof v === 'string' ? v : undefined;
+  return typeof v === 'string' && v ? v : undefined;
+}
+
+/** "com.foo:push" → "com.foo" (Android sub-process names). */
+function basePackage(name: string): string {
+  const i = name.indexOf(':');
+  return i > 0 ? name.slice(0, i) : name;
 }
 
 function resolveScope(scope: Scope, hub: HubLike): ResolvedApp | undefined {
@@ -194,14 +200,17 @@ export function compileScope(scope: Scope, hub: HubLike): CompiledScope {
     if (e.source === 'device') {
       const p = e.process;
       const pidOk = e.pid !== undefined && pids.has(e.pid);
+      // Device crash / ANR records (dropbox, .ips, ActivityManager ANR lines) name the app they are about: the
+      // package decides. By then the crashed pid is dead, and "Runner" may be any Flutter app on an iPhone.
+      const pkg = crashPackage(e);
+      if (pkg !== undefined) return basePackage(pkg) === bundleId && (nameFallback || pidOk);
       if (p) {
         // Exact mode: other runs share the name, the pid decides.
         if (processMatches(p)) return nameFallback || pidOk;
         // A name other apps share ("Runner"): only together with one of this app's pids.
         if (pidNames.has(p)) return pidOk;
       } else if (e.pid !== undefined) return pidOk;
-      // Device crash records (dropbox / .ips) name the package instead of a live process.
-      return crashPackage(e) === bundleId;
+      return false;
     }
     if (e.source === 'system') {
       const code = e.code ?? '';
