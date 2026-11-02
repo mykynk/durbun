@@ -35,19 +35,34 @@ export interface DoctorInput {
   timeoutMs?: number;
 }
 
-export function checkNodeVersion(version: string = process.versions.node): ToolCheck {
-  const major = Number.parseInt(version.replace(/^v/, ''), 10);
+/**
+ * The Node.js runtime. Inside the Mac app (`electron` = process.versions.electron) it is Electron's own
+ * Node: the check says so (code 'doctor.node.embedded') instead of pointing at the app binary as "Node.js".
+ */
+export function checkNodeVersion(version: string = process.versions.node, electron: string | undefined = process.versions.electron): ToolCheck {
+  const plain = version.replace(/^v/, '');
+  const major = Number.parseInt(plain, 10);
   const ok = Number.isFinite(major) && major >= MIN_NODE_MAJOR;
-  return {
+  const check: ToolCheck = {
     id: 'node',
     label: 'Node.js',
     status: ok ? 'ok' : 'error',
-    version: version.startsWith('v') ? version : `v${version}`,
+    version: `v${plain}`,
     path: process.execPath,
-    detail: ok ? undefined : `Dürbün needs Node.js ${MIN_NODE_MAJOR} or newer`,
-    fix: ok ? undefined : 'brew install node',
-    docsUrl: ok ? undefined : 'https://nodejs.org/',
   };
+  if (electron) {
+    check.code = 'doctor.node.embedded';
+    check.params = { electron, node: plain };
+    check.detail = `Embedded in Dürbün.app (Electron ${electron}, Node ${plain})`;
+    if (!ok) check.detail += `; Dürbün needs Node.js ${MIN_NODE_MAJOR} or newer, so update the app`;
+    return check;
+  }
+  if (!ok) {
+    check.detail = `Dürbün needs Node.js ${MIN_NODE_MAJOR} or newer`;
+    check.fix = 'brew install node';
+    check.docsUrl = 'https://nodejs.org/';
+  }
+  return check;
 }
 
 /** Try to bind `host:port` briefly. */

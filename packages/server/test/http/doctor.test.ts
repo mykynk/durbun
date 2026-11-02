@@ -16,6 +16,25 @@ describe('doctor', () => {
   it('checks the Node.js version', () => {
     expect(checkNodeVersion('22.23.4')).toMatchObject({ id: 'node', status: 'ok', version: 'v22.23.4' });
     expect(checkNodeVersion('v18.19.0')).toMatchObject({ status: 'error', fix: 'brew install node' });
+    expect(checkNodeVersion('22.23.4', undefined)).not.toHaveProperty('code');
+  });
+
+  it('inside Dürbün.app (process.versions.electron) the node check says it is embedded', () => {
+    expect(checkNodeVersion('22.20.0', '39.2.3')).toEqual({
+      id: 'node',
+      label: 'Node.js',
+      status: 'ok',
+      version: 'v22.20.0',
+      path: process.execPath,
+      code: 'doctor.node.embedded',
+      params: { electron: '39.2.3', node: '22.20.0' },
+      detail: 'Embedded in Dürbün.app (Electron 39.2.3, Node 22.20.0)',
+    });
+    // too old cannot be fixed with Homebrew there: the app has to be updated
+    const old = checkNodeVersion('v18.19.0', '28.0.0');
+    expect(old).toMatchObject({ status: 'error', code: 'doctor.node.embedded', params: { electron: '28.0.0', node: '18.19.0' } });
+    expect(old.detail).toContain('update the app');
+    expect(old).not.toHaveProperty('fix');
   });
 
   it('probes ports and reports bind failures with a lsof fix', async () => {
