@@ -52,6 +52,10 @@ export interface Strings {
   missingBundle(paths: string): string;
   retry: string;
   portFallbackNotice(wanted: number, used: number): string;
+  attachedVersionNotice(other: string, mine: string): string;
+  shellEnvNotice(shell: string, timeoutS?: number): string;
+  uiCrashedTitle: string;
+  uiCrashedMessage(reason: string): string;
   notificationsUnavailable: string;
 }
 
@@ -100,6 +104,13 @@ const tr: Strings = {
   missingBundle: (paths) => `Sunucu paketi bulunamadı:\n${paths}\n\nGeliştirme ortamında önce "npm run build" çalıştırın.`,
   retry: 'Tekrar Dene',
   portFallbackNotice: (wanted, used) => `${wanted} portu başka bir program tarafından kullanılıyor; Dürbün ${used} portunda çalışıyor.`,
+  attachedVersionNotice: (other, mine) => `Pencerede başka bir Dürbün (sürüm ${other}) açık; bu uygulama ${mine}. O kapanınca uygulama kendi sunucusunu başlatır.`,
+  shellEnvNotice: (shell, timeoutS) =>
+    timeoutS
+      ? `Giriş kabuğu (${shell}) ${timeoutS} saniyede yanıt vermedi; adb ve flutter gibi araçlar yalnızca bilinen klasörlerde aranıyor.`
+      : `Giriş kabuğundan (${shell}) ortam bilgisi alınamadı; adb ve flutter gibi araçlar yalnızca bilinen klasörlerde aranıyor.`,
+  uiCrashedTitle: 'Arayüz art arda kapandı',
+  uiCrashedMessage: (reason) => `Pencerenin içeriği kısa sürede birkaç kez beklenmedik şekilde kapandı (${reason}). Sunucu çalışmaya ve yakalamaya devam ediyor.`,
   notificationsUnavailable: 'macOS bildirimleri bu (imzasız) sürümde gösterilemedi; bunun yerine Dock simgesi işaretlenir.',
 };
 
@@ -148,6 +159,13 @@ const en: Strings = {
   missingBundle: (paths) => `The server bundle was not found:\n${paths}\n\nIn a development checkout run "npm run build" first.`,
   retry: 'Try Again',
   portFallbackNotice: (wanted, used) => `Port ${wanted} is used by another program; Dürbün runs on port ${used}.`,
+  attachedVersionNotice: (other, mine) => `The window shows another Dürbün (version ${other}); this app is ${mine}. When it stops, the app starts its own server.`,
+  shellEnvNotice: (shell, timeoutS) =>
+    timeoutS
+      ? `Login shell (${shell}) did not answer within ${timeoutS} s; adb, flutter and other tools are searched in well-known folders only.`
+      : `Login shell (${shell}) did not report its environment; adb, flutter and other tools are searched in well-known folders only.`,
+  uiCrashedTitle: 'The window content keeps crashing',
+  uiCrashedMessage: (reason) => `The window content closed unexpectedly several times in a short while (${reason}). The server keeps running and capturing.`,
   notificationsUnavailable: 'macOS notifications could not be shown by this (unsigned) build; the Dock icon is marked instead.',
 };
 
