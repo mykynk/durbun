@@ -297,6 +297,14 @@ class TransportCore {
 
   Future<void> _listenLoop() async {
     while (!_stopped) {
+      if (_hello == null) {
+        // Bind only once there is a hello to send. It reaches a background
+        // engine a moment after the engine started (and the Flutter glue may
+        // hold it back, see helloGate); a desktop that connected in between
+        // would be accepted and dropped. Unbound, it is refused and retries.
+        await (_helloWaiter ??= Completer<void>()).future;
+        continue;
+      }
       ServerSocket? server;
       for (final port in config.listenPorts) {
         try {
