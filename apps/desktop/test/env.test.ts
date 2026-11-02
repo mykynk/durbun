@@ -68,6 +68,28 @@ describe('mergeShellEnv', () => {
     expect(Object.keys(changes)).toEqual(['PATH']);
   });
 
+  it('takes the variables the server\'s tool lookup reads (fvm cache, Xcode choice, adb server port)', () => {
+    const changes = mergeShellEnv(
+      finder,
+      {
+        PATH: '/usr/bin:/bin',
+        FVM_CACHE_PATH: '/Volumes/Work/fvm',
+        FVM_HOME: '/Users/dev/.fvm',
+        DEVELOPER_DIR: '/Applications/Xcode-beta.app/Contents/Developer',
+        ANDROID_ADB_SERVER_PORT: '5038',
+        PS1: '%n@%m %1~ %# ',
+      },
+      { home, exists: () => false },
+    );
+    expect(changes).toMatchObject({
+      FVM_CACHE_PATH: '/Volumes/Work/fvm',
+      FVM_HOME: '/Users/dev/.fvm',
+      DEVELOPER_DIR: '/Applications/Xcode-beta.app/Contents/Developer',
+      ANDROID_ADB_SERVER_PORT: '5038',
+    });
+    expect(changes).not.toHaveProperty('PS1');
+  });
+
   it('does not override with empty values and reports no change when equal', () => {
     const current = { PATH: '/usr/bin:/bin', JAVA_HOME: '/jdk' };
     expect(mergeShellEnv(current, { PATH: '/usr/bin:/bin', JAVA_HOME: '' }, { home, exists: () => false })).toEqual({});
@@ -109,6 +131,7 @@ describe('readLoginShellEnv (fake shells)', () => {
     const r = await readLoginShellEnv({ shell, timeoutMs: 300 });
     expect(r.env).toBeNull();
     expect(r.error).toMatch(/timed out/);
+    expect(r.timedOut).toBe(true);
     expect(Date.now() - started).toBeLessThan(3_000);
   });
 

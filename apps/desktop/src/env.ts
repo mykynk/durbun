@@ -11,7 +11,23 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export const SHELL_ENV_KEYS = ['PATH', 'ANDROID_HOME', 'ANDROID_SDK_ROOT', 'FLUTTER_ROOT', 'JAVA_HOME'] as const;
+/**
+ * What the server's tools read: PATH; adb (ANDROID_HOME / ANDROID_SDK_ROOT, and ANDROID_ADB_SERVER_PORT,
+ * without which a second adb server would fight the user's over the devices); the Flutter SDK lookup
+ * (FLUTTER_ROOT, fvm's FVM_CACHE_PATH / FVM_HOME, see packages/server/src/platform/tools.ts); xcrun's
+ * Xcode choice (DEVELOPER_DIR); Gradle/Java (JAVA_HOME).
+ */
+export const SHELL_ENV_KEYS = [
+  'PATH',
+  'ANDROID_HOME',
+  'ANDROID_SDK_ROOT',
+  'ANDROID_ADB_SERVER_PORT',
+  'FLUTTER_ROOT',
+  'FVM_CACHE_PATH',
+  'FVM_HOME',
+  'DEVELOPER_DIR',
+  'JAVA_HOME',
+] as const;
 export type ShellEnvKey = (typeof SHELL_ENV_KEYS)[number];
 
 export interface ShellEnvResult {
@@ -20,9 +36,12 @@ export interface ShellEnvResult {
   shell: string;
   ms: number;
   error?: string;
+  /** The shell did not print its environment within the timeout. */
+  timedOut?: boolean;
 }
 
 const MAX_OUTPUT = 4 * 1024 * 1024;
+export const SHELL_ENV_TIMEOUT_MS = 3_000;
 
 /** The user's login shell: $SHELL, else the passwd entry (Finder launches have no $SHELL), else zsh. */
 export function loginShell(env: NodeJS.ProcessEnv = process.env): string {
@@ -120,18 +139,18 @@ export interface ReadShellEnvOptions {
 /** Ask the login shell for its environment. Resolves within ~timeoutMs, never rejects. */
 export function readLoginShellEnv(opts: ReadShellEnvOptions = {}): Promise<ShellEnvResult> {
   const shell = opts.shell ?? loginShell(opts.env);
-  const timeoutMs = opts.timeoutMs ?? 3_000;
+  const timeoutMs = opts.timeoutMs ?? SHELL_ENV_TIMEOUT_MS;
   const marker = `__DURBUN_ENV_${randomBytes(6).toString('hex')}__`;
   const started = Date.now();
   return new Promise((resolve) => {
     let settled = false;
     let stdout = '';
     let timer: NodeJS.Timeout | undefined;
-    const finish = (env: Record<string, string> | null, error?: string) => {
+    const finish = (env: Record<string, string> | null, error?: string, timedOut = false) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      resolve({ env, shell, ms: Date.now() - started, error });
+      resolve({ env, shell, ms: Date.now() - started, error, ...(timedOut ? { timedOut } : {}) });
     };
     let child: ReturnType<typeof spawn>;
     try {
@@ -154,7 +173,7 @@ export function readLoginShellEnv(opts: ReadShellEnvOptions = {}): Promise<Shell
     timer = setTimeout(() => {
       killGroup(child.pid);
       const env = parseEnvBlock(stdout, marker);
-      finish(env, env ? undefined : `timed out after ${timeoutMs} ms`);
+      finish(env, env ? undefined : `timed out after ${timeoutMs} ms`, !env);
     }, timeoutMs);
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
