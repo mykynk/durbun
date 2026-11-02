@@ -6,6 +6,11 @@
  * Cost: one `pm list packages -3` + `-s` call per 5 min (or when an unknown package's process
  * appears, at most every 15 s), one batched `dumpsys package` call per newly seen package (refreshed on
  * `Start proc` when the cached info is older than 30 s, which catches reinstalls / updates).
+ *
+ * App label (DeviceApp.name): stock adb has no aapt and nothing resolves string resources without loading
+ * the APK, so only a literal manifest label is read — `cmd package resolve-activity` (Android 7+, a binder
+ * call, no resources) prints it as `nonLocalizedLabel=`. Flutter's template label (`android:label="pati"`)
+ * and manifest placeholders are literals; `@string/app_name` labels stay undefined (the UI shows the id).
  */
 import type { AppBuildType, AppInstallSource, DeviceApp } from '@durbun/protocol';
 import type { HubSink, Logger } from '../../types';
@@ -17,6 +22,7 @@ import { parsePackageList } from './parsers';
 
 export const PKG_SECTION = '___DURBUN_PKGS___';
 export const PKG_DUMP_SEP = '___DURBUN_PKG___';
+export const PKG_LABEL_SEP = '___DURBUN_LABEL___';
 
 const PACKAGE_RE = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$/;
 
@@ -76,6 +82,8 @@ export function parsePackageLists(text: string): PackageLists | undefined {
 
 export interface PackageDetails {
   id: string;
+  /** Literal launcher / application label (see the header comment), when the manifest has one. */
+  label?: string;
   versionName?: string;
   versionCode?: string;
   debuggable?: boolean;
@@ -90,8 +98,9 @@ export interface PackageDetails {
   lastUpdateTime?: string;
 }
 
+// Case-insensitive: some builds print "InstallerPackageName" (SPEC §10.2).
 const INSTALL_KEY_RE =
-  /\b(installerPackageName|installInitiatingPackageName|initiatingPackageName|installOriginatingPackageName|originatingPackageName|updateOwnerPackageName)[=:]\s*([A-Za-z0-9_.]+)/g;
+  /\b(installerPackageName|installInitiatingPackageName|initiatingPackageName|installOriginatingPackageName|originatingPackageName|updateOwnerPackageName)[=:]\s*([A-Za-z0-9_.]+)/gi;
 
 function nonNull(v: string | undefined): string | undefined {
   if (v === undefined) return undefined;
@@ -165,19 +174,19 @@ export function parseDumpsysPackage(text: string, pkg: string): PackageDetails |
     INSTALL_KEY_RE.lastIndex = 0;
     for (let m = INSTALL_KEY_RE.exec(line); m; m = INSTALL_KEY_RE.exec(line)) {
       const value = nonNull(m[2]);
-      switch (m[1]) {
-        case 'installerPackageName':
+      switch (m[1]!.toLowerCase()) {
+        case 'installerpackagename':
           if (!('installer' in out)) out.installer = value;
           break;
-        case 'initiatingPackageName':
-        case 'installInitiatingPackageName':
+        case 'initiatingpackagename':
+        case 'installinitiatingpackagename':
           if (!('initiator' in out)) out.initiator = value;
           break;
-        case 'originatingPackageName':
-        case 'installOriginatingPackageName':
+        case 'originatingpackagename':
+        case 'installoriginatingpackagename':
           if (!('originator' in out)) out.originator = value;
           break;
-        case 'updateOwnerPackageName':
+        case 'updateownerpackagename':
           if (!('updateOwner' in out)) out.updateOwner = value;
           break;
       }
@@ -190,13 +199,50 @@ export function parseDumpsysPackage(text: string, pkg: string): PackageDetails |
   return out;
 }
 
-/** Several `dumpsys package` outputs separated by `echo PKG_DUMP_SEP`, in `pkgs` order. */
+/** Shell command reading one package: `dumpsys package` + its launcher label lines (filtered on the device). */
+export function packageInfoCommand(pkg: string): string {
+  return [
+    `dumpsys package ${pkg}`,
+    `echo ${PKG_LABEL_SEP}`,
+    `cmd package resolve-activity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${pkg} 2>/dev/null | grep -E 'packageName=|nonLocalizedLabel='`,
+  ].join('; ');
+}
+
+const LABEL_RE = /\bnonLocalizedLabel=(.*?) icon=0x[0-9a-f]+/;
+
+/**
+ * Label from `cmd package resolve-activity` (ResolveInfo.dump: "packageName=…" then "labelRes=0x0
+ * nonLocalizedLabel=Pati icon=0x… banner=0x…" for the activity, then for its ApplicationInfo). The
+ * activity's own label wins (the launcher shows it); lines of another package (a chooser) are ignored.
+ */
+export function parseLauncherLabel(text: string, pkg: string): string | undefined {
+  let owner: string | undefined;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (line.startsWith('packageName=')) {
+      owner = line.slice('packageName='.length).trim();
+      continue;
+    }
+    if (owner !== pkg) continue;
+    const label = LABEL_RE.exec(line)?.[1]?.trim();
+    // eslint-disable-next-line no-control-regex
+    if (label && label !== 'null' && label.length <= 100 && !/[\u0000-\u001f]/.test(label)) return label;
+  }
+  return undefined;
+}
+
+/** Several `packageInfoCommand` outputs separated by `echo PKG_DUMP_SEP`, in `pkgs` order. */
 export function splitPackageDumps(text: string, pkgs: string[]): Map<string, PackageDetails | undefined> {
   const chunks = text.split(new RegExp(`^${PKG_DUMP_SEP}\\s*$`, 'm'));
   const out = new Map<string, PackageDetails | undefined>();
   pkgs.forEach((pkg, i) => {
     const chunk = chunks[i];
-    if (chunk !== undefined) out.set(pkg, parseDumpsysPackage(chunk, pkg));
+    if (chunk === undefined) return;
+    const [dump = '', labels = ''] = chunk.split(new RegExp(`^${PKG_LABEL_SEP}\\s*$`, 'm'));
+    const details = parseDumpsysPackage(dump, pkg);
+    const label = details ? parseLauncherLabel(labels, pkg) : undefined;
+    if (details && label) details.label = label;
+    out.set(pkg, details);
   });
   return out;
 }
@@ -321,11 +367,13 @@ export class DeviceAppTracker {
     }
   }
 
-  /** Device removed / driver stopping: the hub drops this device's apps. */
+  /**
+   * Device unplugged / driver stopping: stop and forget. The apps stay in the hub (not running), like the
+   * device's logs; the hub drops them itself when the device is removed. Only uninstalls remove apps here.
+   */
   dispose(): void {
-    this.apps.clear();
     this.stop();
-    this.deps.hub.removeDeviceApps(this.deps.deviceId);
+    this.apps.clear();
   }
 
   /** true when the package lists are known (waits for a read in progress; false = not readable now). */
@@ -477,6 +525,7 @@ export class DeviceAppTracker {
     };
     if (app.processName) input.processName = app.processName;
     const info = app.info;
+    if (info?.label) input.name = info.label;
     const crash = app.crash;
     const version = info?.versionName ?? crash?.version;
     const build = info?.versionCode ?? crash?.build;
@@ -619,7 +668,7 @@ export class DeviceAppTracker {
         let parsed = new Map<string, PackageDetails | undefined>();
         let failed = !adb;
         if (adb && pkgs.length) {
-          const cmd = pkgs.map((p) => `dumpsys package ${p}`).join(`; echo ${PKG_DUMP_SEP}; `);
+          const cmd = pkgs.map(packageInfoCommand).join(`; echo ${PKG_DUMP_SEP}; `);
           try {
             const r = await adb.shell(this.deps.serial, cmd, { timeoutMs: 20_000 + pkgs.length * 3000 });
             if (gen !== this.gen) return;

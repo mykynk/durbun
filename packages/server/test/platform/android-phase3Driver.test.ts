@@ -1,7 +1,7 @@
 /**
  * End to end through the real AndroidDriver with a fake `adb` (android-fixtures/fake-adb.cjs):
  * DeviceApps from ps + `dumpsys package`, logcat origin, dropbox crash de-duplicated against the live
- * logcat crash, SurfaceFlinger frame stats for a watched Flutter app, removal on unplug.
+ * logcat crash, SurfaceFlinger frame stats for a watched Flutter app, apps kept (not running) on unplug.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -75,13 +75,14 @@ describe('AndroidDriver phase 3 (DeviceApps, dropbox, frame stats) with a fake a
   it('publishes the running third-party apps with build / installer details', async () => {
     await waitFor(() => ctx.hub.deviceApps.size >= 2, 10_000);
     const pati = ctx.hub.deviceApps.get(`${ID}|com.mykynk.pati`)!;
-    expect(pati).toMatchObject({ buildType: 'debug', version: '1.4.0-dev', build: '1', install: { source: 'adb' }, running: true });
+    expect(pati).toMatchObject({ buildType: 'debug', version: '1.4.0-dev', build: '1', install: { source: 'adb' }, running: true, name: 'Pati QA' });
     await waitFor(() => ctx.hub.deviceApps.get(`${ID}|com.mykynk.pati`)?.pids.join() === '4500', 5000);
     expect(ctx.hub.deviceApps.get(`${ID}|com.mykynk.mahalle`)).toMatchObject({
       buildType: 'release',
       install: { source: 'play', installer: 'com.android.vending' },
       pids: [5100],
     });
+    expect(ctx.hub.deviceApps.get(`${ID}|com.mykynk.mahalle`)?.name).toBeUndefined(); // "@string/app_name": no cheap way
     expect([...ctx.hub.deviceApps.keys()].some((k) => k.includes('gms'))).toBe(false);
     // The device clock (UTC) converts install times.
     expect(pati.install.lastUpdate).toBe(Date.UTC(2026, 10, 2, 11, 41, 9));
@@ -102,6 +103,13 @@ describe('AndroidDriver phase 3 (DeviceApps, dropbox, frame stats) with a fake a
       data: { origin: 'dropbox', package: 'com.mykynk.pati', pid: 4321, previousLaunch: true, duplicateOf: live.id },
     });
     await waitFor(() => ctx.hub.deviceApps.get(`${ID}|com.mykynk.pati`)?.crashReports === 1, 5000);
+    // A previous-launch record counts as activity at its own time, never "now".
+    expect(ctx.hub.deviceAppUpserts.find((u) => u.crashReportsDelta === 1)?.lastActivity).toBe(box.ts);
+    // "No crashes" now means nothing was found: the reader says it works (only this reader is patched).
+    expect(ctx.hub.patches.find((p) => p.patch.readers)).toEqual({
+      id: ID,
+      patch: { readers: { crashReports: { status: 'ok', lastOk: expect.any(Number) } } },
+    });
     // Listing for the four tags in one call; --print only for the new record's second.
     const box1 = calls().filter((c) => c.includes('dumpsys dropbox'));
     expect(box1[0]).toContain('dumpsys dropbox data_app_crash; echo ___DURBUN_DROPBOX___; dumpsys dropbox data_app_anr');
@@ -116,15 +124,18 @@ describe('AndroidDriver phase 3 (DeviceApps, dropbox, frame stats) with a fake a
     expect(m.fps).toBeGreaterThan(50);
     expect(m.fps).toBeLessThanOrEqual(60);
     expect(calls().some((c) => c.includes("--latency 'SurfaceView[com.mykynk.pati/com.mykynk.pati.MainActivity]@0(BLAST)#1422'"))).toBe(true);
+    const frames = ctx.hub.patches.filter((p) => p.patch.readers?.frameStats);
+    expect(frames).toEqual([{ id: ID, patch: { readers: { frameStats: { status: 'ok', lastOk: expect.any(Number) } } } }]);
   }, 20_000);
 
-  it('removes the device apps when the phone is unplugged, without leaking processes', async () => {
+  it('keeps the device apps (not running) when the phone is unplugged, without leaking processes', async () => {
     const st = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')) as { devices: unknown[] };
     st.devices = [];
     fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(st));
     await waitFor(() => ctx.hub.disconnected.find((d) => d.id === ID), 8000);
-    expect(ctx.hub.removedDeviceApps).toContainEqual({ deviceId: ID });
-    expect(ctx.hub.deviceApps.size).toBe(0);
+    // The hub owns removal (device removed); an unplugged phone's apps stay for scoping its logs.
+    expect(ctx.hub.removedDeviceApps).toEqual([]);
+    expect(ctx.hub.deviceApps.get(`${ID}|com.mykynk.pati`)).toMatchObject({ running: false, pids: [], crashReports: 1 });
     await waitFor(() => liveChildCount() === 0, 5000);
   });
 }, 60_000);

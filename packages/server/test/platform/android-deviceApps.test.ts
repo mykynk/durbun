@@ -8,10 +8,13 @@ import {
   DEVICE_APP_TIMING,
   DeviceAppTracker,
   installSourceOf,
+  packageInfoCommand,
   packageListCommand,
   parseDumpsysPackage,
+  parseLauncherLabel,
   parsePackageLists,
   PKG_DUMP_SEP,
+  PKG_LABEL_SEP,
   splitPackageDumps,
 } from '../../src/platform/android/deviceApps';
 import type { RunResult } from '../../src/platform/exec';
@@ -103,6 +106,9 @@ describe('dumpsys package parsing', () => {
     const d = parseDumpsysPackage(text, 'com.acme.app')!;
     expect(d).toEqual({ id: 'com.acme.app', versionCode: '7', debuggable: false, initiator: 'com.android.shell', lastUpdateTime: '2026-11-01 08:00:00' });
     expect(installSourceOf(d)).toEqual({ source: 'adb', installer: 'com.android.shell' });
+    // Capitalized key (SPEC §10.2 "InstallerPackageName").
+    const capital = parseDumpsysPackage(text.replace(/installSource=.*/, 'InstallerPackageName=com.android.vending'), 'com.acme.app')!;
+    expect(installSourceOf(capital)).toEqual({ source: 'play', installer: 'com.android.vending' });
     expect(installSourceOf({ installer: 'com.google.android.packageinstaller' })).toEqual({
       source: 'other-store',
       installer: 'com.google.android.packageinstaller',
@@ -120,6 +126,31 @@ describe('dumpsys package parsing', () => {
     expect(m.get('com.mykynk.pati')?.versionName).toBe('1.4.0-dev');
     expect(m.get('com.gone.app')).toBeUndefined();
     expect(m.get('com.mykynk.mahalle')?.installer).toBe('com.android.vending');
+  });
+
+  it('reads a literal launcher label (DeviceApp.name); resource labels and other packages give none', () => {
+    const full = fx('resolve-activity-api34.txt');
+    expect(parseLauncherLabel(full, 'com.mykynk.pati')).toBe('Pati QA');
+    // The activity's own label wins over the application's (the launcher shows it).
+    const own = full.replace(
+      '  enabled=true exported=true',
+      '  labelRes=0x0 nonLocalizedLabel=Pati Dev icon=0x0 banner=0x0\n  enabled=true exported=true',
+    );
+    expect(parseLauncherLabel(own, 'com.mykynk.pati')).toBe('Pati Dev');
+    // android:label="@string/app_name": only a resource id (no aapt on the device to resolve it).
+    expect(parseLauncherLabel(full.replace('nonLocalizedLabel=Pati QA', 'nonLocalizedLabel=null').replace('labelRes=0x0', 'labelRes=0x7f120001'), 'com.mykynk.pati')).toBeUndefined();
+    // Two launcher activities → the system chooser resolves; its label is not the app's.
+    const chooser = 'ActivityInfo:\n  name=com.android.internal.app.ResolverActivity\n  packageName=android\n  labelRes=0x0 nonLocalizedLabel=Android System icon=0x0 banner=0x0\n';
+    expect(parseLauncherLabel(chooser, 'com.mykynk.pati')).toBeUndefined();
+    expect(parseLauncherLabel('No activity found\n', 'com.mykynk.pati')).toBeUndefined();
+    // Batched with dumpsys package: "<dump>\nLABEL_SEP\n<grep output>".
+    const batch = [`${fx('dumpsys-package-api34-debug-adb.txt')}${PKG_LABEL_SEP}\n${full}`, `Unable to find package: com.gone.app\n${PKG_LABEL_SEP}\n`].join(`${PKG_DUMP_SEP}\n`);
+    const m = splitPackageDumps(batch, ['com.mykynk.pati', 'com.gone.app']);
+    expect(m.get('com.mykynk.pati')).toMatchObject({ label: 'Pati QA', versionName: '1.4.0-dev' });
+    expect(m.get('com.gone.app')).toBeUndefined();
+    expect(packageInfoCommand('com.foo')).toBe(
+      `dumpsys package com.foo; echo ${PKG_LABEL_SEP}; cmd package resolve-activity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.foo 2>/dev/null | grep -E 'packageName=|nonLocalizedLabel='`,
+    );
   });
 
   it('parses pm list packages -3 / -s with the device clock', () => {
@@ -160,8 +191,16 @@ const DUMPS: Record<string, string> = {
   'com.example.native': 'dumpsys-package-api33-galaxy.txt',
 };
 
+/** `cmd package resolve-activity … | grep -E 'packageName=|nonLocalizedLabel='` as the device returns it. */
+const grepLabels = (text: string) => `${text.split('\n').filter((l) => /packageName=|nonLocalizedLabel=/.test(l)).join('\n')}\n`;
+
 function fakeDevice() {
-  const state = { lists: fx('pm-lists.txt'), dumps: { ...DUMPS } as Record<string, string>, failLists: false };
+  const state = {
+    lists: fx('pm-lists.txt'),
+    dumps: { ...DUMPS } as Record<string, string>,
+    labels: { 'com.mykynk.pati': fx('resolve-activity-api34.txt') } as Record<string, string>,
+    failLists: false,
+  };
   const calls: string[] = [];
   const adb = {
     path: '/fake/adb',
@@ -171,9 +210,11 @@ function fakeDevice() {
       if (cmd === packageListCommand()) return ok(state.failLists ? '' : state.lists);
       if (cmd.startsWith('dumpsys package ')) {
         const outs = cmd.split(`; echo ${PKG_DUMP_SEP}; `).map((part) => {
-          const pkg = part.slice('dumpsys package '.length);
+          const pkg = /^dumpsys package (\S+?);/.exec(part)![1]!;
+          expect(part).toBe(packageInfoCommand(pkg));
           const file = state.dumps[pkg];
-          return file ? fx(file) : `Unable to find package: ${pkg}\n`;
+          const dump = file ? fx(file) : `Unable to find package: ${pkg}\n`;
+          return `${dump}${PKG_LABEL_SEP}\n${state.labels[pkg] ? grepLabels(state.labels[pkg]!) : ''}`;
         });
         return ok(outs.join(`${PKG_DUMP_SEP}\n`));
       }
@@ -238,6 +279,7 @@ describe('DeviceAppTracker', () => {
       },
       pids: [4321, 4400],
       running: true,
+      name: 'Pati QA',
     });
     expect(pati.processName).toBeUndefined();
     expect(t.hub.deviceApps.get(KEY('com.mykynk.mahalle'))).toMatchObject({
@@ -326,7 +368,7 @@ describe('DeviceAppTracker', () => {
     t.tracker.dispose();
   });
 
-  it('drops uninstalled apps on the periodic refresh; stop() marks apps not running; dispose() removes all', async () => {
+  it('drops uninstalled apps on the periodic refresh; stop() marks apps not running; dispose() keeps them', async () => {
     DEVICE_APP_TIMING.listRefreshMs = 40;
     const t = setup([
       [4321, 'com.mykynk.pati'],
@@ -340,9 +382,23 @@ describe('DeviceAppTracker', () => {
     expect(t.hub.removedDeviceApps[0]).toEqual({ deviceId: 'android:R58M123ABC', ids: ['com.mykynk.mahalle'] });
     t.tracker.stop();
     expect(t.hub.deviceApps.get(KEY('com.mykynk.pati'))).toMatchObject({ running: false, pids: [] });
+    // Unplug: the hub keeps the app (scoping a disconnected device's logs) and owns its removal.
     t.tracker.dispose();
-    expect(t.hub.removedDeviceApps.at(-1)).toEqual({ deviceId: 'android:R58M123ABC' });
-    expect(t.hub.deviceApps.size).toBe(0);
+    expect(t.hub.removedDeviceApps).toHaveLength(1);
+    expect([...t.hub.deviceApps.keys()]).toEqual([KEY('com.mykynk.pati')]);
+    expect(t.tracker.trackedIds).toEqual([]);
+  });
+
+  it('dispose() of a running device marks its apps not running instead of removing them', async () => {
+    const t = setup([[4321, 'com.mykynk.pati']]);
+    await t.tracker.start();
+    await waitFor(() => t.hub.deviceApps.get(KEY('com.mykynk.pati'))?.running);
+    t.tracker.dispose();
+    expect(t.hub.removedDeviceApps).toEqual([]);
+    expect(t.hub.deviceApps.get(KEY('com.mykynk.pati'))).toMatchObject({ running: false, pids: [] });
+    const upserts = t.hub.deviceAppUpserts.length;
+    t.tracker.onProcessEvent({ pid: 4400, name: 'com.mykynk.pati', event: 'started' });
+    expect(t.hub.deviceAppUpserts).toHaveLength(upserts);
   });
 
   it('degrades quietly when pm cannot list packages', async () => {

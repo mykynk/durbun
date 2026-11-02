@@ -1,0 +1,36 @@
+priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false
+ActivityInfo:
+  name=com.mykynk.pati.MainActivity
+  packageName=com.mykynk.pati
+  enabled=true exported=true directBootAware=false
+  taskAffinity=com.mykynk.pati targetActivity=null persistableMode=PERSIST_ROOT_ONLY
+  launchMode=1 flags=0x20000ac0 privateFlags=0x0 theme=0x7f0f00a4
+  screenOrientation=-1 configChanges=0x40003fb4 softInputMode=0x10
+  lockTaskLaunchMode=LOCK_TASK_LAUNCH_MODE_DEFAULT
+  resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION
+  knownActivityEmbeddingCerts=[]
+  ApplicationInfo:
+    name=android.app.Application
+    packageName=com.mykynk.pati
+    labelRes=0x0 nonLocalizedLabel=Pati QA icon=0x7f0d0000 banner=0x0
+    className=android.app.Application
+    processName=com.mykynk.pati
+    taskAffinity=com.mykynk.pati
+    uid=10190 flags=0x38c8be46 privateFlags=0x24001000 theme=0x7f0f00a3
+    requiresSmallestWidthDp=0 compatibleWidthLimitDp=0 largestWidthLimitDp=0
+    sourceDir=/data/app/~~x0q1w2e3r4t5y6u7i8o9pA==/com.mykynk.pati-y1u2i3o4p5a6s7d8f9g0hQ==/base.apk
+    seinfo=default:targetSdkVersion=34
+    seinfoUser=:complete
+    dataDir=/data/user/0/com.mykynk.pati
+    deviceProtectedDataDir=/data/user_de/0/com.mykynk.pati
+    credentialProtectedDataDir=/data/user/0/com.mykynk.pati
+    enabled=true minSdkVersion=21 targetSdkVersion=34 versionCode=1 targetSandboxVersion=1
+    supportsRtl=true
+    fullBackupContent=true
+    crossProfile=false
+    HiddenApiEnforcementPolicy=2
+    usesNonSdkApi=false
+    allowsPlaybackCapture=true
+    nativeHeapZeroInitialized=-1
+    enableOnBackInvokedCallback=false
+    isAllowlistedForHiddenApis=false

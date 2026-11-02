@@ -82,6 +82,12 @@ function part(p) {
   if (p.startsWith('ps')) return PS;
   if (p === 'pm list packages -3') return 'package:com.mykynk.pati\npackage:com.mykynk.mahalle\npackage:com.example.native\n';
   if (p === 'pm list packages -s') return 'package:android\npackage:com.google.android.gms\npackage:com.android.systemui\n';
+  if (p.startsWith('cmd package resolve-activity ')) {
+    // "… <pkg> 2>/dev/null | grep -E 'packageName=|nonLocalizedLabel='", answered already filtered.
+    const pkg = p.split(' 2>/dev/null')[0].split(' ').pop();
+    if (pkg !== 'com.mykynk.pati') return '';
+    return fx('resolve-activity-api34.txt').split('\n').filter((l) => /packageName=|nonLocalizedLabel=/.test(l)).join('\n') + '\n';
+  }
   if (p.startsWith('dumpsys package ')) {
     const pkg = p.slice('dumpsys package '.length);
     return DUMPS[pkg] ? fx(DUMPS[pkg]) : `Unable to find package: ${pkg}\n`;
