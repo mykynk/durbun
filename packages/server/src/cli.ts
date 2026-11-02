@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PORTS } from '@durbun/protocol';
 import { defaultDataDir, expandHome, tildify } from './config';
 import { errorMessage } from './http/util';
-import { installShutdownHandlers, ServerStartError, startServer, type StartedServer } from './server';
+import { installShutdownHandlers, probeServer, ServerStartError, startServer, type StartedServer } from './server';
 import type { StartServerOptions } from './types';
 import { createLogger, setLogLevel } from './util/logger';
 import { SERVER_VERSION } from './version';
@@ -337,16 +337,8 @@ export async function openUi(url: string): Promise<string | undefined> {
 }
 
 /** Is a Dürbün already answering on this port? (GET /api/health) */
-export async function probeDurbun(port: number, timeoutMs = 1_500): Promise<{ version: string } | undefined> {
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) return undefined;
-    const body = (await res.json()) as { ok?: unknown; name?: unknown; version?: unknown };
-    if (body && body.ok === true && body.name === 'durbun') return { version: String(body.version ?? '?') };
-  } catch {
-    /* nothing there, or not HTTP */
-  }
-  return undefined;
+export function probeDurbun(port: number, timeoutMs = 1_500): Promise<{ version: string } | undefined> {
+  return probeServer(port, timeoutMs);
 }
 
 /* ────────────────────────────── main ────────────────────────────── */
