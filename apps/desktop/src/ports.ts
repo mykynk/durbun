@@ -54,7 +54,7 @@ export async function planHttpPort(preferred: number, sdkPort: number, deps: Por
   return { kind: 'start', port: 0, fallback: true };
 }
 
-/** GET /api/health → { ok: true, name: 'durbun', version } */
+/** GET /api/health → { ok: true, name: 'durbun', version }. Fallback for bundles without probeServer. */
 export async function probeDurbun(port: number, timeoutMs = 1_200): Promise<DurbunProbe | undefined> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
@@ -96,14 +96,14 @@ export function acceptsConnections(port: number, host: string, timeoutMs = 400):
  * Is the port free for Dürbün? The server binds 127.0.0.1, but the window loads http://localhost:port
  * and Chromium tries ::1 first: a program listening on [::1]:port or [::]:port (Node/Vite servers bound
  * to "localhost" or to no host) does not stop the 127.0.0.1 bind, yet it would be the page the window
- * shows. Such a port counts as taken.
+ * shows. Such a port counts as taken. So does a program on 0.0.0.0:port: macOS lets 127.0.0.1 bind on
+ * top of it (stealing its local traffic), and the server's LAN bind (settings.allowLan) fails there.
  */
 export async function isPortFree(port: number): Promise<boolean> {
   if (!(await canBind(port, '127.0.0.1'))) return false;
+  if (!(await canBind(port, '0.0.0.0'))) return false;
   return !(await acceptsConnections(port, '::1'));
 }
-
-export const defaultPortDeps: PortDeps = { probe: (p) => probeDurbun(p), isFree: isPortFree };
 
 /**
  * While the window shows another Dürbün (attach), check it every `intervalMs`; after `misses`

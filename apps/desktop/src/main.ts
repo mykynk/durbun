@@ -5,7 +5,8 @@
  *  - single instance (a second launch focuses the window)
  *  - PATH / ANDROID_HOME / … from the login shell before the server starts (Finder gives a bare env)
  *  - port 9750 / SDK 9751 (DURBUN_PORT / DURBUN_SDK_PORT override); a Dürbün already on the port is
- *    reused; a port held by another program → a nearby free port
+ *    reused (and replaced by our own server when it stops); a port held by another program → a nearby
+ *    free port
  *  - data dir ~/.durbun (shared with the CLI; DURBUN_DATA_DIR overrides; DURBUN_USER_DATA_DIR moves the
  *    Electron profile, DURBUN_DEMO=1 starts with demo data, DURBUN_DEBUG=1 logs verbosely)
  *  - menu-bar item, closing the window keeps capturing; Quit (⌘Q / menu bar) stops the server cleanly
@@ -16,16 +17,19 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DESKTOP_CSS, splashUrl, TRAFFIC_LIGHTS } from './chrome';
-import { applyLoginShellEnv, type ShellEnvKey, type ShellEnvResult } from './env';
+import { splashUrl, statusPageUrl, syncFullScreen, TRAFFIC_LIGHTS } from './chrome';
+import { applyLoginShellEnv, SHELL_ENV_TIMEOUT_MS, type ShellEnvKey, type ShellEnvResult } from './env';
 import { pickLanguage, STRINGS, type Strings } from './i18n';
-import { installFileLog, type FileLog } from './log';
+import { createQuitFlow } from './lifecycle';
+import { installFileLog, type FileLog, type ScopedLogger } from './log';
 import { appMenuTemplate, serverLabel, trayMenuTemplate, type MenuHandlers, type ServerState } from './menu';
 import { decideNavigation, isAllowedPermission, isAllowedRequest, isAppUrl, REQUEST_FILTER_URLS } from './navigation';
 import { createNotifier, type Notifier, type NotifyRequest } from './notifier';
 import { devIconPath, serverPaths } from './paths';
-import { DEFAULT_HTTP_PORT, DEFAULT_SDK_PORT, defaultPortDeps, parsePortEnv, planHttpPort } from './ports';
+import { DEFAULT_HTTP_PORT, DEFAULT_SDK_PORT, isPortFree, parsePortEnv, probeDurbun, watchAttached, type DurbunProbe } from './ports';
+import { createReloadGuard, resolveFailure, type FailureChoice } from './recovery';
 import { runSelfTest } from './selftest';
+import { startOrAttachServer } from './startup';
 import { renderTrayBitmap } from './trayIcon';
 import { fitBounds, MIN_SIZE, readWindowState, THEME_BACKGROUND, writeWindowState, type Theme, type WindowState } from './windowState';
 
@@ -38,14 +42,19 @@ interface EmbeddedServer {
   stop(): Promise<void>;
 }
 interface ServerModule {
-  startServer(opts: {
-    httpPort: number;
-    sdkPort: number;
-    demo: boolean;
-    dataDir: string;
-    uiDir?: string;
-    verbose: boolean;
-  }): Promise<EmbeddedServer>;
+  startServer(
+    opts: {
+      httpPort: number;
+      sdkPort: number;
+      demo: boolean;
+      dataDir: string;
+      uiDir?: string;
+      verbose: boolean;
+    },
+    extras?: { logger?: ScopedLogger },
+  ): Promise<EmbeddedServer>;
+  /** "Is a Dürbün answering on this port?" (absent in bundles older than phase 3). */
+  probeServer?(port: number): Promise<DurbunProbe | undefined>;
 }
 
 const STOP_TIMEOUT_MS = 12_000;
@@ -83,8 +92,7 @@ function run(): void {
   let startInFlight: Promise<EmbeddedServer> | null = null;
   let appOrigin: string | null = null;
   let state: ServerState = { kind: 'starting' };
-  let quitting = false;
-  let stopped = false;
+  let stopWatch: (() => void) | null = null;
   let shellEnv: { result: ShellEnvResult; changed: ShellEnvKey[] } | null = null;
   const externalOpened: string[] = [];
   const stateFile = path.join(app.getPath('userData'), 'window-state.json');
@@ -133,6 +141,18 @@ function run(): void {
     state = next;
     refreshMenus();
   };
+
+  const currentTheme = (): Theme => winState.theme ?? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+  /** What the window shows without a UI: the splash, or why the server could not start. */
+  const statusPage = (theme: Theme) =>
+    state.kind === 'failed' ? statusPageUrl({ theme, title: t.startFailedTitle, text: state.error, busy: false }) : splashUrl(t.splash, theme);
+
+  const quitFlow = createQuitFlow({
+    stop: () => stopServer(),
+    quit: () => app.quit(),
+    onStopped: () => tray?.destroy(),
+  });
+  const isQuitting = () => quitFlow.quitting;
 
   const notifier: Notifier = createNotifier({ log, onClick: showWindow, isFocused: () => !!win && !win.isDestroyed() && win.isFocused() });
 
@@ -207,7 +227,7 @@ function run(): void {
     const primary = screen.getPrimaryDisplay();
     const areas = [primary, ...screen.getAllDisplays().filter((d) => d.id !== primary.id)].map((d) => d.workArea);
     const bounds = fitBounds(winState.bounds, areas);
-    const theme: Theme = winState.theme ?? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+    const theme = currentTheme();
     const w = new BrowserWindow({
       ...bounds,
       minWidth: MIN_SIZE.width,
@@ -249,7 +269,7 @@ function run(): void {
     w.on('close', (event) => {
       saveBounds();
       // macOS: closing the window keeps Dürbün running in the menu bar (capture continues).
-      if (!quitting) {
+      if (!isQuitting()) {
         event.preventDefault();
         w.hide();
       }
@@ -258,25 +278,38 @@ function run(): void {
       if (win === w) win = null;
     });
     w.on('focus', () => notifier.clearBadge());
-    w.on('enter-full-screen', () => w.webContents.send('durbun:fullscreen', true));
-    w.on('leave-full-screen', () => w.webContents.send('durbun:fullscreen', false));
+    syncFullScreen(w, (on) => {
+      if (!w.isDestroyed()) w.webContents.send('durbun:fullscreen', on);
+    });
 
     const wc = w.webContents;
-    wc.on('dom-ready', () => {
-      if (appOrigin && isAppUrl(wc.getURL(), appOrigin)) wc.insertCSS(DESKTOP_CSS).catch(() => undefined);
-    });
     let retries = 0;
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
       if (!isMainFrame || !appOrigin || !isAppUrl(url, appOrigin) || code === -3 /* aborted */) return;
       log.warn(`UI load failed (${code} ${description}) for ${url}`);
       if (retries++ < 10) setTimeout(() => !w.isDestroyed() && w.loadURL(url), 1_000);
     });
+    const reloads = createReloadGuard();
     wc.on('render-process-gone', (_e, details) => {
       log.error(`renderer gone: ${details.reason} (exit ${details.exitCode})`);
-      if (details.reason !== 'clean-exit' && appOrigin && !w.isDestroyed()) setTimeout(() => !w.isDestroyed() && w.loadURL(appOrigin!), 500);
+      if (details.reason === 'clean-exit' || !appOrigin || w.isDestroyed()) return;
+      if (reloads.allow()) {
+        setTimeout(() => !w.isDestroyed() && appOrigin && w.loadURL(appOrigin), 500);
+        return;
+      }
+      log.error('the UI keeps crashing; automatic reloads stopped');
+      void dialog
+        .showMessageBox(w, { type: 'warning', message: t.uiCrashedTitle, detail: t.uiCrashedMessage(details.reason), buttons: [t.reload, t.showLog], defaultId: 0, cancelId: 1 })
+        .then(({ response }) => {
+          if (response === 1) shell.showItemInFolder(log.file);
+          else if (!w.isDestroyed() && appOrigin) {
+            reloads.reset();
+            void w.loadURL(appOrigin);
+          }
+        });
     });
 
-    void w.loadURL(appOrigin ?? splashUrl(t.splash, theme));
+    void w.loadURL(appOrigin ?? statusPage(theme));
   }
 
   function loadUi(origin: string): void {
@@ -315,7 +348,11 @@ function run(): void {
   /* ───────────── server ───────────── */
 
   async function startOrAttach(): Promise<void> {
+    stopWatch?.();
+    stopWatch = null;
+    const wasFailed = state.kind === 'failed';
     setState({ kind: 'starting' });
+    if (wasFailed && !appOrigin && win && !win.isDestroyed()) void win.loadURL(statusPage(currentTheme()));
     const paths = serverPaths({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() });
     if (!existsSync(paths.entry)) return fail(t.missingBundle(paths.entry));
     let mod: ServerModule;
@@ -328,61 +365,77 @@ function run(): void {
     const httpPort = parsePortEnv(process.env.DURBUN_PORT, DEFAULT_HTTP_PORT);
     const sdkPort = parsePortEnv(process.env.DURBUN_SDK_PORT, DEFAULT_SDK_PORT);
     const uiDir = existsSync(path.join(paths.uiDir, 'index.html')) ? paths.uiDir : undefined;
-    let lastError = '';
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const plan = await planHttpPort(httpPort, sdkPort, defaultPortDeps);
-      if (quitting) return;
-      if (plan.kind === 'attach') {
-        log.info(`a Dürbün ${plan.version} already runs on port ${plan.port}; opening it`);
-        setState({ kind: 'attached', port: plan.port });
-        loadUi(`http://localhost:${plan.port}`);
-        return;
-      }
-      try {
-        log.info(`starting the server on port ${plan.port || '(auto)'} / SDK ${sdkPort}, data ${dataDir}, ui ${uiDir ?? '(none)'}`);
-        startInFlight = mod.startServer({
-          httpPort: plan.port,
-          sdkPort,
-          demo: process.env.DURBUN_DEMO === '1',
-          dataDir,
-          uiDir,
-          verbose: Boolean(process.env.DURBUN_DEBUG),
+    const verbose = Boolean(process.env.DURBUN_DEBUG);
+    // "Is it a real Dürbün?" is the server's own definition (GET /api/health), not a copy of it.
+    const probe = (port: number) => (typeof mod.probeServer === 'function' ? mod.probeServer(port) : probeDurbun(port));
+    const outcome = await startOrAttachServer(httpPort, sdkPort, {
+      probe,
+      isFree: isPortFree,
+      cancelled: isQuitting,
+      onBusy: (port) => log.warn(`port ${port} turned out to be busy; trying the next one`),
+      start: (port) => {
+        log.info(`starting the server on port ${port || '(auto)'} / SDK ${sdkPort}, data ${dataDir}, ui ${uiDir ?? '(none)'}`);
+        const p = mod.startServer({ httpPort: port, sdkPort, demo: process.env.DURBUN_DEMO === '1', dataDir, uiDir, verbose }, { logger: log.scoped('durbun', { debug: verbose }) });
+        startInFlight = p;
+        return p.finally(() => {
+          if (startInFlight === p) startInFlight = null;
         });
-        const started = await startInFlight.finally(() => {
-          startInFlight = null;
-        });
-        if (quitting) return; // quit was requested meanwhile; stopServer() took over this server
-        server = started;
-        const port = started.info?.ports?.http ?? (Number(new URL(started.url).port) || plan.port);
-        const warnings = [...started.warnings];
-        if (plan.fallback) warnings.unshift(t.portFallbackNotice(httpPort, port));
-        for (const w of warnings) log.warn(w);
-        log.info(`server running at ${started.url}`);
-        setState({ kind: 'running', port, warnings });
-        loadUi(`http://localhost:${port}`);
-        return;
-      } catch (err) {
-        const e = err as Error & { code?: string };
-        lastError = e.message;
-        if (e.code === 'EADDRINUSE') {
-          log.warn(`port ${plan.port} became busy; trying again`);
-          continue;
-        }
-        return fail(e.message);
-      }
+      },
+    });
+    if (isQuitting() || outcome.kind === 'cancelled') return; // a server started meanwhile is stopped by stopServer()
+    if (outcome.kind === 'failed') return fail(outcome.error);
+    if (outcome.kind === 'attached') {
+      const mine = app.getVersion();
+      const warnings = outcome.version !== mine && outcome.version !== '?' ? [t.attachedVersionNotice(outcome.version, mine)] : [];
+      log.info(`a Dürbün ${outcome.version} already runs on port ${outcome.port}; opening it`);
+      for (const w of warnings) log.warn(w);
+      setState({ kind: 'attached', port: outcome.port, warnings });
+      loadUi(`http://localhost:${outcome.port}`);
+      // When that Dürbün stops (its terminal closed), this app starts its own server instead of
+      // leaving the window on a dead page.
+      stopWatch = watchAttached(outcome.port, {
+        probe,
+        onGone: () => {
+          stopWatch = null;
+          if (isQuitting()) return;
+          log.warn(`the Dürbün on port ${outcome.port} stopped answering; starting this app's own server`);
+          void startOrAttach();
+        },
+      });
+      return;
     }
-    return fail(lastError || 'no free port');
+    const started = outcome.server;
+    server = started;
+    const port = started.info?.ports?.http ?? (Number(new URL(started.url).port) || outcome.port);
+    const warnings = [...started.warnings, ...shellWarnings()];
+    if (outcome.fallback) warnings.unshift(t.portFallbackNotice(httpPort, port));
+    for (const w of warnings) log.warn(w);
+    log.info(`server running at ${started.url}`);
+    setState({ kind: 'running', port, warnings });
+    loadUi(`http://localhost:${port}`);
+  }
+
+  /** The login shell could not be asked: say so, tools may then be missing (Finder's bare PATH). */
+  function shellWarnings(): string[] {
+    const r = shellEnv?.result;
+    if (!r || r.env) return [];
+    return [t.shellEnvNotice(path.basename(r.shell), r.timedOut ? SHELL_ENV_TIMEOUT_MS / 1000 : undefined)];
   }
 
   async function fail(message: string): Promise<void> {
     log.error(`server start failed: ${message}`);
     setState({ kind: 'failed', error: message });
+    if (isQuitting()) return;
     if (selfTestFile) {
       await writeSelfTestFailure(message);
       app.quit();
       return;
     }
-    const parent = win && !win.isDestroyed() ? win : undefined;
+    // The window says why instead of "starting…", and the dialog keeps Retry within reach.
+    appOrigin = null;
+    refreshMenus();
+    if (win && !win.isDestroyed()) void win.loadURL(statusPage(currentTheme()));
+    showWindow();
     const options = {
       type: 'error' as const,
       message: t.startFailedTitle,
@@ -391,10 +444,18 @@ function run(): void {
       defaultId: 0,
       cancelId: 2,
     };
-    const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
-    if (response === 0) return startOrAttach();
-    if (response === 1) shell.showItemInFolder(log.file);
-    else app.quit();
+    const choices: FailureChoice[] = ['retry', 'log', 'quit'];
+    const choice = await resolveFailure(
+      async () => {
+        const parent = win && !win.isDestroyed() ? win : undefined;
+        const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+        return choices[response] ?? 'quit';
+      },
+      () => shell.showItemInFolder(log.file),
+      isQuitting,
+    );
+    if (choice === 'retry') return startOrAttach();
+    if (choice === 'quit') app.quit();
   }
 
   async function writeSelfTestFailure(message: string): Promise<void> {
@@ -436,20 +497,12 @@ function run(): void {
     showWindow();
   });
   app.on('activate', () => showWindow());
-  app.on('window-all-closed', () => {
-    // Stay in the menu bar (the window is only hidden on close anyway).
-  });
-
-  let stopping: Promise<void> | null = null;
+  // Stay in the menu bar when the window closes (it is only hidden anyway), except during a quit.
+  app.on('window-all-closed', () => quitFlow.windowAllClosed());
   app.on('before-quit', (event) => {
-    quitting = true;
-    if (stopped) return;
-    event.preventDefault();
-    stopping ??= stopServer().finally(() => {
-      stopped = true;
-      tray?.destroy();
-      app.quit();
-    });
+    stopWatch?.();
+    stopWatch = null;
+    quitFlow.beforeQuit(event);
   });
   // `kill`, Ctrl+C in a terminal, logout: same clean path (adb/log stream children get stopped).
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {

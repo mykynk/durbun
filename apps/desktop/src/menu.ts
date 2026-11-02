@@ -81,7 +81,7 @@ export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: { canOpenInBr
 export type ServerState =
   | { kind: 'starting' }
   | { kind: 'running'; port: number; warnings: string[] }
-  | { kind: 'attached'; port: number }
+  | { kind: 'attached'; port: number; warnings: string[] }
   | { kind: 'failed'; error: string };
 
 export function serverLabel(t: Strings, s: ServerState): string {
@@ -103,7 +103,7 @@ export function trayMenuTemplate(t: Strings, s: ServerState, h: MenuHandlers): M
     { type: 'separator' },
     { label: serverLabel(t, s), enabled: false },
   ];
-  if (s.kind === 'running' && s.warnings.length > 0) {
+  if ((s.kind === 'running' || s.kind === 'attached') && s.warnings.length > 0) {
     items.push({ label: t.warnings(s.warnings.length), submenu: s.warnings.map((w) => ({ label: w.length > 120 ? w.slice(0, 117) + '…' : w, enabled: false })) });
   }
   if (s.kind === 'failed') items.push({ label: s.error.length > 120 ? s.error.slice(0, 117) + '…' : s.error, enabled: false });

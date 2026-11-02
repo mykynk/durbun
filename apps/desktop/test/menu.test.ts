@@ -66,8 +66,27 @@ describe('tray menu', () => {
   it('labels every state in both languages', () => {
     for (const t of [STRINGS.tr, STRINGS.en]) {
       expect(serverLabel(t, { kind: 'starting' })).toBeTruthy();
-      expect(serverLabel(t, { kind: 'attached', port: 9750 })).toContain('9750');
+      expect(serverLabel(t, { kind: 'attached', port: 9750, warnings: [] })).toContain('9750');
     }
-    expect(serverLabel(STRINGS.tr, { kind: 'attached', port: 9750 })).toBe('Sunucu: başka bir Dürbün · 9750');
+    expect(serverLabel(STRINGS.tr, { kind: 'attached', port: 9750, warnings: [] })).toBe('Sunucu: başka bir Dürbün · 9750');
+  });
+  it('tells which Dürbün the window shows when another one with a different version is attached', () => {
+    const t = STRINGS.tr;
+    const items = trayMenuTemplate(t, { kind: 'attached', port: 9750, warnings: [t.attachedVersionNotice('0.0.9', '0.1.0')] }, handlers());
+    const sub = items.find((i) => i.label === 'Uyarılar (1)')!.submenu as MenuItemConstructorOptions[];
+    expect(sub[0]!.label).toBe("Pencerede başka bir Dürbün (sürüm 0.0.9) açık; bu uygulama 0.1.0. O kapanınca uygulama kendi sunucusunu başlatır.");
+    expect(items.find((i) => i.label === 'Tarayıcıda Aç')?.enabled).toBe(true);
+  });
+  it('notices fit in the tray menu without being cut (≤ 120 characters)', () => {
+    for (const t of [STRINGS.tr, STRINGS.en]) {
+      for (const notice of [
+        t.portFallbackNotice(9750, 9760),
+        t.attachedVersionNotice('10.12.3', '10.12.4'),
+        t.shellEnvNotice('zsh', 3),
+        t.shellEnvNotice('fish'),
+      ]) {
+        expect(notice.length, notice).toBeLessThanOrEqual(120);
+      }
+    }
   });
 });
