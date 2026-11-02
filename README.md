@@ -83,14 +83,20 @@ DMG'yi göndermeniz yeterli.
 Finder'da Dürbün'e sağ tıklayın → **Aç** → **Aç**. macOS bu seçeneği göstermezse: Sistem Ayarları →
 Gizlilik ve Güvenlik → en altta Dürbün için **Yine de Aç**. Bu yalnızca bir kez gerekir.
 
-- Port 9750 / 9751. Bir Dürbün zaten çalışıyorsa (ör. `npm start`) uygulama onu açar. Port başka bir
-  programdaysa yakındaki boş bir portu kullanır ve bunu menü çubuğundaki simgede söyler.
-- `adb`, `flutter`, `idevicesyslog` gibi araçlar için PATH'i giriş kabuğunuzdan kendisi okur.
+- Port 9750 / 9751. Bir Dürbün zaten çalışıyorsa (ör. `npm start`) uygulama onu açar; o kapanınca
+  kendi sunucusunu başlatır. Sürümler farklıysa menü çubuğundaki simge bunu söyler. Port başka bir
+  programdaysa sırayla 9760, 9770, 9780'i dener ve hangi portu kullandığını menü çubuğundaki simgede söyler.
+- `adb`, `flutter`, `idevicesyslog` gibi araçlar için PATH'i ve araçların ayarlarını (`ANDROID_HOME`,
+  `JAVA_HOME`, fvm, `DEVELOPER_DIR`) giriş kabuğunuzdan kendisi okur. Kabuk 3 saniyede yanıt vermezse
+  menü çubuğundaki simge bunu da söyler.
 - Ayarlar ve mock kuralları komut satırıyla aynı yerde durur: `~/.durbun`.
 - Pencereyi kapatmak yakalamayı durdurmaz, Dürbün menü çubuğunda çalışmaya devam eder. Tamamen kapatmak
   için ⌘Q veya menü çubuğu simgesi → **Çık** (sunucu düzgünce durdurulur).
-- Bir şey ters giderse: Yardım → **Tanılama Günlüğünü Göster**.
-- Geliştirirken `npm run app` uygulamayı depodaki `dist/` ile çalıştırır.
+- Sunucu başlatılamazsa pencere nedenini gösterir; **Tekrar Dene**, **Tanılama Günlüğünü Göster** ve
+  **Çık** seçenekleri her zaman elinizin altındadır. Tanılama günlüğü: Yardım → **Tanılama Günlüğünü Göster**.
+- Geliştirirken `npm run app` uygulamayı depodaki `dist/` ile çalıştırır. İkinci bir kopya ya da test
+  için: `DURBUN_PORT`, `DURBUN_SDK_PORT`, `DURBUN_DATA_DIR` (varsayılan `~/.durbun`), `DURBUN_USER_DATA_DIR`
+  (pencere durumu, tek kopya kilidi ve günlük), `DURBUN_DEMO=1`, `DURBUN_DEBUG=1`.
 
 ## Uygulamaya SDK ekleme
 
