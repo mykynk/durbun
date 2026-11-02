@@ -46,6 +46,8 @@ describe('isAllowedPermission', () => {
   it('notifications and clipboard for the app origin only', () => {
     expect(isAllowedPermission('notifications', 'http://localhost:9750/', origin)).toBe(true);
     expect(isAllowedPermission('clipboard-sanitized-write', 'http://127.0.0.1:9750', origin)).toBe(true);
+    expect(isAllowedPermission('fullscreen', 'http://localhost:9750/', origin)).toBe(true);
+    expect(isAllowedPermission('clipboard-read', 'http://localhost:9750/', origin)).toBe(false);
     expect(isAllowedPermission('media', 'http://localhost:9750/', origin)).toBe(false);
     expect(isAllowedPermission('geolocation', 'http://localhost:9750/', origin)).toBe(false);
     expect(isAllowedPermission('notifications', 'https://example.com/', origin)).toBe(false);

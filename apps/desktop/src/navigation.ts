@@ -56,13 +56,12 @@ export function isAllowedRequest(url: string, appOrigin: string | null): boolean
   return !!appOrigin && isAppUrl(url, appOrigin);
 }
 
-/** Permissions the UI uses: crash notifications, copy buttons, full screen. */
-export const ALLOWED_PERMISSIONS: ReadonlySet<string> = new Set([
-  'notifications',
-  'clipboard-sanitized-write',
-  'clipboard-read',
-  'fullscreen',
-]);
+/**
+ * Permissions the UI uses: crash notifications, copy buttons (write only: the UI never reads the
+ * clipboard, and a granted read would let any script on the page read it silently), full screen for
+ * screen recordings (<video controls>).
+ */
+export const ALLOWED_PERMISSIONS: ReadonlySet<string> = new Set(['notifications', 'clipboard-sanitized-write', 'fullscreen']);
 
 export function isAllowedPermission(permission: string, requestingUrl: string, appOrigin: string | null): boolean {
   return ALLOWED_PERMISSIONS.has(permission) && !!appOrigin && isAppUrl(requestingUrl, appOrigin);
