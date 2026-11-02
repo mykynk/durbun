@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DeviceInfo, ToolCheck } from '@durbun/protocol';
 import '../i18n';
-import { setLanguage } from '../i18n/core';
+import { setLanguage, translate } from '../i18n/core';
 import { hubActions } from '../data/stores/hub';
 import { DOCTOR_DETAIL_KEYS, checkDetail, checkFix, checkLabel } from './doctorText';
 import { messageKeys } from '../i18n/core';
@@ -119,6 +119,25 @@ describe('Doctor text', () => {
     expect(checkDetail({ detail: 'A brand new detail' })).toBe('A brand new detail');
   });
 
+  it('words the Node row of the Mac app from its code (server inside Dürbün.app)', () => {
+    const embedded: ToolCheck = {
+      id: 'node',
+      label: 'Node.js',
+      status: 'ok',
+      version: 'v22.20.0',
+      detail: 'Embedded in Dürbün.app (Electron 45.1.0, Node 22.20.0)',
+      code: 'doctor.node.embedded',
+      params: { electron: '45.1.0', node: '22.20.0' },
+    };
+    setLanguage('tr');
+    expect(checkDetail(embedded)).toBe('Dürbün.app içinde gömülü (Electron 45.1.0, Node 22.20.0)');
+    expect(checkDetail({ ...embedded, params: undefined })).toBe('Dürbün.app içinde gömülü');
+    setLanguage('en');
+    expect(checkDetail(embedded)).toBe('Embedded in Dürbün.app (Electron 45.1.0, Node 22.20.0)');
+    // An unknown code keeps the server's English detail.
+    expect(checkDetail({ detail: 'Bundled runtime', code: 'doctor.node.somethingNew' })).toBe('Bundled runtime');
+  });
+
   it('has Turkish and English text for every recognized detail', () => {
     const tr = new Set(messageKeys('tr'));
     const en = new Set(messageKeys('en'));
@@ -174,6 +193,13 @@ describe('SDK guide snippets', () => {
     expectIn(android, ['include(":durbun", ":durbun-noop")', 'debugImplementation(project(":durbun"))', 'releaseImplementation(project(":durbun-noop"))', '"profileImplementation"(project(":durbun-noop"))', 'Durbun.start(this)', '.addInterceptor(DurbunInterceptor())', 'fun log(level: Level, tag: String?, message: String, data: Any? = null, throwable: Throwable? = null)', 'fun e(tag: String?, message: String', 'DurbunOptions(host = "', 'package dev.durbun', 'class DurbunInterceptor'], 'android');
     expectIn(ios, ['name: "Durbun"', '.library(name: "Durbun"', 'public static func start(options: DurbunOptions = DurbunOptions())', 'level: DurbunLogLevel = .info', 'public static func warning(', 'public static func event(_ name: String, _ props: [String: Any]? = nil)', 'NSLocalNetworkUsageDescription', 'host: String? = nil', 'port: UInt16 = 9751'], 'ios');
     expectIn(js, ['"name": "@durbun/react-native"', "import { Durbun } from '@durbun/react-native';", 'Durbun.start();', 'npm pack', 'error(message: string, error: unknown): void;'], 'js');
+    // Dio with a native adapter: on iOS the plugin's native layer already sees URLSession (sdks/flutter/durbun_dio README).
+    expect(sources('sdks/flutter/durbun_dio', /\.md$/)).toContain('URLSession');
+    for (const lang of ['tr', 'en'] as const) {
+      const hint = translate(lang, 'shell.sdk.flutter.dioHint');
+      expect(hint, lang).toContain('URLSession');
+      expect(hint, lang).toContain('mock');
+    }
     // The iOS snippet must use the local package's identity (the folder name), not the declared name.
     expect(S.iosPackage('/r', 'en')).toContain('.product(name: "Durbun", package: "ios")');
     // npm pack file name follows the SDK's package.json version.
@@ -271,5 +297,18 @@ describe('Sidebar', () => {
     expect(text).toContain('SDK data only');
     expect(text).toContain('Imported');
     expect(text).toContain('Unlock the device and tap Trust on “Trust This Computer?”');
+  });
+});
+
+describe('Dürbün.app window chrome', () => {
+  it('the UI styles the Mac app’s drag areas and traffic-light inset itself (apps/desktop sets the attributes)', () => {
+    const root = repoRoot();
+    if (!root) return;
+    const css = readFileSync(join(root, 'packages/ui/src/styles/shell.css'), 'utf8');
+    expect(css).toMatch(/html\[data-desktop='mac'\] \.sb-header,\s*html\[data-desktop='mac'\] \.topbar \{\s*-webkit-app-region: drag;/);
+    expect(css).toContain("html[data-desktop='mac'] :is(.sb-header, .topbar) :is(button, a, input, select, textarea");
+    expect(css).toMatch(/html\[data-desktop='mac'\]:not\(\[data-desktop-fullscreen\]\) \.sidebar:not\(\.is-compact\) \.sb-header \{\s*padding-left: 74px;/);
+    expect(css).toMatch(/html\[data-desktop='mac'\]:not\(\[data-desktop-fullscreen\]\) \.sidebar\.is-compact \.sb-header \{\s*margin-top: 26px;/);
+    expect(css).toMatch(/html\[data-desktop='mac'\]:not\(\[data-desktop-fullscreen\]\) \.app--compact \.topbar \{\s*padding-left: 26px;/);
   });
 });

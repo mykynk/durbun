@@ -1,5 +1,6 @@
 import type { ToolCheck } from '@durbun/protocol';
 import { hasMessage, t } from '../i18n/core';
+import { hasCode, tCode } from '../i18n/codes';
 
 /**
  * Localized text for the server's `ToolCheck`s ("Sistem kontrolü"). The server sends English labels, details
@@ -86,9 +87,13 @@ const DETAILS: Detail[] = [
 /** Message keys (under `shell.doctor.detail.`) the recognized details map to — for completeness tests. */
 export const DOCTOR_DETAIL_KEYS: readonly string[] = DETAILS.map(([, key]) => key);
 
-/** Localized detail of a check (the server's English text when it is not recognized). */
-export function checkDetail(c: Pick<ToolCheck, 'detail'>): string | undefined {
+/**
+ * Localized detail of a check: its i18n code when the UI knows it (e.g. 'doctor.node.embedded' {electron, node}),
+ * else a recognized English detail, else the server's English text.
+ */
+export function checkDetail(c: Pick<ToolCheck, 'detail' | 'code' | 'params'>): string | undefined {
   const detail = c.detail?.trim();
+  if (c.code && hasCode(c.code)) return tCode(c.code, c.params, detail || c.code);
   if (!detail) return undefined;
   for (const [re, key, params] of DETAILS) {
     const m = re.exec(detail);

@@ -642,7 +642,7 @@ registerMessages('shell', {
         useHint: 'Seviye kısayolları: Durbun.v / d / i / w / e / f. Map ve List verileri masaüstünde JSON ağacı olarak açılır.',
         dio: 'Dio native adaptörle çalışıyorsa',
         dioHint:
-          'Dio’nun varsayılan adaptörü zaten yakalanır. NativeAdapter, cupertino_http ve cronet_http dart:io’yu atladığı için bu interceptor’ı ekleyin; dio: parametresi sayesinde varsayılan adaptörden geçen istekler iki kez kaydedilmez.',
+          'Dio’nun varsayılan adaptörü zaten yakalanır. NativeAdapter, cupertino_http ya da cronet_http kullanıyorsanız bu interceptor’ı ekleyin; istekleri raporlar ve mock’ları uygular. dio: parametresiyle varsayılan adaptörden geçen istekler iki kez kaydedilmez; iOS’ta NativeAdapter istekleri zaten native katmandan (URLSession) gelir.',
         noSdk: 'SDK’sız debug: Dart VM Service’e elle bağlanma',
         noSdkHint: 'Otomatik bağlanma kapalıysa ya da bağlantı kurulamadıysa VM Service adresini veya flutter run çıktısının tamamını yapıştırın.',
       },
@@ -1215,7 +1215,7 @@ registerMessages('shell', {
         useHint: 'Level shortcuts: Durbun.v / d / i / w / e / f. Maps and lists show up as a JSON tree on the desktop.',
         dio: 'If Dio uses a native adapter',
         dioHint:
-          'Dio’s default adapter is already captured. NativeAdapter, cupertino_http and cronet_http bypass dart:io, so add this interceptor; thanks to the dio: parameter, requests that still go through the default adapter are not recorded twice.',
+          'Dio’s default adapter is already captured. If you use NativeAdapter, cupertino_http or cronet_http, add this interceptor: it reports the requests and applies mocks. With the dio: parameter, requests that still use the default adapter are not recorded twice; on iOS, NativeAdapter requests already come from the native layer (URLSession).',
         noSdk: 'Debug without the SDK: attach the Dart VM Service manually',
         noSdkHint: 'If auto-attach is off or could not connect, paste the VM Service URL or the whole flutter run output.',
       },
