@@ -188,6 +188,30 @@ describe('lastActivity from device log lines', () => {
     expect(kumbara().lastActivity).toBe(Date.now());
   });
 
+  it('records of a previous launch bump no app: the driver reports their time, their pid / process may be another app by now', () => {
+    vi.useFakeTimers({ now: new Date('2026-11-02T13:00:00Z') });
+    const h = newHub();
+    const now = Date.now();
+    const lastNight = now - 10 * 3_600_000;
+    const morning = now - 5 * 3_600_000;
+    const previous = { previousLaunch: true, reportTs: morning };
+    // Android: an old dropbox record names the package (no top-level pid)
+    h.upsertDeviceApp({ deviceId: PIXEL, id: KUMBARA, lastActivity: lastNight });
+    h.pushDeviceLogs(PIXEL, [line({ ts: morning, origin: 'dropbox', kind: 'crash', tag: 'data_app_crash', process: KUMBARA, data: { origin: 'dropbox', package: KUMBARA, ...previous } })]);
+    expect(h.getDeviceApps().find((a) => a.id === KUMBARA)!.lastActivity).toBe(lastNight);
+    // iOS: an old .ips keeps the pid of the crashed process, which another app now runs under
+    const IPHONE = 'ios:00008110-001A2B3C4D5E6F70';
+    h.upsertDevice(device(IPHONE, { platform: 'ios' }));
+    h.upsertDeviceApp({ deviceId: IPHONE, id: 'com.mykynk.kasa', pids: [1977], running: true, lastActivity: lastNight });
+    h.pushDeviceLogs(IPHONE, [
+      line({ ts: morning, origin: 'crash-report', kind: 'crash', tag: 'crash-report', pid: 1977, process: 'Runner', data: { origin: 'crash-report', bundleId: KUMBARA, ...previous } }),
+    ]);
+    expect(h.getDeviceApps().find((a) => a.id === 'com.mykynk.kasa')!.lastActivity).toBe(lastNight);
+    // a record of this launch still counts at its own time
+    h.pushDeviceLogs(PIXEL, [line({ ts: now - 2000, origin: 'dropbox', kind: 'crash', process: KUMBARA, data: { origin: 'dropbox', previousLaunch: false } })]);
+    expect(h.getDeviceApps().find((a) => a.id === KUMBARA)!.lastActivity).toBe(now - 2000);
+  });
+
   it('a lastActivity in the future (device clock ahead, wrong time zone) is capped at now and does not block later bumps', () => {
     vi.useFakeTimers({ now: new Date('2026-11-02T09:00:00Z') });
     const h = newHub();

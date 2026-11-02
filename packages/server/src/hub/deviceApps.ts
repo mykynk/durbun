@@ -23,6 +23,10 @@ const INSTALL_SOURCES = new Set<string>(['play', 'firebase', 'adb', 'other-store
 
 export const deviceAppKey = (deviceId: string, id: string): string => `${deviceId}|${id}`;
 
+const isDeviceRecord = (e: LogEntry) => e.origin === 'dropbox' || e.origin === 'crash-report';
+/** A crash / ANR record the device kept from before Dürbün was watching (SPEC §10.3 previousLaunch). */
+const isPreviousLaunchRecord = (e: LogEntry) => isDeviceRecord(e) && isRecord(e.data) && e.data.previousLaunch === true;
+
 export function copyDeviceApp(app: DeviceApp): DeviceApp {
   return { ...app, pids: [...app.pids], install: { ...app.install } };
 }
@@ -226,7 +230,9 @@ export class DeviceAppStore {
   /**
    * Device log lines (ids assigned): bumps lastActivity of the apps they belong to — at arrival time, except
    * crash / ANR records read from the device (dropbox, .ips), which count at their own time (capped at now):
-   * a crash from this morning must not make the app look active just now.
+   * a crash from this morning must not make the app look active just now. Records of a previous launch
+   * bump nothing: their driver reports lastActivity = reportTs itself, and their pid / process name may
+   * belong to another app by now.
    */
   noteLogs(deviceId: string, entries: readonly LogEntry[]): void {
     if (this.apps.size === 0 || entries.length === 0) return;
@@ -236,10 +242,11 @@ export class DeviceAppStore {
     let hits: Map<string, number> | undefined;
     let now: number | undefined;
     for (const e of entries) {
+      if (isPreviousLaunchRecord(e)) continue;
       const key = this.match(pidMap, nameMap, e.pid, e.process);
       if (!key) continue;
       now ??= this.now();
-      const at = e.origin === 'dropbox' || e.origin === 'crash-report' ? Math.min(Number.isFinite(e.ts) ? e.ts : now, now) : now;
+      const at = isDeviceRecord(e) ? Math.min(Number.isFinite(e.ts) ? e.ts : now, now) : now;
       hits ??= new Map();
       if (at > (hits.get(key) ?? -Infinity)) hits.set(key, at);
     }
