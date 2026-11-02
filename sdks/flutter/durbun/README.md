@@ -39,8 +39,9 @@ Future<void> main() async {
 
 Bu kadar. Native tarafta başlatma kodu yok: Dart tarafı çalıştığında Android
 ve iOS katmanlarını kendisi başlatır, kapalıyken onlar da kapalı kalır.
-`Durbun.start()` gibi native bir çağrı **gerekmez** (Flutter uygulamasında
-yapılırsa yok sayılır).
+`Durbun.start()` gibi native bir çağrı **eklemeyin**, gerekmez. Dart tarafı
+başlamadan önce çalışırsa debug derlemede ayrı bir native oturum açar: Dart
+tarafı başlayınca bu oturum kapanır, `DURBUN=false` derlemesinde ise açık kalır.
 
 **İsteğe bağlı, Android'de OkHttp kullanan native kodunuz varsa tek satır:**
 
@@ -315,8 +316,10 @@ Future<void> main() async {
 ```
 
 No native init call: the Dart side starts the Android/iOS layers when it runs
-and leaves them off otherwise (a native `Durbun.start()` is not needed and is
-ignored in Flutter apps). Optional on Android, if your native code uses OkHttp:
+and leaves them off otherwise. Do **not** add a native `Durbun.start()`: it is
+not needed. If it runs before the Dart side starts, a debug build opens a
+separate native session; it closes once the Dart side starts, but stays open in
+a `DURBUN=false` build. Optional on Android, if your native code uses OkHttp:
 `.addInterceptor(DurbunInterceptor())` (`import dev.durbun.DurbunInterceptor`) —
 a pass-through while Dürbün is off. iOS URLSession traffic (shared and custom
 sessions, Alamofire, cupertino_http) is captured automatically.

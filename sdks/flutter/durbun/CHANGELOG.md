@@ -12,6 +12,13 @@
 - Enablement: debug/profile on; release only with `--dart-define=DURBUN=true`;
   `DURBUN=false` turns it off; `enabled:` still wins. The native layer follows.
 - `DurbunNetwork.capturesUrlSession` (used by durbun_dio to avoid duplicates).
+- `hello.sdk.layers`: `['dart']`, plus `'android'` / `'ios'` while the plugin's
+  native core is attached, so the desktop can say which layers feed the session.
+- iOS USB listener: binds only once the hello is ready. A desktop that connected
+  in the first moments after start used to be accepted and dropped without a
+  hello (now it is refused and connects on its next try).
+- durbun_dio: the dart:io adapter is recognized by type instead of its class
+  name, so `--obfuscate` builds no longer report those requests twice.
 
 ## 0.1.0
 
