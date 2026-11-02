@@ -1,8 +1,9 @@
-import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { resolveUiDir } from '../../src/http/static';
+import { inlineScriptHashes, resolveUiDir, uiContentSecurityPolicy } from '../../src/http/static';
 import { makeTempDir, startTestApp, type TestApp } from './fakes';
 
 let root: string;
@@ -122,6 +123,46 @@ describe('static UI', () => {
     expect((await get(t.port, '/', {}, 'POST')).status).toBe(405);
   });
 
+  it('sends a Content-Security-Policy with the inline scripts hashed (never unsafe-inline scripts)', async () => {
+    // a Vite-like index: one inline pre-paint script (CRLF line endings), the module bundle by src
+    const inline = '\r\n      (function () { document.documentElement.setAttribute("data-theme", "dark"); })();\r\n    ';
+    const dir = path.join(root, 'csp-ui');
+    await mkdir(path.join(dir, 'assets'), { recursive: true });
+    await writeFile(path.join(dir, 'index.html'), `<!doctype html><html><head><script>${inline}</script><script type="module" crossorigin src="/assets/a.js"></script></head><body></body></html>`);
+    await writeFile(path.join(dir, 'assets', 'a.js'), 'console.log(1)');
+    const sha = createHash('sha256').update(inline.replace(/\r\n/g, '\n'), 'utf8').digest('base64');
+    expect(inlineScriptHashes(await readFile(path.join(dir, 'index.html'), 'utf8'))).toEqual([`'sha256-${sha}'`]);
+
+    t = await startTestApp({ uiDir: dir });
+    const page = await get(t.port, '/', { Host: `localhost:${t.port}` });
+    const csp = page.headers['content-security-policy'] as string;
+    const directives = Object.fromEntries(csp.split('; ').map((d) => [d.split(' ')[0], d.split(' ').slice(1)]));
+    expect(directives['script-src']).toEqual(["'self'", `'sha256-${sha}'`]);
+    expect(csp).not.toMatch(/script-src[^;]*unsafe/);
+    expect(directives['connect-src']).toEqual(["'self'", `ws://localhost:${t.port}`]);
+    expect(directives['img-src']).toEqual(["'self'", 'data:', 'blob:']);
+    expect(directives['media-src']).toEqual(["'self'", 'data:', 'blob:']);
+    expect(directives['frame-ancestors']).toEqual(["'none'"]);
+    expect(directives['object-src']).toEqual(["'none'"]);
+    expect(directives['base-uri']).toEqual(["'self'"]);
+    // client routes, assets and a revalidated (304) document carry it too
+    expect((await get(t.port, '/logs', { Accept: 'text/html' })).headers['content-security-policy']).toBe((await get(t.port, '/')).headers['content-security-policy']);
+    expect((await get(t.port, '/assets/a.js')).headers['content-security-policy']).toContain(`'sha256-${sha}'`);
+    const revalidated = await get(t.port, '/', { 'If-None-Match': page.headers.etag! });
+    expect(revalidated.status).toBe(304);
+    expect(revalidated.headers['content-security-policy']).toContain(`'sha256-${sha}'`);
+
+    // a Host header that is not a plain host[:port] never reaches the policy
+    expect(uiContentSecurityPolicy([], 'evil.example; script-src *')).toContain("connect-src 'self'; ");
+    expect(uiContentSecurityPolicy([], '[::1]:9750')).toContain("connect-src 'self' ws://[::1]:9750;");
+
+    // a rebuild while the server runs: the new inline script is allowed on the next document request
+    const rebuilt = 'window.rebuilt = true;';
+    await writeFile(path.join(dir, 'index.html'), `<!doctype html><html><head><script>${rebuilt}</script></head><body></body></html>`);
+    const sha2 = createHash('sha256').update(rebuilt, 'utf8').digest('base64');
+    expect((await get(t.port, '/')).headers['content-security-policy']).toContain(`script-src 'self' 'sha256-${sha2}';`);
+  });
+
   it('shows a bilingual "please build" page when there is no UI build', async () => {
     t = await startTestApp({ uiDir: null });
     const page = await get(t.port, '/');
@@ -132,6 +173,9 @@ describe('static UI', () => {
     expect(page.body).toContain('has not been built yet');
     expect((await get(t.port, '/logs')).body).toContain('npm run build');
     expect((await get(t.port, '/assets/index-x.js', { Accept: '*/*' })).status).toBe(404);
+    // its inline <style> is allowed, scripts are not
+    expect(page.headers['content-security-policy']).toContain("style-src 'self' 'unsafe-inline'");
+    expect(page.headers['content-security-policy']).toContain("script-src 'self';");
   });
 });
 

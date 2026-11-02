@@ -3,9 +3,10 @@
  * /assets/*), files from the temp directory (screenshots, recordings), and a bilingual placeholder page
  * when no UI build exists. Paths are decoded once, dot segments are refused and the final real path must
  * stay inside the served root (no traversal, no symlink escapes). Supports ETag/304, HEAD and single
- * byte ranges (video seeking).
+ * byte ranges (video seeking). Everything it serves carries the UI's Content-Security-Policy.
  */
-import { createReadStream, promises as fsp, realpathSync, statSync, type Stats } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { createReadStream, promises as fsp, readFileSync, realpathSync, statSync, type Stats } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +17,48 @@ export const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 /** Sandbox for captured/temp content a browser might execute (HTML, SVG, JS). */
 export const SANDBOX_CSP =
   "sandbox; default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:";
+
+/**
+ * sha256 sources for the inline <script> elements of a UI document (Vite keeps the pre-paint theme script
+ * inline), so the CSP allows exactly those scripts and never 'unsafe-inline'. Hashes cover the element's
+ * text as the browser parses it (line endings normalized to \n, UTF-8).
+ */
+export function inlineScriptHashes(html: string): string[] {
+  const out = new Set<string>();
+  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+    if (/\bsrc\s*=/i.test(m[1] ?? '')) continue;
+    const text = (m[2] ?? '').replace(/\r\n?/g, '\n');
+    out.add(`'sha256-${createHash('sha256').update(text, 'utf8').digest('base64')}'`);
+  }
+  return [...out];
+}
+
+/** A Host header value safe to put into the policy (host or [v6], optional port). */
+const CSP_HOST = /^(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])(?::\d{1,5})?$/i;
+
+/**
+ * Content-Security-Policy of the UI document and the static files next to it. Scripts: the bundle and the
+ * hashed inline scripts only; styles may be inline (React style attributes); images and media also
+ * from blob: / data: (screenshots, recordings, body previews); connections to this server, including the
+ * UI's WebSocket on the same host:port (named explicitly: older engines do not let 'self' match ws:).
+ */
+export function uiContentSecurityPolicy(scriptHashes: readonly string[], hostHeader?: string): string {
+  const host = hostHeader?.trim();
+  const ws = host && CSP_HOST.test(host) ? ` ws://${host.toLowerCase()}` : '';
+  return [
+    "default-src 'self'",
+    `script-src 'self'${scriptHashes.map((h) => ` ${h}`).join('')}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' data: blob:",
+    "font-src 'self' data:",
+    `connect-src 'self'${ws}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
 
 export interface UiDirResolution {
   /** Directory containing index.html, or null when no build was found. */
@@ -95,6 +138,8 @@ export interface SendFileOptions {
   headers?: Record<string, string>;
   /** Add the sandbox CSP when the content type could execute (HTML/SVG/XML/JS). */
   sandboxActive?: boolean;
+  /** Content-Security-Policy for this response (also sent with 304, so a revalidated copy gets the current one). */
+  csp?: string;
 }
 
 function sendPlain(res: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
@@ -122,11 +167,14 @@ export function sendFile(req: IncomingMessage, res: ServerResponse, filePath: st
     'X-Content-Type-Options': 'nosniff',
     ...opts.headers,
   };
+  if (opts.csp) headers['Content-Security-Policy'] = opts.csp;
   if (opts.sandboxActive && isActiveContent(type)) headers['Content-Security-Policy'] = SANDBOX_CSP;
 
   const ifNoneMatch = req.headers['if-none-match'];
   if (ifNoneMatch && ifNoneMatch.split(',').some((t) => t.trim() === etag || t.trim() === '*')) {
-    res.writeHead(304, { ETag: etag, 'Cache-Control': opts.cacheControl });
+    const notModified: Record<string, string> = { ETag: etag, 'Cache-Control': opts.cacheControl };
+    if (headers['Content-Security-Policy']) notModified['Content-Security-Policy'] = headers['Content-Security-Policy'];
+    res.writeHead(304, notModified);
     res.end();
     return;
   }
@@ -218,6 +266,28 @@ export function createStaticHandler(uiDir: string | null, info: () => FallbackIn
     }
   }
 
+  // Inline script hashes of index.html: read at startup, re-read when the file changes (a rebuild while the
+  // server runs); other files reuse the last known ones.
+  let hashes: { key: string; list: string[] } = { key: '', list: [] };
+  const refreshHashes = (file: string, stat: Stats) => {
+    const key = `${stat.size}:${stat.mtimeMs}`;
+    if (key === hashes.key) return;
+    try {
+      hashes = { key, list: inlineScriptHashes(readFileSync(file, 'utf8')) };
+    } catch {
+      hashes = { key: '', list: [] };
+    }
+  };
+  if (root) {
+    try {
+      const index = path.join(root, 'index.html');
+      refreshHashes(index, statSync(index));
+    } catch {
+      /* no index.html: the fallback page needs no script hash */
+    }
+  }
+  const cspFor = (req: IncomingMessage) => uiContentSecurityPolicy(hashes.list, req.headers.host);
+
   return async (req, res, pathname) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       sendPlain(res, 405, 'Method not allowed', { Allow: 'GET, HEAD' });
@@ -252,6 +322,7 @@ export function createStaticHandler(uiDir: string | null, info: () => FallbackIn
           'Content-Length': String(Buffer.byteLength(html)),
           'Cache-Control': 'no-store',
           'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': uiContentSecurityPolicy([], req.headers.host),
         });
         res.end(req.method === 'HEAD' ? undefined : html);
       } else {
@@ -273,7 +344,8 @@ export function createStaticHandler(uiDir: string | null, info: () => FallbackIn
     if (stat?.isFile()) {
       const real = await fsp.realpath(filePath).catch(() => null);
       if (real && isInside(root, real)) {
-        sendFile(req, res, real, stat, { cacheControl: isAsset ? IMMUTABLE_CACHE : 'no-cache' });
+        if (real === path.join(root, 'index.html')) refreshHashes(real, stat);
+        sendFile(req, res, real, stat, { cacheControl: isAsset ? IMMUTABLE_CACHE : 'no-cache', csp: cspFor(req) });
         return;
       }
       sendPlain(res, 404, 'Not found');
@@ -283,7 +355,8 @@ export function createStaticHandler(uiDir: string | null, info: () => FallbackIn
       const index = path.join(root, 'index.html');
       const indexStat = await statFile(index);
       if (indexStat?.isFile()) {
-        sendFile(req, res, index, indexStat, { cacheControl: 'no-cache' });
+        refreshHashes(index, indexStat);
+        sendFile(req, res, index, indexStat, { cacheControl: 'no-cache', csp: cspFor(req) });
         return;
       }
     }
