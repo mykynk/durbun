@@ -239,11 +239,18 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
   }
 
   async function exportSession(res: ServerResponse, query: URLSearchParams): Promise<void> {
-    const scope: { deviceId?: string; appId?: string } = {};
+    const scope: { deviceId?: string; appId?: string; bundleId?: string } = {};
     const deviceId = queryString(query, 'deviceId');
     const appId = queryString(query, 'appId');
+    const bundleId = queryString(query, 'bundleId');
     if (deviceId) scope.deviceId = deviceId;
     if (appId) scope.appId = appId;
+    if (bundleId) {
+      // A device app is named by its device and bundle id (an SDK-less build has no session id).
+      if (!deviceId) throw new HttpError(400, 'bundleId needs deviceId (the device the app is on)', 'export.bundleNeedsDevice');
+      if (appId) throw new HttpError(400, 'Give either appId or bundleId, not both', 'export.scopeConflict');
+      scope.bundleId = bundleId;
+    }
     const data = deps.hub.exportSession(scope);
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',

@@ -1,6 +1,7 @@
 /**
- * Hub: the in-memory store behind Dürbün (SPEC §5.2). Logs live in a bounded ring, network entries and
- * bodies in a budgeted store, metrics in per-series rings. Every change is batched (~100 ms) for the UI.
+ * Hub: the in-memory store behind Dürbün (SPEC §5.2). Logs live in a bounded ring (crash / ANR rows it
+ * evicts are kept apart, see MAX_KEPT_CRASH_LOGS), network entries and bodies in a budgeted store, metrics in
+ * per-series rings. Every change is batched (~100 ms) for the UI.
  *
  * Implemented with closures (no `this`) so callers may pass methods around unbound.
  */
@@ -22,8 +23,9 @@ import type {
 import { levelRank } from '@durbun/protocol';
 import type { ClearEvent, CreateHubOptions, DeviceLogInput, Hub, HubChange, SystemLogInput } from '../types';
 import { SERVER_VERSION } from '../version';
+import { appScope } from './appScope';
 import { ChangeBatcher } from './batcher';
-import { copyDeviceApp, deviceAppKey, DeviceAppStore } from './deviceApps';
+import { copyDeviceApp, crashRecordCounter, deviceAppKey, DeviceAppStore } from './deviceApps';
 import {
   appConnectedLine,
   appDisconnectedLine,
@@ -53,6 +55,15 @@ import {
 
 export const HUB_BATCH_INTERVAL_MS = 100;
 export const HUB_MAX_QUEUED_LOGS = 2000;
+/**
+ * Crash / ANR rows pushed out of the log ring by newer lines (a busy iPhone streams ~1000 daemon lines/s)
+ * are kept apart, the newest this many: a crash from an hour ago must not vanish while its app's crash
+ * count still says it happened.
+ */
+export const MAX_KEPT_CRASH_LOGS = 5_000;
+/** Rows that survive ring eviction: crashes and ANRs, live or read from the device (dropbox, .ips). */
+export const isKeptCrashLog = (e: Pick<LogEntry, 'kind' | 'origin'>): boolean =>
+  e.kind === 'crash' || e.kind === 'anr' || e.origin === 'dropbox' || e.origin === 'crash-report';
 /** Virtual device that owns requests replayed from the desktop. */
 export const DESKTOP_DEVICE_ID = 'desktop';
 /** Imported data lives on these virtual devices. */
@@ -94,6 +105,8 @@ export function createHub(opts: CreateHubOptions): Hub {
   let disposed = false;
 
   const logs = new RingBuffer<LogEntry>(settings.maxLogEntries);
+  /** Crash / ANR rows evicted from `logs`, in id order; every one is older than the oldest row in `logs`. */
+  const keptCrashes = new RingBuffer<LogEntry>(MAX_KEPT_CRASH_LOGS);
   const devices = new Map<string, DeviceInfo>();
   const apps = new Map<string, AppSession>();
   /** deviceId + sessionKey → app id (session reuse on reconnect). */
@@ -131,9 +144,18 @@ export function createHub(opts: CreateHubOptions): Hub {
     }
   }
 
+  function keepIfCrash(evicted: LogEntry | undefined): void {
+    if (evicted && isKeptCrashLog(evicted)) keptCrashes.push(evicted);
+  }
+
+  /** Every stored row in id order: kept crashes (older than the ring) first, then the ring. */
+  function allLogs(): LogEntry[] {
+    return keptCrashes.size === 0 ? logs.toArray() : keptCrashes.toArray().concat(logs.toArray());
+  }
+
   function appendLogs(entries: LogEntry[], tap = true): void {
     if (entries.length === 0 || disposed) return;
-    for (const e of entries) logs.push(e);
+    for (const e of entries) keepIfCrash(logs.push(e));
     batcher.addLogs(entries);
     if (tap && logTaps.size > 0) callAll(logTaps, entries, 'onLogs');
   }
@@ -503,6 +525,32 @@ export function createHub(opts: CreateHubOptions): Hub {
     pushSystem(app.deviceId, appDisconnectedLine(app, deviceName(app.deviceId), failed.length));
   }
 
+  /** Session export of one app on one device (SPEC §10.2 / §10.5 device-app scope, hub/appScope.ts). */
+  function exportDeviceApp(deviceId: string, bundleId: string): SessionExport {
+    const scope = appScope({ deviceId, bundleId, apps: apps.values(), deviceApps: deviceApps.values(deviceId), processes: processes.get(deviceId)?.values() ?? [] });
+    const networkList: NetworkDetail[] = [];
+    for (const e of network.values()) {
+      if (!scope.network(e)) continue;
+      const detail = network.detail(e.id);
+      if (detail) networkList.push(detail);
+    }
+    const device = devices.get(deviceId);
+    const deviceApp = deviceApps.get(deviceId, bundleId);
+    const out: SessionExport = {
+      format: 'durbun-session',
+      version: 1,
+      exportedAt: Date.now(),
+      server: { version: SERVER_VERSION },
+      devices: device ? [{ ...device }] : [],
+      apps: [...apps.values()].filter((a) => scope.sessionIds.has(a.id)).map(copyApp),
+      logs: allLogs().filter((e) => scope.logs(e) || (e.kind === 'marker' && e.deviceId === '')),
+      network: networkList,
+      metrics: metrics.all(scope.metrics),
+    };
+    if (deviceApp) out.deviceApps = [deviceApp];
+    return out;
+  }
+
   /* ───────────── hub object ───────────── */
 
   const hub: Hub = {
@@ -675,11 +723,20 @@ export function createHub(opts: CreateHubOptions): Hub {
     },
 
     getLogs(opts = {}) {
-      const start = opts.afterId === undefined ? 0 : logs.upperBound(opts.afterId, (e) => e.id);
-      const limit = opts.limit === undefined ? logs.size : Math.max(0, Math.floor(opts.limit));
-      return logs.slice(start, Math.min(logs.size, start + limit));
+      // One id-ordered view over the kept crashes (all older) and the ring.
+      const kept = keptCrashes.size;
+      const total = kept + logs.size;
+      let start = 0;
+      if (opts.afterId !== undefined) {
+        const inKept = keptCrashes.upperBound(opts.afterId, (e) => e.id);
+        start = inKept < kept ? inKept : kept + logs.upperBound(opts.afterId, (e) => e.id);
+      }
+      const end = opts.limit === undefined ? total : Math.min(total, start + Math.max(0, Math.floor(opts.limit)));
+      if (start >= kept) return logs.slice(start - kept, end - kept);
+      const head = keptCrashes.slice(start, Math.min(end, kept));
+      return end > kept ? head.concat(logs.slice(0, end - kept)) : head;
     },
-    getLogCount: () => logs.size,
+    getLogCount: () => keptCrashes.size + logs.size,
     getNetwork: () => network.list().map((e) => ({ ...e })),
     getNetworkDetail: (id) => network.detail(id),
     searchNetwork: (text, opts) => network.search(typeof text === 'string' ? text : '', opts ?? {}),
@@ -701,14 +758,35 @@ export function createHub(opts: CreateHubOptions): Hub {
       const appInScope = (a: AppSession) => (!deviceId || a.deviceId === deviceId) && (!appId || a.id === appId);
 
       if (target === 'logs' || target === 'all') {
-        if (unscoped) logs.clear();
-        else logs.retain((e) => !inScope(e));
+        // Device apps' crash counts go with their records (SPEC §10.2). A device / unscoped clear removes all
+        // of them. A session's clear removes only rows of that session: the device's crash records mostly
+        // have no appId (a previous launch's pid is in data only, a dead process has no session left) and
+        // stay, so only the records it does remove come off the count.
+        const removedRecords = appId ? new Map<string, number>() : undefined;
+        if (removedRecords) {
+          const countedFor = crashRecordCounter();
+          const visit = (e: LogEntry) => {
+            const key = countedFor(e);
+            if (key !== undefined && inScope(e)) removedRecords.set(key, (removedRecords.get(key) ?? 0) + 1);
+          };
+          keptCrashes.forEach(visit);
+          logs.forEach(visit);
+        }
+        if (unscoped) {
+          logs.clear();
+          keptCrashes.clear();
+        } else {
+          logs.retain((e) => !inScope(e));
+          keptCrashes.retain((e) => !inScope(e));
+        }
         for (const app of apps.values()) {
           if (!appInScope(app) || (app.stats.logs === 0 && app.stats.errors === 0)) continue;
           app.stats.logs = 0;
           app.stats.errors = 0;
           batcher.appChanged(app);
         }
+        if (removedRecords) deviceApps.forgetCrashReports(removedRecords);
+        else deviceApps.resetCrashReports((a) => !deviceId || a.deviceId === deviceId);
       }
       if (target === 'network' || target === 'all') {
         if (unscoped) network.clear();
@@ -747,10 +825,12 @@ export function createHub(opts: CreateHubOptions): Hub {
     exportSession(scope = {}): SessionExport {
       const deviceId = scope.deviceId || undefined;
       const appId = scope.appId || undefined;
+      // One app of a device, with or without a session (an SDK-less store build): what its scope shows.
+      if (deviceId && !appId && scope.bundleId) return exportDeviceApp(deviceId, scope.bundleId);
       const unscoped = !deviceId && !appId;
       const inScope = (e: { deviceId: string; appId?: string }) =>
         (!deviceId || e.deviceId === deviceId) && (!appId || e.appId === appId);
-      const logList = logs.toArray().filter((e) => inScope(e) || (e.kind === 'marker' && e.deviceId === ''));
+      const logList = allLogs().filter((e) => inScope(e) || (e.kind === 'marker' && e.deviceId === ''));
       const networkList: NetworkDetail[] = [];
       for (const e of network.values()) {
         if (!inScope(e)) continue;
@@ -937,7 +1017,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     setSettings(next: ServerSettings): void {
       if (!next) return;
       settings = { ...next };
-      logs.setCapacity(settings.maxLogEntries);
+      for (const evicted of logs.setCapacity(settings.maxLogEntries)) keepIfCrash(evicted);
       network.setLimits(limitsFrom(settings));
       watched = new Set(Array.isArray(settings.watchedApps) ? settings.watchedApps : []);
     },

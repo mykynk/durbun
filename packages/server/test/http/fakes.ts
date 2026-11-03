@@ -239,7 +239,7 @@ export class FakeHub implements Hub {
   upsertDeviceApp(input: Parameters<Hub['upsertDeviceApp']>[0]): DeviceApp {
     const key = `${input.deviceId}|${input.id}`;
     const prev = this.deviceApps.get(key);
-    const { crashReportsDelta: _delta, ...rest } = input;
+    const { crashReportsDelta: _delta, processName, ...rest } = input;
     const app: DeviceApp = {
       buildType: 'unknown',
       install: { source: 'unknown' },
@@ -247,9 +247,11 @@ export class FakeHub implements Hub {
       running: false,
       ...prev,
       ...rest,
+      ...(typeof processName === 'string' ? { processName } : {}),
       key,
       lastActivity: Math.max(prev?.lastActivity ?? 0, input.lastActivity ?? Date.now()),
     };
+    if (processName === null) delete app.processName;
     this.deviceApps.set(key, app);
     return app;
   }
@@ -323,7 +325,9 @@ export class FakeHub implements Hub {
   addMarker(label?: string, deviceId?: string): LogEntry {
     return this.pushSystemLog(deviceId ?? 'all', { message: label ?? 'Marker', kind: 'marker', code: 'marker' });
   }
-  exportSession(scope?: { deviceId?: string; appId?: string }): SessionExport {
+  exportScopes: { deviceId?: string; appId?: string; bundleId?: string }[] = [];
+  exportSession(scope?: { deviceId?: string; appId?: string; bundleId?: string }): SessionExport {
+    this.exportScopes.push({ ...scope });
     const logs = this.logs.filter((l) => (!scope?.deviceId || l.deviceId === scope.deviceId) && (!scope?.appId || l.appId === scope.appId));
     return {
       format: 'durbun-session',

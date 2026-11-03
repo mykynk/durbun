@@ -144,6 +144,22 @@ describe('REST API', () => {
     expect(text).toBe(JSON.stringify(t.hub.exportSession({ deviceId: 'android:R5CT1234' })));
   });
 
+  it('GET /api/export?deviceId=…&bundleId=… exports one device app; bundleId needs deviceId and excludes appId', async () => {
+    t = await startTestApp();
+    t.hub.upsertDevice(sampleDevice());
+    const ok = await fetch(`${t.base}/api/export?deviceId=android:R5CT1234&bundleId=com.mykynk.kumbara`);
+    expect(ok.status).toBe(200);
+    await ok.text();
+    expect(t.hub.exportScopes.at(-1)).toEqual({ deviceId: 'android:R5CT1234', bundleId: 'com.mykynk.kumbara' });
+    const noDevice = await fetch(`${t.base}/api/export?bundleId=com.mykynk.kumbara`);
+    expect(noDevice.status).toBe(400);
+    expect(await noDevice.json()).toMatchObject({ code: 'export.bundleNeedsDevice' });
+    const both = await fetch(`${t.base}/api/export?deviceId=android:R5CT1234&appId=app:1&bundleId=com.mykynk.kumbara`);
+    expect(both.status).toBe(400);
+    expect(await both.json()).toMatchObject({ code: 'export.scopeConflict' });
+    expect(t.hub.exportScopes).toHaveLength(1);
+  });
+
   it('POST /api/import validates and hands the session to the hub', async () => {
     t = await startTestApp();
     const data: SessionExport = {

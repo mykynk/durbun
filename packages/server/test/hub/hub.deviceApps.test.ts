@@ -297,7 +297,8 @@ describe('removal, disconnect, clear and export / import', () => {
     h.clear('all');
     await vi.advanceTimersByTimeAsync(150);
     expect(h.getDevices().map((d) => d.id)).toEqual([PIXEL]);
-    expect(h.getDeviceApps()).toEqual([expect.objectContaining({ deviceId: PIXEL, id: KUMBARA, running: true, crashReports: 1 })]);
+    expect(h.getDeviceApps()).toEqual([expect.objectContaining({ deviceId: PIXEL, id: KUMBARA, running: true })]);
+    expect(h.getDeviceApps()[0]).not.toHaveProperty('crashReports'); // its crash rows were cleared with the logs
     expect(c.all().removedDevices).toEqual(['android:gone']);
     expect(c.all().removedDeviceApps).toEqual([`android:gone|${KUMBARA}`]);
   });
@@ -343,6 +344,120 @@ describe('removal, disconnect, clear and export / import', () => {
     h.markDeviceDisconnected(IPHONE, 'USB cable unplugged');
     h.upsertDevice(device(IPHONE, { platform: 'ios' }));
     expect(pati()).toMatchObject({ running: false, pids: [] });
+  });
+
+  it('clearing logs resets the crash counts of the device apps in the cleared scope (lead decision, phase 3)', async () => {
+    vi.useFakeTimers({ now: new Date('2026-11-02T09:00:00Z') });
+    const h = newHub();
+    h.upsertDevice(device('ios:A', { platform: 'ios' }));
+    const counts = () => Object.fromEntries(h.getDeviceApps().map((a) => [a.key, a.crashReports ?? 0]));
+    h.upsertDeviceApp({ deviceId: PIXEL, id: KUMBARA, crashReportsDelta: 2 });
+    h.upsertDeviceApp({ deviceId: PIXEL, id: 'com.mykynk.pati', crashReportsDelta: 1 });
+    h.upsertDeviceApp({ deviceId: 'ios:A', id: KUMBARA, crashReportsDelta: 3 });
+    h.upsertDeviceApp({ deviceId: 'ios:A', id: 'com.mykynk.pati' }); // never crashed: untouched
+    const pati = h.registerApp(appInput(PIXEL, { app: { name: 'Pati', id: 'com.mykynk.pati', version: '2.4.1', pid: 8421 } }));
+    await vi.advanceTimersByTimeAsync(150);
+
+    h.clear('network', { deviceId: PIXEL });
+    h.clear('metrics');
+    h.clear('logs', { appId: 'app:unknown' });
+    expect(counts()).toEqual({ [`${PIXEL}|${KUMBARA}`]: 2, [`${PIXEL}|com.mykynk.pati`]: 1, [`ios:A|${KUMBARA}`]: 3, 'ios:A|com.mykynk.pati': 0 });
+
+    // an SDK session's scope removes only that session's rows; none of them is a crash record, so the
+    // counts stay (the records they stand for are still there; see the next tests)
+    const c = collectChanges(h);
+    h.clear('logs', { deviceId: PIXEL, appId: pati.id });
+    expect(counts()).toEqual({ [`${PIXEL}|${KUMBARA}`]: 2, [`${PIXEL}|com.mykynk.pati`]: 1, [`ios:A|${KUMBARA}`]: 3, 'ios:A|com.mykynk.pati': 0 });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(c.all().deviceApps).toEqual([]);
+
+    // a device scope: every app of that device; then everything
+    h.clear('logs', { deviceId: PIXEL });
+    expect(counts()).toEqual({ [`${PIXEL}|${KUMBARA}`]: 0, [`${PIXEL}|com.mykynk.pati`]: 0, [`ios:A|${KUMBARA}`]: 3, 'ios:A|com.mykynk.pati': 0 });
+    h.clear('logs');
+    expect(Object.values(counts())).toEqual([0, 0, 0, 0]);
+    // new records count from zero again
+    h.upsertDeviceApp({ deviceId: 'ios:A', id: KUMBARA, crashReportsDelta: 1 });
+    expect(counts()[`ios:A|${KUMBARA}`]).toBe(1);
+  });
+
+  it("a session's clear keeps the device crash records it does not remove, and their count with them (Android)", async () => {
+    vi.useFakeTimers({ now: new Date('2026-11-02T09:00:00Z') });
+    const h = newHub();
+    const PATI = 'com.mykynk.pati';
+    const pati = h.registerApp(appInput(PIXEL, { app: { name: 'Pati', id: PATI, version: '2.4.1', pid: 8421 } }));
+    // What the Android driver reports (dropbox.ts): a record of a launch before Dürbün watched (pid in data
+    // only), an ANR record of this launch read while the process still ran (its pid: the session's row) and
+    // the dropbox copy of that ANR in a second record (duplicateOf the first: one crash, one count).
+    const record = (patch: Partial<LogEntry>, data: Record<string, unknown>) =>
+      line({ level: 'fatal', tag: 'dropbox', origin: 'dropbox', process: PATI, ...patch, data: { origin: 'dropbox', package: PATI, ...data } });
+    h.pushDeviceLogs(PIXEL, [record({ kind: 'crash', message: 'Pati crashed this morning' }, { previousLaunch: true, pid: 7001 })]);
+    h.pushDeviceLogs(PIXEL, [record({ kind: 'anr', pid: 8421, message: 'Pati is not responding' }, { previousLaunch: false })]);
+    const anr = h.getLogs().at(-1)!;
+    h.pushDeviceLogs(PIXEL, [record({ kind: 'anr', pid: 8421, message: 'Pati ANR traces' }, { duplicateOf: anr.id })]);
+    h.upsertDeviceApp({ deviceId: PIXEL, id: PATI, install: { source: 'adb' }, crashReportsDelta: 2 });
+    h.upsertDeviceApp({ deviceId: PIXEL, id: KUMBARA, crashReportsDelta: 1 });
+    h.pushDeviceLogs(PIXEL, [line({ level: 'fatal', origin: 'dropbox', kind: 'crash', data: { origin: 'dropbox', package: KUMBARA } })]);
+    h.pushAppLog(pati.id, { ts: Date.now(), level: 'info', tag: 'app', message: 'Pati SDK line' });
+    expect(anr.appId).toBe(pati.id);
+    await vi.advanceTimersByTimeAsync(150);
+
+    const c = collectChanges(h);
+    h.clear('logs', { deviceId: PIXEL, appId: pati.id });
+    const left = h.getLogs().filter((e) => e.origin === 'dropbox');
+    expect(left.map((e) => e.message)).toEqual(['Pati crashed this morning', 'tick']);
+    // "1 çökme/ANR kaydı" stays next to the record that stays; Kumbara's count is not Pati's business
+    expect(h.getDeviceApps().map((a) => [a.id, a.crashReports])).toEqual([[PATI, 1], [KUMBARA, 1]]);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(c.all().deviceApps.map((a) => [a.id, a.crashReports])).toEqual([[PATI, 1]]);
+
+    // the device's clear removes the rest, and the counts with them
+    h.clear('logs', { deviceId: PIXEL });
+    expect(h.getDeviceApps().map((a) => a.crashReports)).toEqual([undefined, undefined]);
+  });
+
+  it("a session's clear keeps an earlier launch's .ips and its count (iPhone, Xcode build)", () => {
+    const h = newHub();
+    const IPHONE = 'ios:00008130-0001A2B3C4D5E6F7';
+    const PATI = 'com.mykynk.pati';
+    h.upsertDevice(device(IPHONE, { platform: 'ios', name: 'Yusuf iPhone’u' }));
+    h.upsertDeviceApp({ deviceId: IPHONE, id: PATI, processName: 'Runner', pids: [4321], running: true, install: { source: 'xcode' }, crashReportsDelta: 1 });
+    const pati = h.registerApp(appInput(IPHONE, { transport: 'usbmux', app: { name: 'Pati', id: PATI, version: '2.4.1', pid: 4321, processName: 'Runner' } }));
+    h.pushDeviceLogs(IPHONE, [
+      line({ level: 'fatal', tag: 'crash-report', kind: 'crash', origin: 'crash-report', process: 'Runner', message: 'Pati 2.4.1 (241) crashed: EXC_BAD_ACCESS', data: { origin: 'crash-report', bundleId: PATI, previousLaunch: true, pid: 1977 } }),
+    ]);
+    h.pushAppLog(pati.id, { ts: Date.now(), level: 'info', tag: 'app', message: 'Pati SDK line' });
+    h.clear('logs', { deviceId: IPHONE, appId: pati.id });
+    expect(h.getLogs().filter((e) => e.origin === 'crash-report')).toHaveLength(1);
+    expect(h.getDeviceApps().find((a) => a.deviceId === IPHONE)?.crashReports).toBe(1);
+  });
+
+  it('processName: null clears the process name (Android ":remote" until the main process runs); undefined keeps it', async () => {
+    vi.useFakeTimers({ now: new Date('2026-11-02T09:00:00Z') });
+    const h = newHub();
+    h.upsertDeviceApp({ deviceId: PIXEL, id: 'com.foo', processName: 'com.foo:remote', running: true, pids: [700] });
+    h.upsertDeviceApp({ deviceId: PIXEL, id: 'com.foo', running: true });
+    expect(h.getDeviceApps()[0]!.processName).toBe('com.foo:remote');
+    await vi.advanceTimersByTimeAsync(1500);
+    const c = collectChanges(h);
+    h.upsertDeviceApp({ deviceId: PIXEL, id: 'com.foo', processName: null, pids: [700, 701] });
+    expect(h.getDeviceApps()[0]).not.toHaveProperty('processName');
+    await vi.advanceTimersByTimeAsync(150);
+    expect(c.all().deviceApps).toHaveLength(1);
+    expect(c.all().deviceApps[0]).not.toHaveProperty('processName');
+
+    // the old name no longer identifies the app; a shared name ("Runner") is released the same way
+    h.upsertDevice(device('ios:A', { platform: 'ios' }));
+    h.upsertDeviceApp({ deviceId: 'ios:A', id: 'com.a', processName: 'Runner' });
+    const before = h.getDeviceApps().find((a) => a.id === 'com.a')!.lastActivity;
+    h.upsertDeviceApp({ deviceId: 'ios:A', id: 'com.a', processName: null });
+    vi.advanceTimersByTime(5000);
+    h.pushDeviceLogs('ios:A', [line({ process: 'Runner' })]);
+    expect(h.getDeviceApps().find((a) => a.id === 'com.a')!.lastActivity).toBe(before);
+    h.upsertDeviceApp({ deviceId: 'ios:A', id: 'com.a', processName: 'Runner' });
+    vi.advanceTimersByTime(5000);
+    h.pushDeviceLogs('ios:A', [line({ process: 'Runner' })]);
+    expect(h.getDeviceApps().find((a) => a.id === 'com.a')!.lastActivity).toBe(Date.now());
   });
 
   it('exports device apps with the session and imports them onto the imported device (not running)', () => {

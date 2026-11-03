@@ -91,11 +91,16 @@ export interface HubSink {
   /**
    * Insert or merge an app the device reports (SPEC §10). Merge by `deviceId` + `id`: defined fields of
    * the input win, `pids`/`running` replace when given, `lastActivity` = max(old, input, now when absent),
-   * `crashReports` adds `crashReportsDelta`. Emits a batched `deviceApps` change only when something changed.
+   * `crashReports` adds `crashReportsDelta`, `processName: null` removes the process name. Emits a batched
+   * `deviceApps` change only when something changed.
    */
   upsertDeviceApp(
     input: Pick<DeviceApp, 'deviceId' | 'id'> &
-      Partial<Omit<DeviceApp, 'key' | 'deviceId' | 'id' | 'crashReports'>> & { crashReportsDelta?: number },
+      Partial<Omit<DeviceApp, 'key' | 'deviceId' | 'id' | 'crashReports' | 'processName'>> & {
+        crashReportsDelta?: number;
+        /** A string sets it; null clears it (e.g. Android: 'com.foo:remote' once the main process runs). */
+        processName?: string | null;
+      },
   ): DeviceApp;
   /** Drop device apps of a device (`ids`), or all of them when `ids` is omitted (device removed). */
   removeDeviceApps(deviceId: string, ids?: string[]): void;
@@ -155,7 +160,11 @@ export interface Hub extends HubSink {
   /* mutations from the UI */
   clear(target: ClearTarget, scope?: { deviceId?: string; appId?: string }): void;
   addMarker(label?: string, deviceId?: string): LogEntry;
-  exportSession(scope?: { deviceId?: string; appId?: string }): SessionExport;
+  /**
+   * `bundleId` (with `deviceId`, without `appId`): one app of the device — its sessions, the device lines of
+   * its processes, its crash records, requests, metrics and its DeviceApp (the UI's device-app scope).
+   */
+  exportSession(scope?: { deviceId?: string; appId?: string; bundleId?: string }): SessionExport;
   importSession(data: SessionExport, label: string): { deviceIds: string[] };
 
   /* settings */
@@ -293,6 +302,20 @@ export interface StartServerOptions {
   dataDir: string;
   uiDir?: string;
   verbose: boolean;
+}
+
+/**
+ * A start-up problem with a stable code and parameters, so an embedder (the Mac app) can word it in its own
+ * language. `message` is the English text, the same as the matching entry of StartedServer.warnings.
+ * Codes: 'config.invalid' {file, detail}, 'config.unreadable' {file, error, backup?}, 'config.dataDirFallback'
+ * {dir, fallback, error}, 'config.tempDirFallback' {dir, error}, 'ui.missing', 'ui.dirInvalid' {dir, fallback?},
+ * 'sdk.portBusy' {port}, 'sdk.listenFailed' {port, error}, 'sdk.unavailable' / 'drivers.unavailable' /
+ * 'vm.unavailable' / 'demo.unavailable' {reason}, 'demo.startFailed' {reason}.
+ */
+export interface ServerNotice {
+  code: string;
+  params?: Record<string, string | number>;
+  message: string;
 }
 
 export interface RunningServer {

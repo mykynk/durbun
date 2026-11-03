@@ -27,6 +27,30 @@ const isDeviceRecord = (e: LogEntry) => e.origin === 'dropbox' || e.origin === '
 /** A crash / ANR record the device kept from before Dürbün was watching (SPEC §10.3 previousLaunch). */
 const isPreviousLaunchRecord = (e: LogEntry) => isDeviceRecord(e) && isRecord(e.data) && e.data.previousLaunch === true;
 
+/**
+ * Tells which DeviceApp's `crashReports` a device crash record counted for, the way the drivers count
+ * them: one per dropbox / .ips record (keyed by the package it names: Android `data.package`, iOS
+ * `data.bundleId`, the host app for an extension), except a copy of another record (`data.duplicateOf`
+ * naming a dropbox / .ips row: Android's tombstone of a native crash) and a later copy of a live crash
+ * line an earlier record already copied (dropbox.ts "one crash, one report"). Feed every row in id order.
+ */
+export function crashRecordCounter(): (e: LogEntry) => string | undefined {
+  const records = new Set<number>();
+  const copied = new Set<number>();
+  return (e) => {
+    if (!isDeviceRecord(e)) return undefined;
+    records.add(e.id);
+    const data = isRecord(e.data) ? e.data : undefined;
+    const dup = data?.duplicateOf;
+    if (typeof dup === 'number') {
+      if (records.has(dup) || copied.has(dup)) return undefined;
+      copied.add(dup);
+    }
+    const pkg = data?.package ?? data?.bundleId;
+    return typeof pkg === 'string' && pkg ? deviceAppKey(e.deviceId, pkg) : undefined;
+  };
+}
+
 export function copyDeviceApp(app: DeviceApp): DeviceApp {
   return { ...app, pids: [...app.pids], install: { ...app.install } };
 }
@@ -153,6 +177,8 @@ export class DeviceAppStore {
       const v = input[field];
       if (typeof v === 'string') app[field] = v;
     }
+    // A driver clears a process name that no longer applies (Android: ':remote' until the main process runs).
+    if (input.processName === null) delete app.processName;
     if (typeof input.buildType === 'string' && BUILD_TYPES.has(input.buildType)) app.buildType = input.buildType as AppBuildType;
     const install = cleanInstall(input.install);
     if (install) app.install = install;
@@ -177,6 +203,40 @@ export class DeviceAppStore {
     if (before === undefined || signature(app) !== before) this.emit(app);
     else if (app.lastActivity > prevActivity) this.throttled(app);
     return copyDeviceApp(app);
+  }
+
+  /**
+   * The log rows these crash counts stood for were cleared (SPEC §10.2): `crashReports` of the apps in scope
+   * starts again from nothing, so "N crash records" matches what is left to see. Returns how many changed.
+   */
+  resetCrashReports(inScope: (app: DeviceApp) => boolean): number {
+    let changed = 0;
+    for (const app of this.apps.values()) {
+      if (app.crashReports === undefined || !inScope(app)) continue;
+      delete app.crashReports;
+      this.emit(app);
+      changed++;
+    }
+    return changed;
+  }
+
+  /**
+   * Some of the crash records these counts stood for were cleared (key → how many of them counted; see
+   * crashRecordCounter): each app's `crashReports` goes down by as much, so "N crash records" still matches
+   * the records left to see. Returns how many apps changed.
+   */
+  forgetCrashReports(removed: ReadonlyMap<string, number>): number {
+    let changed = 0;
+    for (const [key, n] of removed) {
+      const app = this.apps.get(key);
+      if (!app || app.crashReports === undefined || !(n > 0)) continue;
+      const left = app.crashReports - n;
+      if (left > 0) app.crashReports = left;
+      else delete app.crashReports;
+      this.emit(app);
+      changed++;
+    }
+    return changed;
   }
 
   /** Drops apps of a device (`ids`), or all of them. Returns the removed keys. */
