@@ -84,11 +84,16 @@ export async function searchNetwork(
   return Array.isArray(res.ids) ? res.ids : [];
 }
 
-/** Session export download URL (`durbun-<date>.durbun.json`), optionally limited to a device/app. */
-export function exportUrl(scope: { deviceId?: string; appId?: string } = {}): string {
+/**
+ * Session export download URL (`durbun-<date>.durbun.json`), optionally limited to a device, an app session
+ * (`appId`) or one app the device reports (`deviceId` + `bundleId`: that app's lines, sessions, requests and
+ * DeviceApp only — an SDK-less app has no session id).
+ */
+export function exportUrl(scope: { deviceId?: string; appId?: string; bundleId?: string } = {}): string {
   const q = new URLSearchParams();
   if (scope.deviceId) q.set('deviceId', scope.deviceId);
   if (scope.appId) q.set('appId', scope.appId);
+  if (scope.bundleId && scope.deviceId) q.set('bundleId', scope.bundleId);
   const qs = q.toString();
   return `/api/export${qs ? `?${qs}` : ''}`;
 }

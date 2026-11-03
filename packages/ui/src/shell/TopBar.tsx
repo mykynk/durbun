@@ -294,7 +294,8 @@ function useScopeName(): string | undefined {
   const { devices, apps, deviceApps } = useHub(useShallow((s) => ({ devices: s.devices, apps: s.apps, deviceApps: s.deviceApps })));
   const target = scopeTarget(scope, { devices, apps, deviceApps });
   if (target.app) return appTitle(target.app);
-  if (scope.kind === 'deviceApp') return target.device ? deviceDisplayName(target.device) : undefined;
+  // An SDK-less app: the export holds that app only, so the menu names the app.
+  if (scope.kind === 'deviceApp') return target.deviceApp?.name || target.bundleId;
   return target.device ? deviceDisplayName(target.device) : undefined;
 }
 

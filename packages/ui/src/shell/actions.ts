@@ -15,14 +15,15 @@ export function errorMessage(err: unknown): string {
   return errorText(err);
 }
 
-export function scopeExportParams(scope: Scope): { deviceId?: string; appId?: string } {
+export function scopeExportParams(scope: Scope): { deviceId?: string; appId?: string; bundleId?: string } {
   if (scope.kind === 'device') return { deviceId: scope.deviceId };
   if (scope.kind === 'app') {
     const app = useHub.getState().apps[scope.appId];
     return { deviceId: app?.deviceId, appId: scope.appId };
   }
-  // An SDK-less app has no app id on the server: export its device (its lines are on it).
-  if (scope.kind === 'deviceApp') return { deviceId: scope.deviceId };
+  // An SDK-less app has no session id on the server: the device + bundle id name it ("Export “Kumbara”" holds
+  // Kumbara only, never the other apps' lines of that phone).
+  if (scope.kind === 'deviceApp') return { deviceId: scope.deviceId, bundleId: scope.bundleId };
   return {};
 }
 

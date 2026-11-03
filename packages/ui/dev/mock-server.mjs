@@ -49,6 +49,7 @@ let settings = {
   logcatTail: 2000,
   iosSimLogScope: 'apps',
   iosSimLogLevel: 'info',
+  iosDeviceLogScope: 'apps',
   autoAttachVmService: true,
   watchedApps: [],
   allowLan: false,
@@ -908,7 +909,27 @@ const httpServer = http.createServer(async (req, res) => {
       return d ? json(res, 200, d) : json(res, 404, { error: 'Unknown network entry' });
     }
     if (p === '/api/export') {
-      const exp = { format: 'durbun-session', version: 1, exportedAt: Date.now(), server: { version: '0.1.0' }, devices, apps, logs: logs.slice(-5000), network: [...network.values()], deviceApps };
+      // Same scoping as the server: ?deviceId= (one device), + &appId= (one session) or &bundleId= (one app the device reports).
+      const deviceId = url.searchParams.get('deviceId') || undefined;
+      const appId = url.searchParams.get('appId') || undefined;
+      const bundleId = (deviceId && url.searchParams.get('bundleId')) || undefined;
+      const da = bundleId ? deviceApps.find((d) => d.deviceId === deviceId && d.id === bundleId) : undefined;
+      const appIds = new Set(apps.filter((a) => (!deviceId || a.deviceId === deviceId) && (!appId || a.id === appId) && (!bundleId || a.app.id === bundleId)).map((a) => a.id));
+      const pkgOf = (e) => e.data?.package ?? e.data?.bundleId;
+      const mine = (e) =>
+        e.appId !== undefined ? appIds.has(e.appId) : !bundleId || (da?.pids ?? []).includes(e.pid) || e.process === bundleId || (da?.processName && e.process === da.processName) || pkgOf(e) === bundleId;
+      const inScope = (e) => (!deviceId || e.deviceId === deviceId) && (!appId || e.appId === appId) && mine(e);
+      const exp = {
+        format: 'durbun-session',
+        version: 1,
+        exportedAt: Date.now(),
+        server: { version: '0.1.0' },
+        devices: deviceId ? devices.filter((d) => d.id === deviceId) : devices,
+        apps: apps.filter((a) => appIds.has(a.id)),
+        logs: logs.filter(inScope).slice(-5000),
+        network: [...network.values()].filter((n) => (!deviceId || n.deviceId === deviceId) && (!appId && !bundleId ? true : appIds.has(n.appId))),
+        deviceApps: deviceApps.filter((d) => (!deviceId || d.deviceId === deviceId) && (!bundleId || d.id === bundleId)),
+      };
       const date = new Date().toISOString().slice(0, 10);
       return json(res, 200, exp, { 'Content-Disposition': `attachment; filename="durbun-${date}.durbun.json"` });
     }
