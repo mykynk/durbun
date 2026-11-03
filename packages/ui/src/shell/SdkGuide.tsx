@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { BookOpen, Cable, FolderOpen, Plug, ShieldAlert, ShieldCheck, Wifi, Zap } from 'lucide-react';
+import { Archive, BookOpen, Cable, FolderOpen, Plug, ShieldCheck, Wifi, Zap } from 'lucide-react';
 import { DEFAULT_PORTS } from '@durbun/protocol';
 import { useLanguage, useT } from '../i18n';
 import { isConnected, ui, updateServerSettings, useConnection, useDevices, useServerSettings, useUi, type SdkGuideSection, type SdkGuideTab } from '../data';
@@ -150,8 +150,8 @@ function FlutterGuide({ repo }: { repo: string }) {
       <Section id="release" title={t('shell.sdk.flutter.releaseTitle')}>
         <p className="sdk-p">{t('shell.sdk.flutter.releaseHint')}</p>
         <Snippet lang="shell" code={S.flutterReleaseFlag(lang)} />
-        <Callout tone="warn" icon={ShieldAlert} compact title={t('shell.sdk.flutter.releaseNeverTitle')}>
-          {t('shell.sdk.flutter.releaseNever')}
+        <Callout tone="info" icon={Archive} compact title={t('shell.sdk.flutter.releaseArchiveTitle')}>
+          {t('shell.sdk.flutter.releaseArchive')}
         </Callout>
       </Section>
       <Section id="native" title={t('shell.sdk.flutter.nativeTitle')}>

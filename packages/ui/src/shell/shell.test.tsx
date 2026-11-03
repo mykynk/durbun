@@ -13,6 +13,11 @@ import * as S from './sdkSnippets';
 import { sdkHostLines } from './sdkHosts';
 import { noticeToastParts } from './notices';
 import { Sidebar } from './Sidebar';
+import { scopeExportParams } from './actions';
+import { exportUrl } from '../data/api';
+import { SettingsDialog } from './SettingsDialog';
+import { ui } from '../data/stores/ui';
+import { act } from '@testing-library/react';
 
 afterEach(() => {
   cleanup();
@@ -226,6 +231,51 @@ describe('SDK guide snippets', () => {
     ]);
     expect(S.flutterMain('tr')).toContain('// zone içinde çağırın');
     expect(S.flutterMain('en')).toContain('// call it inside the zone');
+  });
+});
+
+describe('SDK guide: release builds with the SDK on (the team decides which ones)', () => {
+  it('states the commands and the Generated.xcconfig fact, and forbids nothing', () => {
+    // No install-source guard and no store ban any more (decision of 2026-11-02): only neutral facts.
+    const PROHIBITIVE = /ASLA|NEVER|yüklemeyin|Do not upload|kendini kapat|turns itself off|kapalı kalmalı|kapalı olmalı|must stay off|should ship with it off|mağaza için asla|never for the store|Google Play/;
+    for (const lang of ['tr', 'en'] as const) {
+      const snippet = S.flutterReleaseFlag(lang);
+      expect(snippet, lang).toContain('flutter build apk --release --dart-define=DURBUN=true');
+      expect(snippet, lang).toContain('flutter build ipa --release --dart-define=DURBUN=true');
+      expect(snippet, lang).toContain('flutter build ipa --release --export-method ad-hoc --dart-define=DURBUN=true');
+      const archive = translate(lang, 'shell.sdk.flutter.releaseArchive');
+      expect(archive, lang).toContain('ios/Flutter/Generated.xcconfig');
+      expect(archive, lang).toContain('DURBUN=true');
+      for (const key of ['shell.sdk.flutter.releaseHint', 'shell.sdk.flutter.releaseArchiveTitle', 'shell.sdk.flutter.zeroBody', 'shell.sdk.releaseBy.flutter']) {
+        expect(translate(lang, key), `${lang} ${key}`).not.toMatch(PROHIBITIVE);
+      }
+      expect(snippet, lang).not.toMatch(PROHIBITIVE);
+    }
+  });
+});
+
+describe('export of one app', () => {
+  it('an SDK-less app exports that app only (deviceId + bundleId), not the whole device', () => {
+    const scope = { kind: 'deviceApp' as const, deviceId: 'ios:00008130-000A1B2C3D4E5F60', bundleId: 'com.mykynk.kumbara' };
+    expect(scopeExportParams(scope)).toEqual({ deviceId: 'ios:00008130-000A1B2C3D4E5F60', bundleId: 'com.mykynk.kumbara' });
+    expect(exportUrl(scopeExportParams(scope))).toBe('/api/export?deviceId=ios%3A00008130-000A1B2C3D4E5F60&bundleId=com.mykynk.kumbara');
+    expect(exportUrl({ deviceId: 'android:R5CT20XK9QM' })).toBe('/api/export?deviceId=android%3AR5CT20XK9QM');
+    expect(exportUrl({ bundleId: 'com.mykynk.kumbara' })).toBe('/api/export'); // a bundle id means nothing without its device
+  });
+});
+
+describe('Settings › Logs: iPhone log scope', () => {
+  it('sits next to the simulator scope and says what each choice keeps', () => {
+    setLanguage('tr');
+    act(() => ui.openSettings('logs'));
+    render(<SettingsDialog />);
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('iPhone log kapsamı');
+    expect(text).toContain('Uygulamalar: kurulu uygulamaların satırları ve çökmeyle ilgili sistem satırları gelir.');
+    expect(text).toContain('saniyede ~1000 satır');
+    expect(text.indexOf('iPhone log kapsamı')).toBeLessThan(text.indexOf('iOS simülatör log kapsamı'));
+    act(() => ui.closeSettings());
+    expect(translate('en', 'shell.settings.iosDeviceLogScopeHint')).toContain('about 1000 lines a second');
   });
 });
 

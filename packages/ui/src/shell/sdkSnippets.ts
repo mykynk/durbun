@@ -33,11 +33,18 @@ Future<void> main() async {
 }`;
 }
 
-/** Release switch: only for internal / Firebase builds that are separate from the store build. */
+/**
+ * Release builds with the SDK on: the team picks the builds (Firebase, ad hoc, store), the guide states the commands.
+ * `flutter build ipa` exports for the App Store by default; Firebase App Distribution / ad-hoc needs `--export-method
+ * ad-hoc`.
+ */
 export function flutterReleaseFlag(lang: Lang): string {
-  return `# ${c(lang, 'Firebase / iç test derlemesi (mağaza derlemesinde ASLA)', 'Firebase / internal build (NEVER for the store build)')}
+  return `# Android
 flutter build apk --release --dart-define=DURBUN=true
-flutter build ipa --dart-define=DURBUN=true`;
+# iOS
+flutter build ipa --release --dart-define=DURBUN=true
+# ${c(lang, 'iOS · Firebase App Distribution ya da ad-hoc dağıtım', 'iOS · Firebase App Distribution or ad-hoc distribution')}
+flutter build ipa --release --export-method ad-hoc --dart-define=DURBUN=true`;
 }
 
 /** Android native layer of a Flutter app: one line on the app's own OkHttp clients. */
