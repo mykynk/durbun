@@ -84,6 +84,8 @@ class InspectorHome extends StatelessWidget {
           length: 5,
           child: Scaffold(
             appBar: AppBar(
+              // The close button is the way out; no second back arrow.
+              automaticallyImplyLeading: false,
               title: Text(t.title),
               actions: <Widget>[
                 IconButton(
