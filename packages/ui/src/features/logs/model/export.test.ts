@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LogEntry } from '@durbun/protocol';
-import { exportFileName, exportJson, exportTimestamp, exportTxt, formatTxtEntry } from './export';
+import { exportCount, exportFileName, exportJson, exportTimestamp, exportTxt, formatTxtEntry, formatTxtRow } from './export';
 import type { LogRow } from './types';
 
 const ts = new Date(2026, 10, 2, 14, 5, 12, 345).getTime();
@@ -41,6 +41,33 @@ describe('export formatting', () => {
     expect(json.logs[0].repeat).toBeUndefined();
     expect(json.logs[1].repeat).toBe(2);
     expect(json.logs[1].lastTs).toBe(ts + 5);
+  });
+
+  it('writes every event of a merged connection row, in arrival order, without a repeat counter', () => {
+    const sep = (id: number, code: string): LogEntry => e({ id, ts: ts + id * 1000, source: 'system', kind: 'lifecycle', code, message: code, tag: 'durbun' });
+    const events: LogEntry[] = [];
+    let id = 10;
+    for (let i = 0; i < 6; i++) events.push(sep(id++, 'device.disconnected'), sep(id++, 'device.connected'), sep(id++, 'logs.streamStarted'));
+    const between = e({ id: 15, ts: ts + 15_500, message: 'between' }); // arrived while the cable flapped
+    const after = e({ id: 40, ts: ts + 40_000, message: 'after' });
+    const last = events[events.length - 1]!;
+    const rows: LogRow[] = [
+      { id: 15, e: { ...between }, n: 1 },
+      { id: last.id, e: last, n: 1, flap: { key: events[0]!.id, events } },
+      { id: 40, e: after, n: 1 },
+    ];
+    expect(exportCount(rows)).toBe(20);
+    const lines = exportTxt(rows, { text }).trimEnd().split('\n');
+    expect(lines).toHaveLength(20);
+    expect(lines.filter((l) => l.includes('---- SYS:'))).toHaveLength(18);
+    expect(lines.some((l) => l.includes('×'))).toBe(false);
+    expect(lines[5]).toMatch(/I\/flutter: between$/);
+    expect(lines[19]).toMatch(/after$/);
+    const json = JSON.parse(exportJson(rows));
+    expect(json.count).toBe(20);
+    expect(json.logs.map((x: LogEntry) => x.id)).toEqual([...events.slice(0, 5).map((x) => x.id), 15, ...events.slice(5).map((x) => x.id), 40]);
+    expect(json.logs.some((x: { repeat?: number }) => x.repeat !== undefined)).toBe(false);
+    expect(formatTxtRow(rows[1]!, { text }).split('\n')).toHaveLength(18);
   });
 
   it('names files with a sortable timestamp', () => {

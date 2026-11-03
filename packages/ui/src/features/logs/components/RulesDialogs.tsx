@@ -10,7 +10,8 @@ const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.r
 
 /* ───────────── noise rules ───────────── */
 
-export function NoiseRulesDialog({ open, onClose }: { open: boolean; onClose(): void }) {
+/** `keepsCrashLines`: the iPhone 'apps' scope is on, so crash-relevant daemon lines bypass the rules (`keepCrashRelevant`). */
+export function NoiseRulesDialog({ open, onClose, keepsCrashLines }: { open: boolean; onClose(): void; keepsCrashLines?: boolean }) {
   const rules = usePrefs((s) => s.noiseRules);
   const setPref = usePrefs((s) => s.setPref);
   const update = (id: string, patch: Partial<NoiseRule>) => setPref('noiseRules', rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -40,6 +41,7 @@ export function NoiseRulesDialog({ open, onClose }: { open: boolean; onClose(): 
       }
     >
       {rules.length === 0 ? <p className="muted text-sm">{t('logs.rules.empty')}</p> : null}
+      {keepsCrashLines ? <p className="muted text-sm lg-rules__note">{t('logs.rules.noiseKeepsCrash')}</p> : null}
       <div className="lg-rules" role="table" aria-label={t('logs.rules.noiseTitle')}>
         {rules.map((r) => (
           <div key={r.id} className={clsx('lg-rules__row', !r.enabled && 'is-off')} role="row">
