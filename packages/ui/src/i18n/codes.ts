@@ -16,6 +16,10 @@ import { getLanguage, hasMessage, registerMessages, t, translateOr, type Lang, t
  *   process.started / process.died          { process, pid }
  *   marker                                  { label ('' when none), n }
  *   logs.streamStarted|Stopped|Error        { via, detail? }
+ *   logs.streamStalled                      { via, seconds, detail }   (an attached iPhone's stream went silent; restarted)
+ *   logs.scopeNotApplied / scopeApplied     { via, reason: 'devicectlMissing' | 'appListFailed', device } / { via, device }
+ *   logs.connectionLost                     { via, connection: 'usb' | 'wifi', graceSeconds, detail }
+ *   logs.connectionRestored                 { via, connection, seconds, detail }
  *   vm.attached / vm.detached               { app, url } / { app, reason }
  *   vm.attachFailed                         { url, error }
  *   vm.hotRestart / vm.hotReload            { app }
@@ -25,7 +29,7 @@ import { getLanguage, hasMessage, registerMessages, t, translateOr, type Lang, t
  *   config.writeFailed                      { file, error }
  *   action.screenshot.saved (reply data)    { url, file, width, height }
  * Derived params (computed here, never sent): `details` (device.connected), `reason`
- * (device.disconnected, vm.detached), `via` / `failed` (app.*), `size` (screenshot), `detail` / `limit`
+ * (device.disconnected, vm.detached), `why` (logs.scopeNotApplied), `link` / `gap` (logs.connectionLost|Restored), `via` / `failed` (app.*), `size` (screenshot), `detail` / `limit`
  * (errors: the specific part of the server's English message).
  * Older `{ name }` params are still accepted as a fallback.
  */
@@ -45,11 +49,17 @@ export const SERVER_CODES = {
     'logs.streamStarted',
     'logs.streamStopped',
     'logs.streamError',
+    'logs.streamStalled',
+    'logs.scopeNotApplied',
+    'logs.scopeApplied',
+    'logs.connectionLost',
+    'logs.connectionRestored',
     'vm.attached',
     'vm.detached',
     'vm.attachFailed',
     'vm.hotRestart',
     'vm.hotReload',
+    'sdk.routeElsewhere',
   ],
   /** `DeviceInfo.stateCode`. */
   deviceStates: [
@@ -76,6 +86,8 @@ export const SERVER_CODES = {
     'logs.usbmuxdUnavailable',
     'logs.simctlMissing',
     'logs.networkOnly',
+    'logs.streamStalled',
+    'logs.scopeNotApplied',
   ],
   /** `DriverStatus.code`. */
   drivers: [
@@ -97,6 +109,12 @@ export const SERVER_CODES = {
     'settings.lanOff',
     'settings.sdkRebindFailed',
     'config.writeFailed',
+    'config.unreadable',
+    'config.dataDirFallback',
+    'config.tempDirFallback',
+    'sdk.portBusy',
+    'sdk.listenFailed',
+    'demo.startFailed',
     'replay.bodyTruncated',
     'replay.bodyMissing',
     'replay.bodyDropped',
@@ -222,11 +240,37 @@ registerMessages('code', {
     'logs.streamStarted': ['Cihaz log akışı başladı ({via})', 'Cihaz log akışı başladı'],
     'logs.streamStopped': ['Cihaz log akışı durdu ({via})', 'Cihaz log akışı durdu'],
     'logs.streamError': ['Cihaz log akışı kesildi ({via}); yeniden başlatılıyor', 'Cihaz log akışı kesildi; yeniden başlatılıyor'],
+    'logs.streamStalled': ['iPhone bağlı ama log akışı {seconds, number} sn’dir sessiz; yeniden başlatılıyor', 'iPhone bağlı ama log akışı sessiz; yeniden başlatılıyor'],
+    'logs.scopeNotApplied': [
+      '{device}: sistem süreçlerinin satırları da gösteriliyor; {why}',
+      '{device}: sistem süreçlerinin satırları da gösteriliyor',
+      'iPhone’daki sistem süreçlerinin satırları da gösteriliyor; {why}',
+      'iPhone’daki sistem süreçlerinin satırları da gösteriliyor',
+    ],
+    'logs.scopeApplied': [
+      '{device}: kurulu uygulamalar okundu; sistem süreçlerinin satırları artık gizleniyor',
+      'Kurulu uygulamalar okundu; iPhone’daki sistem süreçlerinin satırları artık gizleniyor',
+    ],
+    'logs.connectionLost': [
+      'Cihazın {link} bağlantısı koptu; {gap}. {graceSeconds, number} sn içinde dönmezse cihaz bağlı değil olarak görünür',
+      'Cihazın {link} bağlantısı koptu; {graceSeconds, number} sn içinde dönmezse cihaz bağlı değil olarak görünür',
+      'Cihazın {link} bağlantısı koptu',
+      'Cihazın bağlantısı koptu',
+    ],
+    'logs.connectionRestored': [
+      'Cihazın {link} bağlantısı {seconds, number} sn sonra geri geldi; {gap}',
+      'Cihazın {link} bağlantısı {seconds, number} sn sonra geri geldi',
+      'Cihazın bağlantısı geri geldi',
+    ],
     'vm.attached': ['{app}, Dart VM Service üzerinden bağlandı', '{name}, Dart VM Service üzerinden bağlandı', 'Dart VM Service bağlandı'],
     'vm.detached': ['{app} için Dart VM Service bağlantısı kesildi ({reason})', '{app} için Dart VM Service bağlantısı kesildi', 'Dart VM Service bağlantısı kesildi'],
     'vm.attachFailed': ['Dart VM Service’e bağlanılamadı: {error}', 'Dart VM Service’e bağlanılamadı'],
     'vm.hotRestart': ['{app} yeniden başlatıldı (hot restart)', 'Uygulama yeniden başlatıldı (hot restart)'],
     'vm.hotReload': ['{app} güncellendi (hot reload)', 'Kod güncellendi (hot reload)'],
+    'sdk.routeElsewhere': [
+      'Bu cihazın SDK bağlantıları bu bilgisayarda çalışan başka bir Dürbün’e gidiyor (localhost:{port}). SDK’lı uygulamalar orada görünür; cihaz logları burada da gelir.',
+      'Bu cihazın SDK bağlantıları bu bilgisayarda çalışan başka bir Dürbün’e gidiyor. SDK’lı uygulamalar orada görünür; cihaz logları burada da gelir.',
+    ],
 
     /* ── device states ── */
     'device.unauthorized': 'Cihazdaki “USB hata ayıklamaya izin verilsin mi?” sorusunu onaylayın',
@@ -258,7 +302,7 @@ registerMessages('code', {
     'driver.simctlError': 'simctl hata verdi',
     'driver.initFailed': 'Sürücü başlatılamadı',
     'driver.statusFailed': 'Sürücü durumu okunamadı',
-    'demo.active': '2 sanal cihazda demo verisi üretiliyor',
+    'demo.active': 'Demo cihazlarında örnek veri üretiliyor',
     'demo.inactive': 'Demo modu kapalı',
 
     /* ── notices ── */
@@ -275,6 +319,22 @@ registerMessages('code', {
     ],
     'settings.sdkRebindFailed': ['SDK portu ({port}) yeniden açılamadı: {error}', 'SDK portu yeniden açılamadı'],
     'config.writeFailed': ['{file} kaydedilemedi: {error}', 'Ayar dosyası kaydedilemedi'],
+    'config.unreadable': [
+      '{file} okunamadı ({error}); Dürbün bu dosya olmadan başladı. Bozuk dosyanın kopyası: {backup}',
+      '{file} okunamadı ({error}); Dürbün bu dosya olmadan başladı.',
+      'Bir ayar dosyası okunamadı; Dürbün onsuz başladı.',
+    ],
+    'config.dataDirFallback': ['{dir} klasörüne yazılamıyor ({error}); Dürbün şimdilik {fallback} klasörünü kullanıyor.', 'Veri klasörüne yazılamıyor; Dürbün şimdilik geçici bir klasör kullanıyor.'],
+    'config.tempDirFallback': ['Geçici klasör oluşturulamadı ({error}); {dir} kullanılıyor.', 'Geçici klasör oluşturulamadı; sistemin geçici klasörü kullanılıyor.'],
+    'sdk.portBusy': [
+      'SDK portunu ({port}) başka bir program kullanıyor: simülatördeki ve Wi-Fi üzerinden bağlanan uygulamalar Dürbün’e ulaşamaz (Android’de USB bağlantısı yine çalışır).',
+      'SDK portunu başka bir program kullanıyor: simülatördeki ve Wi-Fi üzerinden bağlanan uygulamalar Dürbün’e ulaşamaz (Android’de USB bağlantısı yine çalışır).',
+    ],
+    'sdk.listenFailed': [
+      'SDK portu ({port}) açılamadı: {error}. Simülatördeki ve Wi-Fi üzerinden bağlanan uygulamalar Dürbün’e ulaşamaz (Android’de USB bağlantısı yine çalışır).',
+      'SDK portu açılamadı. Simülatördeki ve Wi-Fi üzerinden bağlanan uygulamalar Dürbün’e ulaşamaz (Android’de USB bağlantısı yine çalışır).',
+    ],
+    'demo.startFailed': ['Demo modu başlatılamadı: {reason}', 'Demo modu başlatılamadı'],
     'replay.bodyTruncated': 'Yakalanan istek gövdesi kırpılmıştı; istek kırpılmış gövdeyle gönderildi',
     'replay.bodyMissing': 'İstek gövdesi yakalanmamış ya da bellekten atılmış; istek gövdesiz gönderildi',
     'replay.bodyDropped': 'GET ve HEAD istekleri gövde taşıyamaz; gövde çıkarıldı',
@@ -401,6 +461,13 @@ registerMessages('code', {
       kind: { emulator: 'emülatör', simulator: 'simülatör' },
       connection: { usb: 'USB', wifi: 'Wi-Fi' },
       deviceState: { offline: 'çevrimdışı', unauthorized: 'izin bekleniyor' },
+      /** logs.scopeNotApplied `reason`: why app lines cannot be told from system lines. */
+      scopeWhy: {
+        devicectlMissing: 'uygulama satırlarını ayırmak için Xcode 15 ya da daha yenisi (devicectl) gerekir',
+        appListFailed: 'kurulu uygulamalar devicectl ile okunamadığı için uygulama satırları ayrılamıyor',
+      },
+      /** logs.connectionLost / connectionRestored while the log stream was cut. */
+      gap: { lost: 'dönene kadar log satırı gelmez', restored: 'aradaki log satırları eksik' },
       sdk: {
         flutter: 'Flutter SDK',
         android: 'Android SDK',
@@ -458,11 +525,37 @@ registerMessages('code', {
     'logs.streamStarted': ['Device log stream started ({via})', 'Device log stream started'],
     'logs.streamStopped': ['Device log stream stopped ({via})', 'Device log stream stopped'],
     'logs.streamError': ['Device log stream interrupted ({via}); restarting', 'Device log stream interrupted; restarting'],
+    'logs.streamStalled': ['The iPhone is connected, but its log stream has been silent for {seconds, number} s; restarting it', 'The iPhone is connected, but its log stream went silent; restarting it'],
+    'logs.scopeNotApplied': [
+      '{device}: system process lines are shown too; {why}',
+      '{device}: system process lines are shown too',
+      'The iPhone’s system process lines are shown too; {why}',
+      'The iPhone’s system process lines are shown too',
+    ],
+    'logs.scopeApplied': [
+      '{device}: the installed apps could be read; system process lines are left out from now on',
+      'The installed apps could be read; the iPhone’s system process lines are left out from now on',
+    ],
+    'logs.connectionLost': [
+      'The device’s {link} connection dropped; {gap}. If it is not back within {graceSeconds, number} s, the device shows as disconnected',
+      'The device’s {link} connection dropped; if it is not back within {graceSeconds, number} s, the device shows as disconnected',
+      'The device’s {link} connection dropped',
+      'The device’s connection dropped',
+    ],
+    'logs.connectionRestored': [
+      'The device’s {link} connection is back after {seconds, number} s; {gap}',
+      'The device’s {link} connection is back after {seconds, number} s',
+      'The device’s connection is back',
+    ],
     'vm.attached': ['Attached to {app} through the Dart VM Service', 'Attached to {name} through the Dart VM Service', 'Attached to the Dart VM Service'],
     'vm.detached': ['Detached from {app} ({reason})', 'Detached from {app}', 'Detached from the Dart VM Service'],
     'vm.attachFailed': ['Could not attach to the Dart VM Service: {error}', 'Could not attach to the Dart VM Service'],
     'vm.hotRestart': ['Hot restart · {app}', 'Hot restart'],
     'vm.hotReload': ['Hot reload · {app}', 'Hot reload'],
+    'sdk.routeElsewhere': [
+      'This device’s SDK connections go to another Dürbün running on this computer (localhost:{port}). Apps with the SDK show up there; device logs still appear here.',
+      'This device’s SDK connections go to another Dürbün running on this computer. Apps with the SDK show up there; device logs still appear here.',
+    ],
 
     /* ── device states ── */
     'device.unauthorized': 'Accept the “Allow USB debugging?” prompt on the device',
@@ -494,7 +587,7 @@ registerMessages('code', {
     'driver.simctlError': 'simctl reported an error',
     'driver.initFailed': 'The driver failed to start',
     'driver.statusFailed': 'Could not read the driver status',
-    'demo.active': 'Generating demo data on 2 virtual devices',
+    'demo.active': 'Generating sample data on the demo devices',
     'demo.inactive': 'Demo mode is off',
 
     /* ── notices ── */
@@ -511,6 +604,22 @@ registerMessages('code', {
     ],
     'settings.sdkRebindFailed': ['Could not reopen the SDK port ({port}): {error}', 'Could not reopen the SDK port'],
     'config.writeFailed': ['Could not save {file}: {error}', 'Could not save the settings file'],
+    'config.unreadable': [
+      '{file} could not be read ({error}); Dürbün started without it. A copy of the broken file: {backup}',
+      '{file} could not be read ({error}); Dürbün started without it.',
+      'A settings file could not be read; Dürbün started without it.',
+    ],
+    'config.dataDirFallback': ['Cannot write to {dir} ({error}); using {fallback} for this run.', 'Cannot write to the data folder; using a temporary folder for this run.'],
+    'config.tempDirFallback': ['The temp folder could not be created ({error}); using {dir}.', 'The temp folder could not be created; using the system temp folder.'],
+    'sdk.portBusy': [
+      'Another program is using the SDK port ({port}): apps on simulators or Wi-Fi cannot connect (Android over USB still works).',
+      'Another program is using the SDK port: apps on simulators or Wi-Fi cannot connect (Android over USB still works).',
+    ],
+    'sdk.listenFailed': [
+      'The SDK port ({port}) could not be opened: {error}. Apps on simulators or Wi-Fi cannot connect (Android over USB still works).',
+      'The SDK port could not be opened. Apps on simulators or Wi-Fi cannot connect (Android over USB still works).',
+    ],
+    'demo.startFailed': ['Demo mode could not start: {reason}', 'Demo mode could not start'],
     'replay.bodyTruncated': 'The captured request body was truncated; the request was sent with the truncated body',
     'replay.bodyMissing': 'The request body was not captured or was evicted; the request was sent without a body',
     'replay.bodyDropped': 'GET and HEAD requests cannot carry a body; it was dropped',
@@ -633,6 +742,11 @@ registerMessages('code', {
       kind: { emulator: 'emulator', simulator: 'simulator' },
       connection: { usb: 'USB', wifi: 'Wi-Fi' },
       deviceState: { offline: 'offline', unauthorized: 'waiting for permission' },
+      scopeWhy: {
+        devicectlMissing: 'telling app lines apart needs Xcode 15 or newer (devicectl)',
+        appListFailed: 'the installed apps could not be read with devicectl, so app lines cannot be told apart',
+      },
+      gap: { lost: 'no log lines until it is back', restored: 'log lines from the gap are missing' },
       sdk: {
         flutter: 'Flutter SDK',
         android: 'Android SDK',
@@ -772,6 +886,16 @@ function appVia(p: Params, lang: Lang): string {
   return [sdkLabel, transportLabel].filter(Boolean).join(' · ');
 }
 
+/**
+ * logs.connectionLost / connectionRestored: `link` = USB / Wi-Fi; `gap` when the server's English detail says the
+ * log stream was cut too (the params carry no flag for it).
+ */
+function connectionGap(p: Params, lang: Lang, which: 'lost' | 'restored', cut: RegExp): Partial<Prepared> {
+  const connection = str(p.connection);
+  const link = connection === 'usb' || connection === 'wifi' ? part(lang, `connection.${connection}`) : '';
+  return { params: { ...p, link, gap: cut.test(str(p.detail)) ? part(lang, `gap.${which}`) : '' } };
+}
+
 type Prepared = { key: string; params: Params };
 type Preparer = (p: Params, lang: Lang) => Partial<Prepared> | void;
 
@@ -803,6 +927,12 @@ const PREPARE: Record<string, Preparer> = {
   'app.disconnected': (p, lang) => {
     const n = num(p.failedRequests) ?? 0;
     return { params: { ...p, failed: n > 0 ? part(lang, 'failedRequests', { count: n }) : '' } };
+  },
+  'logs.connectionLost': (p, lang) => connectionGap(p, lang, 'lost', /log lines are missing/),
+  'logs.connectionRestored': (p, lang) => connectionGap(p, lang, 'restored', /log lines from that moment are missing/),
+  'logs.scopeNotApplied': (p, lang) => {
+    const reason = str(p.reason);
+    return { params: { ...p, why: reason === 'devicectlMissing' || reason === 'appListFailed' ? part(lang, `scopeWhy.${reason}`) : '' } };
   },
   'vm.detached': (p, lang) => {
     const reason = str(p.reason);

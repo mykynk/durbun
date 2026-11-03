@@ -48,12 +48,26 @@ const SYSTEM_SAMPLES: [code: string, params: Record<string, string | number>][] 
   ['logs.streamStarted', { via: 'logcat' }],
   ['logs.streamStopped', { via: 'idevicesyslog' }],
   ['logs.streamError', { via: 'simctl log stream', detail: 'log stream exited (exit code 1): boom — restarting' }],
+  // An attached iPhone whose idevicesyslog stream went quiet (restarted with backoff).
+  ['logs.streamStalled', { via: 'idevicesyslog', seconds: 30, detail: 'no log line from the device for 30 s although it is connected (idevicesyslog runs but sends nothing); restarting idevicesyslog in 2 s (attempt 1)' }],
+  ['logs.scopeApplied', { via: 'idevicesyslog', device: 'Yusuf’un iPhone’u' }],
+  // A USB drop the iPhone came back from within the grace (no disconnected / connected lines).
+  ['logs.connectionLost', { via: 'idevicesyslog', connection: 'usb', graceSeconds: 3, detail: 'the USB connection dropped; log lines are missing until the device is back; it is shown disconnected if it is not back within 3 s' }],
+  ['logs.connectionLost', { via: 'idevicesyslog', connection: 'wifi', graceSeconds: 10, detail: 'the Wi-Fi connection dropped; it is shown disconnected if it is not back within 10 s' }],
+  ['logs.connectionRestored', { via: 'idevicesyslog', connection: 'usb', seconds: 1.4, detail: 'the USB connection was gone for 1.4 s; log lines from that moment are missing' }],
+  ['logs.connectionRestored', { via: 'idevicesyslog', connection: 'usb', seconds: 0.8, detail: 'the USB connection was gone for 0.8 s' }],
+  // iosDeviceLogScope 'apps' cannot be applied: every line is shown.
+  ['logs.scopeNotApplied', { via: 'idevicesyslog', reason: 'devicectlMissing', device: 'Yusuf’un iPhone’u' }],
+  ['logs.scopeNotApplied', { via: 'idevicesyslog', reason: 'appListFailed', device: 'Yusuf’un iPhone’u' }],
+  ['logs.scopeNotApplied', { via: 'idevicesyslog', reason: 'somethingNew', device: 'Yusuf’un iPhone’u' }],
   ['vm.attached', { app: 'Pati', url: 'ws://127.0.0.1:52345/Ab3x=/ws' }],
   ['vm.detached', { app: 'Pati', reason: 'the app stopped or the device was disconnected' }],
   ['vm.detached', { app: 'Pati', reason: 'detached by the user' }],
   ['vm.attachFailed', { url: 'http://127.0.0.1:50123/x=/', error: 'connect ECONNREFUSED 127.0.0.1:50123' }],
   ['vm.hotRestart', { app: 'Pati' }],
   ['vm.hotReload', { app: 'Pati' }],
+  // Another Dürbün on this Mac (e.g. the Mac app on 9750) owns the device's adb reverse mappings.
+  ['sdk.routeElsewhere', { port: 9750 }],
 ];
 
 const NOTICE_SAMPLES: [code: string, params: Record<string, string | number> | undefined][] = [
@@ -67,6 +81,13 @@ const NOTICE_SAMPLES: [code: string, params: Record<string, string | number> | u
   ['settings.lanOff', { sdkPort: 9751, httpPort: 9750, restartRequired: 1 }],
   ['settings.sdkRebindFailed', { port: 9751, error: 'Port 9751 is already used by another program' }],
   ['config.writeFailed', { file: 'settings.json', error: 'EACCES: permission denied' }],
+  ['config.unreadable', { file: 'settings.json', error: 'Unexpected end of JSON input', backup: '/Users/x/.durbun/settings.json.corrupt-1793651000000' }],
+  ['config.unreadable', { file: 'mocks.json', error: 'Unexpected token } in JSON at position 41' }],
+  ['config.dataDirFallback', { dir: '/Users/x/.durbun', fallback: '/var/folders/tmp/durbun-x', error: 'EACCES: permission denied' }],
+  ['config.tempDirFallback', { dir: '/var/folders/tmp/durbun-tmp-a1b2', error: 'ENOSPC: no space left on device' }],
+  ['sdk.portBusy', { port: 9751 }],
+  ['sdk.listenFailed', { port: 9751, error: 'EACCES: permission denied' }],
+  ['demo.startFailed', { reason: 'demo data folder is not writable' }],
   ['replay.bodyTruncated', undefined],
   ['replay.bodyMissing', undefined],
   ['replay.bodyDropped', undefined],
@@ -111,6 +132,7 @@ describe('server codes → i18n', () => {
     const root = existsSync(join(process.cwd(), 'packages/server/src')) ? join(process.cwd(), 'packages/server/src') : join(process.cwd(), '../server/src');
     if (!existsSync(root)) return; // UI package checked out alone
     const NOT_CODES = new Set([
+      'api.kumbara.app', // a demo host name
       'app.action',
       'command.result',
       'demo.set',
@@ -184,6 +206,24 @@ describe('server codes → i18n', () => {
     expect(tr('marker', { label: '', n: 3 })).toBe('İşaret 3');
     expect(tr('marker', { label: 'Ödeme akışı testi', n: 4 })).toBe('Ödeme akışı testi');
     expect(tr('logs.streamError', { via: 'logcat', detail: 'x' })).toBe('Cihaz log akışı kesildi (logcat); yeniden başlatılıyor');
+    expect(tr('logs.streamStalled', { via: 'idevicesyslog', seconds: 30 })).toBe('iPhone bağlı ama log akışı 30 sn’dir sessiz; yeniden başlatılıyor');
+    expect(tr('logs.scopeNotApplied', { via: 'idevicesyslog', reason: 'devicectlMissing', device: 'Yusuf’un iPhone’u' })).toBe(
+      'Yusuf’un iPhone’u: sistem süreçlerinin satırları da gösteriliyor; uygulama satırlarını ayırmak için Xcode 15 ya da daha yenisi (devicectl) gerekir',
+    );
+    expect(tr('logs.scopeNotApplied', { via: 'idevicesyslog', reason: 'appListFailed', device: 'Yusuf’un iPhone’u' })).toBe(
+      'Yusuf’un iPhone’u: sistem süreçlerinin satırları da gösteriliyor; kurulu uygulamalar devicectl ile okunamadığı için uygulama satırları ayrılamıyor',
+    );
+    // A reason this UI does not know yet: the sentence without the why.
+    expect(tr('logs.scopeNotApplied', { via: 'idevicesyslog', reason: 'somethingNew', device: 'Yusuf’un iPhone’u' })).toBe('Yusuf’un iPhone’u: sistem süreçlerinin satırları da gösteriliyor');
+    expect(tcodeEn('logs.scopeNotApplied', { reason: 'devicectlMissing', device: 'Pixel' })).toBe('Pixel: system process lines are shown too; telling app lines apart needs Xcode 15 or newer (devicectl)');
+    expect(tr('logs.scopeApplied', { via: 'idevicesyslog', device: 'Yusuf’un iPhone’u' })).toBe('Yusuf’un iPhone’u: kurulu uygulamalar okundu; sistem süreçlerinin satırları artık gizleniyor');
+    const lost = SYSTEM_SAMPLES.filter(([c]) => c === 'logs.connectionLost').map(([, p]) => p);
+    expect(tr('logs.connectionLost', lost[0]!)).toBe('Cihazın USB bağlantısı koptu; dönene kadar log satırı gelmez. 3 sn içinde dönmezse cihaz bağlı değil olarak görünür');
+    expect(tr('logs.connectionLost', lost[1]!)).toBe('Cihazın Wi-Fi bağlantısı koptu; 10 sn içinde dönmezse cihaz bağlı değil olarak görünür');
+    const back = SYSTEM_SAMPLES.filter(([c]) => c === 'logs.connectionRestored').map(([, p]) => p);
+    expect(tr('logs.connectionRestored', back[0]!)).toBe('Cihazın USB bağlantısı 1,4 sn sonra geri geldi; aradaki log satırları eksik');
+    expect(tr('logs.connectionRestored', back[1]!)).toBe('Cihazın USB bağlantısı 0,8 sn sonra geri geldi');
+    expect(tcodeEn('logs.connectionRestored', back[0]!)).toBe('The device’s USB connection is back after 1.4 s; log lines from the gap are missing');
     expect(tr('vm.detached', { app: 'Pati', reason: 'detached by the user' })).toBe('Pati için Dart VM Service bağlantısı kesildi (elle ayrıldı)');
     expect(tcodeEn('app.disconnected', { app: 'Pati', failedRequests: 3 })).toBe('Pati disconnected · 3 pending requests failed');
     // Older `{ name }` params still render.
@@ -235,7 +275,8 @@ describe('server codes → i18n', () => {
     expect(driverStatusText({ id: 'flutter-vm', detail: 'Waiting for Flutter debug apps (auto-attach on)' })).toBe(
       'Flutter debug uygulamaları bekleniyor (otomatik bağlanma açık)',
     );
-    expect(driverStatusText({ id: 'demo', detail: 'Generating demo data for 2 virtual devices', code: 'demo.active' })).toBe('2 sanal cihazda demo verisi üretiliyor');
+    // The server says "3 virtual devices" since phase 3; the text names no count, so it cannot go stale again.
+    expect(driverStatusText({ id: 'demo', detail: 'Generating demo data for 3 virtual devices', code: 'demo.active' })).toBe('Demo cihazlarında örnek veri üretiliyor');
     expect(driverStatusText({ id: 'android', detail: 'something odd' })).toBe('something odd');
     expect(deviceDisplayName({ id: 'desktop', name: 'Desktop' })).toBe('Masaüstü · yeniden gönderilenler');
     expect(deviceDisplayName({ id: 'import:1', name: '📁 Pixel 8 · Demo' })).toBe('📁 Pixel 8 · Demo');
