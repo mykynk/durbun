@@ -45,7 +45,7 @@ import {
 import { RuleList } from './components/RuleList';
 import { RuleEditor, type KnownApp } from './components/RuleEditor';
 import { CapabilityHints, ImportDialog, type PendingImport } from './components/Extras';
-import { ExplainCallout, pickEmptyReason, useScopeExplain } from '../../sources';
+import { ExplainCallout, ExplainEmpty, pickEmptyReason, useScopeExplain } from '../../sources';
 import './i18n';
 import './mocks.css';
 
@@ -351,7 +351,8 @@ export default function MocksView() {
         <span className="toolbar__spacer" />
         <IconButton icon={FileUp} label={t('mocks.toolbar.import')} onClick={() => void importFromFile()} />
         <IconButton icon={FileDown} label={t('mocks.toolbar.export')} onClick={exportAll} disabled={rules.length === 0} />
-        <Button size="sm" variant="primary" icon={Plus} onClick={() => void openNew()}>
+        {/* Rules cannot run on the scoped app: creating one is still possible (other apps), but not the main action here. */}
+        <Button size="sm" variant={mocksStructural ? 'secondary' : 'primary'} icon={Plus} onClick={() => void openNew()}>
           {t('mocks.toolbar.newRule')}
         </Button>
       </Toolbar>
@@ -361,13 +362,28 @@ export default function MocksView() {
           <span>{enabledCount > 0 ? t('mocks.master.active', { count: enabledCount }) : t('mocks.master.inactive')}</span>
         </div>
       ) : null}
-      {mocksStructural ? <ExplainCallout capability="mocks" className="mk-explain" /> : <CapabilityHints apps={scopedApps} />}
+      {/* With no rules yet the explanation is the empty state itself (below); with rules it sits above the list. */}
+      {mocksStructural ? empty ? null : <ExplainCallout capability="mocks" className="mk-explain" /> : <CapabilityHints apps={scopedApps} />}
       <SplitPane id="mocks.editor" sizedPane="second" defaultSize={600} minSize={420} maxSize={0.72} collapsed={editor ? null : 'second'} onOverlayDismiss={() => void closeEditor()} className="mk-split">
         <div className="mk-listpane">
           {!loaded ? (
             <div className="mk-loading">
               <Spinner size={16} />
             </div>
+          ) : empty && mocksStructural ? (
+            <ExplainEmpty capability="mocks" icon={Drama} fallback={null}>
+              <div className="mk-elsewhere">
+                <p>{t('mocks.empty.otherApps')}</p>
+                <div className="mk-elsewhere__actions">
+                  <Button size="sm" variant="secondary" icon={Plus} onClick={() => void openNew()}>
+                    {t('mocks.empty.create')}
+                  </Button>
+                  <Button size="sm" variant="ghost" icon={FileUp} onClick={() => void importFromFile()}>
+                    {t('mocks.empty.import')}
+                  </Button>
+                </div>
+              </div>
+            </ExplainEmpty>
           ) : empty ? (
             <EmptyState
               size="lg"

@@ -4,7 +4,7 @@ import { registerMessages } from '../../i18n';
 registerMessages('mocks', {
   tr: {
     toolbar: {
-      label: "Mock'lar araç çubuğu",
+      label: 'Mock’lar araç çubuğu',
       search: 'Kurallarda ara…',
       newRule: 'Yeni kural',
       import: 'İçe aktar',
@@ -12,11 +12,11 @@ registerMessages('mocks', {
       more: 'Diğer işlemler',
     },
     master: {
-      label: "Tüm mock'lar",
+      label: 'Tüm mock’lar',
       hint: 'Tüm kuralları tek seferde kapatır; tekrar açınca önceki seçimin geri gelir.',
       active: { one: '{count, number} kural etkin — eşleşen istekler gerçek sunucuya gitmez.', other: '{count, number} kural etkin — eşleşen istekler gerçek sunucuya gitmez.' },
-      inactive: "Tüm mock'lar kapalı — istekler gerçek sunucuya gidiyor.",
-      turnedOff: "Tüm mock'lar kapatıldı",
+      inactive: 'Tüm mock’lar kapalı — istekler gerçek sunucuya gidiyor.',
+      turnedOff: 'Tüm mock’lar kapatıldı',
       turnedOn: { one: '{count, number} kural yeniden açıldı', other: '{count, number} kural yeniden açıldı' },
     },
     order: {
@@ -49,10 +49,10 @@ registerMessages('mocks', {
       glob: 'Glob',
       regex: 'Regex',
       hint: {
-        contains: "URL'de bu metin geçiyorsa eşleşir (büyük/küçük harf fark etmez).",
+        contains: 'URL’de bu metin geçiyorsa eşleşir (büyük/küçük harf fark etmez).',
         exact: 'URL birebir aynıysa eşleşir; sorgu dahil (büyük/küçük harf fark etmez).',
         glob: '* herhangi bir metin, ? tek karakter; tüm URL eşleşmeli (büyük/küçük harf fark etmez).',
-        regex: "JavaScript düzenli ifadesi; URL'nin herhangi bir yerinde aranır, büyük/küçük harfe duyarlıdır.",
+        regex: 'JavaScript düzenli ifadesi; URL’nin herhangi bir yerinde aranır, büyük/küçük harfe duyarlıdır.',
       },
     },
     methodAny: 'Tüm metotlar',
@@ -238,6 +238,7 @@ registerMessages('mocks', {
       create: 'İlk kuralı oluştur',
       openNetwork: 'Ağ sekmesine git',
       import: 'Dosyadan içe aktar',
+      otherApps: 'Kurallar, Dürbün SDK’sıyla bağlı uygulamalara uygulanır; başka bir uygulama için yine de kural oluşturabilirsiniz.',
     },
     noSelection: {
       title: 'Bir kural seçin',
@@ -253,7 +254,7 @@ registerMessages('mocks', {
     saveFailed: 'Mock kuralları kaydedilemedi',
     commands: {
       new: 'Yeni mock kuralı',
-      toggleAll: "Tüm mock'ları aç / kapat",
+      toggleAll: 'Tüm mock’ları aç / kapat',
       export: 'Mock kurallarını dışa aktar',
       import: 'Mock kurallarını içe aktar',
       save: 'Mock kuralını kaydet',
@@ -495,6 +496,7 @@ registerMessages('mocks', {
       create: 'Create the first rule',
       openNetwork: 'Go to Network',
       import: 'Import from a file',
+      otherApps: 'Rules apply to apps connected through the Dürbün SDK; you can still create one for another app.',
     },
     noSelection: {
       title: 'Select a rule',
