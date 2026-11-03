@@ -6,6 +6,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'compare_view.dart';
 import 'filter_ui.dart';
 import 'format.dart';
 import 'json_tree.dart';
@@ -250,13 +251,17 @@ class CallRow extends StatelessWidget {
       {super.key,
       required this.call,
       required this.store,
-      this.terms = const <String>[]});
+      this.terms = const <String>[],
+      this.onTap});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
 
   /// Folded free words of the search, marked in the path.
   final List<String> terms;
+
+  /// Replaces opening the detail page (the compare picker).
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -294,6 +299,7 @@ class CallRow extends StatelessWidget {
       child: InkWell(
         onTap: () {
           FocusManager.instance.primaryFocus?.unfocus();
+          if (onTap != null) return onTap!();
           Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (_) => DurbunTheme.wrap(
                   context, CallDetailPage(call: call, store: store))));
@@ -594,6 +600,17 @@ class _CallDetailPageState extends State<CallDetailPage> {
                               icon: Icons.replay,
                               onTap: _replaying ? null : _replay,
                             ),
+                          DButton(
+                            label: t.compareEllipsis,
+                            icon: Icons.compare_arrows,
+                            onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                    builder: (_) => DurbunTheme.wrap(
+                                        context,
+                                        ComparePickerPage(
+                                            base: call,
+                                            store: widget.store)))),
+                          ),
                           PopupMenuButton<String>(
                             tooltip: t.copyAs,
                             onSelected: _copyAs,

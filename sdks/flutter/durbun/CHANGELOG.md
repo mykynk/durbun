@@ -1,5 +1,12 @@
 ## Unreleased (phase 3)
 
+- In-app panel: compare two requests, as on the desktop. "Compare…" on a
+  request's detail lists the same method and path first; General, Headers,
+  Response body and Request body tabs, with the desktop's line diff (LCS with
+  patience anchors), only-changes folding and sorted JSON keys, in one column.
+  Replay now sends captured headers once (no second `Accept-Encoding`, no
+  added `User-Agent`).
+
 - In-app panel fixes from a device run: `print` / `debugPrint` lines reach
   the panel locally (they were dropped when the desktop read logcat, or held
   while no desktop connected); logger PrettyPrinter boxes are one entry with

@@ -120,6 +120,44 @@ class InspectorStrings {
   /* network */
   String get netSearchHint => _('Endpoint, host ya da hata ara', 'Search endpoints, hosts, errors');
   String get netFilters => _('İstek filtreleri', 'Request filters');
+
+  /* compare (desktop: network.compare.*) */
+  String get compare => _('Karşılaştır', 'Compare');
+  String get compareEllipsis => _('Karşılaştır…', 'Compare…');
+  String get compareTitle => _('İstekleri karşılaştır', 'Compare requests');
+  String get comparePickTitle => _('İkinci isteği seçin', 'Pick the second request');
+  String comparePickBase(String name) => _('İlk istek: $name', 'First: $name');
+  String get sameEndpoint => _('Aynı endpoint', 'Same endpoint');
+  String get otherRequests => _('Diğer istekler', 'Other requests');
+  String get noOtherRequests => _('Karşılaştıracak başka istek yok', 'No other request to compare with');
+  String get noOtherRequestsBody => _('Aynı isteği uygulamada bir kez daha tetikleyin; burada görünür.', 'Trigger the request once more in the app; it shows up here.');
+  String get swap => _('Yer değiştir', 'Swap');
+  String get responseBody => _('Yanıt gövdesi', 'Response body');
+  String get requestBody => _('İstek gövdesi', 'Request body');
+  String get field => _('Alan', 'Field');
+  String get missing => _('yok', 'missing');
+  String get onlyChanges => _('Yalnızca farklar', 'Only changes');
+  String get sortKeys => _('JSON anahtarlarını sırala', 'Sort JSON keys');
+  String get requestHeaders => _('İstek başlıkları', 'Request headers');
+  String get responseHeaders => _('Yanıt başlıkları', 'Response headers');
+  String headerStats(int changed, int total) => _('$changed / $total farklı', '$changed / $total differ');
+  String get headersSame => _('Başlıklar aynı.', 'Headers are the same.');
+  String get fieldsSame => _('Tüm alanlar aynı.', 'All fields are the same.');
+  String get identicalBodies => _('Gövdeler aynı', 'Bodies are identical');
+  String get linesChanged => _('satır değişti', 'lines changed');
+  String get diffApproximate => _('Çok büyük olduğu için bazı bölümler kaba karşılaştırıldı', 'Some parts were compared coarsely because they are very large');
+  String get diffTooLong => _('Yalnızca ilk 20.000 satır karşılaştırıldı', 'Only the first 20,000 lines were compared');
+  String get bodyTruncatedOne => _('Gövdelerden biri kesik yakalanmış', 'One of the bodies was captured truncated');
+  String get binarySame => _('İkili gövdeler aynı', 'Binary bodies are identical');
+  String get binaryDifferent => _('İkili gövdeler farklı', 'Binary bodies differ');
+  String binarySizes(String a, String b) => 'A: $a · B: $b';
+  String get noRequestBodies => _('İki istekte de gövde yok', 'Neither request has a body');
+  String get noResponseBodies => _('İki yanıtta da gövde yok', 'Neither response has a body');
+  String showHidden(int n) => _('⋯ $n aynı satırı göster', '⋯ show $n unchanged lines');
+  String get comparing => _('Karşılaştırılıyor…', 'Comparing…');
+  String get yes => _('Evet', 'Yes');
+  String get responseType => _('Yanıt türü', 'Response type');
+  String get errorMessage => _('Hata mesajı', 'Error message');
   List<(String, String)> get netQueryHints => <(String, String)>[
     ('/users', _('Yolunda “/users” geçenler (düz kelime URL’de arar)', 'Path has “/users” (a plain word searches the URL)')),
     ('status:4xx', _('4xx yanıtlar (2xx…5xx)', '4xx responses (2xx…5xx)')),
