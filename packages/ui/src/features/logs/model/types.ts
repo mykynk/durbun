@@ -99,14 +99,23 @@ export function isStructural(e: Pick<LogEntry, 'kind' | 'source'>): boolean {
 }
 
 /** Device connection / log-stream separators that a flapping USB connection repeats. */
-const FLAP_CODES: ReadonlySet<string> = new Set(['device.connected', 'device.disconnected', 'logs.streamStarted', 'logs.streamStopped', 'logs.streamError']);
+const FLAP_CODES: ReadonlySet<string> = new Set([
+  'device.connected',
+  'device.disconnected',
+  'logs.connectionLost',
+  'logs.connectionRestored',
+  'logs.streamStarted',
+  'logs.streamStopped',
+  'logs.streamError',
+  'logs.streamStalled',
+]);
 /** Codes of a flap group that mean "it went away" (the rest mean "it is back"). */
-export const FLAP_DROP_CODES: ReadonlySet<string> = new Set(['device.disconnected', 'logs.streamStopped', 'logs.streamError']);
+export const FLAP_DROP_CODES: ReadonlySet<string> = new Set(['device.disconnected', 'logs.connectionLost', 'logs.streamStopped', 'logs.streamError', 'logs.streamStalled']);
 /**
  * Drops nobody asked for: the device went away or its log stream died. `logs.streamStopped` is a restart someone
  * requested (the log-stream action, a settings change): on its own it stays a pair of neutral separators.
  */
-export const FLAP_FAULT_CODES: ReadonlySet<string> = new Set(['device.disconnected', 'logs.streamError']);
+export const FLAP_FAULT_CODES: ReadonlySet<string> = new Set(['device.disconnected', 'logs.connectionLost', 'logs.streamError', 'logs.streamStalled']);
 
 export function isFlapEvent(e: Pick<LogEntry, 'kind' | 'source' | 'code' | 'appId'>): boolean {
   return e.source === 'system' && e.kind === 'lifecycle' && !e.appId && !!e.code && FLAP_CODES.has(e.code);

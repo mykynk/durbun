@@ -52,15 +52,18 @@ export function flapSummary(events: readonly FlapEvent[], deviceName?: string, l
   const firstDrop = events.find(isDrop) ?? events[0]!;
   const span = spanText(last.ts - firstDrop.ts, lang);
   const back = !isDrop(last);
-  const drops = events.filter((e) => e.code === 'device.disconnected').length;
+  // A device that went away: hub disconnects, or an iPhone's USB drop it came back from within the grace.
+  const isConnectionDrop = (e: FlapEvent) => e.code === 'device.disconnected' || e.code === 'logs.connectionLost';
+  const drops = events.filter(isConnectionDrop).length;
   if (drops > 0) {
-    if (drops === 1 && back) return { text: t('logs.flap.backAfter', { device, span: spanText(outage(events, (e) => e.code === 'device.disconnected'), lang) }) };
+    if (drops === 1 && back) return { text: t('logs.flap.backAfter', { device, span: spanText(outage(events, isConnectionDrop), lang) }) };
     return { text: t(back ? 'logs.flap.dropsBack' : 'logs.flap.drops', { device, count: drops, span }), hint: drops >= 3 ? t('logs.flap.hint') : undefined };
   }
   // Failures count; a requested restart (logs.streamStopped) next to one is part of the same outage.
-  const fails = events.filter((e) => e.code === 'logs.streamError').length;
+  const isFailure = (e: FlapEvent) => e.code === 'logs.streamError' || e.code === 'logs.streamStalled';
+  const fails = events.filter(isFailure).length;
   const stops = Math.max(1, fails || events.filter((e) => e.code === 'logs.streamStopped').length);
-  const oneSpan = stops === 1 && back ? spanText(outage(events, (e) => e.code === 'logs.streamError' || e.code === 'logs.streamStopped'), lang) : span;
+  const oneSpan = stops === 1 && back ? spanText(outage(events, (e) => isFailure(e) || e.code === 'logs.streamStopped'), lang) : span;
   return { text: t(back ? 'logs.flap.streamBack' : 'logs.flap.stream', { device, count: stops, span: oneSpan }) };
 }
 

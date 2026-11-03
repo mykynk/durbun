@@ -23,6 +23,18 @@ describe('merged connection row text', () => {
     expect(flapSummary(events, 'Pixel 8').text).toBe('Pixel 8: log akışı kesildi, 3 sn sonra yeniden başladı');
   });
 
+  it('an iPhone USB drop it came back from (logs.connectionLost → connectionRestored) reads like a connection drop', () => {
+    setLanguage('tr');
+    const events = [ev('logs.connectionLost', 10), ev('logs.connectionRestored', 13)];
+    expect(flapSummary(events, 'Yusuf iPhone’u').text).toBe('Yusuf iPhone’u: bağlantı koptu, 3 sn sonra geri geldi');
+  });
+
+  it('a stalled iPhone log stream counts as a failure until lines flow again', () => {
+    setLanguage('tr');
+    const events = [ev('logs.streamStarted', 0), ev('logs.streamStalled', 40), ev('logs.streamStarted', 47)];
+    expect(flapSummary(events, 'Yusuf iPhone’u').text).toBe('Yusuf iPhone’u: log akışı kesildi, 7 sn sonra yeniden başladı');
+  });
+
   it('several drops: the time it kept dropping, from the first drop to the newest event', () => {
     setLanguage('en');
     const events = [ev('device.connected', 0), ev('device.disconnected', 20)];
