@@ -417,6 +417,18 @@ function LogsSection() {
         <Row label={t('shell.settings.logcatTail')} hint={t('shell.settings.logcatTailHint')} range={[LIMITS.logcatTail[0], LIMITS.logcatTail[1]]} saved={savedKey === 'logcatTail'}>
           <NumberField label={t('shell.settings.logcatTail')} value={s.logcatTail} min={LIMITS.logcatTail[0]} max={LIMITS.logcatTail[1]} disabled={!connected} onCommit={(v) => void save('logcatTail', { logcatTail: v })} />
         </Row>
+        <Row label={t('shell.settings.iosDeviceLogScope')} hint={t('shell.settings.iosDeviceLogScopeHint')} saved={savedKey === 'iosDeviceLogScope'}>
+          <SegmentedControl
+            size="sm"
+            value={s.iosDeviceLogScope ?? 'apps'}
+            onChange={(v) => void save('iosDeviceLogScope', { iosDeviceLogScope: v })}
+            aria-label={t('shell.settings.iosDeviceLogScope')}
+            options={[
+              { value: 'apps', label: t('shell.settings.scopeApps'), disabled: !connected },
+              { value: 'all', label: t('shell.settings.scopeAll'), disabled: !connected },
+            ]}
+          />
+        </Row>
         <Row label={t('shell.settings.iosSimLogScope')} hint={t('shell.settings.iosSimLogScopeHint')} saved={savedKey === 'iosSimLogScope'}>
           <SegmentedControl
             size="sm"

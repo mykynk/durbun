@@ -85,7 +85,7 @@ registerMessages('common', {
     groups: {
       logs: 'Loglar',
       network: 'Ağ',
-      mocks: "Mock'lar",
+      mocks: 'Mock’lar',
       perf: 'Performans',
       device: 'Cihaz',
     },
@@ -182,7 +182,7 @@ registerMessages('shell', {
       label: 'Görünümler',
       logs: 'Loglar',
       network: 'Ağ',
-      mocks: "Mock'lar",
+      mocks: 'Mock’lar',
       perf: 'Performans',
       device: 'Cihaz',
       logErrorsNew: { one: 'Bu sekmeye bakmadığınız sırada {count, number} yeni hata', other: 'Bu sekmeye bakmadığınız sırada {count, number} yeni hata' },
@@ -304,6 +304,9 @@ registerMessages('shell', {
       maxLogEntriesHint: 'Sınır aşılınca en eski satırlar silinir.',
       logcatTail: 'Bağlanınca yüklenecek logcat geçmişi',
       logcatTailHint: 'Android cihaz bağlandığında okunacak eski satır sayısı.',
+      iosDeviceLogScope: 'iPhone log kapsamı',
+      iosDeviceLogScopeHint:
+        'Uygulamalar: kurulu uygulamaların satırları ve çökmeyle ilgili sistem satırları gelir. Tümü: bütün sistem süreçleri de gelir; yoğun bir telefonda saniyede ~1000 satıra çıkar.',
       iosSimLogScope: 'iOS simülatör log kapsamı',
       iosSimLogScopeHint: 'Yalnızca kurulu uygulamalar ya da tüm sistem süreçleri.',
       scopeApps: 'Uygulamalar',
@@ -620,7 +623,7 @@ registerMessages('shell', {
       flutter: {
         zeroTitle: 'SDK olmadan da çok şey görünür',
         zeroBody:
-          'Telefonu USB ile takmak yeterli: cihaz logları ve çökme kayıtları her sürümde (eski, Firebase ve mağaza sürümleri dahil) gelir. flutter run ile başlatılan debug uygulamalar ayrıca Dart VM Service üzerinden kendiliğinden bağlanır: loglar, ağ istekleri ve kare süreleri. SDK bunlara yapılandırılmış loglar, mock’lar, uygulama içi araçlar ve iç test derlemelerinde tüm veriyi ekler.',
+          'Telefonu USB ile takmak yeterli: cihaz logları ve çökme kayıtları her sürümde (eski, Firebase ve mağaza sürümleri dahil) gelir. flutter run ile başlatılan debug uygulamalar ayrıca Dart VM Service üzerinden kendiliğinden bağlanır: loglar, ağ istekleri ve kare süreleri. SDK bunlara yapılandırılmış logları, mock’ları ve uygulama içi araçları ekler; SDK’yı açtığınız release derlemelerinde de bütün veri gelir.',
         sourcesLink: 'Veriler nereden gelir?',
         setupTitle: 'Kurulum: iki adım',
         add: 'Paketi ekleyin',
@@ -630,10 +633,11 @@ registerMessages('shell', {
           'Durbun.run print çıktısını, yakalanmamış hataları ve dart:io HTTP trafiğini (http, Dio’nun varsayılan adaptörü, resimler) yakalar; native katman Dart ile birlikte açılır. Debug ve profile derlemelerinde açık, release’te ve flutter test içinde kapalıdır.',
         done: 'Bu kadar. Uygulama açıldığında kenar çubuğunda SDK rozetiyle görünür.',
         releaseTitle: 'Release, Firebase ve mağaza derlemeleri',
-        releaseHint: 'Release derlemelerinde SDK kapalıdır. Firebase / iç test derlemesi mağaza derlemesinden ayrı bir derlemeyse SDK’yı yalnızca o derlemede açın:',
-        releaseNeverTitle: 'Mağaza derlemelerinde asla',
-        releaseNever:
-          'SDK, uygulamanın loglarını ve ağ trafiğini bilgisayara açan bir geliştirici kapısıdır; mağazaya giden derlemede kapalı kalmalı. Firebase sürümü mağaza sürümüyle aynı derlemeyse onda da açmayın: o sürümde cihaz logları ve çökme kayıtları yine görünür.',
+        releaseHint:
+          'Release derlemelerinde SDK varsayılan olarak kapalıdır; --dart-define=DURBUN=true ile alınan her derlemede açılır. Hangi derlemede açık olacağına ekip karar verir. Firebase App Distribution ya da ad-hoc dağıtım için iOS’ta --export-method ad-hoc ekleyin:',
+        releaseArchiveTitle: 'Xcode Archive define’ı korur',
+        releaseArchive:
+          'Flutter define’ları ios/Flutter/Generated.xcconfig dosyasına yazar. Bu yüzden sonradan Xcode’da alınan bir Archive da, DURBUN=true olmadan yeni bir flutter build çalıştırılana kadar DURBUN=true ile derlenir.',
         nativeTitle: 'Native katman (Kotlin / Swift)',
         nativeAndroid: 'Android: Kotlin tarafındaki kendi OkHttp istemcilerinize tek satır ekleyin (Retrofit’e de bu client’ı verin). Native loglar ve çökmeler ek ayar olmadan gelir.',
         nativeIos: 'iOS: URLSession istekleri kendiliğinden yakalanır; bir şey eklemeniz gerekmez.',
@@ -696,7 +700,7 @@ registerMessages('shell', {
       releaseTitle: 'Release güvenliği',
       release: 'SDK’lar release/production derlemelerinde (açıkça zorlanmadıkça) hiçbir şey yapmaz ve uygulamayı yavaşlatmaz.',
       releaseBy: {
-        flutter: 'SDK release derlemelerinde ve flutter test içinde kapalıdır; release’te yalnızca --dart-define=DURBUN=true ile açılır (iç test derlemeleri için, mağaza için asla). Uygulamaya asla hata fırlatmaz.',
+        flutter: 'SDK debug ve profile derlemelerinde açık, release derlemelerinde ve flutter test içinde kapalıdır; release’te --dart-define=DURBUN=true ile açılır, --dart-define=DURBUN=false ise her modda kapatır. Uygulamaya hiçbir zaman hata fırlatmaz.',
         android: 'Release’te durbun-noop kullanılır: kod, thread ya da soket yoktur. durbun yanlışlıkla release’e girse bile debuggable olmayan uygulamada çalışmaz.',
         ios: 'Durbun.start() çağrısını #if DEBUG içine alın; SDK DEBUG olmadan derlendiğinde de (allowInReleaseBuilds verilmedikçe) hiçbir şey yapmaz.',
         'react-native': 'enabled varsayılanı __DEV__’dir: release’te hiçbir yama kurulmaz ve bağlantı açılmaz.',
@@ -878,6 +882,9 @@ registerMessages('shell', {
       maxLogEntriesHint: 'The oldest lines are dropped beyond this limit.',
       logcatTail: 'Logcat history loaded on connect',
       logcatTailHint: 'Number of earlier lines read when an Android device connects.',
+      iosDeviceLogScope: 'iPhone log scope',
+      iosDeviceLogScopeHint:
+        'Apps: lines of installed apps plus crash-related system lines. Everything: every system process as well — about 1000 lines a second on a busy phone.',
       iosSimLogScope: 'iOS simulator log scope',
       iosSimLogScopeHint: 'Only installed apps, or every system process.',
       scopeApps: 'Apps',
@@ -1193,7 +1200,7 @@ registerMessages('shell', {
       flutter: {
         zeroTitle: 'A lot shows up without the SDK',
         zeroBody:
-          'Plugging the phone in over USB is enough: device logs and crash records come in for every build (old, Firebase and store builds included). Debug apps started with flutter run also attach automatically through the Dart VM Service: logs, network requests and frame timings. The SDK adds structured logs, mocks, in-app tools, and all data in internal builds.',
+          'Plugging the phone in over USB is enough: device logs and crash records come in for every build (old, Firebase and store builds included). Debug apps started with flutter run also attach automatically through the Dart VM Service: logs, network requests and frame timings. The SDK adds structured logs, mocks and in-app tools, and every release build you turn it on in sends all of its data too.',
         sourcesLink: 'Where does the data come from?',
         setupTitle: 'Setup: two steps',
         add: 'Add the package',
@@ -1203,10 +1210,10 @@ registerMessages('shell', {
           'Durbun.run captures print output, uncaught errors and dart:io HTTP traffic (http, Dio’s default adapter, images); the native layer turns on together with Dart. On in debug and profile builds, off in release builds and in flutter test.',
         done: 'That’s it. When the app starts, it shows up in the sidebar with an SDK badge.',
         releaseTitle: 'Release, Firebase and store builds',
-        releaseHint: 'The SDK is off in release builds. If the Firebase / internal build is separate from the store build, turn the SDK on in that build only:',
-        releaseNeverTitle: 'Never in store builds',
-        releaseNever:
-          'The SDK is a developer door that opens the app’s logs and network traffic to a computer; it must stay off in builds that go to a store. If the Firebase build is the same build as the store one, leave it off there too: device logs and crash records still show up for it.',
+        releaseHint:
+          'The SDK is off in release builds by default and on in any build made with --dart-define=DURBUN=true; your team decides which builds have it. For Firebase App Distribution or ad-hoc distribution, add --export-method ad-hoc on iOS:',
+        releaseArchiveTitle: 'Xcode Archive keeps the define',
+        releaseArchive: 'Flutter writes the defines into ios/Flutter/Generated.xcconfig, so a later Xcode Archive keeps DURBUN=true until the next flutter build without it.',
         nativeTitle: 'Native layer (Kotlin / Swift)',
         nativeAndroid: 'Android: add one line to your own OkHttp clients on the Kotlin side (and give that client to Retrofit too). Native logs and crashes come in without extra setup.',
         nativeIos: 'iOS: URLSession requests are captured automatically; nothing to add.',
@@ -1269,7 +1276,7 @@ registerMessages('shell', {
       releaseTitle: 'Release safety',
       release: 'SDKs do nothing in release/production builds (unless explicitly forced) and never slow the app down.',
       releaseBy: {
-        flutter: 'The SDK is off in release builds and in flutter test; in release it turns on only with --dart-define=DURBUN=true (for internal builds, never for the store). It never throws into your app.',
+        flutter: 'The SDK is on in debug and profile builds, off in release builds and in flutter test; in release it turns on with --dart-define=DURBUN=true, and --dart-define=DURBUN=false turns it off in every mode. It never throws into your app.',
         android: 'Release builds use durbun-noop: no code, threads or sockets. Even if durbun slips into a release build, it does nothing in a non-debuggable app.',
         ios: 'Wrap Durbun.start() in #if DEBUG; the SDK itself also does nothing when compiled without DEBUG (unless allowInReleaseBuilds).',
         'react-native': 'enabled defaults to __DEV__: release builds install no patches and open no connection.',

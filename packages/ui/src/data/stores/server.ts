@@ -38,12 +38,17 @@ export async function saveMocks(rules: MockRule[]): Promise<MockRule[]> {
 export interface ServerSettingsState {
   settings: ServerSettings;
   loaded: boolean;
+  /**
+   * Keys the server itself sent (the rest are the UI's defaults). An older server that does not know a setting
+   * does not apply it either: e.g. no `iosDeviceLogScope` = every iPhone line is streamed.
+   */
+  reported?: ReadonlySet<string>;
 }
 
 export const useServerSettings = create<ServerSettingsState>()(() => ({ settings: DEFAULT_SETTINGS, loaded: false }));
 
 export function setServerSettingsFromServer(settings: ServerSettings): void {
-  useServerSettings.setState({ settings: { ...DEFAULT_SETTINGS, ...settings }, loaded: true });
+  useServerSettings.setState({ settings: { ...DEFAULT_SETTINGS, ...settings }, loaded: true, reported: new Set(Object.keys(settings ?? {})) });
 }
 
 /** `settings.update` (persisted & broadcast by the server). Optimistic; reverted on failure. */
