@@ -173,16 +173,15 @@ olarak) ve **Run garbage collection**.
 - `durbun` modülünün manifesti `INTERNET` iznini ekler (yalnızca debug'a karışır).
 - Dürbün **HTTP değil, düz TCP soketi** kullanır: `usesCleartextTraffic` veya network security config
   değişikliği **gerekmez**.
-- Release'te `durbun-noop` kullanın: kod, thread, soket yok. `durbun` yanlışlıkla release'e girse bile
-  uygulama debuggable değilse `Durbun.start()` hiçbir şey yapmaz (`forceInRelease = true` hariç).
-- `forceInRelease = true` olsa bile uygulama Google Play'den (iç test dahil her kanal) kurulmuşsa SDK başlamaz ve
-  logcat'e tek satır yazar: «Dürbün kendini kapattı: uygulama mağazadan kurulmuş (Dürbün mağaza sürümlerinde
-  çalışmaz).» Yalnızca Google Play tanınır: Huawei AppGallery, Galaxy Store veya Amazon'dan kurulan böyle bir
-  derleme çalışır, bu yüzden onu oralara da yüklemeyin.
+- `durbun-noop` ile derlenen yapıda Dürbün kodu, thread'i ve soketi yoktur. `durbun` ile derlenen ve debuggable
+  olmayan bir yapıda `Durbun.start()` hiçbir şey yapmaz; `forceInRelease = true` ile çalışır, uygulama nereden
+  kurulursa kurulsun (Firebase, Google Play, başka mağazalar, adb). Hangi derlemenin Dürbün'ü çalıştıracağına proje
+  karar verir.
 - Bağlantı koptuğunda o bağlantının gönderdiği mock kuralları hemen silinir; masaüstü yeniden bağlanınca tekrar
-  gönderir. Bilinen risk: bağlantıda henüz kimlik doğrulama yok; release'te açık bir derleme, telefondaki başka bir
-  uygulama kendini masaüstü gibi tanıtırsa trafiğini ona da gönderebilir. Böyle derlemeleri yalnızca test
-  cihazlarına dağıtın (eşleştirme anahtarı ileride eklenecek).
+  gönderir.
+- Güvenlik notu: bağlantıda henüz eşleştirme (pairing) yok. Dürbün açık bir derleme cihazda `127.0.0.1:9751`'e
+  bağlanır ve orada yanıt veren eşle konuşur: adb reverse üzerinden masaüstü ya da o portu dinleyen başka bir
+  uygulama. Loglar ve ağ trafiği o eşe gider; eş bağlı kaldığı sürece gönderdiği mock kuralları uygulanır.
 - R8/ProGuard için ek kural gerekmez (OkHttp kullanmayan uygulamalar için `-dontwarn okhttp3.**` modülle gelir).
 
 ### Seçenekler (`DurbunOptions`)
@@ -354,16 +353,14 @@ Handlers run on the main thread. Built in: **Dump threads** and **Run garbage co
 
 - The `durbun` manifest adds `INTERNET` (merged into debug builds only).
 - Dürbün uses a **plain TCP socket, not HTTP**: no `usesCleartextTraffic` / network security config changes.
-- Ship `durbun-noop` in release builds (no code, threads or sockets). Even if `durbun` ends up in a release
-  build, `Durbun.start()` does nothing unless the app is debuggable or `forceInRelease = true`.
-- Even with `forceInRelease = true` the SDK does not start when Google Play (any track, internal testing too)
-  installed the app; it writes one line to logcat: «Dürbün turned itself off: this app was installed from the store
-  (Dürbün never runs in store builds).» Only Google Play is recognised: such a build installed from Huawei
-  AppGallery, Galaxy Store or Amazon runs, so keep it off those stores too.
+- A build with `durbun-noop` has no Dürbün code, threads or sockets. In a non-debuggable build with `durbun`,
+  `Durbun.start()` does nothing unless `forceInRelease = true`; with it the SDK runs wherever the app was installed
+  from (Firebase, Google Play, other stores, adb). Each project decides which builds run Dürbün.
 - When the connection drops, the mock rules it pushed are dropped at once; the desktop sends them again when it
-  reconnects. Known risk: the link is not authenticated yet, so a build running in release can send its traffic to
-  another app on the phone that pretends to be the desktop. Hand such builds to test devices only (a pairing token
-  is planned).
+  reconnects.
+- Security note: the link has no pairing yet. A build with Dürbün on connects to `127.0.0.1:9751` on the device and
+  talks to whatever answers there: the desktop (through adb reverse) or another app listening on that port. Logs and
+  network traffic go to that peer, and the mock rules it pushes apply while it stays connected.
 - No R8/ProGuard rules needed (`-dontwarn okhttp3.**` ships with the modules for apps without OkHttp).
 
 ### Options (`DurbunOptions`)

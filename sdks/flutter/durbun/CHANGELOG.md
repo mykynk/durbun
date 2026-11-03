@@ -11,6 +11,13 @@
   version/build in `hello`).
 - Enablement: debug/profile on; release only with `--dart-define=DURBUN=true`;
   `DURBUN=false` turns it off; `enabled:` still wins. The native layer follows.
+  The SDK does not look at where the app was installed from: a `DURBUN=true`
+  release runs from Firebase, ad-hoc, TestFlight, Google Play or the App Store
+  alike, so each project decides which builds run Dürbün. README: release
+  commands (`--export-method ad-hoc` for Firebase / ad-hoc), the
+  `ios/Flutter/Generated.xcconfig` note for Xcode Archive, and a security note
+  (the SDK talks to whatever answers on its device loopback port; no pairing
+  yet).
 - `DurbunNetwork.capturesUrlSession` (used by durbun_dio to avoid duplicates).
 - `hello.sdk.layers`: `['dart']`, plus `'android'` / `'ios'` while the plugin's
   native core is attached, so the desktop can say which layers feed the session.
@@ -19,17 +26,6 @@
   hello (now it is refused and connects on its next try).
 - durbun_dio: the dart:io adapter is recognized by type instead of its class
   name, so `--obfuscate` builds no longer report those requests twice.
-- Store-install guard: a release build asks the plugin (`guard`) before it
-  starts any transport, listener or capture and stays off when Google Play (any
-  track) or the App Store installed the app, or when the plugin does not
-  answer; one line in the device log says why (Turkish or English). The native
-  `start` refuses in store installs too, and Dart then disposes everything.
-  The standalone Android / iOS SDKs apply the same guard in release builds.
-  `init()` therefore completes only once the guard answered in release builds:
-  await it before `runApp`. When it was not awaited and the first screen was
-  already up, the desktop gets a warning that HttpClients created meanwhile
-  (and a Dio that sent its first request then) are not captured. A `dispose()`
-  while the guard is still being asked now wins: its answer starts nothing.
 - Mock rules end with the connection that pushed them, in every layer (Dart,
   Kotlin, Swift, hosted and standalone): the peer is not authenticated yet.
 - Android honours `captureNetwork: false`: no OkHttp capture or mocks, and

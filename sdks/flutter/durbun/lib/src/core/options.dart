@@ -32,9 +32,9 @@ class DurbunOptions {
   ///
   /// * debug and profile builds: on;
   /// * release builds: off, unless built with `--dart-define=DURBUN=true`
-  ///   (e.g. only the tester build you hand out via Firebase App Distribution:
-  ///   `flutter build apk --release --dart-define=DURBUN=true`). Never use
-  ///   that define for store builds;
+  ///   (`flutter build apk --release --dart-define=DURBUN=true`,
+  ///   `flutter build ipa --release --dart-define=DURBUN=true`); such a build
+  ///   runs the SDK wherever it is installed from, stores included;
   /// * `--dart-define=DURBUN=false` turns it off in every build mode;
   /// * inside `flutter test`: off.
   ///

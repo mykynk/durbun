@@ -69,51 +69,44 @@ Future<void> main() async {
 ```
 
 Bu durumda yalnızca `debugPrint` yakalanır, zone hataları `PlatformDispatcher.onError`
-üzerinden gelir. Release derlemesinde `init()` mağaza kontrolünün yanıtını bekler;
-`await` etmeden `runApp` çağırırsanız o arada oluşturulan HttpClient'lar yakalanmaz.
-İlk isteğini o arada gönderen bir Dio da aynı istemciyi kullanmaya devam ettiği için
-oturum boyunca görünmez. Masaüstü bu durumda nedenini söyleyen bir uyarı gösterir.
+üzerinden gelir.
 
 ## Release, Firebase ve mağaza derlemeleri
+
+Bir derlemenin Dürbün'ü çalıştırıp çalıştırmayacağına proje karar verir; mağaza
+derlemeleri de buna dahildir. SDK uygulamanın nereden kurulduğuna bakmaz.
 
 | Derleme | Dürbün |
 |---|---|
 | `flutter run` (debug), profile | **Açık**, kendiliğinden |
-| Release (mağaza) | **Kapalı.** Soket açılmaz, kanca kurulmaz, native katman başlatılmaz. Dart kodu derleyicinin ağaç sarsmasıyla (tree shaking) neredeyse tamamen düşer |
-| Release + `--dart-define=DURBUN=true` | **Açık** — örneğin yalnızca Firebase App Distribution'a giden test derlemesi. Google Play'den veya App Store'dan kurulursa kendini kapatır |
+| Release | **Kapalı.** Soket açılmaz, kanca kurulmaz, native katman başlatılmaz. Dart kodu derleyicinin ağaç sarsmasıyla (tree shaking) neredeyse tamamen düşer |
+| Release + `--dart-define=DURBUN=true` | **Açık**, nereden kurulursa kurulsun (Firebase, ad-hoc, TestFlight, Google Play, App Store…) |
 | `--dart-define=DURBUN=false` | Her modda kapalı (ör. profile ölçümü) |
 | `DurbunOptions(enabled: true/false)` | Her şeyin önüne geçer |
 
 ```bash
-# Firebase / iç test derlemesi — mağazaya giden derlemede ASLA
+# Dürbün açık release:
 flutter build apk --release --dart-define=DURBUN=true
+flutter build ipa --release --dart-define=DURBUN=true
+# Firebase App Distribution / ad-hoc dağıtımı için .ipa:
 flutter build ipa --release --export-method ad-hoc --dart-define=DURBUN=true
-# Bu .ipa’yı App Store Connect’e / TestFlight’a yüklemeyin: TestFlight derlemesi mağazaya giden derlemenin kendisidir.
-# Mağaza derlemesinden önce define’sız yeniden derleyin; Xcode Archive son flutter build’in define’larını (ios/Flutter/Generated.xcconfig) kullanır:
+# Dürbün kapalı release (define yok):
 flutter build appbundle --release
 flutter build ipa --release
 ```
 
-- **Yanlışlıkla mağazaya giderse:** Dürbün çalışmadan önce uygulamanın nereden
-  kurulduğuna bakar. Google Play'den (iç test dahil her kanal) veya App
-  Store'dan kurulmuşsa hiçbir şey başlatmaz ve cihaz loguna tek satır yazar:
-  «Dürbün kendini kapattı: uygulama mağazadan kurulmuş (Dürbün mağaza
-  sürümlerinde çalışmaz).» (Cihaz dili Türkçe değilse İngilizcesi.) Firebase, ad-hoc,
-  TestFlight ve `flutter run` kurulumlarında çalışmaya devam eder. Bu bir
-  emniyet kemeridir, dağıtım yolu değil: `DURBUN=true` derlemeyi mağaza
-  kanallarına (Play iç test, TestFlight) hiç yüklemeyin. Android'de yalnızca
-  Google Play tanınır: Huawei AppGallery, Galaxy Store veya Amazon'dan kurulan
-  bir `DURBUN=true` derlemesi çalışır, bu yüzden onu oralara da yüklemeyin.
-- Release derlemesi bu kontrolü native tarafa sorarak yapar (açılışta tek bir
-  kanal çağrısı). Plugin yanıt vermezse Dürbün yine kapalı kalır ve bunu da
-  cihaz loguna yazar.
-- Firebase ve mağaza aynı binary ise (bazı projelerde öyle) **define kullanmayın**:
-  o binary mağazaya da gider. Dürbün masaüstü bu durumda yine cihazın verdiği
-  her şeyi gösterir (cihaz logları, çökme kayıtları, Android süreç/kare
+- Aynı define `flutter build appbundle` ve `flutter run --release` ile de verilir.
+- iOS: Flutter define'ları `ios/Flutter/Generated.xcconfig` dosyasına yazar ve
+  Xcode Archive bu dosyayı kullanır. `--dart-define=DURBUN=true` ile yapılan bir
+  `flutter build`'den sonra Xcode'da alınan Archive, define'sız bir sonraki
+  `flutter build`'e kadar `DURBUN=true` ile derlenir.
+- Firebase ve mağaza aynı binary'yi alıyorsa define o binary'nin her kurulumunda
+  Dürbün'ü açar. Define'sız bir binary'de de Dürbün masaüstü cihazın verdiği her
+  şeyi gösterir (cihaz logları, çökme kayıtları, Android süreç/kare
   istatistikleri) ve ağ/mock'un neden görünmediğini açıklar.
-- Flavor kullanıyorsanız define'ı yalnızca test flavor'ının derleme komutuna
-  ekleyin ya da `DurbunOptions(enabled: appFlavor == 'qa')` yazın.
-- Android: release'de açacaksanız ana manifestte `INTERNET` izni olmalı (ağ
+- Flavor başına karar için define'ı ilgili flavor'ın derleme komutuna ekleyin ya da
+  `DurbunOptions(enabled: appFlavor == 'qa')` yazın.
+- Android: release'de Dürbün açıkken ana manifestte `INTERNET` izni gerekir (ağ
   kullanan her uygulamada zaten vardır; plugin kendisi izin eklemez).
 - Boyut (Flutter 3.38, sayaç uygulaması, başka bir plugin'i zaten olan uygulamaya
   eklenince, DURBUN kapalı release): Android arm64 APK **+34 KB**; iOS `.app`
@@ -131,7 +124,7 @@ SSL pinning'e dokunulmaz.
 | Dart SDK (bu paket) | Dart logları, `print`, Flutter hataları, Dart çökmeleri, dart:io HTTP (package:http, Dio varsayılan adaptörü, `NetworkImage`), FPS/jank/bellek, `flutter.*` araçları | Dürbün açıkken |
 | Android native katmanı (bu plugin içinde) | Kotlin/Java `Durbun.log`, yakalanmamış Kotlin/Java çökmeleri, OkHttp (`DurbunInterceptor` ile), Wi-Fi'de (adb yokken) uygulamanın kendi logcat'i, `android.dumpThreads` / `android.gc` araçları | Dart tarafı başlatınca |
 | iOS native katmanı (bu plugin içinde) | URLSession trafiği (otomatik), Objective-C istisnaları ve Swift çökmeleri, Swift `print`/stdout/stderr, `Durbun.log` (Swift), `ios.*` araçları | Dart tarafı başlatınca |
-| SDK'sız (eski build, mağaza build'i) | Cihaz logları, sistem çökme kayıtları, Android süreç/kare istatistikleri — masaüstü bunları cihazdan okur | Her zaman |
+| SDK'sız (eski build, Dürbün kapalı release) | Cihaz logları, sistem çökme kayıtları, Android süreç/kare istatistikleri — masaüstü bunları cihazdan okur | Her zaman |
 
 Native çökmeler: Android'de çökme anında doğrudan masaüstüne gider; masaüstüne
 o an ulaşılamazsa bir sonraki açılışta **"Previous launch crashed — …"** olarak
@@ -248,11 +241,12 @@ dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı sat�
   (Dart, OkHttp, URLSession) hemen silinir; masaüstü yeniden bağlanınca
   kurallarını tekrar gönderir. Bağlantı yokken yapılan istekler gerçek sunucuya
   gider.
-- **Bilinen risk:** masaüstü ile SDK arasındaki bağlantıda henüz kimlik doğrulama
-  yok. `DURBUN=true` ile derlenen sürüm, telefondaki başka bir uygulama kendini
-  masaüstü gibi tanıtırsa loglarını ve ağ trafiğini ona da gönderebilir; o
-  uygulama bağlı kaldığı sürece onun mock kurallarını da uygular. Bu derlemeyi yalnızca test
-  cihazlarına dağıtın. Eşleştirme anahtarı (pairing token) ileride eklenecek.
+- **Güvenlik notu:** masaüstü ile SDK arasında henüz eşleştirme (pairing) yok.
+  Dürbün açık bir derleme, cihazın loopback portunda karşısına çıkan eşle konuşur
+  (Android: `127.0.0.1:9751`'e bağlanır; iOS cihaz: `127.0.0.1:9752–9755`'i
+  dinler). O eş, adb reverse / usbmux üzerinden masaüstü ya da cihazdaki başka bir
+  uygulama olabilir; loglar ve ağ trafiği ona gider, bağlı kaldığı sürece
+  gönderdiği mock kuralları uygulanır.
 
 ## Seçenekler (`DurbunOptions`)
 
@@ -362,10 +356,7 @@ a pass-through while Dürbün is off. iOS URLSession traffic (shared and custom
 sessions, Alamofire, cupertino_http) is captured automatically.
 
 Without a zone: `Future<void> main() async { await Durbun.init(); runApp(const MyApp()); }`
-(then only `debugPrint` is captured). In release builds `init()` completes once
-the store check has answered; await it before `runApp`, otherwise HttpClients
-created in the meantime are never captured (nor a Dio that sent its first
-request then: it keeps that client), and the desktop shows a warning saying so. API: `Durbun.log(message, tag:, data:, error:, stackTrace:)`,
+(then only `debugPrint` is captured). API: `Durbun.log(message, tag:, data:, error:, stackTrace:)`,
 `Durbun.v/d/i/w/e/f`, `Durbun.event(name, props)`, `Durbun.isConnected`,
 `Durbun.connection` (stream), `Durbun.addAction(DurbunAction.button/toggle/select)`.
 Native logs: Kotlin `Durbun.i("tag", "message", data = …)` (`dev.durbun.Durbun`),
@@ -376,38 +367,33 @@ Swift `Durbun.info("message", tag: "tag")` (`import durbun`).
 - debug / profile: **on** automatically;
 - release: **off** — no socket, no hooks, the native layer is never started, and
   the Dart code is almost entirely tree-shaken away;
-- release + `--dart-define=DURBUN=true`: **on** (e.g. only the Firebase App
-  Distribution build for testers — never for store builds; it turns itself off
-  when installed from Google Play or the App Store);
+- release + `--dart-define=DURBUN=true`: **on**, wherever the build is installed
+  from (Firebase, ad-hoc, TestFlight, Google Play, App Store, …);
 - `--dart-define=DURBUN=false`: off in every mode;
 - `DurbunOptions(enabled: …)` overrides everything (e.g. `enabled: appFlavor == 'qa'`).
 
+Each project decides per build whether it runs Dürbün, store builds included;
+the SDK does not look at where the app was installed from.
+
 ```bash
-# Firebase / internal build — NEVER the build that goes to the store
+# Release with Dürbün on:
 flutter build apk --release --dart-define=DURBUN=true
+flutter build ipa --release --dart-define=DURBUN=true
+# .ipa for Firebase App Distribution / ad-hoc:
 flutter build ipa --release --export-method ad-hoc --dart-define=DURBUN=true
-# Do not upload this .ipa to App Store Connect / TestFlight: a TestFlight build is the store build itself.
-# Rebuild without the define before the store build; Xcode Archive reuses the last flutter build’s defines (ios/Flutter/Generated.xcconfig):
+# Release with Dürbün off (no define):
 flutter build appbundle --release
 flutter build ipa --release
 ```
 
-If such a build reaches a store by mistake, Dürbün checks where the app was
-installed from before it starts anything: installed from Google Play (any
-track, internal testing too) or the App Store, it starts nothing and writes one
-line to the device log: «Dürbün turned itself off: this app was installed from
-the store (Dürbün never runs in store builds).» (in Turkish on Turkish devices).
-Firebase, ad-hoc, TestFlight and `flutter run` installs keep working. This is a
-safety net, not a distribution path: never upload a `DURBUN=true` build to a
-store channel (Play internal testing, TestFlight). On Android only Google Play
-is recognised: a `DURBUN=true` build installed from Huawei AppGallery, Galaxy
-Store or Amazon runs, so keep it off those stores too. A release build asks the
-plugin's native side (one channel call at launch); if the plugin does not
-answer, Dürbün stays off and logs that too.
-
-If a project ships the same binary to Firebase and the store, do not use the
-define; the desktop still shows what the device exposes (device logs, crash
-records, Android process/frame stats) and explains why network/mocks are missing.
+The same define works with `flutter build appbundle` and `flutter run --release`.
+iOS: Flutter writes the defines into `ios/Flutter/Generated.xcconfig`, which an
+Xcode Archive uses, so an Archive made after a `flutter build` with
+`--dart-define=DURBUN=true` keeps `DURBUN=true` until the next `flutter build`
+without it. If Firebase and the store get the same binary, the define turns
+Dürbün on in every install of it; without the define the desktop still shows
+what the device exposes (device logs, crash records, Android process/frame
+stats) and explains why network/mocks are missing.
 Release builds with Dürbün on need `INTERNET` in the main Android manifest
 (every networked app has it; the plugin adds no permission).
 Size (Flutter 3.38 counter app that already has another plugin, release, DURBUN
@@ -425,7 +411,7 @@ session ("SDK" badge). No proxy is involved, so SSL pinning is untouched.
 | Dart SDK | Dart logs, `print`, Flutter errors, Dart crashes, dart:io HTTP, FPS/jank/memory, `flutter.*` tools | while Dürbün is on |
 | Android layer (in this plugin) | Kotlin/Java `Durbun.log`, uncaught Kotlin/Java crashes, OkHttp (with `DurbunInterceptor`), the app's own logcat over Wi-Fi (no adb), `android.*` tools | once Dart starts it |
 | iOS layer (in this plugin) | URLSession traffic (automatic), Objective-C exceptions and Swift crashes, Swift `print`/stdout/stderr, Swift `Durbun.log`, `ios.*` tools | once Dart starts it |
-| No SDK (old / store builds) | device logs, system crash records, Android process/frame stats, read by the desktop | always |
+| No SDK (old builds, release builds with Dürbün off) | device logs, system crash records, Android process/frame stats, read by the desktop | always |
 
 Native crashes: Android sends them to the desktop at crash time; if the desktop
 cannot be reached they arrive on the next launch as **"Previous launch crashed —
@@ -474,11 +460,12 @@ that starts Dürbün gets the native layer. Native-only apps use `sdks/android` 
 - When the connection drops, the mock rules it pushed are dropped at once in
   every layer (Dart, OkHttp, URLSession); the desktop sends them again when it
   reconnects. Requests made in between go to the real server.
-- **Known risk:** the link between the desktop and the SDK is not authenticated
-  yet. A build made with `DURBUN=true` can send its logs and network traffic to
-  another app on the phone that pretends to be the desktop, and applies that
-  app's mock rules while it stays connected. Hand such builds to test devices
-  only. A pairing token is planned.
+- **Connection:** the link between the desktop and the SDK has no pairing yet. A
+  build with Dürbün on talks to whatever answers on its device loopback port
+  (Android: it connects to `127.0.0.1:9751`; iOS device: it listens on
+  `127.0.0.1:9752–9755`). That peer can be the desktop (through adb reverse /
+  usbmux) or another app on the device; the logs and network traffic go to it,
+  and the mock rules it pushes apply while it stays connected.
 - Header values listed in `redactHeaders` show up as `••••` in every layer.
   `captureNetwork: false` also keeps OkHttp (Android) and URLSession (iOS) out.
 

@@ -126,16 +126,16 @@ doğrular). Mock'lanan istekler masaüstünde `mocked` olarak işaretlenir.
 
 ### Release güvenliği
 
-- `Durbun.start()` çağrısını `#if DEBUG` içine alın.
+- `Durbun.start()` çağrısı `#if DEBUG` içindeyse release derlemesi SDK'yı hiç başlatmaz.
 - SDK kendisi de DEBUG olmadan derlendiğinde **hiçbir şey yapmaz** (`allowInReleaseBuilds: true` ile zorlamadıkça).
-- `allowInReleaseBuilds: true` olsa bile uygulama App Store'dan kurulmuşsa SDK başlamaz ve cihaz loguna tek satır
-  yazar: «Dürbün kendini kapattı: uygulama mağazadan kurulmuş (Dürbün mağaza sürümlerinde çalışmaz).» TestFlight,
-  ad-hoc ve geliştirme kurulumlarında çalışır; yine de böyle bir derlemeyi TestFlight'a yüklemeyin (TestFlight
-  derlemesi mağazaya giden derlemenin kendisidir).
+  `allowInReleaseBuilds: true` ile uygulama nereden kurulursa kurulsun (Xcode, ad-hoc, TestFlight, App Store)
+  çalışır. Hangi derlemenin Dürbün'ü çalıştıracağına proje karar verir.
 - Bağlantı koptuğunda o bağlantının gönderdiği mock kuralları hemen silinir; masaüstü yeniden bağlanınca tekrar
-  gönderir. Bilinen risk: bağlantıda henüz kimlik doğrulama yok; release'te açık bir derleme, telefondaki başka bir
-  uygulama kendini masaüstü gibi tanıtırsa trafiğini ona da gönderebilir. Böyle derlemeleri yalnızca test
-  cihazlarına dağıtın (eşleştirme anahtarı ileride eklenecek).
+  gönderir.
+- Güvenlik notu: bağlantıda henüz eşleştirme (pairing) yok. Dürbün açık bir derleme fiziksel cihazda
+  `127.0.0.1:9752–9755` portlarından birini dinler ve o porta bağlanan eşle konuşur: usbmux üzerinden masaüstü ya da
+  cihazdaki başka bir uygulama. Loglar ve ağ trafiği o eşe gider; eş bağlı kaldığı sürece gönderdiği mock kuralları
+  uygulanır.
 - `DURBUN_DISABLED=1` ortam değişkeni SDK'yı tamamen kapatır; SwiftUI önizlemelerinde (Xcode Previews) SDK zaten devre dışıdır.
 - Bütün G/Ç arka plan kuyruklarında yapılır, kuyruklar sınırlıdır, SDK kendi hatalarını yutar ve
   uygulamayı asla çökertmez. Ağ istekleri dokunulmadan iletilir (tee); zaman aşımları ve sertifika
@@ -228,16 +228,15 @@ path completes the `hello` → `welcome` handshake first wins; the others are cl
 
 ### Release safety
 
-- Wrap `Durbun.start()` in `#if DEBUG`.
-- The SDK itself is inert when compiled without `DEBUG` unless `allowInReleaseBuilds: true`.
-- Even with `allowInReleaseBuilds: true` it does not start in an App Store install and writes one line to the
-  device log: «Dürbün turned itself off: this app was installed from the store (Dürbün never runs in store
-  builds).» TestFlight, ad-hoc and development installs keep working; still, never upload such a build to
-  TestFlight (a TestFlight build is the store build itself).
+- With `Durbun.start()` inside `#if DEBUG`, release builds never start the SDK.
+- The SDK itself is inert when compiled without `DEBUG` unless `allowInReleaseBuilds: true`; with it the SDK runs
+  wherever the app was installed from (Xcode, ad-hoc, TestFlight, App Store). Each project decides which builds run
+  Dürbün.
 - When the connection drops, the mock rules it pushed are dropped at once; the desktop sends them again when it
-  reconnects. Known risk: the link is not authenticated yet, so a build running in release can send its traffic to
-  another app on the phone that pretends to be the desktop. Hand such builds to test devices only (a pairing token
-  is planned).
+  reconnects.
+- Security note: the link has no pairing yet. On a physical device a build with Dürbün on listens on one of
+  `127.0.0.1:9752–9755` and talks to whatever connects there: the desktop (through usbmux) or another app on the
+  device. Logs and network traffic go to that peer, and the mock rules it pushes apply while it stays connected.
 - `DURBUN_DISABLED=1` turns it off completely; it also stays off inside SwiftUI previews (Xcode Previews).
 - All I/O runs on background queues with bounded buffers; the SDK swallows its own errors and never
   crashes the app. Requests are forwarded untouched (tee); timeouts and certificate validation
