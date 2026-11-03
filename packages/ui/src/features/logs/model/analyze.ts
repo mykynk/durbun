@@ -177,6 +177,12 @@ export function crashSummary(e: LogEntry): CrashSummary {
   }
 
   const body = stripPreviousPrefix(first);
+  // iOS crash report (.ips): "<App> <version> (<build>) crashed: <why>" — the row names the app and the build
+  // itself, so the headline is the reason only.
+  if (originOf(e) === 'crash-report') {
+    const i = body.indexOf(' crashed: ');
+    if (i > 0 && body.length > i + 10) return { kind, title: body.slice(i + 10).trim(), previousLaunch };
+  }
   // Device AndroidRuntime group: "FATAL EXCEPTION: main\nProcess: …, PID: …\njava.lang.X: msg\n\tat …"
   const fatalDevice = /^FATAL EXCEPTION:\s*(.+)$/.exec(body);
   if (fatalDevice) {
@@ -201,6 +207,12 @@ export function crashSummary(e: LogEntry): CrashSummary {
   }
   if (!body.trim() && e.error?.message) return { kind, title: `${e.error.type ? `${e.error.type}: ` : ''}${e.error.message}`, previousLaunch };
   return { kind, title: body.trim() || (e.error?.message ?? ''), previousLaunch };
+}
+
+function originOf(e: LogEntry): string | undefined {
+  if (e.origin) return e.origin;
+  const d = e.data as { origin?: unknown } | null | undefined;
+  return d && typeof d === 'object' && typeof d.origin === 'string' ? d.origin : undefined;
 }
 
 function flutterSummary(e: LogEntry, previousLaunch: boolean): CrashSummary {

@@ -140,6 +140,21 @@ describe('crash headlines (SPEC §9.4)', () => {
     expect(android.title).toBe('java.lang.IllegalStateException: x');
   });
 
+  it('iOS crash report (.ips) → the reason only; the row shows the app and the build itself', () => {
+    const ips = entry({
+      kind: 'crash',
+      level: 'fatal',
+      origin: 'crash-report',
+      tag: 'crash-report',
+      message: 'Kumbara 3.1.0 (310) crashed: EXC_BAD_ACCESS (SIGSEGV) · KERN_INVALID_ADDRESS at 0x0000000000000010',
+      data: { origin: 'crash-report', version: '3.1.0', build: '310' },
+    });
+    expect(crashSummary(ips).title).toBe('EXC_BAD_ACCESS (SIGSEGV) · KERN_INVALID_ADDRESS at 0x0000000000000010');
+    // A live line that merely contains the words keeps its text.
+    const live = entry({ kind: 'crash', level: 'fatal', origin: 'idevicesyslog', message: 'Runner crashed: yes' });
+    expect(crashSummary(live).title).toBe('Runner crashed: yes');
+  });
+
   it('ANR → package + reason', () => {
     const s = crashSummary(
       entry({
