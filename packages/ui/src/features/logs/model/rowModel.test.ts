@@ -475,3 +475,197 @@ describe('RowModel: lookups and pause', () => {
     expect(off.model.rows).toHaveLength(2);
   });
 });
+
+describe('RowModel: a flapping device connection', () => {
+  const sep = (code: string, ts: number, deviceId = 'ios:1') => ({ message: code, source: 'system' as const, kind: 'lifecycle' as const, code, ts, deviceId, tag: 'durbun' });
+
+  it('merges repeated disconnect / connect / stream separators of one device into one row at the newest event', () => {
+    const { store, model } = setup();
+    let ts = 1_700_000_000_000;
+    for (let i = 0; i < 6; i++) {
+      store.add(sep('device.disconnected', (ts += 3000)));
+      store.add({ message: `line ${i}`, deviceId: 'demo:1', ts: ts + 1 });
+      store.add(sep('device.connected', (ts += 2000)));
+      store.add(sep('logs.streamStarted', (ts += 500)));
+    }
+    model.sync(store);
+    const seps = model.rows.slice(model.start).filter((r) => r.e.source === 'system');
+    // Without merging: 18 full-width separator rows.
+    expect(seps).toHaveLength(1);
+    const row = seps[0]!;
+    expect(row.flap?.events.map((e) => e.code).filter((c) => c === 'device.disconnected')).toHaveLength(6);
+    expect(row.e.code).toBe('logs.streamStarted');
+    // Different events, not repeats: no ×N (export, copy and the detail panel read `flap.events`).
+    expect(row.n).toBe(1);
+    expect(row.id).toBe(row.e.id);
+    expect(row.flap?.key).toBe(row.flap?.events[0]!.id);
+    // The merged row is the newest row; the other device's lines keep their own rows in order.
+    const last = model.rows[model.rows.length - 1]!;
+    expect(last).toBe(row);
+    expect(messages(model).filter((m) => m.startsWith('line '))).toEqual(['line 0', 'line 1', 'line 2', 'line 3', 'line 4', 'line 5']);
+    const ids = model.rows.slice(model.start).map((r) => r.id);
+    expect([...ids].sort((a, b) => a - b)).toEqual(ids);
+  });
+
+  it('keeps a normal connect, a drop that did not come back and groups farther apart than the gap as plain separators', () => {
+    const { store, model } = setup();
+    const t0 = 1_700_000_000_000;
+    store.add(sep('device.connected', t0));
+    store.add(sep('logs.streamStarted', t0 + 400));
+    store.add(sep('device.disconnected', t0 + 120_000));
+    store.add(sep('device.connected', t0 + 300_000));
+    model.sync(store);
+    expect(model.rows.slice(model.start).map((r) => [r.e.code, r.flap ? r.flap.events.length : 0])).toEqual([
+      ['device.connected', 0],
+      ['logs.streamStarted', 0],
+      ['device.disconnected', 0],
+      ['device.connected', 0],
+    ]);
+  });
+
+  it('leaves a requested log-stream restart as its two neutral separators', () => {
+    const { store, model } = setup();
+    const t0 = 1_700_000_000_000;
+    store.add(sep('device.connected', t0));
+    store.add(sep('logs.streamStarted', t0 + 400));
+    store.add(sep('logs.streamStopped', t0 + 9000));
+    store.add(sep('logs.streamStarted', t0 + 9400));
+    store.add(sep('logs.streamStopped', t0 + 15_000));
+    store.add(sep('logs.streamStarted', t0 + 15_400));
+    model.sync(store);
+    expect(model.rows.slice(model.start).map((r) => [r.e.code, r.flap ? r.flap.events.length : 0])).toEqual([
+      ['device.connected', 0],
+      ['logs.streamStarted', 0],
+      ['logs.streamStopped', 0],
+      ['logs.streamStarted', 0],
+      ['logs.streamStopped', 0],
+      ['logs.streamStarted', 0],
+    ]);
+    // A log stream that failed is a fault: it merges like a drop.
+    store.add({ ...sep('logs.streamError', t0 + 20_000), level: 'warn' });
+    store.add(sep('logs.streamStarted', t0 + 23_000));
+    model.sync(store);
+    expect(model.rows[model.rows.length - 1]!.flap?.events.map((e) => e.code).slice(-2)).toEqual(['logs.streamError', 'logs.streamStarted']);
+  });
+
+  it('groups per device, leaves app separators alone and shows every separator when folding is off', () => {
+    const add = (store: InstanceType<typeof FakeStore>) => {
+      const t0 = 1_700_000_000_000;
+      store.add(sep('device.disconnected', t0, 'ios:1'));
+      store.add(sep('device.disconnected', t0 + 100, 'android:2'));
+      store.add({ ...sep('app.disconnected', t0 + 200, 'ios:1'), appId: 'app:1' });
+      store.add(sep('device.connected', t0 + 3000, 'ios:1'));
+      store.add(sep('device.connected', t0 + 3100, 'android:2'));
+    };
+    const on = setup();
+    add(on.store);
+    on.model.sync(on.store);
+    expect(on.model.rows.map((r) => `${r.e.deviceId} ${r.e.code} ${r.flap?.events.length ?? 1}`)).toEqual([
+      'ios:1 app.disconnected 1',
+      'ios:1 device.connected 2',
+      'android:2 device.connected 2',
+    ]);
+    const off = setup({ fold: false });
+    add(off.store);
+    off.model.sync(off.store);
+    expect(off.model.rows).toHaveLength(5);
+    expect(off.model.rows.some((r) => r.flap)).toBe(false);
+  });
+
+  it('keeps merging across syncs and survives the store trimming the group’s first events', () => {
+    const { store, model } = setup();
+    const t0 = 1_700_000_000_000;
+    store.add(sep('device.disconnected', t0));
+    store.add(sep('device.connected', t0 + 1000));
+    model.sync(store);
+    expect(model.count).toBe(1);
+    store.trimHead(1);
+    store.add(sep('device.disconnected', t0 + 5000));
+    store.add(sep('device.connected', t0 + 6000));
+    model.sync(store);
+    expect(model.count).toBe(1);
+    expect(model.row(0)!.flap?.events).toHaveLength(4);
+  });
+});
+
+describe('RowModel: the device’s own record of a live crash', () => {
+  it('hands the matched dropbox / .ips record to the live crash row (de-duplication on or off)', () => {
+    for (const dedupe of [true, false]) {
+      const { store, model } = setup({ dedupe });
+      const live = store.add({ message: 'Fatal signal 11 (SIGSEGV)', kind: 'crash', level: 'fatal', origin: 'idevicesyslog' });
+      store.add({ message: 'other line' });
+      model.sync(store);
+      const rec = store.add({
+        message: 'Kumbara 3.1.0 (310) crashed: EXC_BAD_ACCESS (SIGSEGV)',
+        kind: 'crash',
+        level: 'fatal',
+        origin: 'crash-report',
+        data: { origin: 'crash-report', version: '3.1.0', build: '310', reportUrl: '/api/files/crash/u/Runner.ips', duplicateOf: live.id },
+      });
+      model.sync(store);
+      const row = model.rows[model.indexOfRow(live.id) + model.start]!;
+      expect(row.rec).toBe(rec);
+      expect(model.rows.some((r) => r.e === rec)).toBe(!dedupe);
+    }
+  });
+
+  it('gives the record to the app row when its live device line was hidden as that row’s twin', () => {
+    for (const deviceFirst of [false, true]) {
+      const { store, model } = setup();
+      const ts = 1_700_000_000_000;
+      const sdk = () =>
+        store.add({
+          message: 'Uncaught exception NSInvalidArgumentException: -[__NSArrayM objectAtIndex:]: index 3 beyond bounds',
+          source: 'app',
+          kind: 'crash',
+          level: 'fatal',
+          ts,
+          error: { type: 'NSInvalidArgumentException', message: 'index 3 beyond bounds' },
+        });
+      const dev = () =>
+        store.add({
+          message: "*** Terminating app due to uncaught exception 'NSInvalidArgumentException', reason: '-[__NSArrayM objectAtIndex:]: index 3 beyond bounds'",
+          kind: 'crash',
+          level: 'fatal',
+          origin: 'idevicesyslog',
+          process: 'Runner',
+          pid: 811,
+          ts: ts + 300,
+        });
+      const live = deviceFirst ? dev() : (sdk(), dev());
+      if (deviceFirst) sdk();
+      const ips = store.add({
+        message: 'Kumbara 3.1.0 (310) crashed: EXC_CRASH (SIGABRT)',
+        kind: 'crash',
+        level: 'fatal',
+        origin: 'crash-report',
+        ts: ts + 2000,
+        data: { origin: 'crash-report', version: '3.1.0', build: '310', reportUrl: '/api/files/crash/u/Runner.ips', duplicateOf: live.id },
+      });
+      model.sync(store);
+      // Regression: the record was hidden and no row had it (no crashed build, no .ips download).
+      expect(model.count).toBe(1);
+      const row = model.row(0)!;
+      expect(row.e.source).toBe('app');
+      expect(row.twin).toBe(true);
+      expect(row.rec).toBe(ips);
+    }
+  });
+
+  it('leaves a record visible when no row shows its live line', () => {
+    const { store, model } = setup({ query: { test: (e) => e.origin === 'crash-report', matchesAll: false } });
+    const live = store.add({ message: 'FATAL EXCEPTION: main', kind: 'crash', level: 'fatal', origin: 'logcat' });
+    const rec = store.add({ message: 'x', kind: 'crash', level: 'fatal', origin: 'crash-report', data: { origin: 'crash-report', reportUrl: '/api/files/crash/u/a.ips', duplicateOf: live.id } });
+    model.sync(store);
+    expect(model.rows.slice(model.start).map((r) => r.e)).toEqual([rec]);
+  });
+
+  it('keeps the record with the download when a second one without it arrives', () => {
+    const { store, model } = setup();
+    const live = store.add({ message: 'FATAL EXCEPTION: main', kind: 'crash', level: 'fatal', origin: 'logcat' });
+    const ips = store.add({ message: 'x', kind: 'crash', level: 'fatal', data: { origin: 'crash-report', reportUrl: '/api/files/crash/u/a.ips', duplicateOf: live.id } });
+    store.add({ message: 'y', kind: 'crash', level: 'fatal', data: { origin: 'dropbox', duplicateOf: live.id } });
+    model.sync(store);
+    expect(model.row(0)!.rec).toBe(ips);
+  });
+});

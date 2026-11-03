@@ -2,7 +2,36 @@ import type { LogEntry } from '@durbun/protocol';
 import { DupIndex, crashSignature, dedupeHash, isDedupeCandidate, isMarkedDuplicate, signatureHash, type DupCandidate } from './dedupe';
 import { HistogramIndex } from './histogram';
 import { F_COUNT_NOISE, F_COUNT_SRC, F_MARKER, F_NOHIST, F_NOISY, F_SRC_MASK, F_VISIBLE, Ledger, SEV_SHIFT } from './ledger';
-import { isPreviousLaunch, isStructural, rankOf, severityOf, type LogRow, type RowFilter, type Severity, type SourceCounts, type StoreView } from './types';
+import {
+  FLAP_FAULT_CODES,
+  FLAP_GAP_MS,
+  isFlapEvent,
+  isPreviousLaunch,
+  isStructural,
+  rankOf,
+  severityOf,
+  type LogRow,
+  type RowFilter,
+  type Severity,
+  type SourceCounts,
+  type StoreView,
+} from './types';
+
+/** Open group of one device's connection / log-stream separators (see `RowModel.addFlapEvent`). */
+interface OpenFlap {
+  key: number;
+  lastTs: number;
+  events: LogEntry[];
+  /** Rows currently showing the group's events (its own separators, or the merged row). */
+  rowIds: number[];
+  /** A fault (disconnect, failed log stream) happened in the group; a requested stream restart is none. */
+  dropped: boolean;
+}
+
+function hasReportUrl(e: LogEntry): boolean {
+  const d = e.data as { reportUrl?: unknown } | null | undefined;
+  return !!d && typeof d === 'object' && typeof d.reportUrl === 'string' && d.reportUrl.length > 0;
+}
 
 const SRC_CODE = { device: 0, app: 1, system: 2 } as const;
 const SRC_NAME = ['device', 'app', 'system'] as const;
@@ -34,8 +63,10 @@ export function canFold(a: LogEntry, b: LogEntry): boolean {
  * - scans only entries newer than its id cursor; rebuilds on store `generation` / filter change;
  * - drops rows that fell out of the store ring with a start pointer (binary search, no shifting);
  * - folds identical consecutive lines (×N), pairs app-vs-device duplicates;
+ * - merges a flapping device's connect / disconnect / log-stream separators into one row (with folding on);
+ * - hands a live crash row the device's own record of it (`data.duplicateOf` → `LogRow.rec`);
  * - keeps source/noise counters and the volume histogram exact via a ledger of counted entries.
- * Rows are immutable objects keyed by their first entry id.
+ * Rows are immutable objects keyed by their first entry id (a merged separator row by its newest one).
  */
 export class RowModel {
   rows: LogRow[] = [];
@@ -52,6 +83,13 @@ export class RowModel {
   readonly hist = new HistogramIndex();
   private readonly ledger = new Ledger(4096);
   private readonly dups = new DupIndex();
+  /** deviceId → its latest group of connection / log-stream separators. */
+  private readonly flaps = new Map<string, OpenFlap>();
+  /**
+   * Device copy of a crash hidden as the twin of an app row → that row's key (insertion ≈ id order). The server
+   * may point the device's own record (`data.duplicateOf`) at the hidden copy; the record then goes to the app row.
+   */
+  private readonly twinRows = new Map<number, number>();
   private filter: RowFilter | null = null;
   private gen = -1;
   private lastId = 0;
@@ -90,6 +128,8 @@ export class RowModel {
     this.hist.clear();
     this.ledger.clear();
     this.dups.clear();
+    this.flaps.clear();
+    this.twinRows.clear();
     this.lastId = 0;
     this.gen = -1;
     this.build++;
@@ -139,6 +179,10 @@ export class RowModel {
         this.rows = rows.slice(this.start);
         this.start = 0;
       }
+    }
+    for (const k of this.twinRows.keys()) {
+      if (k >= firstId) break;
+      this.twinRows.delete(k);
     }
     const led = this.ledger;
     while (led.length > 0 && led.frontId() < firstId) {
@@ -194,13 +238,19 @@ export class RowModel {
       flags |= F_COUNT_NOISE;
     }
     let visible = srcOn && !(noisy && f.hideNoise);
-    // A device crash record the server already matched to a live crash line (`data.duplicateOf`).
-    if (visible && f.dedupe && e.data !== undefined && isMarkedDuplicate(e)) visible = false;
+    // A device crash record the server already matched to a live crash line (`data.duplicateOf`): the live
+    // row gets it (crashed build, .ips download) and, with de-duplication on, it has no row of its own. A record
+    // no row could take stays visible: it is the only place its build and report are shown.
+    if (e.data !== undefined && isMarkedDuplicate(e)) {
+      if (this.attachRecord(e) && f.dedupe) visible = false;
+    }
 
     // App-vs-device duplicates (same text, or the same crash told in the SDK's and the device's words).
     let twinSelf = false;
     let dkey = -1;
     let sig: string | undefined;
+    /** Device copy of a crash this app entry hides (its row key is known once the app row exists). */
+    let hiddenCopy = -1;
     if (isDedupeCandidate(e)) {
       sig = crashSignature(e) ?? undefined;
       dkey = sig !== undefined ? signatureHash(sig) : dedupeHash(e);
@@ -212,11 +262,17 @@ export class RowModel {
           // The app copy is on screen: mark it, hide this device copy.
           if (partner.rowId >= 0) {
             this.markTwin(partner.rowId);
-            if (f.dedupe && visible) visible = false;
+            if (f.dedupe && visible) {
+              visible = false;
+              if (sig !== undefined) this.twinRows.set(e.id, partner.rowId);
+            }
           }
         } else if (visible) {
           twinSelf = true;
-          if (f.dedupe && partner.rowId >= 0) this.removeDeviceCopy(partner);
+          if (f.dedupe && partner.rowId >= 0) {
+            this.removeDeviceCopy(partner);
+            if (sig !== undefined) hiddenCopy = partner.id;
+          }
         }
       }
     }
@@ -234,7 +290,8 @@ export class RowModel {
       }
     }
     this.ledger.push(e.id, e.ts, flags);
-    const rowId = visible ? this.addRow(e, twinSelf) : -1;
+    const rowId = visible ? (f.fold && isFlapEvent(e) ? this.addFlapEvent(e) : this.addRow(e, twinSelf)) : -1;
+    if (hiddenCopy >= 0 && rowId >= 0) this.twinRows.set(hiddenCopy, rowId);
     if (dkey >= 0) this.dups.add({ id: e.id, ts: e.ts, deviceId: e.deviceId, message: e.message, source: e.source as 'app' | 'device', sig, rowId, paired: false, hash: dkey, prev: undefined });
   }
 
@@ -252,6 +309,61 @@ export class RowModel {
     this.appended++;
     this.structure++;
     return e.id;
+  }
+
+  /**
+   * Connection / log-stream separators of one device (`isFlapEvent`). A normal connect stays as it is; once
+   * the device went away (or its log stream failed) and something follows within FLAP_GAP_MS of the previous
+   * event, the group's rows become one row at the newest event, so a loose USB cable reads as one line instead
+   * of three rows per reconnect. A requested log-stream restart alone is no fault: its two separators stay.
+   * The merged row keeps n = 1 (it is not a repeat); its events are `flap.events`.
+   */
+  private addFlapEvent(e: LogEntry): number {
+    const g = this.flaps.get(e.deviceId);
+    const drop = FLAP_FAULT_CODES.has(e.code!);
+    if (!g || Math.abs(e.ts - g.lastTs) > FLAP_GAP_MS) {
+      const id = this.addRow(e, false);
+      this.flaps.set(e.deviceId, { key: e.id, lastTs: e.ts, events: [e], rowIds: [id], dropped: drop });
+      return id;
+    }
+    g.events.push(e);
+    g.lastTs = e.ts;
+    if (!g.dropped) {
+      g.dropped = drop;
+      const id = this.addRow(e, false);
+      g.rowIds.push(id);
+      return id;
+    }
+    for (const id of g.rowIds) {
+      const a = this.absIndexOf(id);
+      if (a >= 0) this.rows.splice(a, 1);
+    }
+    this.rows.push({ id: e.id, e, n: 1, flap: { key: g.key, events: g.events.slice() } });
+    g.rowIds = [e.id];
+    this.appended++;
+    this.structure++;
+    return e.id;
+  }
+
+  /**
+   * Give the live crash row the device's own record of it (prefer a record with a downloadable report). The live
+   * line may be a device copy hidden behind its app twin: the app row takes the record then. False when no row
+   * shows the live line (filtered out, trimmed).
+   */
+  private attachRecord(rec: LogEntry): boolean {
+    const raw = (rec.data as { duplicateOf?: unknown }).duplicateOf;
+    const id = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(id)) return false;
+    let a = this.absIndexOf(id);
+    if (a < 0) {
+      const twin = this.twinRows.get(id);
+      if (twin !== undefined) a = this.absIndexOf(twin);
+    }
+    if (a < 0) return false;
+    const r = this.rows[a]!;
+    if (r.rec && hasReportUrl(r.rec) && !hasReportUrl(rec)) return true;
+    this.rows[a] = { ...r, rec };
+    return true;
   }
 
   private markTwin(rowId: number): void {

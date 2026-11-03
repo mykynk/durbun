@@ -9,12 +9,27 @@ export interface LogRow {
   readonly id: number;
   /** First (displayed) entry. */
   readonly e: LogEntry;
-  /** Identical consecutive occurrences folded into this row (×N). */
+  /** Identical consecutive occurrences folded into this row (×N); 1 on a merged connection row (see `flap`). */
   readonly n: number;
   /** Latest folded occurrence (when n > 1). */
   readonly last?: LogEntry;
   /** App line that was also printed to the device log (app-vs-device dedupe). */
   readonly twin?: boolean;
+  /**
+   * The device's own record of this crash (Android dropbox, iOS .ips) that the server matched to this live
+   * line (`data.duplicateOf`): its build version and report download belong to this row too.
+   */
+  readonly rec?: LogEntry;
+  /** Connection / log-stream separators of one device merged into this row (a flapping USB cable). */
+  readonly flap?: FlapGroup;
+}
+
+/** Device separators merged into one row; the row sits at the newest one (`LogRow.e`). */
+export interface FlapGroup {
+  /** First entry id of the group: expansion state survives the row moving down with each new event. */
+  readonly key: number;
+  /** Every merged separator, oldest first. */
+  readonly events: readonly LogEntry[];
 }
 
 export type SourceToggles = Record<LogSource, boolean>;
@@ -82,6 +97,23 @@ export function isCrashKind(kind: LogEntry['kind']): boolean {
 export function isStructural(e: Pick<LogEntry, 'kind' | 'source'>): boolean {
   return e.kind === 'marker' || (e.source === 'system' && e.kind === 'lifecycle');
 }
+
+/** Device connection / log-stream separators that a flapping USB connection repeats. */
+const FLAP_CODES: ReadonlySet<string> = new Set(['device.connected', 'device.disconnected', 'logs.streamStarted', 'logs.streamStopped', 'logs.streamError']);
+/** Codes of a flap group that mean "it went away" (the rest mean "it is back"). */
+export const FLAP_DROP_CODES: ReadonlySet<string> = new Set(['device.disconnected', 'logs.streamStopped', 'logs.streamError']);
+/**
+ * Drops nobody asked for: the device went away or its log stream died. `logs.streamStopped` is a restart someone
+ * requested (the log-stream action, a settings change): on its own it stays a pair of neutral separators.
+ */
+export const FLAP_FAULT_CODES: ReadonlySet<string> = new Set(['device.disconnected', 'logs.streamError']);
+
+export function isFlapEvent(e: Pick<LogEntry, 'kind' | 'source' | 'code' | 'appId'>): boolean {
+  return e.source === 'system' && e.kind === 'lifecycle' && !e.appId && !!e.code && FLAP_CODES.has(e.code);
+}
+
+/** Separators of one device closer than this to the previous one form a group. */
+export const FLAP_GAP_MS = 30_000;
 
 /** A crash reported on the next launch (iOS signal crashes, undelivered Android crashes). */
 export function isPreviousLaunch(e: Pick<LogEntry, 'data' | 'kind'>): boolean {
