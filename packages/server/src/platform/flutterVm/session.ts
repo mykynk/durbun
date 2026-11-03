@@ -4,6 +4,7 @@
  */
 import type {
   AppInfo,
+  DeviceApp,
   I18nParams,
   LogKind,
   LogLevel,
@@ -16,15 +17,18 @@ import type {
 } from '@durbun/protocol';
 import { PROTOCOL_VERSION } from '@durbun/protocol';
 import type { DriverContext, Logger, PlatformServices, PortForward, VirtualSdkSession } from '../../types';
+import { redactSecrets } from '../../util/redact';
 import { SERVER_VERSION } from '../../version';
 import { nativeTargetPlatform, type ValueContext } from './actions';
 import {
   deriveAppInfo,
+  deviceAppForVm,
   deviceHintsFor,
   inspectHostProcess,
   packageNameFromLibraryUri,
   sdkSessionForPid,
   uniqueOnlineDevice,
+  type BundleInfo,
   type HostProcessInfo,
 } from './appInfo';
 import { DeviceClock } from './clock';
@@ -78,6 +82,8 @@ export interface VmSessionDeps {
   duplicateOf?(session: VmSession): VmSession | undefined;
   /** Delays between reconnect attempts after the connection drops (tests shorten them). */
   reconnectDelaysMs?: number[];
+  /** How long to wait for a physical iPhone to report the app's pid (tests shorten it). */
+  deviceAppWaitMs?: number;
 }
 
 /** The VM is already attached by another session; `appId` is that session's app. */
@@ -133,6 +139,9 @@ const MAX_TEXT_CHARS = 256 * 1024;
 const WELCOME_TIMEOUT_MS = 10_000;
 const HTTP_POLL_MS = 1000;
 const RECONNECT_DELAYS_MS = [250, 750, 1500, 3000, 5000];
+/** A physical iPhone reports a new process's pid a moment after it starts (devicectl process list). */
+const DEVICE_APP_WAIT_MS = 3000;
+const DEVICE_APP_POLL_MS = 200;
 /** Background isolates must live this long before HTTP profiling is enabled in them (skip `compute()`). */
 const BACKGROUND_ISOLATE_HTTP_DELAY_MS = 3000;
 const MIB = 1024 * 1024;
@@ -320,7 +329,7 @@ export class VmSession {
     if (this.target.origin === 'auto') {
       this.notice('success', `Dart VM service attached: ${this.name}`, 'vm.attached', { app: this.name });
     }
-    this.logger.info(`attached to ${this.name} (pid ${this.identity?.pid}) at ${this.client?.url}${via}`);
+    this.logger.info(`attached to ${this.name} (pid ${this.identity?.pid}) at ${redactSecrets(this.client?.url ?? '?')}${via}`);
     return { appId };
   }
 
@@ -599,7 +608,8 @@ export class VmSession {
       const flutterExts = [...main.extensions].some((e) => e.startsWith('ext.flutter.'));
       debug = flutterExts ? main.extensions.has('ext.flutter.debugPaint') : undefined;
     }
-    this.app = deriveAppInfo({ packageName, processName, bundle: host.bundle, sdkApp, pid: id.pid, debug });
+    const bundle = host.bundle ?? (sdkApp ? undefined : await this.deviceAppBundle(deviceId, id.pid, processName));
+    this.app = deriveAppInfo({ packageName, processName, bundle, sdkApp, pid: id.pid, debug });
     // Stable across re-attaches (the reported start time jitters): reuse the first one seen.
     const resolved = this.deps.states.resolve(id.pid, id.startTime);
     this.state = resolved.state;
@@ -627,6 +637,38 @@ export class VmSession {
     virtual.send(hello);
     this.appId = await withTimeout(virtual.appId, WELCOME_TIMEOUT_MS, 'The app session was not accepted by the server');
     this.deviceId = deviceId ?? ctx.getApps().find((a) => a.id === this.appId)?.deviceId;
+  }
+
+  /**
+   * Identity from the device's own report (SPEC §10.2 DeviceApp) for a VM on a physical device, when it is
+   * certain (deviceAppForVm); otherwise the VM's own identity stays (Dart package name). On an iPhone whose
+   * apps Dürbün tracks, wait briefly for the new process's pid.
+   */
+  private async deviceAppBundle(deviceId: string | undefined, pid: number, processName: string | undefined): Promise<BundleInfo | undefined> {
+    if (!deviceId || !(deviceId.startsWith('ios:') || deviceId.startsWith('android:'))) return undefined;
+    const deviceApps = (): DeviceApp[] => {
+      try {
+        return this.deps.ctx.getDeviceApps();
+      } catch {
+        return [];
+      }
+    };
+    let list = deviceApps();
+    let app = deviceAppForVm(list, deviceId, pid, processName);
+    const tracked = list.some((a) => a.deviceId === deviceId);
+    const waitMs = deviceId.startsWith('ios:') && tracked ? (this.deps.deviceAppWaitMs ?? DEVICE_APP_WAIT_MS) : 0;
+    for (let waited = 0; !app && waited < waitMs && !this.ended; waited += DEVICE_APP_POLL_MS) {
+      await sleep(DEVICE_APP_POLL_MS);
+      list = deviceApps();
+      app = deviceAppForVm(list, deviceId, pid, processName);
+    }
+    if (!app) return undefined;
+    return {
+      id: app.id,
+      ...(app.name ? { name: app.name } : {}),
+      ...(app.version ? { version: app.version } : {}),
+      ...(app.build ? { build: app.build } : {}),
+    };
   }
 
   /** Static for the session: extensions may register only after attach (startup), so be inclusive. */

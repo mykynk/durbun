@@ -5,6 +5,7 @@
  */
 import type { DriverStatus, LogEntry, ToolCheck } from '@durbun/protocol';
 import type { DriverContext, FlutterVmModule, Logger, PlatformServices, PortForward } from '../../types';
+import { redactSecrets } from '../../util/redact';
 import {
   collectAnnouncements,
   isAutoAttachDevice,
@@ -177,6 +178,7 @@ class FlutterVmModuleImpl implements FlutterVmModule {
       onEnded: (s) => this.onSessionEnded(s),
       duplicateOf: (s) => this.attachedSessions().find((o) => o !== s && o.isSameVm(s)),
       ...(this.options.reconnectDelaysMs ? { reconnectDelaysMs: this.options.reconnectDelaysMs } : {}),
+      ...(this.options.deviceAppWaitMs !== undefined ? { deviceAppWaitMs: this.options.deviceAppWaitMs } : {}),
     });
     this.sessions.add(session);
     try {
@@ -244,7 +246,7 @@ class FlutterVmModuleImpl implements FlutterVmModule {
       let wsUrl = normalizeVmServiceUrl(a.url);
       if (needsPortForward(a.deviceId, announced.hostname)) {
         const port = Number(announced.port);
-        if (!Number.isInteger(port) || port <= 0) throw new Error(`No port in ${a.url}`);
+        if (!Number.isInteger(port) || port <= 0) throw new Error(`No port in ${redactSecrets(a.url)}`);
         forward = await ctx.platform.forwardToDevice(a.deviceId, port);
         wsUrl = withHostPort(wsUrl, forward.host, forward.port);
       }
@@ -297,6 +299,7 @@ class FlutterVmModuleImpl implements FlutterVmModule {
 export interface FlutterVmModuleOptions {
   autoAttachDelayMs?: number;
   reconnectDelaysMs?: number[];
+  deviceAppWaitMs?: number;
 }
 
 export function createFlutterVmModule(options: FlutterVmModuleOptions = {}): FlutterVmModule {

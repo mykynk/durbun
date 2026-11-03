@@ -6,7 +6,7 @@
  */
 import { execFile } from 'node:child_process';
 import path from 'node:path';
-import type { AppInfo, AppSession, DeviceHints, DeviceInfo, SdkCapability } from '@durbun/protocol';
+import type { AppInfo, AppSession, DeviceApp, DeviceHints, DeviceInfo, SdkCapability } from '@durbun/protocol';
 
 export interface BundleInfo {
   id?: string;
@@ -169,6 +169,25 @@ export function deviceHintsFor(vmOs: string | undefined, extra: { simulatorUdid?
 export function uniqueOnlineDevice(devices: DeviceInfo[], platform: 'android' | 'ios'): string | undefined {
   const matches = devices.filter((d) => d.platform === platform && d.state === 'online');
   return matches.length === 1 ? matches[0]!.id : undefined;
+}
+
+/** How the team's own debug builds get onto a device (Xcode / flutter run, adb / Android Studio, the simulator). */
+const DEVELOPER_INSTALLS = new Set<string>(['xcode', 'adb', 'simulator']);
+
+/**
+ * The DeviceApp a VM-service process is, when that is certain: the one running developer build on the device
+ * whose pids include the VM's pid (or, while the device knows no pids for it, the only one with the VM's
+ * process name). The VM itself only knows its Dart package ("pati") and an iPhone logs every Flutter app as
+ * "Runner", but the device knows the bundle id; without it the session never joins its DeviceApp.
+ */
+export function deviceAppForVm(deviceApps: readonly DeviceApp[], deviceId: string, pid: number, processName?: string): DeviceApp | undefined {
+  const candidates = deviceApps.filter((a) => a.deviceId === deviceId && a.running && DEVELOPER_INSTALLS.has(a.install.source));
+  const byPid = candidates.filter((a) => a.pids.includes(pid));
+  if (byPid.length > 0) return byPid.length === 1 ? byPid[0] : undefined;
+  const name = cleanProcessName(processName);
+  if (!name) return undefined;
+  const byName = candidates.filter((a) => a.pids.length === 0 && (a.processName === name || a.id === name));
+  return byName.length === 1 ? byName[0] : undefined;
 }
 
 /** A connected SDK session (not a VM-service one) of the same process. */

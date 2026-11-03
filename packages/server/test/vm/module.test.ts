@@ -1,5 +1,5 @@
 import net from 'node:net';
-import type { AppSession, DeviceInfo, LogEntry, SdkLog, SdkMetric } from '@durbun/protocol';
+import type { AppSession, DeviceApp, DeviceInfo, LogEntry, SdkLog, SdkMetric } from '@durbun/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFlutterVmModule } from '../../src/platform/flutterVm';
 import type { FlutterVmModule } from '../../src/types';
@@ -53,6 +53,73 @@ afterEach(async () => {
   await vm.stop();
 });
 
+describe('VM session identity from the device (audit-seams #4)', () => {
+  const IPHONE = 'ios:00008130-0001A2B3C4D5E6F7';
+  const deviceApp = (patch: Partial<DeviceApp>): DeviceApp => ({
+    key: `${IPHONE}|com.mykynk.pati`,
+    deviceId: IPHONE,
+    id: 'com.mykynk.pati',
+    name: 'Pati',
+    version: '2.4.1',
+    build: '241',
+    buildType: 'debug',
+    install: { source: 'xcode' },
+    processName: 'Runner',
+    pids: [4321],
+    running: true,
+    lastActivity: Date.now(),
+    ...patch,
+  });
+
+  it('a physical iPhone: the running Xcode build with the VM\'s pid gives the bundle id, name and version', async () => {
+    vm.os = 'ios';
+    ctx.getDeviceApps = () => [deviceApp({}), deviceApp({ key: `${IPHONE}|com.mykynk.kumbara`, id: 'com.mykynk.kumbara', name: 'Kumbara', install: { source: 'store-or-testflight' }, pids: [2841] })];
+    await mod.attach(vm.url, { deviceId: IPHONE });
+    const hello = ctx.virtuals[0]!.ofType('hello')[0]!;
+    expect(hello.app).toMatchObject({ id: 'com.mykynk.pati', name: 'Pati', version: '2.4.1', build: '241', pid: 4321 });
+    expect(ctx.virtuals[0]!.meta.deviceId).toBe(IPHONE);
+  });
+
+  it('keeps the Dart package name when the match is not certain', async () => {
+    vm.os = 'ios';
+    const cases: DeviceApp[][] = [
+      [deviceApp({ install: { source: 'store-or-testflight' } })], // not a developer build
+      [deviceApp({ pids: [999] })], // another process
+      [deviceApp({ running: false, pids: [] })], // not running
+      [deviceApp({}), deviceApp({ key: `${IPHONE}|com.mykynk.pati.dev`, id: 'com.mykynk.pati.dev' })], // two claim the pid
+      [deviceApp({ deviceId: 'ios:OTHER' })], // another phone
+    ];
+    for (const [i, apps] of cases.entries()) {
+      ctx.getDeviceApps = () => apps;
+      const m = createFlutterVmModule({ autoAttachDelayMs: 0, reconnectDelaysMs: [50, 100], deviceAppWaitMs: 0 });
+      await m.start(ctx);
+      await m.attach(vm.url, { deviceId: IPHONE });
+      expect(ctx.virtuals.at(-1)!.ofType('hello')[0]!.app, `case ${i}`).toMatchObject({ id: 'pati', name: 'pati' });
+      await m.stop();
+    }
+  });
+
+  it('waits briefly for an iPhone to report the new process; Android takes the report as it is', async () => {
+    vm.os = 'ios';
+    let apps: DeviceApp[] = [deviceApp({ running: false, pids: [] })];
+    ctx.getDeviceApps = () => apps;
+    const m = createFlutterVmModule({ autoAttachDelayMs: 0, reconnectDelaysMs: [50, 100], deviceAppWaitMs: 2000 });
+    await m.start(ctx);
+    setTimeout(() => (apps = [deviceApp({})]), 300);
+    await m.attach(vm.url, { deviceId: IPHONE });
+    expect(ctx.virtuals.at(-1)!.ofType('hello')[0]!.app).toMatchObject({ id: 'com.mykynk.pati', name: 'Pati' });
+    await m.stop();
+
+    vm.os = 'android';
+    ctx.getDeviceApps = () => [deviceApp({ key: `${ANDROID}|com.mykynk.pati`, deviceId: ANDROID, install: { source: 'adb' }, processName: undefined })];
+    const a = createFlutterVmModule({ autoAttachDelayMs: 0, reconnectDelaysMs: [50, 100] });
+    await a.start(ctx);
+    await a.attach(vm.url, { deviceId: ANDROID });
+    expect(ctx.virtuals.at(-1)!.ofType('hello')[0]!.app).toMatchObject({ id: 'com.mykynk.pati', name: 'Pati', version: '2.4.1' });
+    await a.stop();
+  });
+});
+
 describe('Flutter VM module with a scripted VM', () => {
   it('attaches to a Flutter debug app: identity, device, actions with current values, profiling, refresh rate', async () => {
     vm.flags.set('ext.flutter.debugPaint', true);
@@ -79,6 +146,9 @@ describe('Flutter VM module with a scripted VM', () => {
     expect(mod.status()).toMatchObject({ id: 'flutter-vm', available: true, active: true, detail: '1 app attached through the Dart VM service' });
     expect((await mod.checks())[0]).toMatchObject({ id: 'flutter-vm', status: 'ok' });
     expect(ctx.notices).toHaveLength(0); // manual attach: the command reply informs the UI
+    // the server log names the service without its auth token (the Mac app keeps the log in main.log)
+    expect(ctx.logLines.some((l) => l.includes('attached to pati (pid 4321) at ws://127.0.0.1:') && l.includes('/•••/ws'))).toBe(true);
+    expect(ctx.logLines.join('\n')).not.toContain('fakeTok12');
   });
 
   it('reports heap, RSS and frame metrics', async () => {
