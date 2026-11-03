@@ -2,8 +2,10 @@ import { useMemo } from 'react';
 import type { AppSession, DeviceApp, DeviceInfo, LogEntry, NetworkEntry } from '@durbun/protocol';
 import { appGroupKey, deviceAppKey, useHub, type HubState } from './stores/hub';
 import { useScope, type Scope } from './stores/scope';
-import { emptyLogCounts, isCrashEntry, type LogCounts, type LogStore } from './logStore';
+import { emptyLogCounts, isCrashEntry, isProtectedEntry, type LogCounts, type LogStore } from './logStore';
 import { emptyNetworkCounts, type NetworkCounts, type NetworkStore } from './networkStore';
+import { bundlePrefix } from './ownApps';
+import { fnv1a } from '../lib/hash';
 
 /** Minimal shape of a metric series for scope checks. */
 export interface ScopeSeriesRef {
@@ -57,6 +59,13 @@ interface ResolvedApp {
   /** The app's own process names that another app on the device shares: they match only together with a pid. */
   pidNames: Set<string>;
   nameFallback: boolean;
+  /**
+   * Live pids the device reports for the app (`DeviceApp.pids`): every process of it, extensions and
+   * global-named processes included, so they decide even when the line's process name is another one.
+   */
+  livePids: Set<number>;
+  /** Bundle ids and process names of the OTHER apps on the device (a line named after one is never this app's). */
+  otherNames: Set<string>;
 }
 
 /**
@@ -72,6 +81,22 @@ function sharedNames(hub: HubLike, deviceId: string, bundleId: string, candidate
   }
   for (const d of Object.values(hub.deviceApps ?? {})) {
     if (d.deviceId === deviceId && d.id !== bundleId && d.processName && wanted.has(d.processName)) out.add(d.processName);
+  }
+  return out;
+}
+
+/** Bundle ids and process names of every other app on the device. */
+function otherAppNames(hub: HubLike, deviceId: string, bundleId: string): Set<string> {
+  const out = new Set<string>();
+  for (const a of Object.values(hub.apps)) {
+    if (a.deviceId !== deviceId || a.app.id === bundleId) continue;
+    out.add(a.app.id);
+    if (a.app.processName) out.add(a.app.processName);
+  }
+  for (const d of Object.values(hub.deviceApps ?? {})) {
+    if (d.deviceId !== deviceId || d.id === bundleId) continue;
+    out.add(d.id);
+    if (d.processName) out.add(d.processName);
   }
   return out;
 }
@@ -112,6 +137,8 @@ function resolveApp(hub: HubLike, deviceId: string, bundleId: string, opts: { ex
     pidNames: shared,
     // In exact mode a session with a pid is matched by pid only (other runs share the process name).
     nameFallback: !exact || typeof exact.app.pid !== 'number',
+    livePids: new Set(deviceApp?.pids ?? []),
+    otherNames: deviceApp?.pids.length ? otherAppNames(hub, deviceId, bundleId) : new Set(),
   };
 }
 
@@ -123,7 +150,9 @@ function signatureOf(scope: Scope, r?: ResolvedApp): string {
   const pids = [...r.pids].sort((a, b) => a - b).join(',');
   const names = [...r.names].sort().join(',') + (r.pidNames.size ? `~${[...r.pidNames].sort().join(',')}` : '');
   const head = scope.kind === 'app' ? `a:${scope.appId}:${scope.exact ? 1 : 0}` : `da:${r.deviceId}|${r.bundleId}`;
-  return `${head}|${ids}|${pids}|${names}|${r.nameFallback ? 1 : 0}|${r.app?.id ?? ''}`;
+  const live = [...r.livePids].sort((a, b) => a - b).join(',');
+  const others = r.otherNames.size ? fnv1a([...r.otherNames].sort().join('\n')).toString(36) : '';
+  return `${head}|${ids}|${pids}|${names}|${r.nameFallback ? 1 : 0}|${r.app?.id ?? ''}|${live}|${others}`;
 }
 
 /** Bundle id a device crash record (dropbox / .ips) names in its data. */
@@ -188,10 +217,22 @@ export function compileScope(scope: Scope, hub: HubLike): CompiledScope {
   }
   const res = r ?? resolveApp(hub, (scope as { deviceId: string }).deviceId, (scope as { bundleId: string }).bundleId);
   const ids = new Set(res.sessions.map((s) => s.id));
-  const { pids, names, pidNames, nameFallback, deviceId, bundleId } = res;
+  const { pids, names, pidNames, nameFallback, deviceId, bundleId, livePids, otherNames } = res;
   const subPrefix = `${bundleId}:`;
+  const ownPrefix = bundlePrefix(bundleId);
 
   const processMatches = (name: string) => names.has(name) || name.startsWith(subPrefix);
+  /**
+   * A process of the app under another name, matched by one of its live pids: an iOS extension
+   * ("KumbaraWidgetExtension", inside the .app), an Android process with a global name ("com.foo.remote").
+   * Never a name another app on the device owns, and a package-like name only within the app's own
+   * reverse-domain prefix — an old line of "com.android.vending" whose pid the app got later stays out.
+   */
+  const ownProcessByPid = (name: string, pid: number | undefined): boolean => {
+    if (pid === undefined || !livePids.has(pid) || otherNames.has(name) || otherNames.has(basePackage(name))) return false;
+    if (/^[A-Za-z][\w-]*(\.[\w-]+)+(:[\w.-]+)?$/.test(name)) return bundlePrefix(basePackage(name)) === ownPrefix;
+    return true;
+  };
 
   const logs = (e: LogEntry): boolean => {
     if (e.appId !== undefined) return ids.has(e.appId);
@@ -209,6 +250,7 @@ export function compileScope(scope: Scope, hub: HubLike): CompiledScope {
         if (processMatches(p)) return nameFallback || pidOk;
         // A name other apps share ("Runner"): only together with one of this app's pids.
         if (pidNames.has(p)) return pidOk;
+        return ownProcessByPid(p, e.pid);
       } else if (e.pid !== undefined) return pidOk;
       return false;
     }
@@ -273,6 +315,8 @@ function addLogCounts(into: LogCounts, c: LogCounts | undefined): void {
 const F_WARN = 1;
 const F_ERROR = 2;
 const F_CRASH = 4;
+/** The ring moves this entry to `store.kept` instead of dropping it (crash record). */
+const F_KEPT = 8;
 
 interface ScanCache {
   gen: number;
@@ -281,6 +325,9 @@ interface ScanCache {
   ids: number[];
   flags: number[];
   head: number;
+  /** Matched entries that now sit in `store.kept` (oldest first), subtracted when the store lets them go. */
+  keptIds: number[];
+  keptFlags: number[];
   counts: LogCounts;
 }
 
@@ -291,45 +338,67 @@ function entryFlags(e: LogEntry): number {
   if (e.level === 'warn') f |= F_WARN;
   else if (e.level === 'error' || e.level === 'fatal') f |= F_ERROR;
   if (isCrashEntry(e)) f |= F_CRASH;
+  if (isProtectedEntry(e)) f |= F_KEPT;
   return f;
+}
+
+function applyFlags(c: LogCounts, f: number, sign: 1 | -1): void {
+  c.total += sign;
+  if (f & F_WARN) c.warn += sign;
+  if (f & F_ERROR) c.error += sign;
+  if (f & F_CRASH) c.crash += sign;
 }
 
 /**
  * Counters by predicate for device-app scopes (their device lines carry no `appId`): scans only entries that
- * arrived since the last call and subtracts what the ring trimmed.
+ * arrived since the last call and subtracts what the ring trimmed (crash records the store keeps stay counted).
  */
 function scannedLogCounts(compiled: CompiledScope, store: LogStore): LogCounts {
   let c = scanCaches.get(compiled);
   if (!c || c.gen !== store.generation) {
-    c = { gen: store.generation, lastId: 0, ids: [], flags: [], head: 0, counts: emptyLogCounts() };
+    c = { gen: store.generation, lastId: 0, ids: [], flags: [], head: 0, keptIds: [], keptFlags: [], counts: emptyLogCounts() };
     scanCaches.set(compiled, c);
   }
   const entries = store.entries;
-  for (let i = store.lowerBound(c.lastId + 1); i < entries.length; i++) {
-    const e = entries[i]!;
-    if (!compiled.logs(e)) continue;
-    const f = entryFlags(e);
-    c.ids.push(e.id);
-    c.flags.push(f);
-    c.counts.total++;
-    if (f & F_WARN) c.counts.warn++;
-    if (f & F_ERROR) c.counts.error++;
-    if (f & F_CRASH) c.counts.crash++;
-  }
-  c.lastId = Math.max(c.lastId, store.lastId);
+  const kept = store.kept;
+  // 1. What the ring trimmed since the last call: dropped, or (crash records) moved to `kept`.
   const first = entries[0]?.id ?? Infinity;
   while (c.head < c.ids.length && c.ids[c.head]! < first) {
     const f = c.flags[c.head]!;
-    c.counts.total--;
-    if (f & F_WARN) c.counts.warn--;
-    if (f & F_ERROR) c.counts.error--;
-    if (f & F_CRASH) c.counts.crash--;
+    if (f & F_KEPT) {
+      c.keptIds.push(c.ids[c.head]!);
+      c.keptFlags.push(f);
+    } else applyFlags(c.counts, f, -1);
     c.head++;
   }
   if (c.head > 4096 && c.head * 2 > c.ids.length) {
     c.ids = c.ids.slice(c.head);
     c.flags = c.flags.slice(c.head);
     c.head = 0;
+  }
+  // 2. Entries that arrived since the last call: kept ones first (they may have left the ring in the same batch).
+  const scan = (list: readonly LogEntry[], from: number, ids: number[], flags: number[]) => {
+    for (let i = from; i < list.length; i++) {
+      const e = list[i]!;
+      if (!compiled.logs(e)) continue;
+      const f = entryFlags(e);
+      ids.push(e.id);
+      flags.push(f);
+      applyFlags(c.counts, f, 1);
+    }
+  };
+  let k = kept.length;
+  while (k > 0 && kept[k - 1]!.id > c.lastId) k--;
+  scan(kept, k, c.keptIds, c.keptFlags);
+  scan(entries, store.lowerBound(c.lastId + 1), c.ids, c.flags);
+  c.lastId = Math.max(c.lastId, store.lastId);
+  // 3. The store lets kept entries go oldest first: ids before its oldest kept one are gone.
+  const keptFirst = kept[0]?.id ?? Infinity;
+  let gone = 0;
+  while (gone < c.keptIds.length && c.keptIds[gone]! < keptFirst) applyFlags(c.counts, c.keptFlags[gone++]!, -1);
+  if (gone > 0) {
+    c.keptIds.splice(0, gone);
+    c.keptFlags.splice(0, gone);
   }
   return { ...c.counts };
 }

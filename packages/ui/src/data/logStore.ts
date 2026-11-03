@@ -17,6 +17,21 @@ export function isCrashEntry(e: Pick<LogEntry, 'kind'>): boolean {
   return e.kind === 'crash' || e.kind === 'anr' || e.kind === 'flutter-error';
 }
 
+/**
+ * Crash / ANR entries outlive the ring (the hub keeps them the same way, SPEC §10.3): a device that floods its log
+ * (an iPhone streams ~1000 lines/s) must not push them out, or the crash panels and counts would lie. Kind crash |
+ * anr, or a record the device kept itself (dropbox, .ips). Flutter error boxes are ordinary lines here.
+ */
+export function isProtectedEntry(e: Pick<LogEntry, 'kind' | 'origin' | 'data'>): boolean {
+  if (e.kind === 'crash' || e.kind === 'anr') return true;
+  if (e.origin === 'dropbox' || e.origin === 'crash-report') return true;
+  const o = (e.data as { origin?: unknown } | null | undefined)?.origin;
+  return o === 'dropbox' || o === 'crash-report';
+}
+
+/** At most this many protected entries are kept after the ring trimmed them (the newest). */
+export const PROTECTED_MAX = 5_000;
+
 function applyCounts(c: LogCounts, e: LogEntry, sign: 1 | -1): void {
   c.total += sign;
   if (e.level === 'warn') c.warn += sign;
@@ -24,16 +39,37 @@ function applyCounts(c: LogCounts, e: LogEntry, sign: 1 | -1): void {
   if (isCrashEntry(e)) c.crash += sign;
 }
 
+/** Index of the first entry with id >= `id` (binary search). */
+function lowerBoundIn(arr: readonly LogEntry[], id: number): number {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (arr[mid]!.id < id) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 /**
  * All log entries received from the server, ordered by `id` (arrival order — SPEC §4).
  *
- * `entries` is an append-only ring trimmed at `maxEntries` (oldest dropped first). It is mutated in
+ * `entries` is an append-only ring trimmed at the head (oldest dropped first). It is mutated in
  * place: read it during render keyed on `useLogVersion()` and never mutate it yourself.
- * - `headDropped`: entries trimmed from the head since the last reset (absolute index = headDropped + i).
- * - `generation`: bumped on reset / removeWhere (arbitrary removals) — drop derived caches when it changes.
+ * - `kept`: crash / ANR entries (`isProtectedEntry`) the ring trimmed, kept so a flooding device cannot push
+ *   them out (SPEC §10.3, the hub keeps them the same way). Ordered by id and all older than `entries[0]`;
+ *   the newest `keptCap` stay (≤ PROTECTED_MAX, ≤ half the ring), and `entries.length + kept.length ≤
+ *   maxEntries`. Moving an entry there is still a plain head trim of `entries` (views built on `entries` drop
+ *   ids < `entries[0].id`; `generation` does not change). The array is replaced, not mutated; `keptRevision`
+ *   is bumped whenever it changes. `counts`, `size`, `getById` and `findLast` include it.
+ * - `headDropped`: entries trimmed from the head of `entries` since the last reset (absolute index = headDropped + i).
+ * - `generation`: bumped on reset / removeWhere / out-of-order inserts (arbitrary changes) — drop derived
+ *   caches when it changes.
  */
 export class LogStore extends VersionedStore {
   entries: LogEntry[] = [];
+  kept: readonly LogEntry[] = [];
+  keptRevision = 0;
   maxEntries: number = DEFAULT_SETTINGS.maxLogEntries;
   /** Entries accepted since page load (monotonic, history included). */
   totalReceived = 0;
@@ -90,6 +126,9 @@ export class LogStore extends VersionedStore {
         if (e.id > this.lastId) {
           arr.push(e);
           this.lastId = e.id;
+        } else if (this.kept.length > 0 && e.id <= this.kept[this.kept.length - 1]!.id) {
+          // Older than lines the ring already let go: only a crash record still has a place (in `kept`).
+          if (!this.insertKept(e)) continue;
         } else {
           const idx = this.lowerBound(e.id);
           if (idx < arr.length && arr[idx]!.id === e.id) {
@@ -112,25 +151,82 @@ export class LogStore extends VersionedStore {
     this.changed();
   }
 
+  /** Out-of-order entry at or before the newest kept one. Returns true when it was added (not a duplicate). */
+  private insertKept(e: LogEntry): boolean {
+    const kept = this.kept.slice();
+    const idx = lowerBoundIn(kept, e.id);
+    if (idx < kept.length && kept[idx]!.id === e.id) {
+      this.count(kept[idx]!, -1);
+      kept[idx] = e;
+      this.count(e, 1);
+      this.kept = kept;
+      this.keptRevision++;
+      return false;
+    }
+    if (!isProtectedEntry(e)) return false;
+    kept.splice(idx, 0, e);
+    this.kept = kept;
+    this.keptRevision++;
+    this.generation++;
+    return true;
+  }
+
+  /** Crash / ANR entries kept after the ring trimmed them: at most PROTECTED_MAX, at most half the ring. */
+  get keptCap(): number {
+    return Math.max(0, Math.min(PROTECTED_MAX, Math.floor(this.maxEntries / 2)));
+  }
+
+  /**
+   * Head trim of `entries` down to `maxEntries` (minus what `kept` holds). Protected entries on the way move to
+   * `kept` (oldest kept ones go when it is over `keptCap`); everything else is dropped.
+   */
   private trim(): void {
-    const overflow = this.entries.length - this.maxEntries;
-    if (overflow <= 0) return;
-    const removed = this.entries.splice(0, overflow);
-    for (const e of removed) this.count(e, -1);
-    this.headDropped += overflow;
+    const arr = this.entries;
+    const kept = this.kept;
+    const cap = this.keptCap;
+    let evict = Math.max(0, kept.length - cap);
+    let total = arr.length + kept.length - evict;
+    let n = 0;
+    let moved: LogEntry[] | null = null;
+    while (total > this.maxEntries && n < arr.length) {
+      const e = arr[n++]!;
+      if (cap > 0 && isProtectedEntry(e)) {
+        (moved ??= []).push(e);
+        if (kept.length + moved.length - evict > cap) {
+          evict++;
+          total--;
+        }
+      } else {
+        this.count(e, -1);
+        total--;
+      }
+    }
+    if (n > 0) {
+      arr.splice(0, n);
+      this.headDropped += n;
+    }
+    if (moved || evict > 0) {
+      // Moved entries come from the head of `entries`, so they are newer than every kept one.
+      const next = moved ? kept.concat(moved) : kept.slice();
+      for (const e of next.splice(0, evict)) this.count(e, -1);
+      this.kept = next;
+      this.keptRevision++;
+    }
   }
 
   setMaxEntries(max: number): void {
     if (!Number.isFinite(max) || max <= 0) return;
     this.maxEntries = Math.floor(max);
-    const before = this.entries.length;
+    const before = this.size;
     this.trim();
-    if (this.entries.length !== before) this.changed();
+    if (this.size !== before) this.changed();
   }
 
   /** Remove everything (e.g. resync after reconnect). */
   reset(): void {
     this.entries = [];
+    this.kept = [];
+    this.keptRevision++;
     this.headDropped = 0;
     this.lastId = 0;
     this.counts = emptyLogCounts();
@@ -142,48 +238,63 @@ export class LogStore extends VersionedStore {
 
   /** Remove entries matching `predicate` (server `cleared` events). Returns the number removed. */
   removeWhere(predicate: (e: LogEntry) => boolean): number {
-    const kept: LogEntry[] = [];
     let removed = 0;
-    for (const e of this.entries) {
-      if (predicate(e)) {
-        this.count(e, -1);
-        removed++;
-      } else kept.push(e);
+    const filter = (list: readonly LogEntry[]): LogEntry[] => {
+      const out: LogEntry[] = [];
+      for (const e of list) {
+        if (predicate(e)) {
+          this.count(e, -1);
+          removed++;
+        } else out.push(e);
+      }
+      return out;
+    };
+    const kept = filter(this.kept);
+    const keptRemoved = removed;
+    const entries = filter(this.entries);
+    if (keptRemoved > 0) {
+      this.kept = kept;
+      this.keptRevision++;
     }
     if (removed > 0) {
-      this.entries = kept;
+      this.entries = entries;
       this.generation++;
       this.changed();
     }
     return removed;
   }
 
-  /** Index of the first entry with id >= `id` (binary search). */
+  /** Index in `entries` of the first entry with id >= `id` (binary search). */
   lowerBound(id: number): number {
-    const arr = this.entries;
-    let lo = 0;
-    let hi = arr.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (arr[mid]!.id < id) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
+    return lowerBoundIn(this.entries, id);
   }
 
-  /** Index of the entry with this id, or -1. */
+  /** Index in `entries` of the entry with this id, or -1 (kept crash records are not in `entries`). */
   indexOfId(id: number): number {
     const idx = this.lowerBound(id);
     return idx < this.entries.length && this.entries[idx]!.id === id ? idx : -1;
   }
 
+  /** The entry with this id, from `entries` or `kept`. */
   getById(id: number): LogEntry | undefined {
     const idx = this.indexOfId(id);
-    return idx >= 0 ? this.entries[idx] : undefined;
+    if (idx >= 0) return this.entries[idx];
+    const k = this.kept;
+    const ki = k.length > 0 && id <= k[k.length - 1]!.id ? lowerBoundIn(k, id) : -1;
+    return ki >= 0 && ki < k.length && k[ki]!.id === id ? k[ki] : undefined;
   }
 
+  /** Newest entry matching `predicate`, searching `entries` and then `kept` (e.g. "latest crash"). */
+  findLast(predicate: (e: LogEntry) => boolean): LogEntry | undefined {
+    for (const list of [this.entries, this.kept]) {
+      for (let i = list.length - 1; i >= 0; i--) if (predicate(list[i]!)) return list[i];
+    }
+    return undefined;
+  }
+
+  /** Entries held: the ring plus the kept crash records. */
   get size(): number {
-    return this.entries.length;
+    return this.entries.length + this.kept.length;
   }
 }
 

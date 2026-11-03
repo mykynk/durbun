@@ -795,14 +795,12 @@ export default function LogsView() {
     [dismissCrash, revealEntry],
   );
   const gotoLatestCrash = useCallback(() => {
-    const entries = logStore.entries;
     const scope = scopeRef.current.logs;
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const e = entries[i]!;
-      if (isCrashEntry(e) && scope(e)) {
-        revealEntry(e.id, { open: true });
-        return;
-      }
+    // The ring plus the crash records it keeps after a flood (`logStore.kept`): the counters include them too.
+    const latest = logStore.findLast((e) => isCrashEntry(e) && scope(e));
+    if (latest) {
+      revealEntry(latest.id, { open: true });
+      return;
     }
     // "No crash" is only true when the scoped devices' own crash records can be read.
     const unreadable = crashRecordsState(scopeRef.current.scope, useHub.getState()).unreadable;

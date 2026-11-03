@@ -76,6 +76,30 @@ describe('device-app scope (SDK-less apps)', () => {
     expect(c.logs(log({ deviceId: IPHONE, pid: 12873 }))).toBe(false);
   });
 
+  it('counts the app’s processes under other names by live pid: iOS extensions, Android global-named processes (regression)', () => {
+    const kumbara = da(IPHONE, 'com.mykynk.kumbara', { install: { source: 'store-or-testflight' }, processName: 'Runner', pids: [3100, 3150], running: true });
+    const whatsapp = da(IPHONE, 'net.whatsapp.WhatsApp', { install: { source: 'store-or-testflight' }, processName: 'WhatsApp', pids: [4000], running: true });
+    const h = { apps: {}, deviceApps: { [kumbara.key]: kumbara, [RUNNER_B.key]: RUNNER_B, [whatsapp.key]: whatsapp }, processes: {} };
+    const ios = compileScope({ kind: 'deviceApp', deviceId: IPHONE, bundleId: 'com.mykynk.kumbara' }, h);
+    const at = (p: Partial<LogEntry>) => log({ deviceId: IPHONE, origin: 'idevicesyslog', ...p });
+    // …/Kumbara.app/PlugIns/KumbaraWidgetExtension.appex: its pid is one of the app's.
+    expect(ios.logs(at({ process: 'KumbaraWidgetExtension', pid: 3150 }))).toBe(true);
+    expect(ios.logs(at({ process: 'KumbaraWidgetExtension', pid: 7777 }))).toBe(false);
+    // Round 1's Runner protection stays: Pati's "Runner" is not Kumbara's.
+    expect(ios.logs(at({ process: 'Runner', pid: 902 }))).toBe(false);
+    expect(ios.logs(at({ process: 'Runner', pid: 3100 }))).toBe(true);
+    // A name another app owns never counts, even if Kumbara got its old pid.
+    expect(ios.logs(at({ process: 'WhatsApp', pid: 3150 }))).toBe(false);
+    const android = compileScope(scope, hub());
+    expect(android.logs(log({ process: 'com.mykynk.kumbara.remote', pid: 12901 }))).toBe(true);
+    expect(android.logs(log({ process: 'com.mykynk.sync', pid: 12901 }))).toBe(true);
+    expect(android.logs(log({ process: 'com.mykynk.kumbara.remote', pid: 4242 }))).toBe(false);
+    expect(android.logs(log({ process: 'com.android.vending', pid: 12873 }))).toBe(false); // another package: an old line with a recycled pid
+    // The compiled scope follows the device's live pids.
+    const moved = { ...h, deviceApps: { ...h.deviceApps, [kumbara.key]: { ...kumbara, pids: [3100] } } };
+    expect(scopeSignature({ kind: 'deviceApp', deviceId: IPHONE, bundleId: 'com.mykynk.kumbara' }, moved)).not.toBe(ios.key);
+  });
+
   it('includes SDK sessions of the same app and their traffic', () => {
     const sdk = app('app:7', { bundle: 'com.mykynk.kumbara', pid: 14001, name: 'Kumbara' });
     const c = compileScope(scope, hub({ apps: { 'app:7': sdk, 'app:2': app('app:2') } }));

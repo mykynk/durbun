@@ -4,6 +4,8 @@ import { DEFAULT_SETTINGS, type DeviceApp, type DeviceInfo, type LogEntry } from
 import '../../i18n';
 import { setLanguage } from '../../i18n/core';
 import { hubActions, logStore, setScope, usePrefs, useServerSettings } from '../../data';
+import { toast } from '../../components';
+import { getAllCommands } from '../../lib/commands';
 import LogsView from './index';
 
 const PIXEL = 'android:R5CT20XK9QM';
@@ -183,5 +185,35 @@ describe('rows of the list', () => {
     render(<LogsView />);
     expect(screen.getByText(/killing_specific_process/)).toBeTruthy();
     expect(screen.queryByText(/AppleBCMWLANCore/)).toBeNull();
+  });
+});
+
+describe('go to the latest crash', () => {
+  // Regression: a flood moved the crash record out of the ring into `logStore.kept`; the counters still said 1 crash,
+  // but «Son çökmeye git» scanned the ring only and said there was none.
+  it('finds a crash record the ring kept after a flood', () => {
+    const max = logStore.maxEntries;
+    try {
+      act(() => logStore.setMaxEntries(200));
+      load([device(PIXEL)]);
+      const crash = entry({
+        kind: 'crash',
+        level: 'fatal',
+        origin: 'dropbox',
+        tag: 'data_app_crash',
+        message: 'FATAL EXCEPTION: main · java.lang.IllegalStateException: sepet boş',
+        data: { origin: 'dropbox', package: 'com.mykynk.kumbara' },
+      });
+      feed([crash, ...Array.from({ length: 400 }, (_, i) => entry({ message: `satır ${i}` }))]);
+      expect(logStore.indexOfId(crash.id)).toBe(-1);
+      expect(logStore.counts.crash).toBe(1);
+      const info = vi.spyOn(toast, 'info');
+      render(<LogsView />);
+      act(() => void getAllCommands().find((c) => c.id === 'logs.crash.latest')!.run());
+      expect(info).not.toHaveBeenCalled();
+      expect(screen.getAllByText(/sepet boş/).length).toBeGreaterThan(0);
+    } finally {
+      act(() => logStore.setMaxEntries(max));
+    }
   });
 });

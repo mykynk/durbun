@@ -4,7 +4,7 @@
  */
 
 /* High-frequency stores (outside React) + hooks */
-export { logStore, LogStore, isCrashEntry, emptyLogCounts } from './logStore';
+export { logStore, LogStore, isCrashEntry, isProtectedEntry, emptyLogCounts, PROTECTED_MAX } from './logStore';
 export type { LogCounts } from './logStore';
 export { networkStore, NetworkStore, isNetworkError, emptyNetworkCounts } from './networkStore';
 export type { NetworkCounts } from './networkStore';
@@ -90,6 +90,8 @@ export { ApiError } from './api';
 
 /* "what can I see / where from / why not" (SPEC §10) */
 export { explainSources, explainContext, explainRow, buildBadgeOf, buildKindOf, EXPLAIN_CAPABILITIES } from './explain';
+export { bundlePrefix, isDeveloperInstall, ownAppIndex, isOwnApp } from './ownApps';
+export type { OwnAppIndex } from './ownApps';
 export type {
   ExplainCapability,
   ExplainStatus,
