@@ -82,8 +82,9 @@ MaterialApp(
 );
 ```
 
-Ekranda sürüklenebilir küçük bir Dürbün balonu çıkar; dokununca panel açılır.
-Mac'e bağlı olmak gerekmez, testçi telefonda kendi başına bakabilir. Panel
+Uygulamanın üstüne hiçbir şey çizilmez: **telefonu sallayınca** panel açılır
+(iOS simülatörde *Device → Shake*, Android emülatörde *Extended controls →
+Virtual sensors → Shake*). Mac'e bağlı olmak gerekmez, testçi telefonda kendi başına bakabilir. Panel
 masaüstü Dürbün'ün tasarımını (aynı renkler, seviye ve durum renkleri, etiket
 renkleri, açık/koyu tema) ve sekmelerini taşır:
 
@@ -118,14 +119,20 @@ Sınırlar ve ayarlar:
 
 - Telefonda yaklaşık son 2.000 log satırı, 300 istek ve toplam 24 MB gövde tutulur.
   Sınır dolunca en eskiler silinir ve panel bunu söyler.
-- Balonu gizleyip paneli kendi debug menünüzden açabilirsiniz:
-  `DurbunInspector(showBubble: false, child: …)` ve `Durbun.showInspector()`.
+- Paneli kendi debug menünüzden ya da bir düğmeden de açabilirsiniz:
+  `Durbun.showInspector()`. Sallamayı kapatmak için `openOnShake: false`,
+  ekranda küçük bir Dürbün düğmesi istiyorsanız `showBubble: true` verin.
+- Sallama algılama yalnızca uygulama öndeyken çalışır. Android'de ivme sensörü
+  okunur (izin gerekmez), iOS'ta sistemin sallama hareketi kullanılır (izin
+  gerekmez).
+- SDK'yı güncelledikten sonra iOS'ta bir kez `cd ios && pod install` çalıştırın
+  (plugin'e yeni dosya eklendiğinde CocoaPods projesi yenilenmeli).
 - Telefonda hiçbir şey tutulmasın istiyorsanız `DurbunOptions(inspector: false)`
   verin.
 - Panel uygulamanın kendi navigator'ında açılır (`MaterialApp.builder` içinde
   bulunur). Başka bir navigator için `DurbunInspector(navigatorKey: …)` verin.
 - Dürbün'ün kapalı olduğu derlemelerde (`DURBUN=false`, ya da define verilmemiş
-  bir release) balon görünmez, widget yalnızca uygulamayı çizer.
+  bir release) panel açılmaz, sallama dinlenmez; widget yalnızca uygulamayı çizer.
 
 ## Release, Firebase ve mağaza derlemeleri
 
@@ -421,8 +428,9 @@ Swift `Durbun.info("message", tag: "tag")` (`import durbun`).
 
 ## In-app inspector (no Mac needed)
 
-One line in `MaterialApp` puts a draggable Dürbün bubble on the screen; tapping
-it opens a panel with the desktop's design and tabs, on the phone, with or
+One line in `MaterialApp` adds the panel; nothing is drawn over the app.
+**Shake the phone** to open it (simulator: Device → Shake; Android emulator:
+Virtual sensors → Shake). It opens a panel with the desktop's design and tabs, on the phone, with or
 without a Mac:
 
 ```dart
@@ -446,8 +454,10 @@ oldest entries were removed.
 
 Options:
 
-- `DurbunInspector(showBubble: false, …)` together with `Durbun.showInspector()`
-  opens it from your own debug menu.
+- `Durbun.showInspector()` opens it from your own debug menu;
+  `openOnShake: false` turns shaking off, `showBubble: true` adds a small
+  Dürbün button. The accelerometer is read only while the app is in front.
+- After updating the SDK run `cd ios && pod install` once.
 - `DurbunOptions(inspector: false)` keeps nothing on the device.
 - In builds where Dürbün is off, only the app is drawn.
 

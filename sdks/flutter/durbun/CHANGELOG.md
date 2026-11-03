@@ -1,5 +1,11 @@
 ## Unreleased (phase 3)
 
+- The in-app panel opens by shaking the phone and draws nothing over the app by
+  default (`showBubble: false`, `openOnShake: true`). Android reads the
+  accelerometer (Seismic-like detection, 13 m/s², 0.5 s window) and iOS uses the
+  system shake gesture (UIWindow `motionEnded`), both through the
+  `dev.durbun/shake` channel and only while the app is in the foreground.
+
 - In-app inspector redesigned after the desktop UI: the same tokens (colors,
   level / method / status / JSON colors, FNV-1a tag hues), logo, top bar and
   status bar. Logs: live stream with pause, level toggles, quick filters, query
