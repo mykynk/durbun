@@ -91,8 +91,11 @@ class DurbunClient implements HttpCaptureHost {
     return client;
   }
 
-  /// Longest time the first `hello` waits for [start]'s `helloGate`.
-  static const Duration kHelloGateTimeout = Duration(milliseconds: 1500);
+  /// Longest time the first `hello` waits for [start]'s `helloGate`: as long
+  /// as the Flutter glue waits for the plugin's native start, so a slow native
+  /// layer still makes it into the session (the server keeps the first hello
+  /// of a connection).
+  static const Duration kHelloGateTimeout = Duration(seconds: 3);
 
   final DurbunOptions options;
   final String sdkPlatform;
@@ -238,6 +241,7 @@ class DurbunClient implements HttpCaptureHost {
   /// Whether a welcome/config was received at least once.
   bool get configKnown => _configKnown;
 
+  /// Mock rules of the connected desktop (empty while disconnected).
   List<MockRule> get mocks => _mocks;
 
   /// Server-assigned app session id (null until connected once).
@@ -490,6 +494,12 @@ class DurbunClient implements HttpCaptureHost {
         if (_connection.connected) {
           _diagnostic('disconnected (${event.length > 1 ? event[1] : ''})');
         }
+        // Mock rules hold only while the peer that pushed them is connected:
+        // whoever answered the hello is not authenticated yet. The desktop
+        // sends them again in its next welcome; the native layer learns it
+        // from the state push below.
+        _mocks = const <MockRule>[];
+        _rawMocks = null;
         _setConnection(DurbunConnection.disconnected);
         _notifyState();
       case TransportEvents.message:

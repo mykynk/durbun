@@ -252,6 +252,33 @@ void main() {
         expect(c.config.metricsIntervalMs, 500);
       });
 
+      test('mock rules end with the connection that pushed them', () async {
+        final d = desktop = await FakeDesktop.start(
+          mocks: [
+            {
+              'id': 'm1',
+              'enabled': true,
+              'method': 'GET',
+              'url': '/users',
+              'match': 'contains',
+              'action': {'type': 'respond', 'status': 200},
+              'createdAt': 1,
+            },
+          ],
+        );
+        final c = client = DurbunClient.start(testOptions(d.port, isolate: isolate));
+        await c.waitForConnection(const Duration(seconds: 5));
+        expect(c.mocks.map((r) => r.id), ['m1']);
+        expect(c.matchMock('GET', 'https://api.example.com/users')?.id, 'm1');
+        // Whoever answered the hello is not authenticated: once it is gone,
+        // its rules must not keep rewriting the app's responses.
+        await d.close();
+        desktop = null;
+        await eventually(() => !c.isConnected);
+        expect(c.mocks, isEmpty);
+        expect(c.matchMock('GET', 'https://api.example.com/users'), isNull);
+      });
+
       test('buffers while the desktop is down, then flushes in order', () async {
         final port = await freePort();
         final c = client = DurbunClient.start(testOptions(port, isolate: isolate));
