@@ -47,6 +47,8 @@ export interface AndroidSessionDeps {
   logger: Logger;
   /** Dropbox records already reported for this serial (kept by the driver across replugs). */
   dropboxCursor?: DropboxCursor;
+  /** DeviceApp ids published for this serial (kept by the driver across replugs, see DeviceAppTrackerDeps). */
+  publishedApps?: Set<string>;
 }
 
 interface StateText {
@@ -169,6 +171,7 @@ export class AndroidDeviceSession {
       logger: deps.logger,
       processes: () => this.processes,
       clock: this.clock,
+      published: deps.publishedApps,
     });
     this.crashes = new CrashIndex(this.id);
     this.dropbox = new DropboxWatcher({

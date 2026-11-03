@@ -138,4 +138,20 @@ describe('AndroidDriver phase 3 (DeviceApps, dropbox, frame stats) with a fake a
     expect(ctx.hub.deviceApps.get(`${ID}|com.mykynk.pati`)).toMatchObject({ running: false, pids: [], crashReports: 1 });
     await waitFor(() => liveChildCount() === 0, 5000);
   });
+
+  it('plugged in again: an app uninstalled meanwhile is removed, the others stay', async () => {
+    const file = path.join(dir, 'state.json');
+    const st = JSON.parse(fs.readFileSync(file, 'utf8')) as { devices: unknown[]; uninstalled?: string[] };
+    const lists = () => calls().filter((c) => c.includes('pm list packages -3')).length;
+    const before = lists();
+    st.uninstalled = ['com.mykynk.mahalle'];
+    st.devices = [{ serial: SERIAL, state: 'device' }];
+    fs.writeFileSync(file, JSON.stringify(st));
+    await waitFor(() => lists() > before, 10_000);
+    await waitFor(() => ctx.hub.deviceApps.get(`${ID}|com.mykynk.pati`)?.running, 10_000);
+    expect(ctx.hub.deviceApps.has(`${ID}|com.mykynk.mahalle`)).toBe(false);
+    expect(ctx.hub.removedDeviceApps).toEqual([{ deviceId: ID, ids: ['com.mykynk.mahalle'] }]);
+    // The same dropbox record is not counted again after the replug.
+    expect(ctx.hub.deviceApps.get(`${ID}|com.mykynk.pati`)).toMatchObject({ crashReports: 1, pids: [4500] });
+  });
 }, 60_000);

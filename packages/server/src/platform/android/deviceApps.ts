@@ -56,8 +56,15 @@ export interface PackageLists {
   clock: DeviceClock;
 }
 
-/** Output of `packageListCommand()`; undefined when the sections are missing (command failed). */
-export function parsePackageLists(text: string): PackageLists | undefined {
+/** What `pm` prints instead of packages while the package service is not up (early boot) or failing. */
+const PM_ERROR_RE = /Error:|Exception|Can't find service|Failure/;
+
+/**
+ * Output of `packageListCommand()` (+ its stderr); undefined when the lists could not be read: sections
+ * missing, `pm` errors, or no system packages. An empty answer must never read as "nothing installed": the
+ * tracker would remove every app of the phone (also those published before an unplug / reboot).
+ */
+export function parsePackageLists(text: string, stderr = ''): PackageLists | undefined {
   const parts = text.split(new RegExp(`^${PKG_SECTION}\\s*$`, 'm'));
   if (parts.length < 3) return undefined;
   const head = (parts[0] ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
@@ -71,13 +78,14 @@ export function parsePackageLists(text: string): PackageLists | undefined {
     }
   }
   const third = parts[1] ?? '';
-  // "pm" printing an error instead of packages (package service not up yet).
-  if (/Error:|Exception|Can't find service|Failure/.test(third) && !/^package:/m.test(third)) return undefined;
-  return {
-    thirdParty: new Set(parsePackageList(third)),
-    system: new Set(parsePackageList(parts[2] ?? '')),
-    clock,
-  };
+  // "pm" printing an error instead of packages (package service not up yet, or gone mid-command): in stdout
+  // before Android 7, on stderr with adb's shell protocol (7+: "cmd: Can't find service: package").
+  if (!/^package:/m.test(third) && (PM_ERROR_RE.test(third) || PM_ERROR_RE.test(stderr))) return undefined;
+  const system = new Set(parsePackageList(parts[2] ?? ''));
+  // A running Android always lists its framework ("package:android") as a system package. None: pm did not
+  // answer (during boot stdout keeps only the clock lines and the two separators).
+  if (!system.size) return undefined;
+  return { thirdParty: new Set(parsePackageList(third)), system, clock };
 }
 
 export interface PackageDetails {
@@ -304,6 +312,11 @@ export interface DeviceAppTrackerDeps {
   processes: () => ReadonlyMap<number, string>;
   /** Shared clock object; the tracker fills it from `date +%z` / `persist.sys.timezone`. */
   clock: DeviceClock;
+  /**
+   * Ids published to the hub for this device, kept by the driver across replugs: the hub keeps an unplugged
+   * phone's apps, so one uninstalled meanwhile is removed at the first package list after the replug.
+   */
+  published?: Set<string>;
 }
 
 interface TrackedApp {
@@ -317,6 +330,8 @@ interface TrackedApp {
   pendingDelta: number;
   pendingActivity?: number;
   lastSent?: string;
+  /** processName the hub holds from our last upsert (cleared with `processName: null` once it no longer applies). */
+  sentProcessName?: string;
 }
 
 export class DeviceAppTracker {
@@ -334,8 +349,11 @@ export class DeviceAppTracker {
   private listTimer?: NodeJS.Timeout;
   private active = false;
   private gen = 0;
+  private readonly published: Set<string>;
 
-  constructor(private readonly deps: DeviceAppTrackerDeps) {}
+  constructor(private readonly deps: DeviceAppTrackerDeps) {
+    this.published = deps.published ?? new Set();
+  }
 
   /** Device came online: read the package lists, then publish running apps. */
   async start(): Promise<void> {
@@ -360,10 +378,7 @@ export class DeviceAppTracker {
     this.unknownPending.clear();
     for (const app of this.apps.values()) {
       if (app.infoState === 'pending') app.infoState = app.info ? 'done' : 'failed';
-      if (app.pids.length) {
-        app.pids = [];
-        this.publish(app);
-      }
+      if (app.pids.length) this.applyPids(app, []);
     }
   }
 
@@ -524,6 +539,8 @@ export class DeviceAppTracker {
       running: app.pids.length > 0,
     };
     if (app.processName) input.processName = app.processName;
+    // Only a ':remote' process ran, now the main one does (or nothing runs): the hub keeps a name until told.
+    else if (app.sentProcessName !== undefined) input.processName = null;
     const info = app.info;
     if (info?.label) input.name = info.label;
     const crash = app.crash;
@@ -542,7 +559,8 @@ export class DeviceAppTracker {
       if (last !== undefined) install.lastUpdate = last;
       input.install = install;
     }
-    const sig = JSON.stringify(input);
+    // A sent clear (null) and no name are the same state: the clear goes out once.
+    const sig = JSON.stringify({ ...input, processName: input.processName ?? undefined });
     if (sig === app.lastSent && app.pendingDelta === 0 && app.pendingActivity === undefined) return;
     app.lastSent = sig;
     if (app.pendingDelta) input.crashReportsDelta = app.pendingDelta;
@@ -551,6 +569,8 @@ export class DeviceAppTracker {
     app.pendingActivity = undefined;
     try {
       this.deps.hub.upsertDeviceApp(input);
+      this.published.add(app.id);
+      app.sentProcessName = app.processName;
     } catch (e) {
       this.deps.logger.debug(`${this.deps.serial}: upsertDeviceApp(${app.id}) failed: ${(e as Error).message}`);
     }
@@ -566,20 +586,21 @@ export class DeviceAppTracker {
       if (!adb) return false;
       const r = await adb.shell(this.deps.serial, packageListCommand(), { timeoutMs: 20_000 });
       if (gen !== this.gen) return false;
-      const lists = parsePackageLists(r.stdout);
+      const lists = parsePackageLists(r.stdout, r.stderr);
       if (!lists) {
-        this.deps.logger.debug(`${this.deps.serial}: pm list packages failed: ${r.error ?? r.stderr.trim()}`);
+        // Not "nothing installed": keep every app and read again after listRetryMs.
+        const why = (r.error ?? r.stderr.trim()) || 'no system packages listed (package service not up yet?)';
+        this.deps.logger.debug(`${this.deps.serial}: pm list packages failed: ${why}`);
         return false;
       }
       if (lists.clock.tzName !== undefined) this.deps.clock.tzName = lists.clock.tzName;
       if (lists.clock.offsetMinutes !== undefined) this.deps.clock.offsetMinutes = lists.clock.offsetMinutes;
-      const before = this.thirdParty;
       this.thirdParty = lists.thirdParty;
       this.system = lists.system;
       this.listedAt = Date.now();
       // checkedUnknown is kept: a name that was in neither list after a refresh is a process name, not a
       // package (an app installed later shows up in the third-party list, which is checked first).
-      if (before) this.dropUninstalled();
+      this.dropUninstalled();
       return true;
     })()
       .catch((e: Error) => {
@@ -592,15 +613,14 @@ export class DeviceAppTracker {
     return this.listing;
   }
 
+  /** Apps no longer installed: tracked now, or published by an earlier session (uninstalled while unplugged). */
   private dropUninstalled(): void {
-    const gone: string[] = [];
-    for (const app of this.apps.values()) {
-      if (!this.thirdParty!.has(app.id)) gone.push(app.id);
-    }
+    const gone = [...new Set([...this.apps.keys(), ...this.published])].filter((id) => !this.thirdParty!.has(id));
     if (!gone.length) return;
     for (const id of gone) {
       this.apps.delete(id);
       this.infoQueue.delete(id);
+      this.published.delete(id);
     }
     this.deps.hub.removeDeviceApps(this.deps.deviceId, gone);
   }

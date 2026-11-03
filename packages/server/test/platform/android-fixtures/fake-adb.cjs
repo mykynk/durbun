@@ -50,7 +50,11 @@ if (cmd === 'logcat') {
 }
 if (cmd !== 'shell') process.exit(0);
 
-const PS = '  PID NAME\n    1 init\n  612 system_server\n  900 com.google.android.gms\n  901 com.google.android.gms.persistent\n 4500 com.mykynk.pati\n 5100 com.mykynk.mahalle\n';
+// st.uninstalled: packages removed from the phone (gone from ps, pm list and dumpsys package).
+const gone = new Set(st.uninstalled || []);
+const installed = (line) => ![...gone].some((pkg) => line.endsWith(` ${pkg}`) || line.endsWith(`:${pkg}`));
+const PS = '  PID NAME\n    1 init\n  612 system_server\n  900 com.google.android.gms\n  901 com.google.android.gms.persistent\n 4500 com.mykynk.pati\n 5100 com.mykynk.mahalle\n'
+  .split('\n').filter(installed).join('\n');
 const DUMPS = {
   'com.mykynk.pati': 'dumpsys-package-api34-debug-adb.txt',
   'com.mykynk.mahalle': 'dumpsys-package-api34-play.txt',
@@ -80,7 +84,7 @@ function part(p) {
   if (p === 'wm density') return 'Physical density: 411\n';
   if (p === 'dumpsys battery') return '  level: 80\n  scale: 100\n  status: 2\n  USB powered: true\n';
   if (p.startsWith('ps')) return PS;
-  if (p === 'pm list packages -3') return 'package:com.mykynk.pati\npackage:com.mykynk.mahalle\npackage:com.example.native\n';
+  if (p === 'pm list packages -3') return 'package:com.mykynk.pati\npackage:com.mykynk.mahalle\npackage:com.example.native\n'.split('\n').filter(installed).join('\n');
   if (p === 'pm list packages -s') return 'package:android\npackage:com.google.android.gms\npackage:com.android.systemui\n';
   if (p.startsWith('cmd package resolve-activity ')) {
     // "… <pkg> 2>/dev/null | grep -E 'packageName=|nonLocalizedLabel='", answered already filtered.
@@ -90,7 +94,7 @@ function part(p) {
   }
   if (p.startsWith('dumpsys package ')) {
     const pkg = p.slice('dumpsys package '.length);
-    return DUMPS[pkg] ? fx(DUMPS[pkg]) : `Unable to find package: ${pkg}\n`;
+    return DUMPS[pkg] && !gone.has(pkg) ? fx(DUMPS[pkg]) : `Unable to find package: ${pkg}\n`;
   }
   const crashDate = utc(st.crashMs + 300);
   if (p.startsWith('dumpsys dropbox --print data_app_crash')) {

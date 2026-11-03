@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Adb } from '../../src/platform/android/adb';
+import { DeviceAppStore } from '../../src/hub/deviceApps';
 import { deviceLocalToEpoch, parseTzName, parseUtcOffset, type DeviceClock } from '../../src/platform/android/deviceClock';
 import {
   basePackage,
@@ -15,6 +16,7 @@ import {
   parsePackageLists,
   PKG_DUMP_SEP,
   PKG_LABEL_SEP,
+  PKG_SECTION,
   splitPackageDumps,
 } from '../../src/platform/android/deviceApps';
 import type { RunResult } from '../../src/platform/exec';
@@ -170,6 +172,22 @@ describe('dumpsys package parsing', () => {
     expect(parsePackageLists('+0000\n___DURBUN_PKGS___\n___DURBUN_PKGS___\npackage:android\n')?.thirdParty.size).toBe(0);
   });
 
+  it('an early-boot answer (pm errors on stderr, empty sections) is a failed read, not "nothing installed"', () => {
+    const empty = `+0300\nEurope/Istanbul\n${PKG_SECTION}\n${PKG_SECTION}\n`;
+    // Android 9+ with adb's shell protocol: stdout keeps only the clock lines and the separators.
+    expect(parsePackageLists(empty, "cmd: Can't find service: package\ncmd: Can't find service: package\n")).toBeUndefined();
+    // Android 7-8 ("pm" reaches the service through Java).
+    expect(parsePackageLists(empty, 'Error: Could not access the Package Manager.  Is the system running?\n')).toBeUndefined();
+    // Nothing on stderr either: a running Android always lists "package:android".
+    expect(parsePackageLists(empty)).toBeUndefined();
+    // The service came up between the two pm calls: -3 failed, -s answered.
+    const half = `+0300\n${PKG_SECTION}\n${PKG_SECTION}\npackage:android\npackage:com.android.systemui\n`;
+    expect(parsePackageLists(half, "cmd: Can't find service: package\n")).toBeUndefined();
+    expect(parsePackageLists(half)?.thirdParty.size).toBe(0);
+    // Listed packages win over unrelated stderr noise.
+    expect(parsePackageLists(fx('pm-lists.txt'), 'WARNING: linker: Exception in something unrelated\n')?.thirdParty.size).toBe(5);
+  });
+
   it('maps process names to packages', () => {
     expect(basePackage('com.mykynk.pati')).toBe('com.mykynk.pati');
     expect(basePackage('com.mykynk.pati:remote')).toBe('com.mykynk.pati');
@@ -200,6 +218,8 @@ function fakeDevice() {
     dumps: { ...DUMPS } as Record<string, string>,
     labels: { 'com.mykynk.pati': fx('resolve-activity-api34.txt') } as Record<string, string>,
     failLists: false,
+    /** Whole answer to the list command (e.g. an early-boot one with stderr), instead of `lists`. */
+    listResult: undefined as RunResult<string> | undefined,
   };
   const calls: string[] = [];
   const adb = {
@@ -207,7 +227,7 @@ function fakeDevice() {
     tool: { path: '/fake/adb', source: 'path' },
     async shell(_serial: string, cmd: string) {
       calls.push(cmd);
-      if (cmd === packageListCommand()) return ok(state.failLists ? '' : state.lists);
+      if (cmd === packageListCommand()) return state.listResult ?? ok(state.failLists ? '' : state.lists);
       if (cmd.startsWith('dumpsys package ')) {
         const outs = cmd.split(`; echo ${PKG_DUMP_SEP}; `).map((part) => {
           const pkg = /^dumpsys package (\S+?);/.exec(part)![1]!;
@@ -232,21 +252,24 @@ describe('DeviceAppTracker', () => {
   });
   afterEach(() => Object.assign(DEVICE_APP_TIMING, saved));
 
-  function setup(procs: Array<[number, string]>) {
+  function setup(procs: Array<[number, string]>, published?: Set<string>) {
     const dev = fakeDevice();
     const hub = createFakeHub();
     const processes = new Map<number, string>(procs);
     const clock: DeviceClock = {};
-    const tracker = new DeviceAppTracker({
-      adb: () => dev.adb,
-      serial: 'R58M123ABC',
-      deviceId: 'android:R58M123ABC',
-      hub,
-      logger: silentLogger,
-      processes: () => processes,
-      clock,
-    });
-    return { ...dev, hub, processes, clock, tracker };
+    /** A tracker for this device (a new one = the phone plugged in again). */
+    const make = () =>
+      new DeviceAppTracker({
+        adb: () => dev.adb,
+        serial: 'R58M123ABC',
+        deviceId: 'android:R58M123ABC',
+        hub,
+        logger: silentLogger,
+        processes: () => processes,
+        clock,
+        published,
+      });
+    return { ...dev, hub, processes, clock, tracker: make(), make };
   }
 
   const KEY = (id: string) => `android:R58M123ABC|${id}`;
@@ -329,6 +352,37 @@ describe('DeviceAppTracker', () => {
     t.tracker.dispose();
   });
 
+  it('clears processName in the hub once the main process runs, or nothing runs (sent once)', async () => {
+    const t = setup([[4400, 'com.mykynk.pati:remote']]);
+    // The real hub store behind the fake hub: `processName: null` must clear the name.
+    const store = new DeviceAppStore({ onChange: () => {}, onRemove: () => {} });
+    const upsert = t.hub.upsertDeviceApp;
+    t.hub.upsertDeviceApp = (input) => {
+      store.upsert(input);
+      return upsert(input);
+    };
+    const pati = () => store.get('android:R58M123ABC', 'com.mykynk.pati');
+    const names = () => t.hub.deviceAppUpserts.filter((u) => u.id === 'com.mykynk.pati').map((u) => u.processName);
+    await t.tracker.start();
+    await waitFor(() => pati());
+    expect(pati()).toMatchObject({ pids: [4400], processName: 'com.mykynk.pati:remote' });
+    t.processes.set(4500, 'com.mykynk.pati');
+    t.tracker.onProcessEvent({ pid: 4500, name: 'com.mykynk.pati', event: 'started' });
+    expect(pati()).toMatchObject({ pids: [4400, 4500], running: true });
+    expect(pati()?.processName).toBeUndefined();
+    t.tracker.sync(); // nothing changed: no second clear
+    expect(names()).toEqual(['com.mykynk.pati:remote', null]);
+    // Only the ':remote' process again, then the device goes away: the name is cleared with the pids.
+    t.processes.delete(4500);
+    t.tracker.onProcessEvent({ pid: 4500, name: 'com.mykynk.pati', event: 'died' });
+    expect(pati()?.processName).toBe('com.mykynk.pati:remote');
+    t.tracker.stop();
+    expect(pati()).toMatchObject({ pids: [], running: false });
+    expect(pati()?.processName).toBeUndefined();
+    expect(names()).toEqual(['com.mykynk.pati:remote', null, 'com.mykynk.pati:remote', null]);
+    t.tracker.dispose();
+  });
+
   it('re-lists packages when an unknown package starts (new install), once', async () => {
     const t = setup([]);
     await t.tracker.start();
@@ -387,6 +441,67 @@ describe('DeviceAppTracker', () => {
     expect(t.hub.removedDeviceApps).toHaveLength(1);
     expect([...t.hub.deviceApps.keys()]).toEqual([KEY('com.mykynk.pati')]);
     expect(t.tracker.trackedIds).toEqual([]);
+  });
+
+  it('plugged in again (new tracker, same published ids): an app uninstalled meanwhile is removed at the first list', async () => {
+    const published = new Set<string>();
+    const t = setup(
+      [
+        [4321, 'com.mykynk.pati'],
+        [5100, 'com.mykynk.mahalle'],
+      ],
+      published,
+    );
+    await t.tracker.start();
+    await waitFor(() => t.hub.deviceApps.size === 2);
+    t.tracker.dispose(); // unplugged: the hub keeps both
+    expect(published).toEqual(new Set(['com.mykynk.pati', 'com.mykynk.mahalle']));
+    t.state.lists = t.state.lists.replace('package:com.mykynk.mahalle\n', '');
+    t.processes.delete(5100);
+    const again = t.make();
+    await again.start();
+    expect(t.hub.removedDeviceApps).toEqual([{ deviceId: 'android:R58M123ABC', ids: ['com.mykynk.mahalle'] }]);
+    expect([...t.hub.deviceApps.keys()]).toEqual([KEY('com.mykynk.pati')]);
+    expect(published).toEqual(new Set(['com.mykynk.pati']));
+    again.dispose();
+  });
+
+  it('plugged in again while the phone boots (package service not up): keeps every app and reads again later', async () => {
+    DEVICE_APP_TIMING.listRetryMs = 30;
+    const published = new Set<string>();
+    const t = setup(
+      [
+        [4321, 'com.mykynk.pati'],
+        [5100, 'com.mykynk.mahalle'],
+      ],
+      published,
+    );
+    await t.tracker.start();
+    await waitFor(() => t.hub.deviceApps.size === 2);
+    t.tracker.dispose(); // unplugged / rebooting: the hub keeps both
+    // adb lists the phone as "device" before system_server registers the package service: pm writes only to
+    // stderr (shell protocol), stdout keeps the clock lines and the separators.
+    t.state.listResult = {
+      ok: false,
+      code: 20,
+      signal: null,
+      stdout: `+0300\nEurope/Istanbul\n${PKG_SECTION}\n${PKG_SECTION}\n`,
+      stderr: "cmd: Can't find service: package\ncmd: Can't find service: package\n",
+      timedOut: false,
+    };
+    t.processes.clear();
+    const again = t.make();
+    await again.start();
+    expect(await again.ready()).toBe(false);
+    expect(t.hub.removedDeviceApps).toEqual([]);
+    expect(t.hub.deviceApps.size).toBe(2);
+    expect(published).toEqual(new Set(['com.mykynk.pati', 'com.mykynk.mahalle']));
+    // Booted: the retry reads the real lists and the apps are still there.
+    t.state.listResult = undefined;
+    await waitFor(() => again.isThirdParty('com.mykynk.pati') === true, 2000);
+    expect(t.hub.removedDeviceApps).toEqual([]);
+    expect(t.hub.deviceApps.size).toBe(2);
+    again.dispose();
   });
 
   it('dispose() of a running device marks its apps not running instead of removing them', async () => {

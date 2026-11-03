@@ -33,6 +33,8 @@ export class AndroidDriver implements DeviceDriver {
   private readonly sessions = new Map<string, AndroidDeviceSession>();
   /** Dropbox records already reported, per serial — a replugged phone does not repeat old crashes. */
   private readonly dropboxCursors = new Map<string, DropboxCursor>();
+  /** DeviceApp ids published, per serial — apps uninstalled while the phone was unplugged go at the replug. */
+  private readonly publishedApps = new Map<string, Set<string>>();
   private unsubSettings?: () => void;
   private adbPathSetting?: string;
 
@@ -218,8 +220,10 @@ export class AndroidDriver implements DeviceDriver {
       if (!session) {
         let cursor = this.dropboxCursors.get(row.serial);
         if (!cursor) this.dropboxCursors.set(row.serial, (cursor = createDropboxCursor()));
+        let published = this.publishedApps.get(row.serial);
+        if (!published) this.publishedApps.set(row.serial, (published = new Set()));
         session = new AndroidDeviceSession(
-          { ctx: this.ctx, adb: () => this.adb, logger: this.logger, dropboxCursor: cursor },
+          { ctx: this.ctx, adb: () => this.adb, logger: this.logger, dropboxCursor: cursor, publishedApps: published },
           row,
         );
         this.sessions.set(row.serial, session);
