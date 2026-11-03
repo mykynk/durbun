@@ -105,6 +105,7 @@ void main() {
     late FakeDesktop desktop;
     final calls = <MethodCall>[];
     Object? Function(MethodCall call)? startReply;
+    var startDelay = Duration.zero;
 
     Map<String, Object?> attachedReply() => <String, Object?>{
       'attached': true,
@@ -144,11 +145,15 @@ void main() {
       desktop = await FakeDesktop.start(appId: 'app:native');
       calls.clear();
       startReply = (_) => jsonEncode(attachedReply());
+      startDelay = Duration.zero;
       IoDurbunBackend.debugNativeBridgeFactory = (client) =>
           NativeBridge(client, channel: _channel, platformSupported: true);
       _messenger.setMockMethodCallHandler(_channel, (call) async {
         calls.add(call);
-        if (call.method == 'start') return startReply?.call(call);
+        if (call.method == 'start') {
+          if (startDelay > Duration.zero) await Future<void>.delayed(startDelay);
+          return startReply?.call(call);
+        }
         return null;
       });
     });
@@ -193,6 +198,44 @@ void main() {
       // The hello a native crash report presents carries the same layers.
       expect(((state['hello']! as Map)['sdk']! as Map)['layers'], <String>['dart', 'android']);
       expect((state['config']! as Map)['maxBodyBytes'], 1048576);
+    });
+
+    test('a native layer that answers after 2 s still makes the first hello', () async {
+      // The server keeps the first hello of a connection: a late native layer
+      // would stay out of the session (layers, app version) until a reconnect.
+      startDelay = const Duration(seconds: 2);
+      final conn = await startSdk();
+      expect((conn.hello!['sdk']! as Map)['layers'], <String>['dart', 'android']);
+      expect((conn.hello!['app']! as Map)['version'], '2.3.0');
+    });
+
+    test('mock rules end with the connection, on the native side too', () async {
+      desktop.mocks = <Map<String, Object?>>[
+        <String, Object?>{
+          'id': 'm1',
+          'enabled': true,
+          'method': 'GET',
+          'url': '/users',
+          'match': 'contains',
+          'action': <String, Object?>{'type': 'respond', 'status': 200},
+          'createdAt': 1,
+        },
+      ];
+      final conn = await startSdk();
+      bool pushed(MethodCall c, {required bool connected, required bool withRules}) {
+        if (c.method != 'state') return false;
+        final state = _json(c.arguments);
+        return state['connected'] == connected && (state['mocks']! as List).isNotEmpty == withRules;
+      }
+
+      await eventually(() => calls.any((c) => pushed(c, connected: true, withRules: true)));
+      final before = calls.length;
+      conn.destroy();
+      // Whoever answered the hello is not authenticated: once it is gone, the
+      // native layer (OkHttp / URLSession) must stop applying its rules too.
+      await eventually(
+        () => calls.skip(before).any((c) => pushed(c, connected: false, withRules: false)),
+      );
     });
 
     test('native messages go out on the Dart connection', () async {
@@ -304,6 +347,130 @@ void main() {
       await startSdk();
       await Durbun.dispose();
       expect(calls.map((c) => c.method), contains('stop'));
+    });
+  });
+
+  group('store-install guard', () {
+    late FakeDesktop desktop;
+    final calls = <MethodCall>[];
+    final lines = <String>[];
+    Object? guardReply;
+    Object? startReply;
+
+    DurbunOptions options() => DurbunOptions(
+      enabled: true,
+      port: desktop.port,
+      appId: 'com.example.guard',
+      captureNetwork: false,
+      metrics: false,
+      useBackgroundIsolate: false,
+    );
+
+    setUp(() async {
+      desktop = await FakeDesktop.start(appId: 'app:guard');
+      calls.clear();
+      lines.clear();
+      guardReply = jsonEncode(<String, Object?>{
+        'platform': 'android',
+        'storeInstall': true,
+        'installer': 'com.android.vending',
+      });
+      startReply = jsonEncode(<String, Object?>{
+        'attached': true,
+        'platform': 'android',
+        'capabilities': <String>['logs'],
+      });
+      IoDurbunBackend.debugNativeBridgeFactory = (client) =>
+          NativeBridge(client, channel: _channel, platformSupported: true);
+      // As in a release build on Android / iOS.
+      IoDurbunBackend.debugAskStoreGuardFirst = true;
+      IoDurbunBackend.debugStoreGuard = StoreGuard(
+        channel: _channel,
+        printLine: lines.add,
+        languageCode: () => 'tr',
+      );
+      _messenger.setMockMethodCallHandler(_channel, (call) async {
+        calls.add(call);
+        if (call.method == 'guard') return guardReply;
+        if (call.method == 'start') return startReply;
+        return null;
+      });
+    });
+
+    tearDown(() async {
+      await Durbun.dispose();
+      IoDurbunBackend.debugNativeBridgeFactory = null;
+      IoDurbunBackend.debugAskStoreGuardFirst = null;
+      IoDurbunBackend.debugStoreGuard = null;
+      _messenger.setMockMethodCallHandler(_channel, null);
+      await desktop.close();
+    });
+
+    Future<void> expectNothingReachedTheDesktop() async {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      expect(desktop.connections, isEmpty);
+    }
+
+    test('release build installed from a store: nothing starts, one line says why', () async {
+      await Durbun.init(options());
+      var ran = false;
+      await Durbun.run(() {
+        ran = true;
+      }, options: options());
+      expect(ran, isTrue, reason: 'the app itself runs as usual');
+      expect(Durbun.isEnabled, isFalse);
+      expect(calls.map((c) => c.method), <String>['guard'], reason: 'asked once, before anything');
+      expect(lines, <String>[kStoreInstallNoticeTr]);
+      await expectNothingReachedTheDesktop();
+    });
+
+    test('release build from Firebase, TestFlight or adb starts once the guard answered', () async {
+      guardReply = jsonEncode(<String, Object?>{'platform': 'android', 'storeInstall': false});
+      await Durbun.init(options());
+      final conn = await desktop.nextConnection();
+      expect(conn.hello, isNotNull);
+      expect(Durbun.isEnabled, isTrue);
+      expect(calls.map((c) => c.method).take(2), <String>['guard', 'start']);
+      expect(lines, isEmpty);
+    });
+
+    test('release build without an answer from the plugin stays off and says so', () async {
+      _messenger.setMockMethodCallHandler(_channel, null); // → MissingPluginException
+      await Durbun.init(options());
+      expect(Durbun.isEnabled, isFalse);
+      expect(lines, <String>[kStoreCheckFailedNoticeTr]);
+      await expectNothingReachedTheDesktop();
+    });
+
+    test('debug/profile: a native start that reports a store install turns everything off', () async {
+      IoDurbunBackend.debugAskStoreGuardFirst = false;
+      startReply = jsonEncode(<String, Object?>{
+        'attached': false,
+        'platform': 'ios',
+        'storeInstall': true,
+        'reason': 'the app was installed from the App Store',
+      });
+      await Durbun.init(options());
+      await eventually(() => !Durbun.isEnabled);
+      expect(calls.map((c) => c.method), <String>['start'], reason: 'debug builds do not ask first');
+      expect(lines, <String>[kStoreInstallNoticeTr]);
+      await expectNothingReachedTheDesktop();
+    });
+
+    test('the line follows the device language', () {
+      expect(storeGuardNotice(StoreCheck.store, 'tr'), kStoreInstallNoticeTr);
+      expect(storeGuardNotice(StoreCheck.store, 'en'), kStoreInstallNoticeEn);
+      expect(storeGuardNotice(StoreCheck.store, 'de'), kStoreInstallNoticeEn);
+      expect(storeGuardNotice(StoreCheck.unknown, 'tr'), kStoreCheckFailedNoticeTr);
+      expect(storeGuardNotice(StoreCheck.unknown, 'en'), kStoreCheckFailedNoticeEn);
+      expect(
+        kStoreInstallNoticeTr,
+        'Dürbün kendini kapattı: uygulama mağazadan kurulmuş (Dürbün mağaza sürümlerinde çalışmaz).',
+      );
+      expect(
+        kStoreInstallNoticeEn,
+        'Dürbün turned itself off: this app was installed from the store (Dürbün never runs in store builds).',
+      );
     });
   });
 

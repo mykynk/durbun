@@ -18,6 +18,138 @@ import '../core/options.dart';
 /// Method channel shared with `DurbunFlutterPlugin` (Android + iOS).
 const String kDurbunNativeChannel = 'dev.durbun/native';
 
+/// How long the Dart side waits for the plugin's `guard` and `start` replies
+/// (the first hello waits as long, see `DurbunClient.kHelloGateTimeout`).
+const Duration kNativeReplyTimeout = Duration(seconds: 3);
+
+/// The line printed when the SDK turned itself off in a store install.
+const String kStoreInstallNoticeTr =
+    'Dürbün kendini kapattı: uygulama mağazadan kurulmuş (Dürbün mağaza sürümlerinde çalışmaz).';
+const String kStoreInstallNoticeEn =
+    'Dürbün turned itself off: this app was installed from the store (Dürbün never runs in store builds).';
+
+/// The line printed when a release build could not ask the plugin.
+const String kStoreCheckFailedNoticeTr =
+    "Dürbün kapalı kaldı: uygulamanın mağazadan kurulup kurulmadığı kontrol edilemedi (durbun plugin'i yanıt vermedi).";
+const String kStoreCheckFailedNoticeEn =
+    'Dürbün stayed off: it could not check whether this app was installed from the store (the durbun plugin did not answer).';
+
+/// What the plugin's native side says about how the app was installed.
+enum StoreCheck {
+  /// Firebase, TestFlight, ad-hoc, adb, Xcode, …: Dürbün may run.
+  notStore,
+
+  /// Google Play (any track, internal testing too) or the App Store.
+  store,
+
+  /// No answer (plugin missing, error, timeout).
+  unknown,
+}
+
+/// Dürbün never runs in store installs. A release build made with
+/// `--dart-define=DURBUN=true` asks the plugin's native side, which knows who
+/// installed the app (Android: the installer package; iOS: the App Store
+/// receipt), before it starts any transport, listener or capture; debug and
+/// profile builds can never be store installs. Asked once per process; the
+/// explanation is printed once, to the device log (logcat / Console), so the
+/// desktop's device log shows why the SDK is missing.
+class StoreGuard {
+  StoreGuard({
+    MethodChannel? channel,
+    void Function(String line)? printLine,
+    String Function()? languageCode,
+  }) : _channel =
+           channel ??
+           const MethodChannel(
+             kDurbunNativeChannel,
+             StandardMethodCodec(),
+             EarlyBinaryMessenger(),
+           ),
+       _printLine = printLine ?? Zone.root.print,
+       _languageCode = languageCode ?? _deviceLanguage;
+
+  /// The guard the SDK uses.
+  static final StoreGuard instance = StoreGuard();
+
+  final MethodChannel _channel;
+  final void Function(String line) _printLine;
+  final String Function() _languageCode;
+  Future<StoreCheck>? _answer;
+  bool _announced = false;
+
+  /// Asks the native side (once; later calls reuse the answer).
+  Future<StoreCheck> check() => _answer ??= _ask();
+
+  Future<StoreCheck> _ask() async {
+    try {
+      final reply = await _channel
+          .invokeMethod<Object?>('guard')
+          .timeout(kNativeReplyTimeout);
+      switch (_decodeMap(reply)?['storeInstall']) {
+        case true:
+          return StoreCheck.store;
+        case false:
+          return StoreCheck.notStore;
+      }
+    } catch (_) {
+      // MissingPluginException, PlatformException, timeout: no answer.
+    }
+    return StoreCheck.unknown;
+  }
+
+  /// Prints the one line that says why Dürbün is off (once per process).
+  void announce(StoreCheck check) {
+    if (check == StoreCheck.notStore || _announced) return;
+    _announced = true;
+    try {
+      _printLine(storeGuardNotice(check, _languageCode()));
+    } catch (_) {}
+  }
+
+  /// The device language the guard's lines follow ('tr', 'en', …).
+  String get languageCode {
+    try {
+      return _languageCode();
+    } catch (_) {
+      return 'en';
+    }
+  }
+
+  static String _deviceLanguage() {
+    try {
+      return ui.PlatformDispatcher.instance.locale.languageCode;
+    } catch (_) {
+      return 'en';
+    }
+  }
+}
+
+/// The line for [check] in the device language (Turkish or English).
+String storeGuardNotice(StoreCheck check, String languageCode) {
+  final turkish = languageCode.toLowerCase() == 'tr';
+  if (check == StoreCheck.store) {
+    return turkish ? kStoreInstallNoticeTr : kStoreInstallNoticeEn;
+  }
+  return turkish ? kStoreCheckFailedNoticeTr : kStoreCheckFailedNoticeEn;
+}
+
+/// Sent to the desktop when a release build's `init()` was not awaited and
+/// the app's first screen was already up once the store check answered.
+const String kLateStartNoticeTr =
+    'Dürbün, uygulamanın ilk ekranı açıldıktan sonra başladı: runApp, Durbun.init() beklenmeden çağrılmış '
+    '(release derlemesinde init önce mağaza kontrolünün yanıtını bekler). Bu arada oluşturulan '
+    "HttpClient'lar yakalanmaz; ilk isteğini bu arada gönderen bir Dio, aynı istemciyi kullanmaya devam "
+    'ettiği için oturum boyunca görünmez. Çözüm: await Durbun.init();';
+const String kLateStartNoticeEn =
+    "Dürbün started after the app's first screen: runApp was called without awaiting Durbun.init() "
+    '(in release builds init first waits for the store check). HttpClients created in the meantime are '
+    'not captured, and a Dio that sent its first request then stays invisible for the whole session '
+    'because it keeps that client. Fix: await Durbun.init();';
+
+/// [kLateStartNoticeTr] or [kLateStartNoticeEn] for [languageCode].
+String lateStartNotice(String languageCode) =>
+    languageCode.toLowerCase() == 'tr' ? kLateStartNoticeTr : kLateStartNoticeEn;
+
 /// What the native layer reported when it started.
 class NativeStartInfo {
   const NativeStartInfo({
@@ -75,12 +207,17 @@ class NativeBridge {
   NativeStartInfo? _info;
   bool _stopped = false;
   bool _statePushScheduled = false;
+  bool _refusedStoreInstall = false;
   String? _lastState;
 
   /// Info from the native side once it attached (null otherwise).
   NativeStartInfo? get info => _info;
 
   bool get isAttached => _info != null && !_stopped;
+
+  /// True when the native side refused to start because the app was
+  /// installed from a store: the SDK must turn itself off.
+  bool get refusedStoreInstall => _refusedStoreInstall;
 
   /// Starts the native layer for this session. Completes (never throws) once
   /// it attached, declined or turned out to be missing.
@@ -101,8 +238,14 @@ class NativeBridge {
       });
       final reply = await _channel
           .invokeMethod<Object?>('start', args)
-          .timeout(const Duration(seconds: 3));
+          .timeout(kNativeReplyTimeout);
       if (_stopped) return;
+      if (_decodeMap(reply)?['storeInstall'] == true) {
+        // Nothing started on the native side; the owner disposes the rest.
+        _refusedStoreInstall = true;
+        _safeClearHandler();
+        return;
+      }
       final info = NativeStartInfo.parse(reply);
       if (info == null) {
         _diagnostic('native layer did not attach: ${_decodeMap(reply)?['reason'] ?? 'unknown reason'}');

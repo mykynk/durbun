@@ -1,8 +1,10 @@
 // The real backend (Android, iOS, macOS, …): pure-Dart core + Flutter glue.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show WidgetsBinding;
 
 import '../core/body.dart';
 import '../core/client.dart';
@@ -53,8 +55,26 @@ class IoDurbunBackend implements DurbunBackend {
   DebugPrintCallback? _ourDebugPrint;
   NativeBridge? _native;
 
+  /// Bumped by every [dispose]: a store-guard answer that arrives after a
+  /// dispose (or a newer one) must not start the SDK any more.
+  int _epoch = 0;
+
   /// Test hook: builds the bridge to the plugin's native layer.
   static NativeBridge Function(DurbunClient client)? debugNativeBridgeFactory;
+
+  /// Test hooks for the store-install guard: the guard itself, and whether
+  /// init/run ask it before starting anything (null: release builds on
+  /// Android and iOS, the plugin's platforms).
+  static StoreGuard? debugStoreGuard;
+  static bool? debugAskStoreGuardFirst;
+
+  static StoreGuard get _storeGuard => debugStoreGuard ?? StoreGuard.instance;
+
+  /// Debug and profile builds can never be store installs; other platforms
+  /// have no native side to ask.
+  static bool get _askStoreGuardFirst =>
+      debugAskStoreGuardFirst ??
+      (kReleaseMode && (Platform.isAndroid || Platform.isIOS));
 
   DurbunClient? get client => _client;
 
@@ -65,15 +85,55 @@ class IoDurbunBackend implements DurbunBackend {
   bool get isActive => _client != null && !_client!.isDisposed;
 
   @override
-  Future<void> init(DurbunOptions options) async {
-    _setUp(options, zoneCapturesPrint: false);
+  Future<void> init(DurbunOptions options) {
+    if (isActive || !resolveDurbunEnabled(options)) return Future<void>.value();
+    if (!_askStoreGuardFirst) {
+      // Synchronous, so calls right after an un-awaited init() are captured.
+      _setUp(options, zoneCapturesPrint: false);
+      return Future<void>.value();
+    }
+    final epoch = _epoch;
+    return _storeGuardAllows().then((allowed) {
+      if (!allowed || epoch != _epoch) return;
+      // Not awaited before runApp: HttpClients made since then stay unwrapped.
+      final appWasFirst = _widgetTreeMounted();
+      _setUp(options, zoneCapturesPrint: false);
+      if (appWasFirst) _tellLateStart();
+    });
+  }
+
+  static bool _widgetTreeMounted() {
+    try {
+      return WidgetsBinding.instance.rootElement != null;
+    } catch (_) {
+      return false; // no binding yet
+    }
+  }
+
+  /// Says on the desktop why traffic from the first screen may be missing.
+  void _tellLateStart() {
+    _client?.log(
+      DurbunLogLevel.warn,
+      lateStartNotice(_storeGuard.languageCode),
+      tag: 'durbun',
+    );
+  }
+
+  /// Release builds: false when nothing may start (a store install, or no
+  /// answer from the plugin); the guard then prints its one line.
+  Future<bool> _storeGuardAllows() async {
+    final guard = _storeGuard;
+    final check = await guard.check();
+    if (check == StoreCheck.notStore) return true;
+    guard.announce(check);
+    return false;
   }
 
   /// Starts everything once; later calls are no-ops while running.
   void _setUp(DurbunOptions options, {required bool zoneCapturesPrint}) {
     if (isActive || !resolveDurbunEnabled(options)) return;
     try {
-      // The first hello waits (≤ 1.5 s) for the native layer, so its
+      // The first hello waits (≤ 3 s) for the native layer, so its
       // capabilities, actions and app version are in it.
       final nativeReady = Completer<void>();
       final client = DurbunClient.start(
@@ -89,6 +149,9 @@ class IoDurbunBackend implements DurbunBackend {
             (debugNativeBridgeFactory ?? NativeBridge.new)(client);
         unawaited(
           bridge.start(options).whenComplete(() {
+            // Turned off before the gate opens, so the held-back hello never
+            // goes out (debug and profile builds get here without the guard).
+            if (bridge.refusedStoreInstall) _turnOffForStoreInstall(client);
             if (!nativeReady.isCompleted) nativeReady.complete();
           }),
         );
@@ -121,6 +184,13 @@ class IoDurbunBackend implements DurbunBackend {
     } catch (_) {
       // Never break the app because of the SDK.
     }
+  }
+
+  /// The native side refused to start: this app was installed from a store.
+  void _turnOffForStoreInstall(DurbunClient client) {
+    if (!identical(_client, client)) return;
+    _storeGuard.announce(StoreCheck.store);
+    unawaited(dispose());
   }
 
   /// Re-chains hooks the app may have replaced after we installed ours
@@ -159,6 +229,18 @@ class IoDurbunBackend implements DurbunBackend {
   @override
   Future<void> run(FutureOr<void> Function() body, DurbunOptions options) {
     if (!resolveDurbunEnabled(options)) return Future<void>.sync(body);
+    if (!_askStoreGuardFirst) return _run(body, options);
+    // Release build: nothing starts before the guard answered (one call to
+    // the plugin; the app body waits for it).
+    final epoch = _epoch;
+    return _storeGuardAllows().then(
+      (allowed) => allowed && epoch == _epoch
+          ? _run(body, options)
+          : Future<void>.sync(body),
+    );
+  }
+
+  Future<void> _run(FutureOr<void> Function() body, DurbunOptions options) {
     _setUp(options, zoneCapturesPrint: true);
     final client = _client;
     if (client == null) return Future<void>.sync(body);
@@ -248,13 +330,18 @@ class IoDurbunBackend implements DurbunBackend {
 
   @override
   Future<void> dispose() async {
+    // Also while the store guard is still being asked (release builds): its
+    // answer then starts nothing, so no SDK is left running unreachable.
+    _epoch++;
     final client = _client;
     if (client == null) return;
+    _client = null;
+    _options = null;
     _guardian?.cancel();
     _guardian = null;
-    final native = _native;
-    _native = null;
-    if (native != null) await native.stop();
+    // Closed first (synchronously marked disposed): nothing more reaches the
+    // desktop, and a hello still held back by the gate never goes out.
+    final closing = client.dispose();
     _metrics?.dispose();
     _metrics = null;
     _errors?.dispose();
@@ -265,9 +352,10 @@ class IoDurbunBackend implements DurbunBackend {
     _ourDebugPrint = null;
     _originalDebugPrint = null;
     _printCapture = null;
-    _client = null;
-    _options = null;
-    await client.dispose();
+    final native = _native;
+    _native = null;
+    if (native != null) await native.stop();
+    await closing;
   }
 
   /* ───────────── adapters outside dart:io (package:durbun_dio) ───────────── */
