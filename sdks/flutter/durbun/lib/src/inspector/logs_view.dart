@@ -5,6 +5,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'filter_ui.dart';
 import 'format.dart';
 import 'json_tree.dart';
 import 'live_list.dart';
@@ -12,54 +13,86 @@ import 'network_model.dart';
 import 'network_view.dart' show CallDetailPage;
 import 'store.dart';
 import 'strings.dart';
+import 'text_match.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
 /// A row of the stream: a log line (with its repeat count) or a request.
 class StreamItem {
-  StreamItem.log(InspectorLog this.log) : call = null, ts = log.ts, key = 'l${log.seq}';
-  StreamItem.call(InspectorCall this.call) : log = null, ts = call.ts, key = 'c${call.key}';
+  StreamItem.log(InspectorLog this.log) : call = null, ts = log.ts, key = 'l${log.seq}', seq = log.seq;
+  StreamItem.call(InspectorCall this.call) : log = null, ts = call.ts, key = 'c${call.key}', seq = call.seq;
 
   final InspectorLog? log;
   final InspectorCall? call;
   final double ts;
   final String key;
+
+  /// Arrival order in the store (logs and calls share the counter).
+  final int seq;
   int repeats = 1;
 }
 
 const List<String> kLevels = <String>['verbose', 'debug', 'info', 'warn', 'error', 'fatal'];
 
 class LogFilters {
-  final Set<String> levels = <String>{...kLevels};
+  /// Lines below this level are hidden (crashes and events always pass).
+  String minLevel = 'verbose';
   bool errorsOnly = false;
   bool crashes = false;
+
+  /// Requests are mixed into the stream (an "include" switch, unlike the
+  /// "only" filters around it).
   bool network = true;
-  bool flutterOnly = false;
   bool events = false;
-  bool nativeOnly = false;
+
+  /// `all`, `flutter` (Dart) or `native` (Kotlin/Swift).
+  String source = 'all';
   final Set<String> hiddenTags = <String>{};
+
+  /// Filters away from their default (the badge on the Filters button).
+  int get activeCount =>
+      (minLevel != 'verbose' ? 1 : 0) +
+      (errorsOnly ? 1 : 0) +
+      (crashes ? 1 : 0) +
+      (!network ? 1 : 0) +
+      (events ? 1 : 0) +
+      (source != 'all' ? 1 : 0) +
+      (hiddenTags.isNotEmpty ? 1 : 0);
+
+  void reset() {
+    minLevel = 'verbose';
+    errorsOnly = false;
+    crashes = false;
+    network = true;
+    events = false;
+    source = 'all';
+    hiddenTags.clear();
+  }
+
+  /// Changes whenever a filter does (tells the live list to follow again).
+  String get signature => '$minLevel|$errorsOnly|$crashes|$network|$events|$source|${hiddenTags.join(',')}';
 }
 
 int _rank(String level) => kLevels.indexOf(level).clamp(0, 5);
 
 bool logMatches(InspectorLog l, LogFilters f, List<QueryClause> q) {
-  if (!f.levels.contains(l.level) && !l.isCrash && !l.isEvent) return false;
+  if (_rank(l.level) < _rank(f.minLevel) && !l.isCrash && !l.isEvent) return false;
   if (f.errorsOnly && !l.isError) return false;
   if (f.crashes && !l.isCrash && l.kind != 'flutter-error') return false;
   if (f.events && !l.isEvent) return false;
-  if (f.flutterOnly && l.native) return false;
-  if (f.nativeOnly && !l.native) return false;
+  if (f.source == 'flutter' && l.native) return false;
+  if (f.source == 'native' && !l.native) return false;
   if (l.tag != null && f.hiddenTags.contains(l.tag)) return false;
   for (final c in q) {
     final bool hit;
     switch (c.key) {
       case 'tag':
-        hit = (l.tag?.toLowerCase() ?? '') == c.value || (l.tag?.toLowerCase().contains(c.value) ?? false);
+        hit = foldContains(l.tag ?? '', c.value);
       case 'level':
         final want = kLevels.indexWhere((x) => x.startsWith(c.value));
         hit = want >= 0 && _rank(l.level) >= want;
       case 'message':
-        hit = l.message.toLowerCase().contains(c.value);
+        hit = l.folded.contains(c.value);
       case 'is':
         hit = switch (c.value) {
           'crash' || 'cokme' || 'çökme' => l.isCrash,
@@ -70,10 +103,10 @@ bool logMatches(InspectorLog l, LogFilters f, List<QueryClause> q) {
           _ => false,
         };
       default:
-        hit = l.message.toLowerCase().contains(c.value) ||
-            (l.tag?.toLowerCase().contains(c.value) ?? false) ||
-            (l.error?['message']?.toString().toLowerCase().contains(c.value) ?? false) ||
-            (l.error?['type']?.toString().toLowerCase().contains(c.value) ?? false);
+        hit = l.folded.contains(c.value) ||
+            foldContains(l.tag ?? '', c.value) ||
+            foldContains('${l.error?['message'] ?? ''}', c.value) ||
+            foldContains('${l.error?['type'] ?? ''}', c.value);
     }
     if (hit == c.negate) return false;
   }
@@ -83,15 +116,15 @@ bool logMatches(InspectorLog l, LogFilters f, List<QueryClause> q) {
 bool callMatchesLogQuery(InspectorCall c, LogFilters f, List<QueryClause> q) {
   if (!f.network || f.events || f.crashes) return false;
   if (f.errorsOnly && !c.isFailure) return false;
-  if (f.nativeOnly && !c.native) return false;
-  if (f.flutterOnly && c.native) return false;
+  if (f.source == 'native' && !c.native) return false;
+  if (f.source == 'flutter' && c.native) return false;
   for (final x in q) {
     if (x.key == 'tag' || x.key == 'level' || x.key == 'message') {
       if (!x.negate) return false;
       continue;
     }
-    if (x.key == 'is' && x.value != 'network' && x.value != 'ag' && x.value != 'ağ' && !x.negate) return false;
-    if (x.key == null && !(c.url.toLowerCase().contains(x.value) || c.method.toLowerCase() == x.value) != x.negate) return false;
+    if (x.key == 'is' && x.value != 'network' && x.value != 'ag' && !x.negate) return false;
+    if (x.key == null && !(urlContains(c.url, x.value) || foldText(c.method) == x.value) != x.negate) return false;
   }
   return true;
 }
@@ -156,6 +189,145 @@ class _LogsViewState extends State<LogsView> {
     }
   }
 
+  void _clearAll() {
+    _search.clear();
+    setState(() {
+      _f.reset();
+      _q = const <QueryClause>[];
+    });
+  }
+
+  void _openFilters() {
+    final t = InspectorStrings.of(context);
+    showFilterSheet(
+      context,
+      title: t.logFilters,
+      onChanged: () => setState(() {}),
+      onReset: _f.reset,
+      build: (context, changed) {
+        final c = DurbunColors.of(context);
+        return <Widget>[
+          SheetSection(
+            title: t.level,
+            hint: t.levelHint,
+            children: <Widget>[
+              for (final l in kLevels.take(5))
+                DToggle(
+                  label: l == 'verbose' ? t.allLevels : t.levelAtLeast(t.levelName(l)),
+                  color: l == 'verbose' ? null : c.level(l),
+                  selected: _f.minLevel == l,
+                  onTap: () {
+                    _f.minLevel = l;
+                    changed();
+                  },
+                ),
+            ],
+          ),
+          SheetSection(
+            title: t.source,
+            children: <Widget>[
+              for (final (v, label) in <(String, String)>[('all', t.allSources), ('flutter', t.flutterSource), ('native', t.nativeSource)])
+                DToggle(
+                  label: label,
+                  selected: _f.source == v,
+                  onTap: () {
+                    _f.source = v;
+                    changed();
+                  },
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SheetSwitch(label: t.errorsOnly, hint: t.onlyErrorsHint, icon: Icons.warning_amber_rounded, value: _f.errorsOnly, onChanged: (v) {
+            _f.errorsOnly = v;
+            changed();
+          }),
+          SheetSwitch(label: t.crashes, hint: t.crashesHint, icon: Icons.bolt, value: _f.crashes, onChanged: (v) {
+            _f.crashes = v;
+            changed();
+          }),
+          SheetSwitch(label: t.events, hint: t.eventsHint, icon: Icons.auto_awesome, value: _f.events, onChanged: (v) {
+            _f.events = v;
+            changed();
+          }),
+          SheetSwitch(label: t.showRequests, hint: t.showRequestsHint, icon: Icons.swap_horiz, value: _f.network, onChanged: (v) {
+            _f.network = v;
+            changed();
+          }),
+          if (_f.hiddenTags.isNotEmpty)
+            SheetSection(
+              title: t.hiddenTagsTitle,
+              hint: t.hiddenTagsHint,
+              children: <Widget>[
+                for (final tag in _f.hiddenTags.toList()..sort())
+                  ActiveChip(label: tag, mono: true, color: c.tag(tag).$1, onRemove: () {
+                    _f.hiddenTags.remove(tag);
+                    changed();
+                  }),
+              ],
+            ),
+        ];
+      },
+    );
+  }
+
+  Future<void> _pickLevel(BuildContext anchor) async {
+    final t = InspectorStrings.of(context);
+    final c = DurbunColors.of(context);
+    final box = anchor.findRenderObject() as RenderBox?;
+    final overlay = Navigator.of(context).overlay?.context.findRenderObject() as RenderBox?;
+    if (box == null || overlay == null) return;
+    final at = box.localToGlobal(Offset(0, box.size.height + 4), ancestor: overlay);
+    final picked = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(at.dx, at.dy, overlay.size.width - at.dx, 0),
+      color: c.bgElevated,
+      items: <PopupMenuEntry<String>>[
+        for (final l in kLevels.take(5))
+          PopupMenuItem<String>(
+            value: l,
+            height: 44,
+            child: Row(children: <Widget>[
+              Container(width: 8, height: 8, decoration: BoxDecoration(color: l == 'verbose' ? c.textSubtle : c.level(l), shape: BoxShape.circle)),
+              const SizedBox(width: 10),
+              Text(l == 'verbose' ? t.allLevels : t.levelAtLeast(t.levelName(l)),
+                  style: TextStyle(fontSize: 14, color: c.text, fontWeight: _f.minLevel == l ? FontWeight.w700 : FontWeight.w400)),
+            ]),
+          ),
+      ],
+    );
+    if (picked != null) setState(() => _f.minLevel = picked);
+  }
+
+  /// Filters button, level menu, then the active filters (each with an ×)
+  /// so they are always in view, then quick toggles for the rest.
+  List<Widget> _chips(InspectorStrings t, DurbunColors c) {
+    final active = <Widget>[];
+    final quick = <Widget>[];
+    void toggle(String label, IconData icon, bool on, void Function(bool) set) => on
+        ? active.add(ActiveChip(label: label, onRemove: () => setState(() => set(false))))
+        : quick.add(DToggle(label: label, icon: icon, selected: false, onTap: () => setState(() => set(true))));
+    toggle(t.errorsOnly, Icons.warning_amber_rounded, _f.errorsOnly, (v) => _f.errorsOnly = v);
+    toggle(t.crashes, Icons.bolt, _f.crashes, (v) => _f.crashes = v);
+    toggle(t.events, Icons.auto_awesome, _f.events, (v) => _f.events = v);
+    if (_f.source != 'all') active.add(ActiveChip(label: _f.source == 'native' ? t.nativeSource : t.flutterSource, onRemove: () => setState(() => _f.source = 'all')));
+    if (!_f.network) active.add(ActiveChip(label: t.requestsHidden, onRemove: () => setState(() => _f.network = true)));
+    if (_f.hiddenTags.isNotEmpty) active.add(ActiveChip(label: t.hiddenTags(_f.hiddenTags.length), onRemove: () => setState(_f.hiddenTags.clear)));
+    return <Widget>[
+      FilterButton(count: _f.activeCount, onTap: _openFilters),
+      Builder(
+        builder: (anchor) => DToggle(
+          label: '${_f.minLevel == 'verbose' ? t.level : t.levelAtLeast(t.levelName(_f.minLevel))} ▾',
+          color: _f.minLevel == 'verbose' ? null : c.level(_f.minLevel),
+          selected: _f.minLevel != 'verbose',
+          onTap: () => _pickLevel(anchor),
+        ),
+      ),
+      ...active,
+      ...quick,
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
@@ -164,7 +336,8 @@ class _LogsViewState extends State<LogsView> {
       listenable: widget.store,
       builder: (context, _) {
         final items = buildStream(widget.store, _f, _q);
-        final free = _q.where((x) => x.key == null && !x.negate).map((x) => x.value).firstOrNull ?? '';
+        final terms = freeTerms(_q);
+        final nothing = widget.store.logs.isEmpty && widget.store.calls.isEmpty;
         return Column(
           children: <Widget>[
             Container(
@@ -172,62 +345,46 @@ class _LogsViewState extends State<LogsView> {
               padding: const EdgeInsets.fromLTRB(10, 8, 6, 0),
               child: Row(
                 children: <Widget>[
-                  Expanded(child: DSearchField(hint: t.logSearchHint, controller: _search, onChanged: _setQuery)),
+                  Expanded(
+                    child: DSearchField(
+                      hint: t.logSearchHint,
+                      controller: _search,
+                      onChanged: _setQuery,
+                      onHelp: () => showQueryHelp(context,
+                          hints: <QueryHint>[for (final (k, v) in t.logQueryHints) QueryHint(k, v)], controller: _search, onChanged: _setQuery),
+                    ),
+                  ),
                   DIconButton(
                     icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
                     tooltip: _paused ? t.resume : t.pause,
                     active: _paused,
+                    size: 38,
                     onTap: () => setState(() => _paused = !_paused),
                   ),
                 ],
               ),
             ),
-            Container(
-              color: c.bgPanel,
-              height: 44,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                children: <Widget>[
-                  _LevelToggles(levels: _f.levels, onChanged: () => setState(() {})),
-                  const SizedBox(width: 8),
-                  for (final (label, icon, get, set) in <(String, IconData, bool Function(), void Function(bool))>[
-                    (t.errorsOnly, Icons.warning_amber_rounded, () => _f.errorsOnly, (v) => _f.errorsOnly = v),
-                    (t.crashes, Icons.bolt, () => _f.crashes, (v) => _f.crashes = v),
-                    (t.network, Icons.swap_horiz, () => _f.network, (v) => _f.network = v),
-                    (t.events, Icons.auto_awesome, () => _f.events, (v) => _f.events = v),
-                    ('Flutter', Icons.flutter_dash, () => _f.flutterOnly, (v) => _f.flutterOnly = v),
-                    (t.native, Icons.memory, () => _f.nativeOnly, (v) => _f.nativeOnly = v),
-                  ]) ...<Widget>[
-                    DToggle(label: label, icon: icon, selected: get(), onTap: () => setState(() => set(!get()))),
-                    const SizedBox(width: 4),
-                  ],
-                  if (_f.hiddenTags.isNotEmpty)
-                    DToggle(
-                      label: t.hiddenTags(_f.hiddenTags.length),
-                      icon: Icons.visibility_off_outlined,
-                      selected: true,
-                      onTap: () => setState(_f.hiddenTags.clear),
-                    ),
-                ],
-              ),
-            ),
+            FilterRow(children: _chips(t, c)),
             Divider(height: 1, color: c.border),
             Expanded(
               child: items.isEmpty
                   ? EmptyState(
                       icon: _f.errorsOnly || _f.crashes ? Icons.verified_outlined : Icons.notes,
-                      title: widget.store.logs.isEmpty && widget.store.calls.isEmpty ? t.noLogsTitle : t.noMatchTitle,
-                      body: widget.store.logs.isEmpty && widget.store.calls.isEmpty ? t.noLogsBody : t.noMatchBody,
+                      title: nothing ? t.noLogsTitle : t.noMatchTitle,
+                      body: nothing ? t.noLogsBody : t.noMatchBody,
+                      actionLabel: nothing ? null : t.clearFilters,
+                      onAction: nothing ? null : _clearAll,
                     )
                   : LiveList<StreamItem>(
                       items: items,
                       keyOf: (x) => x.key,
+                      seqOf: (x) => x.seq,
                       paused: _paused,
+                      filterKey: '${_f.signature}#${_search.text}',
                       newText: t.newItems,
                       itemBuilder: (context, it) => it.call != null
-                          ? _NetLogRow(call: it.call!, store: widget.store)
-                          : LogRow(item: it, query: free, onTagAction: _applyTagAction),
+                          ? _NetLogRow(call: it.call!, store: widget.store, terms: terms)
+                          : LogRow(item: it, terms: terms, onTagAction: _applyTagAction),
                     ),
             ),
             if (widget.store.droppedLogs > 0)
@@ -244,52 +401,35 @@ class _LogsViewState extends State<LogsView> {
   }
 }
 
-class _LevelToggles extends StatelessWidget {
-  const _LevelToggles({required this.levels, required this.onChanged});
-
-  final Set<String> levels;
-  final VoidCallback onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = DurbunColors.of(context);
-    return Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(color: c.bgSunken, borderRadius: BorderRadius.circular(DurbunRadius.md), border: Border.all(color: c.border)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          for (final l in kLevels.take(5))
-            GestureDetector(
-              onTap: () {
-                final on = levels.contains(l);
-                if (on) {
-                  levels.remove(l);
-                  if (l == 'error') levels.remove('fatal');
-                } else {
-                  levels.add(l);
-                  if (l == 'error') levels.add('fatal');
-                }
-                onChanged();
-              },
-              child: Container(
-                width: 24,
-                height: 22,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: levels.contains(l) ? c.level(l).withValues(alpha: 0.16) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(DurbunRadius.sm),
-                ),
-                child: Text(
-                  LevelBadge.letter(l),
-                  style: DurbunType.monoStyle(size: 11, weight: FontWeight.w700, color: levels.contains(l) ? c.level(l) : c.textSubtle, height: 1),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
+/// The start of a message for a row: a few lines, a few hundred characters.
+/// A row shows three lines; laying out a whole logged HTML page for that
+/// takes seconds on a phone.
+String rowPreview(String message, {int maxLines = 4, int maxChars = 600}) {
+  var end = message.length < maxChars ? message.length : maxChars;
+  var nl = -1;
+  for (var i = 0; i < maxLines; i++) {
+    nl = message.indexOf('\n', nl + 1);
+    if (nl < 0 || nl >= end) break;
+    if (i == maxLines - 1) end = nl;
   }
+  return end < message.length ? '${message.substring(0, end)}…' : message;
+}
+
+/// [text] in pieces of about [size] characters, cut at line ends where it
+/// can, so a long message is laid out a screen at a time.
+List<String> textChunks(String text, {int size = 2000}) {
+  final out = <String>[];
+  var at = 0;
+  while (at < text.length) {
+    var end = at + size >= text.length ? text.length : at + size;
+    if (end < text.length) {
+      final nl = text.lastIndexOf('\n', end);
+      if (nl > at) end = nl + 1;
+    }
+    out.add(text.substring(at, end));
+    at = end;
+  }
+  return out;
 }
 
 /// `{ key: value, key2: … }` preview of a log's data, one line.
@@ -313,10 +453,12 @@ String dataPreview(Object? data, {int max = 120}) {
 }
 
 class LogRow extends StatelessWidget {
-  const LogRow({super.key, required this.item, this.query = '', this.onTagAction});
+  const LogRow({super.key, required this.item, this.terms = const <String>[], this.onTagAction});
 
   final StreamItem item;
-  final String query;
+
+  /// Folded free words of the search, marked in the message.
+  final List<String> terms;
   final void Function(String action, String tag)? onTagAction;
 
   @override
@@ -331,6 +473,8 @@ class LogRow extends StatelessWidget {
       color: tint ?? Colors.transparent,
       child: InkWell(
         onTap: () async {
+          // The keyboard would come back with the search field's focus.
+          FocusManager.instance.primaryFocus?.unfocus();
           final action = await Navigator.of(context).push<(String, String)>(
             MaterialPageRoute<(String, String)>(builder: (_) => DurbunTheme.wrap(context, LogDetailPage(log: l, repeats: item.repeats))),
           );
@@ -368,7 +512,7 @@ class LogRow extends StatelessWidget {
               Text.rich(
                 TextSpan(
                   children: <InlineSpan>[
-                    highlightSpan(l.message, query, l.isEvent ? mono.copyWith(fontWeight: FontWeight.w700) : mono, c.hlMark),
+                    highlightTerms(rowPreview(l.message), terms, l.isEvent ? mono.copyWith(fontWeight: FontWeight.w700) : mono, c.hlMark),
                     if (l.data != null) TextSpan(text: '  ${dataPreview(l.data)}', style: mono.copyWith(color: c.textMuted, fontSize: 11.5)),
                   ],
                 ),
@@ -387,10 +531,11 @@ class LogRow extends StatelessWidget {
 
 /// A request inside the log stream.
 class _NetLogRow extends StatelessWidget {
-  const _NetLogRow({required this.call, required this.store});
+  const _NetLogRow({required this.call, required this.store, this.terms = const <String>[]});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
+  final List<String> terms;
 
   @override
   Widget build(BuildContext context) {
@@ -407,9 +552,12 @@ class _NetLogRow extends StatelessWidget {
     return Material(
       color: tint ?? Colors.transparent,
       child: InkWell(
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => DurbunTheme.wrap(context, CallDetailPage(call: call, store: store))),
-        ),
+        onTap: () {
+          FocusManager.instance.primaryFocus?.unfocus();
+          Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => DurbunTheme.wrap(
+                  context, CallDetailPage(call: call, store: store))));
+        },
         child: Container(
           padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
           decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.border.withValues(alpha: 0.45)))),
@@ -430,11 +578,11 @@ class _NetLogRow extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 2),
-              Text(
-                '${uri?.host ?? ''}${uri?.path ?? call.url}',
-                maxLines: 1,
+              Text.rich(
+                highlightTerms(decodeUrl(uri == null ? call.url : '${uri.host}${uri.path}'), terms,
+                    DurbunType.monoStyle(size: 12, color: c.textMuted, height: 1.3), c.hlMark),
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: DurbunType.monoStyle(size: 12, color: c.textMuted, height: 1.3),
               ),
             ],
           ),
@@ -527,10 +675,17 @@ class _LogDetailPageState extends State<LogDetailPage> {
       return ListView(padding: pad, children: <Widget>[SelectableText(prettyValue(l.data), style: DurbunType.monoStyle(color: c.text))]);
     }
     if (name == t.stack) return ListView(padding: pad, children: <Widget>[StackTraceView(stack: stack)]);
+    final msgStyle = DurbunType.monoStyle(size: 13, color: c.text, weight: l.isEvent ? FontWeight.w700 : null);
     return ListView(
       padding: pad,
       children: <Widget>[
-        SelectableText(l.message, style: DurbunType.monoStyle(size: 13, color: c.text, weight: l.isEvent ? FontWeight.w700 : null)),
+        // Said first: the end of a long message is far down the page.
+        if (l.cutChars > 0)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Callout(title: t.messageCut(l.cutChars)),
+          ),
+        for (final part in textChunks(l.message)) SelectableText(part.endsWith('\n') ? part.substring(0, part.length - 1) : part, style: msgStyle),
         if (head.isNotEmpty && head != l.message) ...<Widget>[
           const SizedBox(height: 12),
           Container(

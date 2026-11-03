@@ -7,6 +7,7 @@ library;
 import 'dart:convert';
 
 import 'store.dart';
+import 'text_match.dart';
 
 /* ───────────────────────────── filters ───────────────────────────── */
 
@@ -28,7 +29,22 @@ class NetFilters {
   bool get isEmpty =>
       methods.isEmpty && statuses.isEmpty && host == null && !errorsOnly && !slowOnly && !mockedOnly;
 
+  /// Filters away from their default (the badge on the Filters button).
+  int get activeCount =>
+      methods.length +
+      statuses.length +
+      (host != null ? 1 : 0) +
+      (errorsOnly ? 1 : 0) +
+      (slowOnly ? 1 : 0) +
+      (mockedOnly ? 1 : 0) +
+      (searchBodies ? 1 : 0);
+
+  /// Changes whenever a filter does (tells the live list to follow again).
+  String get signature =>
+      '${methods.join(',')}|${statuses.join(',')}|$host|$errorsOnly|$slowOnly|$mockedOnly|$searchBodies';
+
   void reset() {
+    searchBodies = false;
     methods.clear();
     statuses.clear();
     host = null;
@@ -118,14 +134,21 @@ List<QueryClause> parseQuery(String text) {
       t = t.substring(1);
     }
     final colon = t.indexOf(':');
-    final key = colon > 0 ? _keyAliases[t.substring(0, colon).toLowerCase()] : null;
+    final key = colon > 0 ? _keyAliases[foldText(t.substring(0, colon))] : null;
     final raw = key == null ? t : t.substring(colon + 1);
-    final value = raw.replaceAll(RegExp(r'^"|"$'), '').toLowerCase();
+    // Folded: case, ş ı ğ ü ö ç and İ never decide a match.
+    final value = foldText(raw.replaceAll(RegExp(r'^"|"$'), ''));
     if (value.isEmpty) continue;
     clauses.add(QueryClause(key, value, negate: negate));
   }
   return clauses;
 }
+
+/// The free (non-negated, key-less) words of a query, to mark in rows.
+List<String> freeTerms(List<QueryClause> clauses) => <String>[
+      for (final q in clauses)
+        if (q.key == null && !q.negate) q.value
+    ];
 
 bool _statusMatches(InspectorCall c, String v) {
   final s = c.status;
@@ -166,27 +189,27 @@ bool callMatchesQuery(InspectorCall c, List<QueryClause> clauses, {bool bodies =
       case 'status':
         hit = _statusMatches(c, q.value);
       case 'method':
-        hit = q.value.split(',').contains(c.method.toLowerCase());
+        hit = q.value.split(',').contains(foldText(c.method));
       case 'host':
-        hit = hostOf(c).toLowerCase().contains(q.value);
+        hit = foldContains(hostOf(c), q.value);
       case 'path':
-        hit = (c.uri?.path ?? c.url).toLowerCase().contains(q.value);
+        hit = urlContains(c.uri?.path ?? c.url, q.value);
       case 'source':
-        hit = c.source.toLowerCase().contains(q.value);
+        hit = foldContains(c.source, q.value);
       case 'is':
         hit = _isMatches(c, q.value);
       case 'op':
-        hit = (graphqlLabel(c)?.toLowerCase() ?? '').contains(q.value);
+        hit = foldContains(graphqlLabel(c) ?? '', q.value);
       default:
         final v = q.value;
-        hit = c.url.toLowerCase().contains(v) ||
-            c.method.toLowerCase() == v ||
+        hit = urlContains(c.url, v) ||
+            foldText(c.method) == v ||
             '${c.status ?? ''}' == v ||
-            (c.error?.toLowerCase().contains(v) ?? false) ||
-            (graphqlLabel(c)?.toLowerCase().contains(v) ?? false) ||
+            foldContains(c.error ?? '', v) ||
+            foldContains(graphqlLabel(c) ?? '', v) ||
             (bodies &&
-                ((c.requestBody?.isText == true && c.requestBody!.data.toLowerCase().contains(v)) ||
-                    (c.responseBody?.isText == true && c.responseBody!.data.toLowerCase().contains(v))));
+                ((c.requestBody?.isText == true && foldContains(c.requestBody!.data, v)) ||
+                    (c.responseBody?.isText == true && foldContains(c.responseBody!.data, v))));
     }
     if (hit == q.negate) return false;
   }

@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/body.dart' show wireBodyFromPending;
 import 'package:durbun/src/core/protocol.dart';
+import 'package:durbun/src/inspector/filter_ui.dart' show ActiveChip;
 import 'package:durbun/src/inspector/inspector.dart' show InspectorBubble;
 import 'package:durbun/src/inspector/store.dart';
 import 'package:flutter/material.dart';
@@ -120,6 +120,7 @@ void main() {
     expect(find.textContaining('api.example.com/v1/orders'), findsOneWidget, reason: 'requests are rows of the log stream');
     expect(find.text('Crash'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Errors only'));
     await tester.tap(find.text('Errors only'));
     await tester.pumpAndSettle();
     expect(find.text('Sepet açıldı'), findsNothing);
@@ -143,10 +144,16 @@ void main() {
     expect(find.text('okhttp'), findsOneWidget);
     expect(find.text('500'), findsOneWidget);
 
-    await tester.tap(find.text('GET').first);
+    await tester.tap(find.text('Filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: find.byType(BottomSheet), matching: find.text('GET')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
     expect(find.text('/charge'), findsNothing, reason: 'the method chip hides the POST');
-    await tester.tap(find.text('GET').first);
+    await tester.tap(find.widgetWithText(ActiveChip, 'GET'));
+    await tester.pumpAndSettle();
+    expect(find.text('/charge'), findsOneWidget, reason: 'the × on the active chip removes it');
     await tester.enterText(find.byType(TextField).last, 'status:5xx');
     await tester.pumpAndSettle();
     expect(find.text('/charge'), findsNothing, reason: 'status:5xx hides the pending call');

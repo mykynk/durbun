@@ -41,10 +41,56 @@ class InspectorStrings {
   String get copied => _('Kopyalandı', 'Copied');
   String get copy => _('Kopyala', 'Copy');
   String get on => _('Açık', 'On');
+  String get clearSearch => _('Aramayı temizle', 'Clear search');
+  String get queryHelp => _('Arama ifadeleri', 'Search words');
+  String get queryHelpBody => _(
+    'Düz kelime her yerde arar. Birden çok kelime birlikte aranır; başına - koymak hariç tutar. Eklemek için dokunun.',
+    'A plain word searches everywhere. Several words must all match; a leading - excludes. Tap one to add it.',
+  );
+  String get filters => _('Filtreler', 'Filters');
+  String get done => _('Tamam', 'Done');
+  String get remove => _('Kaldır', 'Remove');
+  String get clearFilters => _('Filtreleri temizle', 'Clear filters');
   String get off => _('Kapalı', 'Off');
 
   /* logs */
-  String get logSearchHint => _('Loglarda ara…  tag:  level:warn  is:crash', 'Search logs…  tag:  level:warn  is:crash');
+  String get logSearchHint => _('Mesaj, etiket ya da hata ara', 'Search messages, tags, errors');
+  String get logFilters => _('Log filtreleri', 'Log filters');
+  List<(String, String)> get logQueryHints => <(String, String)>[
+    ('tag:auth', _('Etiketi “auth” içerenler', 'Tag contains “auth”')),
+    ('level:warn', _('Uyarı ve üstü', 'Warning and above')),
+    ('is:error', _('Hatalar ve çökmeler', 'Errors and crashes')),
+    ('is:crash', _('Yalnızca çökmeler', 'Crashes only')),
+    ('is:event', _('Olaylar (Durbun.event)', 'Events (Durbun.event)')),
+    ('is:native', _('Kotlin/Swift logları', 'Kotlin/Swift logs')),
+    ('message:"token"', _('Yalnızca mesajda ara', 'Search the message only')),
+    ('-tag:analytics', _('Bu etiketi hariç tut', 'Leave this tag out')),
+    ('"tam ifade"', _('Boşluklu ifadeyi bir arada ara', 'Search a phrase with spaces')),
+  ];
+  String get level => _('Seviye', 'Level');
+  String get levelHint => _('Seçilen seviye ve üstü gösterilir.', 'The chosen level and above are shown.');
+  String get allLevels => _('Tümü', 'All');
+  String levelAtLeast(String name) => _('$name+', '$name+');
+  String levelName(String level) => switch (level) {
+    'verbose' => _('Ayrıntı', 'Verbose'),
+    'debug' => 'Debug',
+    'info' => _('Bilgi', 'Info'),
+    'warn' => _('Uyarı', 'Warning'),
+    'error' => _('Hata', 'Error'),
+    _ => _('Ölümcül', 'Fatal'),
+  };
+  String get show => _('Göster', 'Show');
+  String get allSources => _('Tümü', 'All');
+  String get flutterSource => _('Flutter (Dart)', 'Flutter (Dart)');
+  String get nativeSource => _('Native (Kotlin/Swift)', 'Native (Kotlin/Swift)');
+  String get showRequests => _('İstekleri akışta göster', 'Show requests in the stream');
+  String get showRequestsHint => _('Ağ istekleri loglarla aynı zaman sırasında görünür.', 'Requests appear between the logs, in time order.');
+  String get requestsHidden => _('İstekler gizli', 'Requests hidden');
+  String get hiddenTagsTitle => _('Gizli etiketler', 'Hidden tags');
+  String get hiddenTagsHint => _('Dokunun: yeniden gösterilir.', 'Tap one to show it again.');
+  String get onlyErrorsHint => _('Hata, ölümcül ve çökme kayıtları', 'Error, fatal and crash lines');
+  String get crashesHint => _('Yakalanmamış hatalar ve Flutter hata kutuları', 'Uncaught errors and Flutter error boxes');
+  String get eventsHint => _('Durbun.event ile gönderilenler', 'Sent with Durbun.event');
   String get errorsOnly => _('Sadece hatalar', 'Errors only');
   String get crashes => _('Çökmeler', 'Crashes');
   String get events => _('Olaylar', 'Events');
@@ -57,6 +103,10 @@ class InspectorStrings {
     'Durbun.log, print, debugPrint, Flutter errors, events and Kotlin/Swift logs stream here.',
   );
   String get event => _('Olay', 'Event');
+  String messageCut(int n) => _(
+    'Mesajın son $n karakteri telefonda tutulmadı (masaüstüne tamamı gider).',
+    'The last $n characters are not kept on the phone (the desktop gets all of it).',
+  );
   String get crash => _('Çökme', 'Crash');
   String get message => _('Mesaj', 'Message');
   String get data => _('Veri', 'Data');
@@ -68,8 +118,31 @@ class InspectorStrings {
   String hideThisTag(String tag) => _('“$tag” etiketini gizle', 'Hide “$tag”');
 
   /* network */
-  String get netSearchHint => _('İsteklerde ara…  status:4xx  method:post  host:', 'Filter requests…  status:4xx  method:post  host:');
+  String get netSearchHint => _('Endpoint, host ya da hata ara', 'Search endpoints, hosts, errors');
+  String get netFilters => _('İstek filtreleri', 'Request filters');
+  List<(String, String)> get netQueryHints => <(String, String)>[
+    ('/users', _('Yolunda “/users” geçenler (düz kelime URL’de arar)', 'Path has “/users” (a plain word searches the URL)')),
+    ('status:4xx', _('4xx yanıtlar (2xx…5xx)', '4xx responses (2xx…5xx)')),
+    ('status:>=500', _('Durum kodu 500 ve üstü', 'Status 500 and above')),
+    ('status:fail', _('Bağlantı hataları', 'Transport errors')),
+    ('method:post', _('POST istekleri (method:get,put da olur)', 'POST requests (method:get,put works too)')),
+    ('host:api', _('Host adında “api” geçenler', 'Host contains “api”')),
+    ('path:/login', _('Yalnızca yolda ara', 'Search the path only')),
+    ('is:slow', _('1 sn’den uzun sürenler', 'Took longer than 1 s')),
+    ('is:failed', _('Başarısız istekler', 'Failed requests')),
+    ('is:mocked', _('Mock ile yanıtlananlar', 'Answered by a mock')),
+    ('is:graphql', _('GraphQL istekleri', 'GraphQL requests')),
+    ('op:Login', _('GraphQL işlem adı', 'GraphQL operation name')),
+    ('source:okhttp', _('Kaynağa göre (dart, dio, okhttp, urlsession)', 'By source (dart, dio, okhttp, urlsession)')),
+    ('-host:analytics', _('Bu host’u hariç tut', 'Leave this host out')),
+  ];
   String get searchBodies => _('Gövdelerde de ara', 'Search bodies too');
+  String get searchBodiesHint => _('Arama, istek ve yanıt gövdelerinin içine de bakar.', 'The search also looks inside request and response bodies.');
+  String get inBodies => _('Gövdede ara', 'In bodies');
+  String get statusTitle => _('Durum', 'Status');
+  String get host => 'Host';
+  String get flags => _('Diğer', 'Other');
+  String get failedHint => _('4xx, 5xx ya da bağlantı hatası', '4xx, 5xx or a transport error');
   String get other => _('Diğer', 'Other');
   String get failed => _('Başarısız', 'Failed');
   String get slowOnly => _('Yavaş ≥ 1 sn', 'Slow ≥ 1 s');

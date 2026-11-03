@@ -13,12 +13,17 @@ class PrintCapture {
   PrintCapture({
     required this.mode,
     required this.sink,
+    this.local,
     this.dropFlutterErrorBoxes = false,
     this.maxPending = 500,
   });
 
   final DurbunPrintCapture mode;
   final PrintLineSink sink;
+
+  /// Gets every captured line at once, whatever [mode] decides for the
+  /// desktop (the in-app panel has no other way to see stdout).
+  final PrintLineSink? local;
 
   /// When errors are captured as `flutter-error` entries, the console copy of
   /// the error box (and "Another exception was thrown") is a duplicate.
@@ -38,6 +43,12 @@ class PrintCapture {
     if (mode == DurbunPrintCapture.never) return;
     if (dropFlutterErrorBoxes && _isErrorBoxLine(line)) return;
     final ts = nowEpochMs();
+    final l = local;
+    if (l != null) {
+      try {
+        l(line, ts);
+      } catch (_) {}
+    }
     if (mode == DurbunPrintCapture.always) {
       sink(line, ts);
       return;

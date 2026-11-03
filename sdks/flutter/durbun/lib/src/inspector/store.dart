@@ -12,6 +12,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../core/protocol.dart' show kEncodedLineKey, kPendingBodyMarker;
+import 'print_lines.dart';
+import 'text_match.dart';
 
 /// Turns a pending body marker map into a wire body map (`encoding`, `data`,
 /// `size`, `truncated`). Supplied by the IO backend (`wireBodyFromPending`).
@@ -31,7 +33,13 @@ class InspectorLog {
     this.kind,
     this.isEvent = false,
     this.native = false,
+    this.cutChars = 0,
   });
+
+  /// Longest message kept on the phone. Apps log whole response bodies (one
+  /// HTML document can be hundreds of KB on a single line); the panel keeps
+  /// the start, the desktop still gets all of it.
+  static const int maxMessageChars = 64 * 1024;
 
   final int seq;
 
@@ -53,6 +61,12 @@ class InspectorLog {
 
   /// Came from the plugin's native layer (Kotlin / Swift).
   final bool native;
+
+  /// Characters cut from the end of [message] (see [maxMessageChars]).
+  final int cutChars;
+
+  /// [message] folded for search ([foldText]), computed once.
+  late final String folded = foldText(message);
 
   bool get isError => level == 'error' || level == 'fatal' || kind == 'crash';
 
@@ -360,9 +374,54 @@ class DurbunInspectorStore extends ChangeNotifier {
     _scheduleNotify();
   }
 
+  late final PrintLineAssembler _prints = PrintLineAssembler(_addPrint);
+  int _tapMuted = 0;
+
+  /// Takes a captured `print` / `debugPrint` line straight from the app,
+  /// whether or not it is also sent to the desktop. PrettyPrinter boxes
+  /// (logger package) become one entry.
+  void ingestPrint(String line, double ts) {
+    if (_disposed) return;
+    try {
+      _prints.add(line, ts);
+    } catch (_) {}
+  }
+
+  /// Runs [send] with [ingest] ignoring what it sends: print lines reach the
+  /// panel through [ingestPrint], so their desktop copy must not count twice.
+  void withoutTap(void Function() send) {
+    _tapMuted++;
+    try {
+      send();
+    } finally {
+      _tapMuted--;
+    }
+  }
+
+  void _addPrint(PrintEntry e) {
+    if (_disposed) return;
+    _addLog(
+      InspectorLog(
+        seq: ++_seq,
+        ts: e.ts,
+        level: e.level,
+        message: _cap(e.message),
+        cutChars: _cutOf(e.message),
+        tag: e.tag,
+        error: e.stack == null && e.error == null
+            ? null
+            : <String, Object?>{
+                if (e.error != null) 'message': e.error,
+                if (e.stack != null) 'stack': e.stack,
+              },
+        kind: 'text',
+      ),
+    );
+  }
+
   /// Takes one outgoing SDK message. Never throws, never mutates [message].
   void ingest(Map<String, Object?> message) {
-    if (_disposed) return;
+    if (_disposed || _tapMuted > 0) return;
     try {
       final encoded = message[kEncodedLineKey];
       if (encoded is String) {
@@ -384,7 +443,8 @@ class DurbunInspectorStore extends ChangeNotifier {
             seq: ++_seq,
             ts: _num(m['ts']) ?? _now(),
             level: m['level'] is String ? m['level'] as String : 'info',
-            message: m['message'] is String ? m['message'] as String : '',
+            message: _cap(m['message'] is String ? m['message'] as String : ''),
+            cutChars: _cutOf(m['message']),
             tag: m['tag'] as String?,
             data: m['data'],
             error: _map(m['error']),
@@ -562,11 +622,20 @@ class DurbunInspectorStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _prints.dispose();
     _notifyTimer?.cancel();
     _notifyTimer = null;
     if (identical(_instance, this)) _instance = null;
     super.dispose();
   }
+
+  static String _cap(String m) => m.length <= InspectorLog.maxMessageChars
+      ? m
+      : m.substring(0, InspectorLog.maxMessageChars);
+
+  static int _cutOf(Object? m) => m is String && m.length > InspectorLog.maxMessageChars
+      ? m.length - InspectorLog.maxMessageChars
+      : 0;
 
   static double _now() => DateTime.now().microsecondsSinceEpoch / 1000.0;
 

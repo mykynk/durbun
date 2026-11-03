@@ -102,11 +102,18 @@ class IoDurbunBackend implements DurbunBackend {
         );
       });
       client.runInternal(() {
+        final store =
+            options.inspector ? DurbunInspectorStore.instance : null;
+        void send(String line, double ts) =>
+            client.log(DurbunLogLevel.info, line, tag: 'flutter', ts: ts);
         final capture = _printCapture = PrintCapture(
           mode: options.capturePrint,
           dropFlutterErrorBoxes: options.captureErrors,
-          sink: (line, ts) =>
-              client.log(DurbunLogLevel.info, line, tag: 'flutter', ts: ts),
+          // The panel takes every line locally; the desktop copy is unchanged.
+          local: store?.ingestPrint,
+          sink: store == null
+              ? send
+              : (line, ts) => store.withoutTap(() => send(line, ts)),
         );
         client.addConfigListener(capture.onConfig);
         if (client.configKnown) capture.onConfig(client.config);

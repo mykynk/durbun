@@ -6,6 +6,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'filter_ui.dart';
 import 'format.dart';
 import 'json_tree.dart';
 import 'live_list.dart';
@@ -13,6 +14,7 @@ import 'network_model.dart';
 import 'replay.dart';
 import 'store.dart';
 import 'strings.dart';
+import 'text_match.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -27,11 +29,152 @@ class NetworkView extends StatefulWidget {
 
 class _NetworkViewState extends State<NetworkView> {
   final NetFilters _filters = NetFilters();
+  final TextEditingController _search = TextEditingController();
   List<QueryClause> _clauses = const <QueryClause>[];
 
   bool _matches(InspectorCall c) =>
       callMatchesFilters(c, _filters) &&
       callMatchesQuery(c, _clauses, bodies: _filters.searchBodies);
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _setQuery(String v) => setState(() => _clauses = parseQuery(v));
+
+  void _clearAll() {
+    _search.clear();
+    setState(() {
+      _filters.reset();
+      _clauses = const <QueryClause>[];
+    });
+  }
+
+  Color _statusColor(DurbunColors c, String s) => switch (s) {
+        '2xx' => c.st2xx,
+        '3xx' => c.st3xx,
+        '4xx' => c.st4xx,
+        _ => c.st5xx,
+      };
+
+  void _openFilters(List<String> hosts) {
+    final t = InspectorStrings.of(context);
+    void flip(Set<String> s, String v) => s.contains(v) ? s.remove(v) : s.add(v);
+    showFilterSheet(
+      context,
+      title: t.netFilters,
+      onChanged: () => setState(() {}),
+      onReset: _filters.reset,
+      build: (context, changed) {
+        final c = DurbunColors.of(context);
+        return <Widget>[
+          SheetSection(
+            title: t.method,
+            children: <Widget>[
+              for (final m in kMethodChips)
+                DToggle(
+                  label: m == 'OTHER' ? t.other : m,
+                  mono: m != 'OTHER',
+                  color: m == 'OTHER' ? null : c.method(m),
+                  selected: _filters.methods.contains(m),
+                  onTap: () {
+                    flip(_filters.methods, m);
+                    changed();
+                  },
+                ),
+            ],
+          ),
+          SheetSection(
+            title: t.statusTitle,
+            children: <Widget>[
+              for (final st in kStatusClasses)
+                DToggle(
+                  label: st == 'fail' ? t.failed : st,
+                  mono: st != 'fail',
+                  color: _statusColor(c, st),
+                  selected: _filters.statuses.contains(st),
+                  onTap: () {
+                    flip(_filters.statuses, st);
+                    changed();
+                  },
+                ),
+            ],
+          ),
+          if (hosts.isNotEmpty)
+            SheetSection(
+              title: t.host,
+              children: <Widget>[
+                DToggle(
+                  label: t.allHosts,
+                  selected: _filters.host == null,
+                  onTap: () {
+                    _filters.host = null;
+                    changed();
+                  },
+                ),
+                for (final h in hosts)
+                  DToggle(
+                    label: h,
+                    mono: true,
+                    selected: _filters.host == h,
+                    onTap: () {
+                      _filters.host = _filters.host == h ? null : h;
+                      changed();
+                    },
+                  ),
+              ],
+            ),
+          const SizedBox(height: 8),
+          SheetSwitch(label: t.errorsOnly, hint: t.failedHint, icon: Icons.warning_amber_rounded, value: _filters.errorsOnly, onChanged: (v) {
+            _filters.errorsOnly = v;
+            changed();
+          }),
+          SheetSwitch(label: t.slowOnly, icon: Icons.schedule, value: _filters.slowOnly, onChanged: (v) {
+            _filters.slowOnly = v;
+            changed();
+          }),
+          SheetSwitch(label: t.mockedOnly, icon: Icons.theater_comedy_outlined, value: _filters.mockedOnly, onChanged: (v) {
+            _filters.mockedOnly = v;
+            changed();
+          }),
+          SheetSwitch(label: t.searchBodies, hint: t.searchBodiesHint, icon: Icons.data_object, value: _filters.searchBodies, onChanged: (v) {
+            _filters.searchBodies = v;
+            changed();
+          }),
+        ];
+      },
+    );
+  }
+
+  /// Filters button, then the active filters (each with an ×) so they are
+  /// always in view, then quick toggles for the common ones.
+  List<Widget> _chips(InspectorStrings t, DurbunColors c, List<String> hosts) {
+    final f = _filters;
+    final active = <Widget>[
+      for (final m in f.methods)
+        ActiveChip(label: m == 'OTHER' ? t.other : m, mono: m != 'OTHER', color: m == 'OTHER' ? null : c.method(m), onRemove: () => setState(() => f.methods.remove(m))),
+      for (final st in f.statuses)
+        ActiveChip(label: st == 'fail' ? t.failed : st, mono: st != 'fail', color: _statusColor(c, st), onRemove: () => setState(() => f.statuses.remove(st))),
+      if (f.host != null) ActiveChip(label: f.host!, mono: true, onRemove: () => setState(() => f.host = null)),
+      if (f.errorsOnly) ActiveChip(label: t.errorsOnly, onRemove: () => setState(() => f.errorsOnly = false)),
+      if (f.slowOnly) ActiveChip(label: t.slowOnly, onRemove: () => setState(() => f.slowOnly = false)),
+      if (f.mockedOnly) ActiveChip(label: t.mockedOnly, onRemove: () => setState(() => f.mockedOnly = false)),
+      if (f.searchBodies) ActiveChip(label: t.inBodies, onRemove: () => setState(() => f.searchBodies = false)),
+    ];
+    final quick = <Widget>[
+      if (!f.errorsOnly) DToggle(label: t.errorsOnly, icon: Icons.warning_amber_rounded, selected: false, onTap: () => setState(() => f.errorsOnly = true)),
+      if (!f.slowOnly) DToggle(label: t.slowOnly, icon: Icons.schedule, selected: false, onTap: () => setState(() => f.slowOnly = true)),
+      for (final st in const <String>['4xx', '5xx'])
+        if (!f.statuses.contains(st)) DToggle(label: st, mono: true, color: _statusColor(c, st), selected: false, onTap: () => setState(() => f.statuses.add(st))),
+    ];
+    return <Widget>[
+      FilterButton(count: f.activeCount, onTap: () => _openFilters(hosts)),
+      ...active,
+      ...quick,
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +185,9 @@ class _NetworkViewState extends State<NetworkView> {
       builder: (context, _) {
         final all = widget.store.calls;
         final shown = all.where(_matches).toList();
-        final hosts = <String>{for (final x in all) hostOf(x)}..remove('');
+        final hosts = (<String>{for (final x in all) hostOf(x)}..remove('')).toList()..sort();
+        final terms = freeTerms(_clauses);
+        final filtered = _filters.activeCount > 0 || _clauses.isNotEmpty;
         return Column(
           children: <Widget>[
             Container(
@@ -53,31 +198,19 @@ class _NetworkViewState extends State<NetworkView> {
                   Expanded(
                     child: DSearchField(
                       hint: t.netSearchHint,
-                      onChanged: (v) => setState(() {
-                        _clauses = parseQuery(v);
-                      }),
-                      trailing: DIconButton(
-                        icon: Icons.manage_search,
-                        tooltip: t.searchBodies,
-                        size: 28,
-                        active: _filters.searchBodies,
-                        onTap: () => setState(() =>
-                            _filters.searchBodies = !_filters.searchBodies),
-                      ),
+                      controller: _search,
+                      onChanged: _setQuery,
+                      onHelp: () => showQueryHelp(context,
+                          hints: <QueryHint>[for (final (k, v) in t.netQueryHints) QueryHint(k, v)], controller: _search, onChanged: _setQuery),
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  Text('${shown.length}',
-                      style:
-                          DurbunType.monoStyle(size: 12, color: c.textSubtle)),
+                  const SizedBox(width: 8),
+                  Text(filtered ? '${shown.length}/${all.length}' : '${all.length}',
+                      style: DurbunType.monoStyle(size: 12, color: c.textSubtle)),
                 ],
               ),
             ),
-            _FilterBar(
-              filters: _filters,
-              hosts: hosts.toList()..sort(),
-              onChanged: () => setState(() {}),
-            ),
+            FilterRow(children: _chips(t, c, hosts)),
             Divider(height: 1, color: c.border),
             Expanded(
               child: shown.isEmpty
@@ -85,163 +218,28 @@ class _NetworkViewState extends State<NetworkView> {
                       icon: Icons.swap_horiz,
                       title: all.isEmpty ? t.noRequestsTitle : t.noMatchTitle,
                       body: all.isEmpty ? t.noRequestsBody : t.noMatchBody,
+                      actionLabel: all.isEmpty ? null : t.clearFilters,
+                      onAction: all.isEmpty ? null : _clearAll,
                     )
                   : LiveList<InspectorCall>(
                       items: shown,
                       keyOf: (x) => x.key,
+                      seqOf: (x) => x.seq,
+                      filterKey: '${_filters.signature}#${_search.text}',
                       newText: t.newItems,
-                      itemBuilder: (context, call) => CallRow(
-                          call: call, store: widget.store, query: _freeText()),
+                      itemBuilder: (context, call) => CallRow(call: call, store: widget.store, terms: terms),
                     ),
             ),
             if (widget.store.droppedCalls > 0)
               Container(
                 width: double.infinity,
                 color: c.bgPanel,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                child: Text(t.dropped(widget.store.droppedCalls),
-                    style: TextStyle(fontSize: 11, color: c.textMeta)),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                child: Text(t.dropped(widget.store.droppedCalls), style: TextStyle(fontSize: 11, color: c.textMeta)),
               ),
           ],
         );
       },
-    );
-  }
-
-  String _freeText() =>
-      _clauses
-          .where((q) => q.key == null && !q.negate)
-          .map((q) => q.value)
-          .firstOrNull ??
-      '';
-}
-
-class _FilterBar extends StatelessWidget {
-  const _FilterBar(
-      {required this.filters, required this.hosts, required this.onChanged});
-
-  final NetFilters filters;
-  final List<String> hosts;
-  final VoidCallback onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = InspectorStrings.of(context);
-    final c = DurbunColors.of(context);
-    Widget gap() => const SizedBox(width: 4);
-    Widget sep() => Container(
-        width: 1,
-        height: 18,
-        margin: const EdgeInsets.symmetric(horizontal: 6),
-        color: c.border);
-    void flip(Set<String> s, String v) {
-      s.contains(v) ? s.remove(v) : s.add(v);
-      onChanged();
-    }
-
-    return Container(
-      color: c.bgPanel,
-      height: 44,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        children: <Widget>[
-          for (final m in kMethodChips) ...<Widget>[
-            DToggle(
-              label: m == 'OTHER' ? t.other : m,
-              mono: m != 'OTHER',
-              color: m == 'OTHER' ? null : c.method(m),
-              selected: filters.methods.contains(m),
-              onTap: () => flip(filters.methods, m),
-            ),
-            gap(),
-          ],
-          sep(),
-          for (final s in kStatusClasses) ...<Widget>[
-            DToggle(
-              label: s == 'fail' ? t.failed : s,
-              mono: s != 'fail',
-              color: switch (s) {
-                '2xx' => c.st2xx,
-                '3xx' => c.st3xx,
-                '4xx' => c.st4xx,
-                _ => c.st5xx,
-              },
-              selected: filters.statuses.contains(s),
-              onTap: () => flip(filters.statuses, s),
-            ),
-            gap(),
-          ],
-          sep(),
-          DToggle(
-            label: t.errorsOnly,
-            icon: Icons.warning_amber_rounded,
-            selected: filters.errorsOnly,
-            onTap: () {
-              filters.errorsOnly = !filters.errorsOnly;
-              onChanged();
-            },
-          ),
-          gap(),
-          DToggle(
-            label: t.slowOnly,
-            icon: Icons.schedule,
-            selected: filters.slowOnly,
-            onTap: () {
-              filters.slowOnly = !filters.slowOnly;
-              onChanged();
-            },
-          ),
-          gap(),
-          DToggle(
-            label: t.mockedOnly,
-            icon: Icons.theater_comedy_outlined,
-            selected: filters.mockedOnly,
-            onTap: () {
-              filters.mockedOnly = !filters.mockedOnly;
-              onChanged();
-            },
-          ),
-          gap(),
-          PopupMenuButton<String?>(
-            tooltip: t.allHosts,
-            onSelected: (h) {
-              filters.host = h == '' ? null : h;
-              onChanged();
-            },
-            itemBuilder: (_) => <PopupMenuEntry<String?>>[
-              PopupMenuItem<String?>(value: '', child: Text(t.allHosts)),
-              for (final h in hosts)
-                PopupMenuItem<String?>(
-                    value: h,
-                    child: Text(h,
-                        style:
-                            DurbunType.monoStyle(size: 12.5, color: c.text))),
-            ],
-            child: IgnorePointer(
-              child: DToggle(
-                label: filters.host ?? t.allHosts,
-                icon: Icons.dns_outlined,
-                selected: filters.host != null,
-                onTap: () {},
-              ),
-            ),
-          ),
-          if (!filters.isEmpty) ...<Widget>[
-            gap(),
-            DToggle(
-              label: t.resetFilters,
-              icon: Icons.filter_alt_off_outlined,
-              selected: false,
-              onTap: () {
-                filters.reset();
-                onChanged();
-              },
-            ),
-          ],
-        ],
-      ),
     );
   }
 }
@@ -249,19 +247,25 @@ class _FilterBar extends StatelessWidget {
 /// One request: status · method · path (+ badges) over host · source · size · time.
 class CallRow extends StatelessWidget {
   const CallRow(
-      {super.key, required this.call, required this.store, this.query = ''});
+      {super.key,
+      required this.call,
+      required this.store,
+      this.terms = const <String>[]});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
-  final String query;
+
+  /// Folded free words of the search, marked in the path.
+  final List<String> terms;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     final uri = call.uri;
-    final path = uri == null ? call.url : (uri.path.isEmpty ? '/' : uri.path);
-    final q = uri != null && uri.hasQuery ? '?${uri.query}' : '';
+    final path = decodeUrl(
+        uri == null ? call.url : (uri.path.isEmpty ? '/' : uri.path));
+    final q = uri != null && uri.hasQuery ? decodeUrl('?${uri.query}') : '';
     final failed = call.error != null && !call.cancelled;
     final statusText = call.error != null
         ? (call.cancelled ? t.cancelledShort : 'FAIL')
@@ -288,11 +292,12 @@ class CallRow extends StatelessWidget {
     return Material(
       color: tint ?? Colors.transparent,
       child: InkWell(
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(
+        onTap: () {
+          FocusManager.instance.primaryFocus?.unfocus();
+          Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (_) => DurbunTheme.wrap(
-                  context, CallDetailPage(call: call, store: store))),
-        ),
+                  context, CallDetailPage(call: call, store: store))));
+        },
         child: Container(
           padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
           decoration: BoxDecoration(
@@ -325,13 +330,14 @@ class CallRow extends StatelessWidget {
                     child: Text.rich(
                       TextSpan(
                         children: <InlineSpan>[
-                          highlightSpan(path, query, mono, c.hlMark),
+                          highlightTerms(path, terms, mono, c.hlMark),
                           if (q.isNotEmpty)
-                            highlightSpan(q, query,
+                            highlightTerms(q, terms,
                                 mono.copyWith(color: c.textSubtle), c.hlMark),
                         ],
                       ),
-                      maxLines: 1,
+                      // Two lines, so a match deep in a long path is seen.
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -347,9 +353,17 @@ class CallRow extends StatelessWidget {
                       runSpacing: 3,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: <Widget>[
-                        Text(uri?.host ?? '',
-                            style: DurbunType.monoStyle(
-                                size: 11, color: c.textMeta, height: 1.3)),
+                        // One line: a host broken mid-word is hard to read.
+                        Text.rich(
+                            highlightTerms(
+                                uri?.host ?? '',
+                                terms,
+                                DurbunType.monoStyle(
+                                    size: 11, color: c.textMeta, height: 1.3),
+                                c.hlMark),
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.ellipsis),
                         _SourceBadge(call),
                         if (gql != null)
                           DBadge(gql, tone: BadgeTone.warning, mono: true),

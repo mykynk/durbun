@@ -4,6 +4,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'strings.dart';
+import 'text_match.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -53,9 +54,9 @@ List<JsonLine> flattenJson(
 /// Paths of every container whose subtree has a key or value containing [q].
 Set<String> pathsToMatches(Object? root, String q) {
   final hits = <String>{};
-  final needle = q.toLowerCase();
+  final needle = foldText(q);
   bool walk(Object? v, String path, String? key) {
-    var hit = key != null && key.toLowerCase().contains(needle);
+    var hit = key != null && foldText(key).contains(needle);
     if (v is Map) {
       for (final e in v.entries) {
         if (walk(e.value, '$path.${e.key}', '${e.key}')) hit = true;
@@ -64,7 +65,7 @@ Set<String> pathsToMatches(Object? root, String q) {
       for (var i = 0; i < v.length; i++) {
         if (walk(v[i], '$path[$i]', null)) hit = true;
       }
-    } else if ('$v'.toLowerCase().contains(needle)) {
+    } else if (foldText('$v').contains(needle)) {
       hit = true;
     }
     if (hit && (v is Map || v is List)) hits.add(path);

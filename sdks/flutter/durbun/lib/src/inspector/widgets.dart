@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'strings.dart';
+import 'text_match.dart';
 import 'theme.dart';
 
 /// Copies [text] and confirms with a short toast.
@@ -175,10 +176,11 @@ class DToggle extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(DurbunRadius.md),
         onTap: onTap,
+        // No alignment: an aligned Container would stretch to the full width
+        // inside a Wrap (the filter sheet).
         child: Container(
           height: 28,
           padding: const EdgeInsets.symmetric(horizontal: 9),
-          alignment: Alignment.center,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -186,7 +188,12 @@ class DToggle extends StatelessWidget {
                 Icon(icon, size: 14, color: fg),
                 const SizedBox(width: 4)
               ],
-              Text(label, style: style),
+              // Shrinks with an ellipsis when wider than the screen (large text).
+              Flexible(
+                  child: Text(label,
+                      style: style,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis)),
             ],
           ),
         ),
@@ -195,25 +202,46 @@ class DToggle extends StatelessWidget {
   }
 }
 
-/// The search / query field of the toolbars.
-class DSearchField extends StatelessWidget {
+/// The search / query field of the toolbars: a clear button while there is
+/// text, and an optional help button that lists the query words.
+class DSearchField extends StatefulWidget {
   const DSearchField(
       {super.key,
       required this.hint,
       required this.onChanged,
       this.controller,
-      this.trailing});
+      this.trailing,
+      this.onHelp});
 
   final String hint;
   final ValueChanged<String> onChanged;
   final TextEditingController? controller;
   final Widget? trailing;
+  final VoidCallback? onHelp;
+
+  @override
+  State<DSearchField> createState() => _DSearchFieldState();
+}
+
+class _DSearchFieldState extends State<DSearchField> {
+  TextEditingController? _own;
+
+  TextEditingController get _controller =>
+      widget.controller ?? (_own ??= TextEditingController());
+
+  @override
+  void dispose() {
+    _own?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    final controller = _controller;
     return Container(
-      height: 36,
+      height: 38,
       decoration: BoxDecoration(
         color: c.inputBg,
         borderRadius: BorderRadius.circular(DurbunRadius.md),
@@ -227,31 +255,51 @@ class DSearchField extends StatelessWidget {
           Expanded(
             child: TextField(
               controller: controller,
-              onChanged: onChanged,
+              onChanged: widget.onChanged,
               autocorrect: false,
               enableSuggestions: false,
+              textInputAction: TextInputAction.search,
               style:
                   DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.2),
               cursorColor: c.accent,
               decoration: InputDecoration(
                 isDense: true,
                 border: InputBorder.none,
-                hintText: hint,
+                hintText: widget.hint,
                 hintMaxLines: 1,
-                hintStyle: DurbunType.monoStyle(
-                    size: 12.5, color: c.textSubtle, height: 1.2),
+                hintStyle: TextStyle(
+                    fontSize: 13, color: c.textSubtle, height: 1.2),
               ),
             ),
           ),
-          if (trailing != null) trailing!,
-          const SizedBox(width: 4),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (context, v, _) => v.text.isEmpty
+                ? const SizedBox.shrink()
+                : DIconButton(
+                    icon: Icons.close_rounded,
+                    tooltip: t.clearSearch,
+                    size: 32,
+                    onTap: () {
+                      controller.clear();
+                      widget.onChanged('');
+                    },
+                  ),
+          ),
+          if (widget.onHelp != null)
+            DIconButton(
+                icon: Icons.help_outline_rounded,
+                tooltip: t.queryHelp,
+                size: 32,
+                onTap: widget.onHelp),
+          if (widget.trailing != null) widget.trailing!,
+          const SizedBox(width: 3),
         ],
       ),
     );
   }
 }
 
-/// Square icon button with a tooltip.
 class DIconButton extends StatelessWidget {
   const DIconButton(
       {super.key,
@@ -303,13 +351,18 @@ class DButton extends StatelessWidget {
       required this.onTap,
       this.icon,
       this.primary = false,
-      this.trailingIcon});
+      this.trailingIcon,
+      this.large = false});
 
   final String label;
   final VoidCallback? onTap;
   final IconData? icon;
   final IconData? trailingIcon;
   final bool primary;
+
+  /// Taller, with the label centred in the given width (a sheet's main
+  /// button).
+  final bool large;
 
   @override
   Widget build(BuildContext context) {
@@ -325,10 +378,11 @@ class DButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(DurbunRadius.md),
         onTap: onTap,
         child: Container(
-          height: 30,
+          height: large ? 44 : 30,
           padding: const EdgeInsets.symmetric(horizontal: 10),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: large ? MainAxisSize.max : MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
               if (icon != null) ...<Widget>[
                 Icon(icon, size: 15, color: fg),
@@ -336,7 +390,9 @@ class DButton extends StatelessWidget {
               ],
               Text(label,
                   style: TextStyle(
-                      fontSize: 12.5, color: fg, fontWeight: FontWeight.w500)),
+                      fontSize: large ? 14.5 : 12.5,
+                      color: fg,
+                      fontWeight: large ? FontWeight.w600 : FontWeight.w500)),
               if (trailingIcon != null) ...<Widget>[
                 const SizedBox(width: 4),
                 Icon(trailingIcon, size: 15, color: c.textMuted)
@@ -598,11 +654,20 @@ class Callout extends StatelessWidget {
 /// Centered empty state with an icon, a title and a hint.
 class EmptyState extends StatelessWidget {
   const EmptyState(
-      {super.key, required this.icon, required this.title, this.body});
+      {super.key,
+      required this.icon,
+      required this.title,
+      this.body,
+      this.actionLabel,
+      this.onAction});
 
   final IconData icon;
   final String title;
   final String? body;
+
+  /// A button under the text (for example "Clear filters").
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -640,6 +705,13 @@ class EmptyState extends StatelessWidget {
                     Text(body!,
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 12.5, color: c.textMuted)),
+                  ],
+                  if (actionLabel != null && onAction != null) ...<Widget>[
+                    const SizedBox(height: 14),
+                    DButton(
+                        label: actionLabel!,
+                        icon: Icons.filter_alt_off_outlined,
+                        onTap: onAction),
                   ],
                 ],
               ),
@@ -717,21 +789,5 @@ class SectionTitle extends StatelessWidget {
 }
 
 /// Text with every case-insensitive occurrence of [query] highlighted.
-TextSpan highlightSpan(String text, String query, TextStyle style, Color mark) {
-  if (query.isEmpty) return TextSpan(text: text, style: style);
-  final lower = text.toLowerCase();
-  final q = query.toLowerCase();
-  final spans = <TextSpan>[];
-  var at = 0;
-  while (true) {
-    final i = lower.indexOf(q, at);
-    if (i < 0) break;
-    if (i > at) spans.add(TextSpan(text: text.substring(at, i)));
-    spans.add(TextSpan(
-        text: text.substring(i, i + q.length),
-        style: TextStyle(backgroundColor: mark)));
-    at = i + q.length;
-  }
-  if (at < text.length) spans.add(TextSpan(text: text.substring(at)));
-  return TextSpan(style: style, children: spans);
-}
+TextSpan highlightSpan(String text, String query, TextStyle style, Color mark) =>
+    highlightTerms(text, query.isEmpty ? const <String>[] : <String>[foldText(query)], style, mark);

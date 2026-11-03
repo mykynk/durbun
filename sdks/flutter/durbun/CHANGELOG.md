@@ -1,5 +1,16 @@
 ## Unreleased (phase 3)
 
+- In-app panel fixes from a device run: `print` / `debugPrint` lines reach
+  the panel locally (they were dropped when the desktop read logcat, or held
+  while no desktop connected); logger PrettyPrinter boxes are one entry with
+  the level from the emoji and the tag from `[Tag]`; filters and search apply
+  while the list is frozen (scrolled up or paused); search ignores case,
+  Turkish letters and %-encoding and marks every word; a logged HTML page on
+  one line no longer freezes the panel (messages kept up to 64 KB on the
+  phone, rows show a preview). Toolbars: Filters sheet, removable active
+  chips first, minimum-level menu, clear button, tappable query help, "Clear
+  filters" on empty results.
+
 - The in-app panel opens by shaking the phone and draws nothing over the app by
   default (`showBubble: false`, `openOnShake: true`). Android reads the
   accelerometer (Seismic-like detection, 13 m/s², 0.5 s window) and iOS uses the
