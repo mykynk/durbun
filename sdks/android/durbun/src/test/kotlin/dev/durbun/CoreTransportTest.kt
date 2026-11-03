@@ -195,6 +195,29 @@ class CoreTransportTest {
     }
 
     @Test
+    fun mockRulesEndWithTheConnectionThatPushedThem() {
+        val desktop = desktop {
+            mocks = listOf(
+                mapOf(
+                    "id" to "m1", "enabled" to true, "method" to "GET", "url" to "/users", "match" to "contains",
+                    "action" to mapOf("type" to "respond", "status" to 200), "createdAt" to 1,
+                ),
+            )
+        }
+        val core = core(desktop)
+        waitUntil { core.isConnected && core.mockRules.size == 1 }
+        // Whoever answered the hello is not authenticated: once it is gone, its rules must not stay active.
+        desktop.acceptHandshakes = false
+        desktop.dropClient()
+        waitUntil { !core.isConnected }
+        waitUntil { core.mockRules.isEmpty() } // onDisconnected runs right after the link is marked inactive
+        assertEquals(null, core.findMock("GET", "https://api.example.com/users"))
+        // The desktop's next welcome brings them back.
+        desktop.acceptHandshakes = true
+        waitUntil { core.isConnected && core.mockRules.size == 1 }
+    }
+
+    @Test
     fun appOptionsOverrideDesktopCaptureSettings() {
         val desktop = desktop()
         val core = core(desktop, DurbunOptions(captureBodies = false, maxBodyBytes = 512))

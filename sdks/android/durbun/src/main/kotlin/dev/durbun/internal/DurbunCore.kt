@@ -184,17 +184,23 @@ internal class DurbunCore(
 
     /**
      * Desktop state from the host: `{connected, via, appId, config, mocks, hello}` (JSON). Unknown or missing
-     * fields keep their previous value.
+     * fields keep their previous value, except the mock rules: they hold only while the host is connected.
      */
     fun applyHostState(stateJson: String) {
         if (host == null || stopped.get()) return
         try {
             val state = Json.parseObject(stateJson) ?: return
             state.obj("config")?.let { config = SdkConfig.from(it, config) }
-            state.list("mocks")?.let { mockRules = MockRule.listFromJson(it) }
             state.str("appId")?.let { serverAppId = it }
             val previous = hostState
             val connected = state.bool("connected") ?: previous.connected
+            // The desktop is not authenticated yet (any local peer can answer the hello), so rules pushed by a
+            // peer that went away must not keep rewriting the app's responses.
+            mockRules = if (connected) {
+                state.list("mocks")?.let { MockRule.listFromJson(it) } ?: mockRules
+            } else {
+                emptyList()
+            }
             hostState = HostState(
                 connected = connected,
                 endpoint = if (state.containsKey("via")) HostState.parseVia(state.str("via")) else previous.endpoint,
@@ -233,7 +239,8 @@ internal class DurbunCore(
 
     fun nextRequestId(): String = "okhttp-" + requestSeq.incrementAndGet()
 
-    fun findMock(method: String, url: String): MockRule? = MockMatcher.find(mockRules, method, url, env.appId)
+    fun findMock(method: String, url: String): MockRule? =
+        if (options.captureNetwork) MockMatcher.find(mockRules, method, url, env.appId) else null
 
     /* ───────────── crashes ───────────── */
 
@@ -348,6 +355,9 @@ internal class DurbunCore(
     }
 
     override fun onDisconnected(endpoint: Transport.Endpoint, reason: String) {
+        // Mock rules hold only while the peer that pushed them is connected (it is not authenticated yet).
+        // The desktop sends them again in its next welcome.
+        mockRules = emptyList()
         logger.info("Disconnected from the Dürbün desktop ($reason); reconnecting…")
         stopMetrics()
     }
@@ -537,7 +547,9 @@ internal class DurbunCore(
     }
 
     private fun capabilities(): List<String> {
-        val caps = mutableListOf("logs", "network", "mocks", "events", "commands")
+        val caps = mutableListOf("logs")
+        if (options.captureNetwork) caps += listOf("network", "mocks")
+        caps += listOf("events", "commands")
         if (options.captureCrashes) caps += "crash"
         if (options.captureMetrics && metricsSampler != null) caps += "metrics"
         return caps

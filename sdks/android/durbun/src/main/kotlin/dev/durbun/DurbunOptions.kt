@@ -36,6 +36,11 @@ data class DurbunOptions @JvmOverloads constructor(
     val captureLogcat: Boolean = true,
     /** Display name shown on the desktop; defaults to the app label. */
     val appName: String? = null,
+    /**
+     * Report OkHttp traffic through [DurbunInterceptor] and apply the desktop's mock rules. `false` makes the
+     * interceptor a plain pass-through and leaves network and mocks out of what the app announces.
+     */
+    val captureNetwork: Boolean = true,
 ) {
     companion object {
         /** Default desktop SDK port (raw TCP, newline-delimited JSON). */

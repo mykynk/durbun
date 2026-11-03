@@ -15,9 +15,10 @@ import okhttp3.Response
  *     .build()
  * ```
  *
- * Until [Durbun.start] has run (and always in release builds) it is a plain pass-through.
+ * Until [Durbun.start] has run (and always in release builds, or with [DurbunOptions.captureNetwork] off —
+ * in Flutter apps `DurbunOptions(captureNetwork: false)` on the Dart side) it is a plain pass-through.
  *
- * @param redactHeaders header names (case-insensitive) whose values are shown as `[redacted]`,
+ * @param redactHeaders header names (case-insensitive) whose values are shown as `••••`,
  *   for example `setOf("Authorization", "Cookie")`.
  */
 class DurbunInterceptor @JvmOverloads constructor(
@@ -26,7 +27,8 @@ class DurbunInterceptor @JvmOverloads constructor(
     private val capture = OkHttpCapture(redactHeaders.map { it.lowercase() }.toSet())
 
     override fun intercept(chain: Interceptor.Chain): Response {
-        val core = Durbun.coreOrNull() ?: return chain.proceed(chain.request())
+        val core = Durbun.coreOrNull()
+        if (core == null || !core.options.captureNetwork) return chain.proceed(chain.request())
         return capture.intercept(core, chain)
     }
 }

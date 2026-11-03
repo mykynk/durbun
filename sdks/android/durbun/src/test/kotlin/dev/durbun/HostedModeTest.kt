@@ -119,10 +119,32 @@ class HostedModeTest {
         assertNotNull(core.findMock("GET", "https://example.com/todos/1"))
         assertNull(core.findMock("POST", "https://example.com/todos/1"))
 
-        // Partial update: only `connected` changes, the rest is kept.
+        // Partial update: only `connected` changes. The config is kept; the mock rules end with the connection.
         core.applyHostState("""{"connected":false}""")
         assertFalse(core.isConnected)
-        assertNotNull(core.findMock("GET", "https://example.com/todos/1"))
+        assertFalse(core.captureBodies)
+        assertEquals(2048, core.maxBodyBytes)
+        assertNull(core.findMock("GET", "https://example.com/todos/1"))
+        assertTrue(core.mockRules.isEmpty())
+
+        // Rules never apply while the host is disconnected, and come back with the next connection.
+        val rules = """[{"id":"m2","enabled":true,"method":"GET","url":"/todos/","match":"contains",""" +
+            """"action":{"type":"respond","status":418,"delayMs":0}}]"""
+        core.applyHostState("""{"mocks":$rules}""")
+        assertNull(core.findMock("GET", "https://example.com/todos/1"))
+        core.applyHostState("""{"connected":true,"mocks":$rules}""")
+        assertEquals("m2", core.findMock("GET", "https://example.com/todos/1")?.id)
+    }
+
+    @Test
+    fun captureNetworkOffLeavesNetworkAndMocksOut() {
+        val core = hosted(RecordingLink(), DurbunOptions(captureMetrics = false, captureNetwork = false))
+        assertEquals(listOf("logs", "events", "commands", "crash"), core.hostedCapabilities())
+        core.applyHostState(
+            """{"connected":true,"mocks":[{"id":"m1","enabled":true,"method":"*","url":"/","match":"contains",""" +
+                """"action":{"type":"respond","status":418,"delayMs":0}}]}""",
+        )
+        assertNull(core.findMock("GET", "https://example.com/todos/1"))
     }
 
     @Test
