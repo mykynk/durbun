@@ -9,7 +9,9 @@ import dev.durbun.DurbunOptions
 import dev.durbun.internal.DurbunCore
 import dev.durbun.internal.HostLink
 import dev.durbun.internal.Json
+import dev.durbun.internal.StoreInstallGuard
 import dev.durbun.internal.android.AndroidRuntime
+import dev.durbun.internal.android.InstallSource
 import dev.durbun.internal.bool
 import dev.durbun.internal.list
 import dev.durbun.internal.num
@@ -28,6 +30,9 @@ import io.flutter.plugin.common.MethodChannel
  *    through the Dart side's single desktop connection (one app session);
  *  - the desktop state (config, mock rules) and native commands (`android.dumpThreads`, `android.gc`, the
  *    app's own `Durbun.addAction` tools) arrive from Dart.
+ *
+ * Never in store installs: a release build asks `guard` before Dart starts anything, and `start` refuses
+ * when Google Play installed the app (any track), so Dart turns everything off.
  */
 class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var channel: MethodChannel? = null
@@ -49,6 +54,7 @@ class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         try {
             when (call.method) {
+                "guard" -> result.success(guard())
                 "start" -> result.success(start(call.arguments as? String))
                 "state" -> {
                     ownCore()?.applyHostState(call.arguments as? String ?: "")
@@ -76,9 +82,37 @@ class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private fun ownCore(): DurbunCore? = synchronized(lock) { if (owner === this) hosted else null }
 
+    /**
+     * Store-install guard, asked by a release build before Dart starts anything. Without `storeInstall` in
+     * the reply (no engine) Dart stays off.
+     */
+    private fun guard(): String {
+        val ctx = context ?: return Json.encode(linkedMapOf("platform" to "android"))
+        val installer = InstallSource.installerOf(ctx)
+        return Json.encode(
+            linkedMapOf(
+                "platform" to "android",
+                "storeInstall" to StoreInstallGuard.isStoreInstaller(installer),
+                "installer" to installer,
+            ),
+        )
+    }
+
     /** Starts (or, after a hot restart, restarts) the hosted core. Returns the JSON reply for Dart. */
     private fun start(argsJson: String?): String {
         val ctx = context ?: return declined("the plugin is not attached to an engine")
+        val installer = InstallSource.installerOf(ctx)
+        if (StoreInstallGuard.isStoreInstaller(installer)) {
+            // Nothing starts; Dart disposes everything it started and prints the one line.
+            return Json.encode(
+                linkedMapOf(
+                    "attached" to false,
+                    "platform" to "android",
+                    "storeInstall" to true,
+                    "reason" to "the app was installed from the store ($installer)",
+                ),
+            )
+        }
         val args = argsJson?.let { Json.parseObject(it) } ?: emptyMap()
         val opts = args.obj("options") ?: emptyMap()
         synchronized(lock) {
@@ -99,6 +133,8 @@ class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             captureMetrics = false,
             captureLogcat = opts.str("capturePrint") != "never",
             maxBufferedMessages = opts.num("maxBufferedMessages")?.toInt() ?: DurbunOptions.DEFAULT_MAX_BUFFERED_MESSAGES,
+            // Dart's captureNetwork: false also keeps OkHttp out (no capture, no mocks, not announced).
+            captureNetwork = opts.bool("captureNetwork") ?: true,
         )
         val link = ChannelLink(this)
         val core = AndroidRuntime.startHosted(ctx, options, Durbun.pendingActions(), link, redacted)
