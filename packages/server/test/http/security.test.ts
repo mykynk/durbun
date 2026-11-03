@@ -1,9 +1,11 @@
+import os from 'node:os';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import type { IncomingMessage } from 'node:http';
 import { streamJson } from '../../src/http/jsonStream';
 import { describeFetchError, prepareReplay } from '../../src/http/replay';
-import { allowedOrigins, checkLocalAccess, isLoopbackAddress, isLoopbackHostHeader } from '../../src/http/security';
+import { hostAddresses } from '../../src/http/app';
+import { allowedOrigins, checkLocalAccess, checkSdkUpgrade, isLoopbackAddress, isLoopbackHostHeader, ownHostNames } from '../../src/http/security';
 import { contentDisposition, fileTimestamp } from '../../src/http/util';
 import { sampleNetwork } from './fakes';
 
@@ -49,6 +51,18 @@ describe('security', () => {
     for (const headers of cases) expect(checkLocalAccess(req('127.0.0.1', headers), 9750).ok, JSON.stringify(headers)).toBe(false);
     expect(isLoopbackHostHeader('durbun.localhost:9750')).toBe(true);
     expect(isLoopbackHostHeader(undefined)).toBe(true);
+  });
+});
+
+describe('/sdk pages of this Mac', () => {
+  it("knows this Mac's own addresses and host name, so a JS-SDK page on them passes whatever host it dials", () => {
+    const own = ownHostNames();
+    for (const a of hostAddresses()) expect(own.has(a), a).toBe(true);
+    const label = os.hostname().toLowerCase().split('.')[0]!;
+    expect(own.has(`${label}.local`)).toBe(true);
+    const page = (origin: string) => ({ headers: { host: 'localhost:9800', origin, 'sec-fetch-site': 'cross-site' } });
+    for (const name of [...hostAddresses(), `${label}.local`]) expect(checkSdkUpgrade(page(`http://${name}:5173`)), name).toEqual({ ok: true });
+    expect(checkSdkUpgrade(page('http://192.0.2.77:5173'))).toMatchObject({ ok: false }); // TEST-NET: never this Mac
   });
 });
 
