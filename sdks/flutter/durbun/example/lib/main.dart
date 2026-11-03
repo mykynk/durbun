@@ -43,6 +43,8 @@ class DurbunExampleApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Dürbün Example',
+      // In-app inspector: bubble + panel on the phone, with or without a Mac.
+      builder: DurbunInspector.builder,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF7C6CF2)),

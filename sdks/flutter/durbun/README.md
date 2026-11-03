@@ -71,6 +71,53 @@ Future<void> main() async {
 Bu durumda yalnızca `debugPrint` yakalanır, zone hataları `PlatformDispatcher.onError`
 üzerinden gelir.
 
+## Uygulama içi panel (Mac'siz)
+
+Telefonun kendisinde de her şeyi görmek için `MaterialApp`'e tek satır ekleyin:
+
+```dart
+MaterialApp(
+  builder: DurbunInspector.builder,   // ← bu satır
+  home: const HomePage(),
+);
+```
+
+Ekranda sürüklenebilir küçük bir balon çıkar; dokununca panel açılır. Mac'e
+bağlı olmak gerekmez, testçi telefonda kendi başına bakabilir.
+
+- **Ağ:** dart:io, `package:http`, Dio, native OkHttp ve URLSession istekleri tek
+  listede, en yenisi üstte. Durum, süre, boyut, kaynak (`dart:io` / `dio` /
+  `okhttp` / `urlsession`) ve mock rozeti görünür. Adres, metot, durum kodu
+  ile arama yapılır, "Yalnızca hatalı" filtresi vardır. Ayrıntıda başlıklar,
+  okunaklı JSON gövde, görsel önizleme, zamanlamalar, **cURL olarak kopyala** ve
+  **tümünü metin olarak kopyala** bulunur.
+- **Loglar:** `Durbun.log`, `print` / `debugPrint`, Flutter hataları, event'ler ve
+  Kotlin/Swift native logları. Seviye filtresi, arama, `data` ağacı, yığın izi
+  ve kopyalama.
+- **Hatalar:** çökmeler ve hata logları ayrı sekmede. Native çökmeler bir sonraki
+  açılışta native katmandan gelir ve burada da görünür. Balon üzerindeki kırmızı
+  rozet, panel son açıldığından beri gelen hata ve başarısız istekleri sayar.
+- **Performans:** FPS, takılan kareler, build/raster süreleri, bellek ve FPS
+  grafiği.
+- **Bilgi:** uygulama, cihaz, yakalanan katmanlar (`dart`, `android`, `ios`),
+  masaüstü bağlantısı ve etkin mock kuralları.
+
+Panel, masaüstünün aldığı mesajların aynısını gösterir. Masaüstü bağlıyken
+ikisi birlikte çalışır.
+
+Sınırlar ve ayarlar:
+
+- Telefonda yaklaşık son 2.000 log satırı, 300 istek ve toplam 24 MB gövde tutulur.
+  Sınır dolunca en eskiler silinir ve panel bunu söyler.
+- Balonu gizleyip paneli kendi debug menünüzden açabilirsiniz:
+  `DurbunInspector(showBubble: false, child: …)` ve `Durbun.showInspector()`.
+- Telefonda hiçbir şey tutulmasın istiyorsanız `DurbunOptions(inspector: false)`
+  verin.
+- Panel uygulamanın kendi navigator'ında açılır (`MaterialApp.builder` içinde
+  bulunur). Başka bir navigator için `DurbunInspector(navigatorKey: …)` verin.
+- Dürbün'ün kapalı olduğu derlemelerde (`DURBUN=false`, ya da define verilmemiş
+  bir release) balon görünmez, widget yalnızca uygulamayı çizer.
+
 ## Release, Firebase ve mağaza derlemeleri
 
 Bir derlemenin Dürbün'ü çalıştırıp çalıştırmayacağına proje karar verir; mağaza
@@ -264,6 +311,7 @@ dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı sat�
 | `waitForDesktop` | `0` | `run` uygulamayı başlatmadan önce bu kadar bekler (açılıştaki isteklere mock uygulansın diye) |
 | `listenForUsb` | `true` | iOS cihazda usbmux dinleyicisi |
 | `useBackgroundIsolate` | `true` | taşıma katmanı arka plan isolate'ta |
+| `inspector` | `true` | uygulama içi panel için son logları, istekleri ve ölçümleri telefonda tutar (`DurbunInspector`) |
 
 ## Sınırlar
 
@@ -361,6 +409,37 @@ Without a zone: `Future<void> main() async { await Durbun.init(); runApp(const M
 `Durbun.connection` (stream), `Durbun.addAction(DurbunAction.button/toggle/select)`.
 Native logs: Kotlin `Durbun.i("tag", "message", data = …)` (`dev.durbun.Durbun`),
 Swift `Durbun.info("message", tag: "tag")` (`import durbun`).
+
+## In-app inspector (no Mac needed)
+
+One line in `MaterialApp` puts a draggable bubble on the screen. Tapping it opens
+a panel on the phone itself:
+
+```dart
+MaterialApp(builder: DurbunInspector.builder, home: const HomePage());
+```
+
+- **Network:** dart:io, `package:http`, Dio, native OkHttp and URLSession in one
+  list. It shows status, duration, size, source and mocks, with search and a
+  failures-only filter. The detail has headers, pretty JSON, image preview,
+  timings, copy as cURL and copy all.
+- **Logs:** `Durbun.log`, `print`, Flutter errors, events and native logs, with a
+  level filter, search, the data tree and stack traces.
+- **Errors:** crashes and error logs. The bubble's red badge counts errors and
+  failed requests that arrived since the panel was last opened.
+- **Performance:** FPS, janky frames, build/raster times, memory and an FPS chart.
+- **Info:** app, device, captured layers, desktop connection and active mocks.
+
+The panel shows the same messages the desktop receives. On the phone it keeps
+about 2,000 log lines, 300 requests and 24 MB of bodies, and says when the
+oldest entries were removed.
+
+Options:
+
+- `DurbunInspector(showBubble: false, …)` together with `Durbun.showInspector()`
+  opens it from your own debug menu.
+- `DurbunOptions(inspector: false)` keeps nothing on the device.
+- In builds where Dürbün is off, only the app is drawn.
 
 ## Release, Firebase and store builds
 

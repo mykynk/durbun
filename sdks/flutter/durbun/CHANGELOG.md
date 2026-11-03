@@ -1,5 +1,14 @@
 ## Unreleased (phase 3)
 
+- In-app inspector: `MaterialApp(builder: DurbunInspector.builder)` adds a
+  draggable bubble and a panel on the phone. The panel has network (dart:io,
+  Dio, OkHttp, URLSession, with cURL, pretty JSON and image preview), logs,
+  errors, performance and info tabs, and works without the desktop. It is fed
+  by every outgoing SDK message (`DurbunClient.outgoingTap`), native-encoded
+  lines included. The store is bounded (2,000 logs, 300 requests, 24 MB of
+  bodies). Pending bodies are decoded only when viewed.
+  `DurbunOptions.inspector` (default `true`) and `Durbun.showInspector()`.
+
 - `durbun` is now a Flutter plugin (Android `dev.durbun.flutter.DurbunFlutterPlugin`,
   iOS `DurbunFlutterPlugin`) that carries the native cores: Android compiles
   `sdks/android/durbun` through Gradle sourceSets, iOS carries an exact copy of
