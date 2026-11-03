@@ -45,18 +45,24 @@ void main() {
       await tester.pumpAndSettle();
       Durbun.showInspector();
       await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Network').first);
+      await tester.pumpAndSettle();
       await tester.tap(find.textContaining('/v1/customers').first);
       await tester.pumpAndSettle();
-      for (final tab in ['Request', 'Response']) {
-        await tester.tap(find.text(tab));
+      for (final tab in ['Request', 'Response', 'Timing', 'General']) {
+        await tester.tap(find.textContaining(tab).first);
         await tester.pumpAndSettle();
       }
-      await tester.pageBack();
+      await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      for (final tab in ['Logs', 'Performance', 'Info']) {
-        await tester.tap(find.text(tab));
+      for (final tab in ['Logs', 'Mocks', 'Performance', 'Device']) {
+        await tester.tap(find.byTooltip(tab).first);
         await tester.pumpAndSettle();
       }
+      await tester.tap(find.byTooltip('Logs').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Unhandled exception').first);
+      await tester.pumpAndSettle();
     });
   }
 }

@@ -306,8 +306,18 @@ class DurbunInspectorStore extends ChangeNotifier {
 
   InspectorMetric? get lastMetric => _metrics.isEmpty ? null : _metrics.last;
 
-  /// The last `hello` (app, device, sdk layers).
-  Map<String, Object?>? get hello => _hello;
+  /// The last `hello` (app, device, sdk layers): the running client's, or
+  /// one that passed through [ingest].
+  Map<String, Object?>? get hello {
+    try {
+      return helloProvider?.call() ?? _hello;
+    } catch (_) {
+      return _hello;
+    }
+  }
+
+  /// Set by the IO backend: builds the client's current hello.
+  Map<String, Object?>? Function()? helloProvider;
 
   /// Lines / calls evicted since the last [clear] (the ring is full).
   int get droppedLogs => _droppedLogs;

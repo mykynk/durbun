@@ -88,6 +88,7 @@ class IoDurbunBackend implements DurbunBackend {
       if (options.inspector) {
         final store = DurbunInspectorStore.instance
           ..bodyResolver = wireBodyFromPending
+          ..helloProvider = (() => client.isDisposed ? null : client.describeState()['hello'] as Map<String, Object?>?)
           ..attached = true;
         client.outgoingTap = store.ingest;
       }
@@ -284,7 +285,9 @@ class IoDurbunBackend implements DurbunBackend {
     _originalDebugPrint = null;
     _printCapture = null;
     client.outgoingTap = null;
-    DurbunInspectorStore.existing?.attached = false;
+    DurbunInspectorStore.existing
+      ?..attached = false
+      ..helloProvider = null;
     _client = null;
     _options = null;
     await client.dispose();

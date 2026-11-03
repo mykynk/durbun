@@ -9,7 +9,8 @@ import 'package:flutter/material.dart';
 import 'format.dart';
 import 'store.dart';
 import 'strings.dart';
-import 'views.dart';
+import 'home.dart';
+import 'theme.dart';
 
 /// Puts Dürbün's in-app inspector on top of the app: a small draggable bubble
 /// that opens a panel with network requests, logs, errors, performance and
@@ -109,7 +110,7 @@ class _DurbunInspectorState extends State<DurbunInspector> {
       await navigator.push<void>(
         MaterialPageRoute<void>(
           settings: const RouteSettings(name: '/durbun'),
-          builder: (_) => InspectorHome(store: _store),
+          builder: (routeContext) => DurbunTheme.wrap(routeContext, InspectorHome(store: _store)),
         ),
       );
     } finally {
@@ -195,21 +196,13 @@ class InspectorBubble extends StatelessWidget {
                   left: 4,
                   top: 4,
                   child: Container(
-                    width: size,
-                    height: size,
                     decoration: BoxDecoration(
-                      color: const Color(0xE66E5CF0),
-                      shape: BoxShape.circle,
+                      borderRadius: BorderRadius.circular(size * 0.234),
                       boxShadow: const <BoxShadow>[
-                        BoxShadow(
-                            color: Color(0x55000000),
-                            blurRadius: 8,
-                            offset: Offset(0, 2)),
+                        BoxShadow(color: Color(0x66000000), blurRadius: 10, offset: Offset(0, 3)),
                       ],
                     ),
-                    alignment: Alignment.center,
-                    child: const Icon(Icons.travel_explore,
-                        color: Colors.white, size: 26),
+                    child: DurbunLogo(size: size),
                   ),
                 ),
                 if (unseen > 0)
@@ -222,7 +215,7 @@ class InspectorBubble extends StatelessWidget {
                       height: 20,
                       padding: const EdgeInsets.symmetric(horizontal: 5),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE5484D),
+                        color: const Color(0xFFFF6369),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: Colors.white, width: 1.5),
                       ),
