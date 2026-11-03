@@ -4,9 +4,12 @@
  *   "Nov  2 11:43:01 Yusuf-iPhoneu SpringBoard(FrontBoard)[57] <Notice>: message"
  *   "Nov  2 11:43:01.123456 Yusuf iPhone’u Runner(Flutter)[1234] <Notice>: flutter: hello"
  *   "Nov  2 11:43:01 iPhone kernel[0] <Notice>: …"
+ *   "Nov  2 23:00:18 Microsoft Authenticator(CFNetwork)[812] <Notice>: …"   (no host name)
  *   continuation lines (no header) belong to the previous record; "[connected:UDID]" /
  *   "[disconnected:UDID]" are idevicesyslog status lines. The device name may contain spaces, so the
- *   known name (and its hostname form) is stripped first. Year is assumed current (Dec→Jan aware).
+ *   known name (and its hostname form) is stripped first. The idevicesyslog shipped with Flutter 3.38 prints
+ *   no host name at all (seen with iOS 27.2): the kernel's frequent "kernel(…)[0]" lines tell which layout
+ *   the stream uses, so process names with spaces stay whole. Year is assumed current (Dec→Jan aware).
  */
 import type { LogLevel } from '@durbun/protocol';
 import type { DeviceLogInput } from '../../types';
@@ -31,6 +34,9 @@ const MONTHS: Record<string, number> = {
 const HEADER_RE = /^([A-Z][a-z]{2}) {1,2}(\d{1,2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))? (.*)$/;
 const BODY_RE = /^(.*?)\[(\d+)\] <([A-Za-z]+)>:(?: (.*))?$/;
 const STATUS_RE = /^\[(connected|disconnected)(?::([^\]]*))?\]$/;
+/** pid-0 lines: "kernel(AppleSPMIPMU)" (no host name) vs "Yusufs-iPhone kernel(…)". */
+const KERNEL_ONLY_RE = /^kernel(?:\(|$)/;
+const KERNEL_AFTER_HOST_RE = /^\S+ kernel(?:\(|$)/;
 const DAY_MS = 86_400_000;
 
 const LEVELS: Record<string, LogLevel> = {
@@ -60,7 +66,8 @@ export function deviceNameVariants(name: string | undefined): string[] {
 }
 
 export type SyslogParse =
-  | { type: 'entry'; entry: DeviceLogInput }
+  /** `hostless`: a kernel line showing whether the stream prints a host name before the process (false) or not (true). */
+  | { type: 'entry'; entry: DeviceLogInput; hostless?: boolean }
   | { type: 'status'; connected: boolean; udid?: string }
   | { type: 'continuation'; text: string };
 
@@ -75,8 +82,11 @@ function syslogTime(mon: string, day: string, hh: string, mm: string, ss: string
   return ms;
 }
 
-/** Parse one (ANSI-free) idevicesyslog line. */
-export function parseSyslogLine(line: string, names: readonly string[], nowMs = Date.now()): SyslogParse {
+/**
+ * Parse one (ANSI-free) idevicesyslog line. `hostless`: the stream is known to print no host name, so an
+ * unknown first word is part of the process name.
+ */
+export function parseSyslogLine(line: string, names: readonly string[], nowMs = Date.now(), hostless = false): SyslogParse {
   const st = STATUS_RE.exec(line);
   if (st) return { type: 'status', connected: st[1] === 'connected', ...(st[2] ? { udid: st[2] } : {}) };
   const h = HEADER_RE.exec(line);
@@ -84,6 +94,7 @@ export function parseSyslogLine(line: string, names: readonly string[], nowMs = 
   const b = BODY_RE.exec(h[7]!);
   if (!b) return { type: 'continuation', text: line };
   let who = b[1]!.trimEnd();
+  const kernelLayout = b[2] === '0' ? (KERNEL_ONLY_RE.test(who) ? true : KERNEL_AFTER_HOST_RE.test(who) ? false : undefined) : undefined;
   let stripped = false;
   for (const n of names) {
     if (who.startsWith(n + ' ')) {
@@ -92,7 +103,7 @@ export function parseSyslogLine(line: string, names: readonly string[], nowMs = 
       break;
     }
   }
-  if (!stripped) {
+  if (!stripped && !(kernelLayout ?? hostless)) {
     const sp = who.indexOf(' ');
     if (sp !== -1) who = who.slice(sp + 1);
   }
@@ -114,7 +125,7 @@ export function parseSyslogLine(line: string, names: readonly string[], nowMs = 
     process,
   };
   normalizeIosFlutter(entry);
-  return { type: 'entry', entry };
+  return kernelLayout === undefined ? { type: 'entry', entry } : { type: 'entry', entry, hostless: kernelLayout };
 }
 
 /**
@@ -142,6 +153,8 @@ export function normalizeIosFlutter(entry: DeviceLogInput): void {
  */
 export class SyslogLineParser {
   private names: string[] = [];
+  /** Learned from kernel lines: the stream prints no host name before the process. */
+  private hostless = false;
   private pending?: DeviceLogInput;
   private extra: string[] | null = null;
   private timer?: NodeJS.Timeout;
@@ -158,7 +171,8 @@ export class SyslogLineParser {
 
   pushLine(raw: string): void {
     const line = stripAnsi(raw);
-    const r = parseSyslogLine(line, this.names);
+    const r = parseSyslogLine(line, this.names, Date.now(), this.hostless);
+    if (r.type === 'entry' && r.hostless !== undefined) this.hostless = r.hostless;
     if (r.type === 'status') {
       this.flush();
       this.onStatus?.(r.connected, r.udid);

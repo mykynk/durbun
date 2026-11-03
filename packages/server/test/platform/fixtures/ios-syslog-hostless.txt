@@ -1,0 +1,30 @@
+[connected:00008130-000A1B2C3D4E001F]
+Nov  2 23:00:18 runningboardd(RunningBoard)[36] <Notice>: Invalidating assertion 36-99549-2305631 (target:app<com.apple.sports(E56754BF-B318-4018-8D3E-D6151646A1D3)>) from originator [osservice<com.apple.SpringBoard>:99549]
+Nov  2 23:00:18 spotlightknowledged.updater(SpotlightKnowledgeDaemon)[96363] <Notice>: Unloading processor <private>. Handle  <private>
+Nov  2 23:00:18 kernel(AppleSPMIPMU)[0] <Notice>: RTC upcountTicks=2e88ce7e2fe, regs=fc:c5:cf:19:d1:05 (0)
+Nov  2 23:00:18 bluetoothd[101] <Notice>: Returning scan parameters: Main:30.00m
+Nov  2 23:00:19 Runner(Flutter)[14812] <Notice>: flutter: Sepet açıldı
+Nov  2 23:00:19 Runner(Flutter)[15240] <Notice>: flutter: Kumbara yeni süreçte açıldı
+Nov  2 23:00:19 MahalleNotificationService(UserNotifications)[14807] <Notice>: Bildirim içeriği hazırlandı
+Nov  2 23:00:19 Microsoft Authenticator(CFNetwork)[14939] <Error>: Task <8B1E44C2-7F1A-4C55-9F2E-0D6A1B3C5E7F>.<1> finished with error [-1001] Error Domain=NSURLErrorDomain Code=-1001
+Nov  2 23:00:19 FitnessWidget(WidgetKit)[14799] <Notice>: Reloading timeline for kind <private>
+Nov  2 23:00:20 runningboardd(RunningBoard)[36] <Notice>: Acquiring assertion targeting [app<com.mykynk.pati(E56754BF-B318-4018-8D3E-D6151646A1D3)>:14812] from originator [osservice<com.apple.SpringBoard>:99549] with description <RBSAssertionDescriptor| "FBWorkspace (BG-Opportunistic[40])" ID:36-99549-2305692 target:14812 attributes:[<RBSDomainAttribute| domain:"com.apple.frontboard" name:"SuspendableJetsamPriority-Active" sourceEnvironment:"(null)">]>
+Nov  2 23:00:20 runningboardd(RunningBoard)[36] <Notice>: [app<com.mykynk.pati(E56754BF-B318-4018-8D3E-D6151646A1D3)>:14812] Set jetsam priority to 40 [0] flag[1]
+Nov  2 23:00:20 backboardd(RunningBoardServices)[68] <Notice>: Received state update for 14812 (app<com.mykynk.pati((null))>, running-active-NotVisible
+Nov  2 23:00:20 kernel[0] <Notice>: necp_process_defunct_list: necp_update_client abort nexus error (2) for pid 14812 Runner
+Nov  2 23:00:21 kernel[0] <Notice>: memorystatus: killing_specific_process pid 14889 [Mahalle] (per-process-limit 3) 2097152KB - memorystatus_available_pages: 52156
+Nov  2 23:00:21 runningboardd(RunningBoard)[36] <Notice>: [app<com.mykynk.mahalle(241EB666-57AF-4122-A98A-37318530C210)>:14889] termination reported by launchd (2, 9, 9)
+Nov  2 23:00:21 SpringBoard(FrontBoard)[99549] <Notice>: [app<com.mykynk.mahalle>:14889] Process exited: <RBSProcessExitContext| specific, status:<RBSProcessExitStatus| domain:signal(2) code:SIGKILL(9)>>.
+Nov  2 23:00:21 kernel[0] <Notice>: memorystatus: killing_specific_process pid 812 [mediaserverd] (vm-pageshortage 0) 12544KB - memorystatus_available_pages: 41022
+Nov  2 23:00:22 runningboardd(RunningBoard)[36] <Notice>: [app<com.mykynk.pati(E56754BF-B318-4018-8D3E-D6151646A1D3)>:14812] Terminating with description: <RBSTerminateContext| domain:10 code:0x8BADF00D explanation:scene-update watchdog transgression: app<com.mykynk.pati(E56754BF-B318-4018-8D3E-D6151646A1D3)>:14812 exhausted real (wall clock) time allowance of 10.00 seconds>
+Nov  2 23:00:22 ReportCrash(CrashReporterSupport)[15301] <Notice>: Formulating fatal 309 report for corpse[14807] MahalleNotificationService
+Nov  2 23:00:22 ReportCrash(CrashReporterSupport)[15301] <Notice>: Formulating fatal 309 report for corpse[512] gpsd
+Nov  2 23:00:22 osanalyticshelper[15302] <Notice>: Saved type '309(<private>)' report (1 of max 25) at /private/var/mobile/Library/Logs/CrashReporter/MahalleNotificationService-2026-11-02-230022.ips
+Nov  2 23:00:23 SpringBoard(FrontBoard)[99549] <Notice>: [app<com.apple.mobilesafari>:900] Process exited: <RBSProcessExitContext| voluntary>.
+Nov  2 23:00:23 kernel(Sandbox)[0] <Error>: Sandbox: Runner(14812) deny(1) file-read-data /private/var/mobile/Library/Preferences/com.apple.UIKit.plist
+Nov  2 23:00:24 Runner(CoreFoundation)[14871] <Error>: *** Terminating app due to uncaught exception 'NSInvalidArgumentException', reason: '-[__NSCFNumber length]: unrecognized selector sent to instance 0x8000000000000000'
+First throw call stack:
+(0x19a7c1a08 0x197b1c2c4 0x19a8c0d34)
+Nov  2 23:00:24 locationd[88] <Notice>: os_transaction created: (<private>) <private>
+Nov  2 23:00:24 com.apple.WebKit.WebContent(WebKit)[4410] <Error>: [pid=4410] WebProcess::updateFreezerStatus: isFreezable=1, error=-1
+Nov  2 23:00:25 CommCenter(libATCommandStudioDynamic.dylib)[99] <Notice>: #I Packet filter: 0
