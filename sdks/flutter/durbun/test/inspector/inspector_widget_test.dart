@@ -7,6 +7,7 @@ import 'package:durbun/src/core/protocol.dart';
 import 'package:durbun/src/inspector/inspector.dart' show InspectorBubble;
 import 'package:durbun/src/inspector/store.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -34,11 +35,11 @@ DurbunInspectorStore filledStore() {
   return store;
 }
 
-Widget app(DurbunInspectorStore store, {Locale locale = const Locale('en')}) => MaterialApp(
+Widget app(DurbunInspectorStore store, {Locale locale = const Locale('en'), bool bubble = false}) => MaterialApp(
   locale: locale,
   supportedLocales: const [Locale('en'), Locale('tr')],
   localizationsDelegates: GlobalMaterialLocalizations.delegates,
-  builder: (context, child) => DurbunInspector(store: store, child: child!),
+  builder: (context, child) => DurbunInspector(store: store, showBubble: bubble, child: child!),
   home: const Scaffold(body: Center(child: Text('the app'))),
 );
 
@@ -48,17 +49,68 @@ Future<void> phone(WidgetTester tester) async {
   addTearDown(tester.view.reset);
 }
 
+const MethodChannel shakeChannel = MethodChannel('dev.durbun/shake');
+
+/// What the plugin would send when the phone is shaken.
+Future<void> shake(WidgetTester tester) async {
+  await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+    shakeChannel.name,
+    const StandardMethodCodec().encodeMethodCall(const MethodCall('shake')),
+    (_) {},
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
+  final listenCalls = <Object?>[];
+  setUp(() {
+    listenCalls.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(shakeChannel, (call) async {
+      if (call.method == 'listen') listenCalls.add(call.arguments);
+      return true;
+    });
+  });
+  tearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(shakeChannel, null));
+
+  testWidgets('shaking opens the panel; nothing is drawn over the app; the sensor is off in the background', (tester) async {
+    await phone(tester);
+    final store = filledStore();
+    await tester.pumpWidget(app(store));
+    expect(listenCalls, [true], reason: 'the plugin is asked to listen while the app is in front');
+    expect(find.byType(InspectorBubble), findsNothing, reason: 'no bubble by default');
+    await shake(tester);
+    expect(find.text('Sepet açıldı'), findsOneWidget, reason: 'the panel is open');
+    await shake(tester);
+    expect(find.text('Sepet açıldı'), findsOneWidget, reason: 'a second shake does not stack another panel');
+
+    for (final st in [AppLifecycleState.inactive, AppLifecycleState.hidden, AppLifecycleState.paused]) {
+      tester.binding.handleAppLifecycleStateChanged(st);
+    }
+    expect(listenCalls.last, false);
+    for (final st in [AppLifecycleState.hidden, AppLifecycleState.inactive, AppLifecycleState.resumed]) {
+      tester.binding.handleAppLifecycleStateChanged(st);
+    }
+    expect(listenCalls.last, true);
+
+    await tester.pumpWidget(const SizedBox());
+    expect(listenCalls.last, false, reason: 'unmounting stops listening');
+  });
+
+  testWidgets('without the SDK nothing listens for shakes', (tester) async {
+    await tester.pumpWidget(MaterialApp(builder: DurbunInspector.builder, home: const Text('the app')));
+    expect(listenCalls.where((x) => x == true), isEmpty);
+  });
+
   testWidgets('without the SDK (release / off) only the app shows', (tester) async {
     await tester.pumpWidget(MaterialApp(builder: DurbunInspector.builder, home: const Text('the app')));
     expect(find.text('the app'), findsOneWidget);
     expect(find.byKey(const ValueKey<String>('durbun-bubble-badge')), findsNothing);
   });
 
-  testWidgets('bubble → logs: repeats merged, requests in the stream, crash detail with stack', (tester) async {
+  testWidgets('optional bubble → logs: repeats merged, requests in the stream, crash detail with stack', (tester) async {
     await phone(tester);
     final store = filledStore();
-    await tester.pumpWidget(app(store));
+    await tester.pumpWidget(app(store, bubble: true));
     expect(find.byKey(const ValueKey<String>('durbun-bubble-badge')), findsOneWidget, reason: 'a 500 and a crash are unseen');
     await tester.tap(find.byType(InspectorBubble));
     await tester.pumpAndSettle();

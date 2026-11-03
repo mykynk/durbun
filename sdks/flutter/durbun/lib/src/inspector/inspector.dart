@@ -1,10 +1,12 @@
-/// `DurbunInspector`: the in-app inspector (floating bubble + full-screen
-/// panel) that shows what the SDK captured, on the phone itself.
+/// `DurbunInspector`: the in-app inspector (full-screen panel, opened by
+/// shaking the phone) that shows what the SDK captured, on the phone itself.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'format.dart';
 import 'store.dart';
@@ -12,10 +14,11 @@ import 'strings.dart';
 import 'home.dart';
 import 'theme.dart';
 
-/// Puts Dürbün's in-app inspector on top of the app: a small draggable bubble
-/// that opens a panel with network requests, logs, errors, performance and
-/// app info. It works without the desktop, and shows what the desktop would
-/// (Dart, Dio, native OkHttp / URLSession traffic, native logs).
+/// Puts Dürbün's in-app inspector into the app: shake the phone to open a
+/// panel with logs, network requests, mocks, performance and device info. It
+/// works without the desktop, and shows what the desktop would (Dart, Dio,
+/// native OkHttp / URLSession traffic, native logs). Nothing is drawn over
+/// the app unless [showBubble] is set.
 ///
 /// ```dart
 /// MaterialApp(
@@ -30,7 +33,8 @@ class DurbunInspector extends StatefulWidget {
   const DurbunInspector({
     super.key,
     required this.child,
-    this.showBubble = true,
+    this.showBubble = false,
+    this.openOnShake = true,
     this.navigatorKey,
     this.store,
   });
@@ -41,9 +45,13 @@ class DurbunInspector extends StatefulWidget {
 
   final Widget child;
 
-  /// Show the floating bubble. Without it, open the panel with [show]
-  /// (e.g. from a debug menu).
+  /// Show a small draggable Dürbün button over the app (off by default).
   final bool showBubble;
+
+  /// Shaking the phone opens the panel (simulator: Device → Shake; Android
+  /// emulator: Extended controls → Virtual sensors → Shake). The
+  /// accelerometer is read only while the app is in the foreground.
+  final bool openOnShake;
 
   /// Navigator the panel opens on. By default the first navigator below this
   /// widget (the app's own, when used as `MaterialApp.builder`).
@@ -54,14 +62,18 @@ class DurbunInspector extends StatefulWidget {
 
   static final ValueNotifier<int> _openRequests = ValueNotifier<int>(0);
 
-  /// Opens the panel (no-op when no [DurbunInspector] is mounted).
+  /// Opens the panel (no-op when no [DurbunInspector] is mounted), e.g. from
+  /// a debug menu or a long press of your own.
   static void show() => _openRequests.value++;
 
   @override
   State<DurbunInspector> createState() => _DurbunInspectorState();
 }
 
-class _DurbunInspectorState extends State<DurbunInspector> {
+class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingObserver {
+  static const MethodChannel _shake = MethodChannel('dev.durbun/shake');
+  bool _listening = false;
+
   bool _open = false;
   Offset? _bubble;
 
@@ -75,12 +87,48 @@ class _DurbunInspectorState extends State<DurbunInspector> {
     super.initState();
     InspectorBody.prettyJson ??= prettyJsonText;
     DurbunInspector._openRequests.addListener(_openPanel);
+    WidgetsBinding.instance.addObserver(this);
+    _syncShake();
   }
+
+  @override
+  void didUpdateWidget(DurbunInspector old) {
+    super.didUpdateWidget(old);
+    _syncShake();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) => _syncShake(state);
 
   @override
   void dispose() {
     DurbunInspector._openRequests.removeListener(_openPanel);
+    WidgetsBinding.instance.removeObserver(this);
+    _setShake(false);
     super.dispose();
+  }
+
+  /// Listens for shakes only while it can open the panel and the app is in front.
+  void _syncShake([AppLifecycleState? state]) {
+    final s = state ?? WidgetsBinding.instance.lifecycleState;
+    final foreground = s == null || s == AppLifecycleState.resumed;
+    _setShake(widget.openOnShake && _enabled && foreground);
+  }
+
+  void _setShake(bool on) {
+    if (on == _listening) return;
+    _listening = on;
+    try {
+      _shake.setMethodCallHandler(on ? _onShakeCall : null);
+      _shake.invokeMethod<Object?>('listen', on).catchError((Object _) => null);
+    } catch (_) {
+      // No plugin (web, tests): shaking just does nothing.
+    }
+  }
+
+  Future<Object?> _onShakeCall(MethodCall call) async {
+    if (call.method == 'shake') unawaited(_openPanel());
+    return null;
   }
 
   NavigatorState? _navigator() {

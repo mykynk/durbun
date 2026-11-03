@@ -31,17 +31,49 @@ import io.flutter.plugin.common.MethodChannel
  */
 class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var channel: MethodChannel? = null
+    private var shakeChannel: MethodChannel? = null
+    private var shake: ShakeDetector? = null
     private var context: Context? = null
     private val main = Handler(Looper.getMainLooper())
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
         channel = MethodChannel(binding.binaryMessenger, CHANNEL).also { it.setMethodCallHandler(this) }
+        // Shake to open the in-app inspector: Dart turns the accelerometer on and off ("listen").
+        shakeChannel = MethodChannel(binding.binaryMessenger, SHAKE_CHANNEL).also { ch ->
+            ch.setMethodCallHandler { call, result ->
+                try {
+                    if (call.method != "listen") return@setMethodCallHandler result.notImplemented()
+                    val ctx = context
+                    if (call.arguments == true && ctx != null) {
+                        val detector = shake ?: ShakeDetector(ctx) {
+                            main.post {
+                                try {
+                                    shakeChannel?.invokeMethod("shake", null)
+                                } catch (_: Throwable) {
+                                }
+                            }
+                        }.also { shake = it }
+                        result.success(detector.start())
+                    } else {
+                        shake?.stop()
+                        result.success(false)
+                    }
+                } catch (t: Throwable) {
+                    Log.d(TAG, "Dürbün shake detection failed", t)
+                    result.success(false)
+                }
+            }
+        }
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel?.setMethodCallHandler(null)
         channel = null
+        shake?.stop()
+        shake = null
+        shakeChannel?.setMethodCallHandler(null)
+        shakeChannel = null
         stopHosted()
         context = null
     }
@@ -169,6 +201,7 @@ class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     companion object {
         const val CHANNEL = "dev.durbun/native"
+        const val SHAKE_CHANNEL = "dev.durbun/shake"
         private const val TAG = "Durbun"
         private val lock = Any()
 

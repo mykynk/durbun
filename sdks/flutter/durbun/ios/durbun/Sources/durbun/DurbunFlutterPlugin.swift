@@ -15,6 +15,7 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
     private static weak var owner: DurbunFlutterPlugin?
 
     private let channel: FlutterMethodChannel
+    private var shake: DurbunShake?
     private var link: ChannelLink?
     private var attached = true
 
@@ -25,11 +26,14 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: channelName, binaryMessenger: registrar.messenger())
         let instance = DurbunFlutterPlugin(channel: channel)
+        instance.shake = DurbunShake(messenger: registrar.messenger())
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
 
     public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
         attached = false
+        shake?.detach()
+        shake = nil
         stopHosted()
     }
 
