@@ -5,8 +5,11 @@
  *        --source <relativePath> --destination <tempDir>/crash/<udid>/<name>
  * On connect the last 24 h are read, then new files every 60 s. Handled files are remembered per device
  * by the driver (`seen`), so re-plugging a device does not report its crashes again; only .ips crash
- * reports of third-party apps become log entries. Files named after a process that is not an installed
- * app are re-checked on every scan (the app may be installed after the last app listing).
+ * reports of third-party apps become log entries. A file the listing marks as a crash (bug_type 309/109)
+ * is copied whatever its name: app extensions' reports are named after the extension's executable, and
+ * the report's bundle id decides (system crashes are rare: 2 a day on a real phone, deleted after the
+ * check). Without a bug_type only files named after a third-party executable are copied; the others are
+ * re-checked on every scan (the app may be installed after the last app listing).
  * Real listing (devicectl 651.32, iOS 27.2): `name` and `relativePath` are both the path inside the domain
  * ("Retired/Runner-2026-11-02-095019.ips"); nearly every report sits in Retired/. `--destination` is the
  * file to write (an existing folder there makes the copy fail). ProxiedDevice-<id>/ holds a paired Apple
@@ -37,7 +40,10 @@ export interface DeviceCrashWatcherOptions {
   /** Where copies go: `<tempDir>/crash/<udid>`. */
   destDir: string;
   logger: Logger;
-  /** Is a crash file named after this process worth copying (installed third-party app)? */
+  /**
+   * Is this process a third-party app or app extension? Without a bug_type in the listing only files named
+   * after one are copied; with one, they are copied first.
+   */
   isInteresting(processName: string | undefined): boolean;
   onReport(report: IpsReport, file: string): void;
   /** Outcome of every listing (the device's crash-report reader state). */
@@ -141,7 +147,7 @@ export class DeviceCrashWatcher {
     }
     this.status({ ok: true });
     const cutoff = this.now() - (this.opts.lookbackMs ?? CRASH_LOOKBACK_MS);
-    const candidates: Array<{ file: DevicectlFile; when: number }> = [];
+    const candidates: Array<{ file: DevicectlFile; when: number; named: boolean }> = [];
     for (const file of parseDevicectlFiles(r.json)) {
       // iOS moves reports into Retired/ under the same name: one key per report, not per path.
       if (file.isDirectory || PROXIED_DEVICE.test(file.relativePath) || this.seen.has(reportKey(file))) continue;
@@ -156,10 +162,13 @@ export class DeviceCrashWatcher {
         continue;
       }
       // Not marked seen: an app installed after the last listing makes it interesting later.
-      if (!this.opts.isInteresting(crashFileProcess(file.name))) continue;
-      candidates.push({ file, when });
+      const named = this.opts.isInteresting(crashFileProcess(file.name));
+      if (file.bugType === undefined && !named) continue;
+      candidates.push({ file, when, named });
     }
-    candidates.sort((a, b) => a.when - b.when);
+    // Reports named after a third-party executable first: other crashes (system daemons, extensions not seen
+    // running) must not delay them when a scan has more than it copies.
+    candidates.sort((a, b) => Number(b.named) - Number(a.named) || a.when - b.when);
     const max = this.opts.maxCopiesPerScan ?? 20;
     for (const { file } of candidates.slice(0, max)) {
       if (this.stopped) return;
