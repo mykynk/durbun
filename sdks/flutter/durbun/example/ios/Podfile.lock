@@ -1,0 +1,22 @@
+PODS:
+  - durbun (0.1.0):
+    - Flutter
+  - Flutter (1.0.0)
+
+DEPENDENCIES:
+  - durbun (from `.symlinks/plugins/durbun/ios`)
+  - Flutter (from `Flutter`)
+
+EXTERNAL SOURCES:
+  durbun:
+    :path: ".symlinks/plugins/durbun/ios"
+  Flutter:
+    :path: Flutter
+
+SPEC CHECKSUMS:
+  durbun: 4c65ae30dde7a3872f0dad0225f2558245e66a29
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+
+PODFILE CHECKSUM: e00a6e76e34daaa4139bef63415b0fd075ba7d03
+
+COCOAPODS: 1.16.2
