@@ -5,10 +5,11 @@
  * see), that port is avoided on the next attempt, so the plan moves on to 9760 / 9770 / 9780 / an
  * OS-assigned port instead of planning the same busy port again.
  */
-import { planHttpPort, type PortDeps } from './ports';
+import { originFor, planHttpPort, type DurbunPage, type PortDeps } from './ports';
 
+/** `origin`: what the window loads, on the host the probe checked (ports.ts APP_HOST). */
 export type StartOutcome<S> =
-  | { kind: 'attached'; port: number; version: string }
+  | { kind: 'attached'; port: number; version: string; page?: DurbunPage; origin: string }
   | { kind: 'started'; server: S; port: number; fallback: boolean }
   | { kind: 'cancelled' }
   | { kind: 'failed'; error: string; code?: string };
@@ -30,7 +31,7 @@ export async function startOrAttachServer<S>(preferred: number, sdkPort: number,
   for (let attempt = 0; attempt < MAX_START_ATTEMPTS; attempt++) {
     const plan = await planHttpPort(preferred, sdkPort, deps, avoid);
     if (deps.cancelled()) return { kind: 'cancelled' };
-    if (plan.kind === 'attach') return { kind: 'attached', port: plan.port, version: plan.version };
+    if (plan.kind === 'attach') return { kind: 'attached', port: plan.port, version: plan.version, page: plan.page, origin: originFor(plan.port) };
     try {
       return { kind: 'started', server: await deps.start(plan.port), port: plan.port, fallback: plan.fallback };
     } catch (err) {
@@ -44,4 +45,25 @@ export async function startOrAttachServer<S>(preferred: number, sdkPort: number,
     }
   }
   return { kind: 'failed', error: lastError || 'no free port', code: 'EADDRINUSE' };
+}
+
+/** The parts of the embedded server that tell where it listens (packages/server/src/server.ts). */
+export interface ListeningServer {
+  url: string;
+  info?: { ports?: { http?: number } };
+}
+
+/**
+ * Where the window finds the server this app started: its bound port (the real one when port 0 was
+ * asked for) on APP_HOST, whatever host the server's own `url` names ("localhost").
+ */
+export function startedOrigin(server: ListeningServer, plannedPort: number): { port: number; origin: string } {
+  let fromUrl = 0;
+  try {
+    fromUrl = Number(new URL(server.url).port) || 0;
+  } catch {
+    /* no usable url */
+  }
+  const port = server.info?.ports?.http || fromUrl || plannedPort;
+  return { port, origin: originFor(port) };
 }

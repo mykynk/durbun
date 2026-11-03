@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { startOrAttachServer, type StartDeps } from '../src/startup';
+import { startedOrigin, startOrAttachServer, type StartDeps } from '../src/startup';
 
 const busy = (port: number) => Object.assign(new Error(`Port ${port} is already in use`), { name: 'ServerStartError', code: 'EADDRINUSE', port });
 
@@ -40,7 +40,12 @@ describe('startOrAttachServer', () => {
   });
 
   it('attaches to a Dürbün that answers, also after a lost race', async () => {
-    expect(await startOrAttachServer(9750, 9751, deps({ running: { 9750: '0.1.0' } }).d)).toEqual({ kind: 'attached', port: 9750, version: '0.1.0' });
+    expect(await startOrAttachServer(9750, 9751, deps({ running: { 9750: '0.1.0' } }).d)).toEqual({
+      kind: 'attached',
+      port: 9750,
+      version: '0.1.0',
+      origin: 'http://127.0.0.1:9750',
+    });
     // listen() lost the race against a Dürbün CLI starting on 9750 at the same moment
     const running: Record<number, string> = {};
     const { d } = deps({ failAt: [9750], running });
@@ -49,7 +54,19 @@ describe('startOrAttachServer', () => {
       running[9750] = '0.1.0';
       return start(port);
     };
-    expect(await startOrAttachServer(9750, 9751, d)).toEqual({ kind: 'attached', port: 9750, version: '0.1.0' });
+    expect(await startOrAttachServer(9750, 9751, d)).toEqual({ kind: 'attached', port: 9750, version: '0.1.0', origin: 'http://127.0.0.1:9750' });
+  });
+
+  it('keeps what the proof found out about the page', async () => {
+    const d: StartDeps<never> = {
+      probe: async () => ({ version: '0.1.0', page: 'placeholder' }),
+      isFree: async () => false,
+      start: async () => {
+        throw new Error('must not start');
+      },
+      cancelled: () => false,
+    };
+    expect(await startOrAttachServer(9750, 9751, d)).toMatchObject({ kind: 'attached', page: 'placeholder', origin: 'http://127.0.0.1:9750' });
   });
 
   it('stops without starting once quit was requested', async () => {
@@ -67,5 +84,15 @@ describe('startOrAttachServer', () => {
       error: 'settings.json: unexpected token',
       code: undefined,
     });
+  });
+});
+
+describe('startedOrigin', () => {
+  it('loads the bound port on 127.0.0.1, although the server names itself "localhost"', () => {
+    expect(startedOrigin({ url: 'http://localhost:9760', info: { ports: { http: 9760 } } }, 9760)).toEqual({ port: 9760, origin: 'http://127.0.0.1:9760' });
+    // port 0 was asked for: the real port comes from the server
+    expect(startedOrigin({ url: 'http://localhost:53122', info: { ports: { http: 53122 } } }, 0)).toEqual({ port: 53122, origin: 'http://127.0.0.1:53122' });
+    expect(startedOrigin({ url: 'http://localhost:53123' }, 0)).toEqual({ port: 53123, origin: 'http://127.0.0.1:53123' });
+    expect(startedOrigin({ url: 'not a url' }, 9750)).toEqual({ port: 9750, origin: 'http://127.0.0.1:9750' });
   });
 });

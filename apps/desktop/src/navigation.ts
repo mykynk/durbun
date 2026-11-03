@@ -13,12 +13,15 @@ function parse(url: string): URL | null {
   }
 }
 
-/** Same server: http(s)/ws(s) on a loopback host with the app's port (localhost ≡ 127.0.0.1 ≡ ::1). */
+/**
+ * Same server: http(s)/ws(s) on the app origin's own loopback host and port. Other loopback names are
+ * not the app: "localhost" is tried on ::1 first and may reach a different program than 127.0.0.1.
+ */
 export function isAppUrl(url: string, appOrigin: string): boolean {
   const u = parse(url);
   const app = parse(appOrigin);
   if (!u || !app) return false;
-  if (!LOOPBACK_HOSTS.has(u.hostname) || !LOOPBACK_HOSTS.has(app.hostname)) return false;
+  if (!LOOPBACK_HOSTS.has(app.hostname) || u.hostname !== app.hostname) return false;
   const port = (x: URL) => x.port || (x.protocol === 'https:' || x.protocol === 'wss:' ? '443' : '80');
   const scheme = u.protocol === 'ws:' ? 'http:' : u.protocol === 'wss:' ? 'https:' : u.protocol;
   return scheme === app.protocol && port(u) === port(app);
