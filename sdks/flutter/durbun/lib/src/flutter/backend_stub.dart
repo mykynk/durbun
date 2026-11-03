@@ -70,4 +70,7 @@ class _StubBackend implements DurbunBackend {
     required String source,
     String? mockRuleId,
   }) => null;
+
+  @override
+  Map<String, Object?>? inspectorState() => null;
 }

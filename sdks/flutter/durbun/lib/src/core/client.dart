@@ -291,8 +291,19 @@ class DurbunClient implements HttpCaptureHost {
 
   /* ───────────────────────────── sending ───────────────────────────── */
 
+  /// Sees every outgoing message (Dart and native-encoded lines) before the
+  /// transport: the in-app inspector keeps its own copy. Must not throw or
+  /// mutate the message.
+  void Function(Map<String, Object?> message)? outgoingTap;
+
   void _send(Map<String, Object?> message, {bool volatile = false}) {
     if (_disposed) return;
+    final tap = outgoingTap;
+    if (tap != null) {
+      try {
+        tap(message);
+      } catch (_) {}
+    }
     try {
       _transport.send(message, volatile: volatile);
     } catch (_) {}

@@ -14,6 +14,7 @@ import '../core/options.dart';
 import '../core/print_capture.dart';
 import '../core/protocol.dart';
 import '../core/types.dart';
+import '../inspector/store.dart';
 import 'backend.dart';
 import 'commands.dart';
 import 'error_hooks.dart';
@@ -84,6 +85,12 @@ class IoDurbunBackend implements DurbunBackend {
       );
       _client = client;
       _options = options;
+      if (options.inspector) {
+        final store = DurbunInspectorStore.instance
+          ..bodyResolver = wireBodyFromPending
+          ..attached = true;
+        client.outgoingTap = store.ingest;
+      }
       client.runInternal(() {
         final bridge = _native =
             (debugNativeBridgeFactory ?? NativeBridge.new)(client);
@@ -247,6 +254,17 @@ class IoDurbunBackend implements DurbunBackend {
       _client?.flush(timeout) ?? Future<bool>.value(false);
 
   @override
+  Map<String, Object?>? inspectorState() {
+    final client = _client;
+    if (client == null || client.isDisposed) return null;
+    try {
+      return client.describeState();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<void> dispose() async {
     final client = _client;
     if (client == null) return;
@@ -265,6 +283,8 @@ class IoDurbunBackend implements DurbunBackend {
     _ourDebugPrint = null;
     _originalDebugPrint = null;
     _printCapture = null;
+    client.outgoingTap = null;
+    DurbunInspectorStore.existing?.attached = false;
     _client = null;
     _options = null;
     await client.dispose();

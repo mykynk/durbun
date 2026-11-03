@@ -56,4 +56,8 @@ abstract class DurbunBackend {
     required String source,
     String? mockRuleId,
   });
+
+  /// Desktop state for the in-app inspector: `{connected, via, appId, config,
+  /// mocks, hello}`; null when the SDK is off.
+  Map<String, Object?>? inspectorState();
 }

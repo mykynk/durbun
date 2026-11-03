@@ -26,6 +26,7 @@ class DurbunOptions {
     this.waitForDesktop = Duration.zero,
     this.listenForUsb = true,
     this.useBackgroundIsolate = true,
+    this.inspector = true,
   });
 
   /// Whether the SDK runs. `null` (default):
@@ -92,6 +93,11 @@ class DurbunOptions {
   /// Run the transport (JSON encoding, socket I/O) on a background isolate.
   final bool useBackgroundIsolate;
 
+  /// Keeps the last logs, requests and metrics on the device for the in-app
+  /// inspector (`DurbunInspector`), with or without a desktop. Bounded: about
+  /// 2,000 log lines, 300 requests and 24 MB of bodies.
+  final bool inspector;
+
   /// Copy with some fields replaced.
   DurbunOptions copyWith({
     bool? enabled,
@@ -109,6 +115,7 @@ class DurbunOptions {
     Duration? waitForDesktop,
     bool? listenForUsb,
     bool? useBackgroundIsolate,
+    bool? inspector,
   }) {
     return DurbunOptions(
       enabled: enabled ?? this.enabled,
@@ -126,6 +133,7 @@ class DurbunOptions {
       waitForDesktop: waitForDesktop ?? this.waitForDesktop,
       listenForUsb: listenForUsb ?? this.listenForUsb,
       useBackgroundIsolate: useBackgroundIsolate ?? this.useBackgroundIsolate,
+      inspector: inspector ?? this.inspector,
     );
   }
 }
