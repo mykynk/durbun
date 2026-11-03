@@ -39,6 +39,8 @@ import { parseSimLogLine, simLogStreamArgs } from './simlog';
 
 const POLL_MS = 3000;
 const VIA = 'simctl log stream';
+/** Longest a crash report waits for the first app listing (host apps of app extensions). */
+const APPS_WAIT_MS = 10_000;
 
 export interface SimDeps {
   ctx: DriverContext;
@@ -165,8 +167,12 @@ export class SimulatorSession {
       this.deps.logger.debug(`copying ${file}: ${(e as Error).message}`);
       copy = undefined;
     }
+    // An app extension's report (com.x.app.Widget) belongs to its installed host app (com.x.app): the
+    // first app listing must be in (reports of the last 24 h arrive right at boot).
+    await this.apps.whenListed(APPS_WAIT_MS);
     if (this.disposed) return;
-    const known = report.bundleId ? this.apps.app(report.bundleId) : undefined;
+    const host = this.apps.reportApp(report);
+    const known = host ? this.apps.app(host) : undefined;
     const duplicateOf = this.deps.crashIndex.claim(this.id, report);
     this.batcher.push(
       crashReportEntry(report, {
@@ -176,6 +182,7 @@ export class SimulatorSession {
         ...(copy ? { reportUrl: crashReportUrl(path.basename(dir), name) } : {}),
         ...(duplicateOf !== undefined ? { duplicateOf } : {}),
         ...(known?.name ? { appName: known.name } : {}),
+        ...(host ? { hostBundleId: host } : {}),
       }),
     );
     this.apps.onCrash(report);
