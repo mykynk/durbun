@@ -135,6 +135,21 @@ describe('ConfigStore.updateSettings', () => {
     expect(reloaded.settings.iosSimLogLevel).toBe('debug');
   });
 
+  it('accepts iosDeviceLogScope (physical iPhones: apps | all), persists it and rejects other values', async () => {
+    await writeFile(path.join(dir, 'settings.json'), JSON.stringify({ iosDeviceLogScope: 'everything' }));
+    const bad = await loadConfig(dir);
+    expect(bad.settings.iosDeviceLogScope).toBe('apps'); // the default
+    expect(bad.warnings.join('\n')).toMatch(/iosDeviceLogScope must be one of apps, all/);
+    expect(() => bad.updateSettings({ iosDeviceLogScope: 'some' })).toThrow(ConfigValidationError);
+
+    const result = bad.updateSettings({ iosDeviceLogScope: 'all' });
+    expect(result.changed).toEqual(['iosDeviceLogScope']);
+    expect(bad.settings.iosDeviceLogScope).toBe('all');
+    await bad.flush();
+    expect(await readJson(path.join(dir, 'settings.json'))).toEqual({ iosDeviceLogScope: 'all' });
+    expect((await loadConfig(dir)).settings.iosDeviceLogScope).toBe('all');
+  });
+
   it('rejects type errors as a whole', async () => {
     const config = await loadConfig(dir);
     expect(() => config.updateSettings({ maxLogEntries: 'lots', allowLan: true })).toThrow(ConfigValidationError);

@@ -26,11 +26,16 @@ import type {
   PlatformServices,
   RunningServer,
   SdkLayer,
+  ServerNotice,
   StartServerOptions,
   VirtualSdkSession,
 } from './types';
-import { createLogger, setLogLevel } from './util/logger';
+import { createLogger, redactingLogger, setLogLevel } from './util/logger';
 import { SERVER_VERSION } from './version';
+
+/** Version of this server bundle (the Mac app compares it with a Dürbün it attaches to). */
+export { SERVER_VERSION };
+export type { ServerNotice };
 
 /** Constructors of the modules owned by other teams (injectable for tests). */
 export interface ServerFactories {
@@ -52,6 +57,8 @@ export const defaultFactories: ServerFactories = {
 export interface StartedServer extends RunningServer {
   /** Problems the user should know about (printed by the CLI banner). */
   readonly warnings: string[];
+  /** The same problems with codes and parameters, in the same order, for hosts that word them (ServerNotice). */
+  readonly notices?: ServerNotice[];
   readonly uiDir: string | null;
   readonly dataDir: string;
   readonly sdkListening: boolean;
@@ -210,12 +217,19 @@ export async function probeServer(port: number, timeoutMs = 1_500): Promise<{ ve
 }
 
 export async function startServerWith(opts: StartServerOptions, factories: ServerFactories, extras: StartServerExtras = {}): Promise<StartedServer> {
-  const logger = extras.logger ?? createLogger('durbun');
+  // No line may carry a secret (Dart VM service tokens), whatever logger the embedder passed.
+  const logger = redactingLogger(extras.logger ?? createLogger('durbun'));
   if (opts.verbose) setLogLevel('debug');
   const warnings: string[] = [];
+  const notices: ServerNotice[] = [];
+  const warn = (code: string, message: string, params?: ServerNotice['params']) => {
+    warnings.push(message);
+    notices.push(params ? { code, params, message } : { code, message });
+  };
 
   const config = await loadConfig(opts.dataDir, { lanOverride: opts.lan, logger: logger.child('config') });
   warnings.push(...config.warnings);
+  notices.push(...(config.notices ?? config.warnings.map((message) => ({ code: 'config.invalid', message }))));
 
   let hub: Hub;
   try {
@@ -236,7 +250,7 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
   } catch (err) {
     const reason = errorMessage(err);
     logger.error(`SDK layer failed to initialize: ${reason}`);
-    warnings.push(`App SDK connections are unavailable: ${reason}`);
+    warn('sdk.unavailable', `App SDK connections are unavailable: ${reason}`, { reason });
     sdk = unavailableSdk(reason);
   }
 
@@ -247,7 +261,7 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
   } catch (err) {
     const reason = errorMessage(err);
     logger.error(`device drivers failed to initialize: ${reason}`);
-    warnings.push(`Device drivers are unavailable: ${reason}`);
+    warn('drivers.unavailable', `Device drivers are unavailable: ${reason}`, { reason });
     platform = { drivers: PLATFORM_DRIVER_IDS.map((id) => unavailableDriver(id, reason)), services: unavailableServices(reason) };
   }
 
@@ -257,7 +271,7 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
   } catch (err) {
     const reason = errorMessage(err);
     logger.error(`Flutter VM module failed to initialize: ${reason}`);
-    warnings.push(`Flutter VM Service capture is unavailable: ${reason}`);
+    warn('vm.unavailable', `Flutter VM Service capture is unavailable: ${reason}`, { reason });
     vm = unavailableVm(reason);
   }
 
@@ -267,15 +281,18 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
   } catch (err) {
     const reason = errorMessage(err);
     logger.warn(`demo driver failed to initialize: ${reason}`);
-    if (opts.demo) warnings.push(`Demo mode is unavailable: ${reason}`);
+    if (opts.demo) warn('demo.unavailable', `Demo mode is unavailable: ${reason}`, { reason });
     demo = null;
   }
 
   const ui = resolveUiDir(opts.uiDir, extras.moduleDir);
   if (ui.explicitInvalid) {
-    warnings.push(`--ui-dir ${ui.explicitInvalid} has no index.html; ${ui.dir ? `using ${ui.dir} instead` : 'serving the placeholder page'}`);
+    warn('ui.dirInvalid', `--ui-dir ${ui.explicitInvalid} has no index.html; ${ui.dir ? `using ${ui.dir} instead` : 'serving the placeholder page'}`, {
+      dir: ui.explicitInvalid,
+      ...(ui.dir ? { fallback: ui.dir } : {}),
+    });
   }
-  if (!ui.dir) warnings.push('The web UI is not built yet: run "npm run build" (the browser shows a placeholder page until then).');
+  if (!ui.dir) warn('ui.missing', 'The web UI is not built yet: run "npm run build" (the browser shows a placeholder page until then).');
 
   // Mutable: ports.http becomes the bound port after listen() (drivers read it when they start).
   const ports = { http: opts.httpPort, sdk: opts.sdkPort };
@@ -329,9 +346,9 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
   }
 
   if (!(await app.bindSdk(lan))) {
-    warnings.push(
-      `SDK port ${opts.sdkPort}: ${app.sdkListener.error ?? 'not listening'} — apps on simulators or Wi-Fi cannot connect over TCP (Android over USB still works).`,
-    );
+    const message = `SDK port ${opts.sdkPort}: ${app.sdkListener.error ?? 'not listening'} — apps on simulators or Wi-Fi cannot connect over TCP (Android over USB still works).`;
+    if (app.sdkListener.errorCode === 'EADDRINUSE') warn('sdk.portBusy', message, { port: opts.sdkPort });
+    else warn('sdk.listenFailed', message, { port: opts.sdkPort, error: app.sdkListener.error ?? 'not listening' });
   }
 
   const starts: Promise<void>[] = platform.drivers.map((driver) =>
@@ -343,7 +360,7 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
     try {
       await app.setDemo(true);
     } catch (err) {
-      warnings.push(`Demo mode could not start: ${errorMessage(err)}`);
+      warn('demo.startFailed', `Demo mode could not start: ${errorMessage(err)}`, { reason: errorMessage(err) });
     }
   }
   await Promise.race([Promise.allSettled(starts), delay(extras.driverStartWaitMs ?? DEFAULT_DRIVER_START_WAIT_MS)]);
@@ -375,6 +392,7 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
     },
     stop: () => (stopping ??= shutdown()),
     warnings,
+    notices,
     uiDir: ui.dir,
     dataDir: config.dataDir,
     get sdkListening() {

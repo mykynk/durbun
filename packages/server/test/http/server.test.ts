@@ -1,9 +1,9 @@
 import net from 'node:net';
-import { rm } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { StartServerOptions } from '../../src/types';
-import { installShutdownHandlers, ServerStartError, startServerWith, type ServerFactories, type StartedServer } from '../../src/server';
+import { installShutdownHandlers, SERVER_VERSION, ServerStartError, startServerWith, type ServerFactories, type StartedServer } from '../../src/server';
 import { silentLogger } from '../../src/util/logger';
 import { connectUi, FakeDriver, FakeHub, FakeSdk, FakeVm, makeTempDir } from './fakes';
 
@@ -95,6 +95,7 @@ describe('startServer wiring', () => {
     expect(running.info).toMatchObject({ name: 'durbun', demo: true, lan: false, ports: { http: port, sdk: 39_761 }, dataDir: path.join(dir, 'data') });
     expect(running.sdkListening).toBe(true);
     expect(running.warnings).toEqual(['The web UI is not built yet: run "npm run build" (the browser shows a placeholder page until then).']);
+    expect(running.notices).toEqual([{ code: 'ui.missing', message: running.warnings[0] }]);
 
     // A settings change from the UI reaches drivers (ctx.onSettings / ctx.settings) and the hub.
     const seen: number[] = [];
@@ -155,6 +156,17 @@ describe('startServer wiring', () => {
     expect(running.warnings.join('\n')).toMatch(/App SDK connections are unavailable: sdk boom/);
     expect(running.warnings.join('\n')).toMatch(/Flutter VM Service capture is unavailable: vm boom/);
     expect(running.warnings.join('\n')).toMatch(/Demo mode is unavailable: demo boom/);
+    // the same problems with codes and parameters (the Mac app words them in Turkish)
+    expect(running.notices?.map((n) => [n.code, n.params])).toEqual([
+      ['sdk.unavailable', { reason: 'sdk boom' }],
+      ['drivers.unavailable', { reason: 'createPlatform: not implemented yet' }],
+      ['vm.unavailable', { reason: 'vm boom' }],
+      ['demo.unavailable', { reason: 'demo boom' }],
+      ['ui.missing', undefined],
+      ['sdk.listenFailed', { port: 39_761, error: 'Could not listen on 127.0.0.1:39761: SDK layer unavailable: sdk boom' }],
+      ['demo.startFailed', { reason: 'Demo mode is not available in this build' }],
+    ]);
+    expect(running.notices?.map((n) => n.message)).toEqual(running.warnings);
     expect(running.sdkListening).toBe(false);
     const statuses = running.app.driverStatuses();
     expect(statuses.map((s) => [s.id, s.available])).toEqual([
@@ -204,6 +216,25 @@ describe('startServer wiring', () => {
     running = await startServerWith(options(), f.factories, extras());
     expect(running.sdkListening).toBe(false);
     expect(running.warnings.join('\n')).toMatch(/SDK port 39761: Port 39761 is already used by another program/);
+    expect(running.notices?.at(-1)).toEqual({ code: 'sdk.portBusy', params: { port: 39_761 }, message: running.warnings.at(-1) });
+  });
+
+  it('gives config problems codes too, and exports the server version for embedders', async () => {
+    const data = path.join(dir, 'data');
+    await mkdir(data, { recursive: true });
+    await writeFile(path.join(data, 'settings.json'), JSON.stringify({ iosSimLogScope: 'everything' }));
+    await writeFile(path.join(data, 'mocks.json'), '[{ "id": ');
+    running = await startServerWith(options(), fakes().factories, extras());
+    const byCode = (code: string) => running!.notices?.filter((n) => n.code === code) ?? [];
+    expect(byCode('config.invalid')).toEqual([
+      { code: 'config.invalid', params: { file: 'settings.json', detail: 'iosSimLogScope must be one of apps, all — using the default' }, message: 'settings.json: iosSimLogScope must be one of apps, all — using the default' },
+    ]);
+    const unreadable = byCode('config.unreadable');
+    expect(unreadable).toHaveLength(1);
+    expect(unreadable[0]!.params).toMatchObject({ file: 'mocks.json', backup: expect.stringContaining('mocks.json.corrupt-') });
+    expect(running.notices?.map((n) => n.message)).toEqual(running.warnings);
+    expect(SERVER_VERSION).toMatch(/^\d+\.\d+\.\d+/);
+    expect(running.info.version).toBe(SERVER_VERSION);
   });
 });
 

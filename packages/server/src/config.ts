@@ -21,7 +21,7 @@ import {
   type ServerSettings,
   type UrlMatchType,
 } from '@durbun/protocol';
-import type { Logger } from './types';
+import type { Logger, ServerNotice } from './types';
 import { silentLogger } from './util/logger';
 
 export const SETTINGS_FILE = 'settings.json';
@@ -52,6 +52,9 @@ const PATH_KEYS: PathKey[] = ['adbPath', 'idevicesyslogPath'];
 const ENUMS = {
   iosSimLogScope: ['apps', 'all'],
   iosSimLogLevel: ['default', 'info', 'debug'],
+  // Physical iPhones: 'apps' keeps third-party apps' lines and crash-related system lines (the iOS device
+  // driver filters), 'all' every daemon.
+  iosDeviceLogScope: ['apps', 'all'],
 } as const;
 const ENUM_KEYS = Object.keys(ENUMS) as (keyof typeof ENUMS)[];
 
@@ -498,6 +501,8 @@ export interface ConfigStore {
   readonly mocks: MockRule[];
   /** Problems found while loading (corrupt files, invalid values). */
   readonly warnings: string[];
+  /** The same problems with codes and parameters (ServerNotice), in the same order. */
+  readonly notices?: ServerNotice[];
   /** Validate, apply and persist a partial settings object. Throws ConfigValidationError on type errors. */
   updateSettings(patch: unknown): SettingsUpdateResult;
   /** Validate and persist the full mock rule list. Throws ConfigValidationError when any rule is invalid. */
@@ -539,6 +544,7 @@ class FileConfigStore implements ConfigStore {
     init: { stored: ServerSettings; explicitKeys: SettingsKey[]; rules: MockRule[]; lanOverride?: boolean },
     readonly warnings: string[],
     private readonly logger: Logger,
+    readonly notices: ServerNotice[] = [],
   ) {
     this.settingsPath = path.join(dataDir, SETTINGS_FILE);
     this.mocksPath = path.join(dataDir, MOCKS_FILE);
@@ -701,6 +707,11 @@ export async function loadConfig(dataDirInput: string, opts: LoadConfigOptions =
   const logger = opts.logger ?? silentLogger;
   const now = opts.now ?? Date.now;
   const warnings: string[] = [];
+  const notices: ServerNotice[] = [];
+  const warn = (code: string, message: string, params: Record<string, string | number>) => {
+    warnings.push(message);
+    notices.push({ code, params, message });
+  };
 
   let dataDir = path.resolve(expandHome(dataDirInput || defaultDataDir()));
   try {
@@ -713,7 +724,11 @@ export async function loadConfig(dataDirInput: string, opts: LoadConfigOptions =
       /* no passwd entry (containers) */
     }
     const fallback = path.join(os.tmpdir(), `durbun-${user}`);
-    warnings.push(`data directory ${dataDir} is not writable (${(err as Error).message}); using ${fallback} for this run`);
+    warn('config.dataDirFallback', `data directory ${dataDir} is not writable (${(err as Error).message}); using ${fallback} for this run`, {
+      dir: dataDir,
+      fallback,
+      error: (err as Error).message,
+    });
     dataDir = fallback;
     await ensureWritableDir(dataDir);
   }
@@ -729,13 +744,17 @@ export async function loadConfig(dataDirInput: string, opts: LoadConfigOptions =
       const normalized = normalizeSettings(settingsFile.value);
       stored = normalized.settings;
       explicitKeys = normalized.keys;
-      warnings.push(...normalized.warnings.map((w) => `${SETTINGS_FILE}: ${w}`));
+      for (const w of normalized.warnings) warn('config.invalid', `${SETTINGS_FILE}: ${w}`, { file: SETTINGS_FILE, detail: w });
     } else {
-      warnings.push(`${SETTINGS_FILE}: expected an object — using defaults`);
+      warn('config.invalid', `${SETTINGS_FILE}: expected an object — using defaults`, { file: SETTINGS_FILE, detail: 'expected an object — using defaults' });
     }
   } else if (settingsFile.kind === 'corrupt') {
     const backup = await backupCorrupt(settingsPath, now());
-    warnings.push(`${SETTINGS_FILE} could not be read (${settingsFile.error}) — using defaults${backup ? `; copy kept at ${backup}` : ''}`);
+    warn('config.unreadable', `${SETTINGS_FILE} could not be read (${settingsFile.error}) — using defaults${backup ? `; copy kept at ${backup}` : ''}`, {
+      file: SETTINGS_FILE,
+      error: settingsFile.error,
+      ...(backup ? { backup } : {}),
+    });
   }
 
   let rules: MockRule[] = [];
@@ -743,10 +762,14 @@ export async function loadConfig(dataDirInput: string, opts: LoadConfigOptions =
   if (mocksFile.kind === 'ok') {
     const validated = validateMockRules(mocksFile.value, now());
     rules = validated.rules;
-    warnings.push(...validated.problems.map((p) => `${MOCKS_FILE}: ${p} — rule skipped`));
+    for (const p of validated.problems) warn('config.invalid', `${MOCKS_FILE}: ${p} — rule skipped`, { file: MOCKS_FILE, detail: `${p} — rule skipped` });
   } else if (mocksFile.kind === 'corrupt') {
     const backup = await backupCorrupt(mocksPath, now());
-    warnings.push(`${MOCKS_FILE} could not be read (${mocksFile.error}) — starting without mock rules${backup ? `; copy kept at ${backup}` : ''}`);
+    warn('config.unreadable', `${MOCKS_FILE} could not be read (${mocksFile.error}) — starting without mock rules${backup ? `; copy kept at ${backup}` : ''}`, {
+      file: MOCKS_FILE,
+      error: mocksFile.error,
+      ...(backup ? { backup } : {}),
+    });
   }
 
   let tempDir = path.join(dataDir, TEMP_DIR_NAME);
@@ -758,10 +781,10 @@ export async function loadConfig(dataDirInput: string, opts: LoadConfigOptions =
     }
   } catch (err) {
     tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'durbun-tmp-'));
-    warnings.push(`temp directory could not be created (${(err as Error).message}); using ${tempDir}`);
+    warn('config.tempDirFallback', `temp directory could not be created (${(err as Error).message}); using ${tempDir}`, { dir: tempDir, error: (err as Error).message });
   }
   await removeStaleWriteTemps(dataDir, now());
 
   for (const w of warnings) logger.warn(w);
-  return new FileConfigStore(dataDir, tempDir, { stored, explicitKeys, rules, lanOverride: opts.lanOverride }, warnings, logger);
+  return new FileConfigStore(dataDir, tempDir, { stored, explicitKeys, rules, lanOverride: opts.lanOverride }, warnings, logger, notices);
 }

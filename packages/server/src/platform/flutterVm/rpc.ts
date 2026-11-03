@@ -15,6 +15,7 @@ import http from 'node:http';
 import https from 'node:https';
 import WebSocket from 'ws';
 import type { Logger } from '../../types';
+import { redactSecrets } from '../../util/redact';
 import { normalizeVmServiceUrl, toHttpBase, wsUrlFromRedirect } from './url';
 
 export const RpcCodes = {
@@ -147,10 +148,10 @@ export async function connectVmService(wsUrl: string, opts: ConnectOptions = {})
     const result = await openSocket(current, timeoutMs);
     if ('ws' in result) return new VmServiceClient(result.ws, current, hop > 0, opts);
     const next = wsUrlFromRedirect(result.redirect, current);
-    opts.logger?.debug(`VM service redirected ${current} → ${next}`);
+    opts.logger?.debug(`VM service redirected ${redactSecrets(current)} → ${redactSecrets(next)}`);
     current = next;
   }
-  throw new Error(`Too many redirects while connecting to ${wsUrl}`);
+  throw new Error(`Too many redirects while connecting to ${redactSecrets(wsUrl)}`);
 }
 
 export type ProbeResult =
