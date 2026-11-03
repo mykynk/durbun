@@ -255,6 +255,23 @@ final class TransportTests: SDKTestCase {
         }
     }
 
+    func testMockRulesEndWithTheConnectionThatPushedThem() {
+        desktop.mocks = [[
+            "id": "m1", "enabled": true, "method": "GET", "url": "/users", "match": "contains",
+            "action": ["type": "respond", "status": 200], "createdAt": 1,
+        ]]
+        startConnected()
+        XCTAssertTrue(waitUntil { DurbunCore.shared.mockRules.map(\.id) == ["m1"] })
+        // Whoever answered the hello is not authenticated: once it is gone, its rules must not stay active.
+        desktop.autoWelcome = false
+        desktop.closeConnections()
+        XCTAssertTrue(waitUntil { !Durbun.isConnected })
+        XCTAssertTrue(waitUntil { DurbunCore.shared.mockRules.isEmpty }, "rules dropped with the connection")
+        // The desktop's next welcome brings them back.
+        desktop.autoWelcome = true
+        XCTAssertTrue(waitUntil(timeout: 10) { Durbun.isConnected && DurbunCore.shared.mockRules.count == 1 })
+    }
+
     func testReleaseGuardAndDisabledOption() {
         var disabled = options()
         disabled.enabled = false

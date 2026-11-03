@@ -73,7 +73,15 @@ final class HostedModeTests: XCTestCase {
         XCTAssertEqual(core.mockRules.map(\.id), ["m1"])
         core.applyHostState(#"{"connected":false}"#)
         XCTAssertFalse(core.isConnected)
-        XCTAssertEqual(core.mockRules.map(\.id), ["m1"], "missing fields keep their value")
+        XCTAssertFalse(core.sdkConfig.captureBodies, "missing fields keep their value")
+        XCTAssertEqual(core.sdkConfig.maxBodyBytes, 2048)
+        XCTAssertEqual(core.mockRules.map(\.id), [], "the mock rules end with the connection")
+
+        let rules = #"[{"id":"m2","enabled":true,"method":"GET","url":"/todos/","match":"contains","action":{"type":"respond","status":418}}]"#
+        core.applyHostState(#"{"mocks":\#(rules)}"#)
+        XCTAssertEqual(core.mockRules.map(\.id), [], "never applied while the host is disconnected")
+        core.applyHostState(#"{"connected":true,"mocks":\#(rules)}"#)
+        XCTAssertEqual(core.mockRules.map(\.id), ["m2"])
     }
 
     func testCommandsAnswerThroughTheHostAndActionsAreHandedOver() {

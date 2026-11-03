@@ -33,7 +33,14 @@ final class DurbunCore {
         var reconnectMinDelay: TimeInterval?
         var reconnectMaxDelay: TimeInterval?
         var handshakeTimeout: TimeInterval?
+        /// Behave like a build without `DEBUG` (default: the real build configuration).
+        var releaseBuild: Bool?
+        /// Whether the Flutter plugin is part of the app (default: looked up at runtime).
+        var flutterPluginPresent: Bool?
     }
+
+    /// Present in every Flutter app that uses `package:durbun` (the plugin carries a copy of this core).
+    static let flutterPluginClass = "durbun.DurbunFlutterPlugin"
 
     var overrides = Overrides()
 
@@ -122,12 +129,21 @@ final class DurbunCore {
         lifecycle.lock()
         defer { lifecycle.unlock() }
         guard options.enabled else { return }
-        if isHosted {
-            Diagnostics.info("Durbun.start() is not needed in Flutter apps: package:durbun already runs the native layer.")
+        let overrides = self.overrides
+        // Flutter apps: package:durbun starts this core from Dart (and keeps it off when Dart is off), so a
+        // stray native call must not open a second session.
+        if isHosted || (overrides.flutterPluginPresent ?? (NSClassFromString(Self.flutterPluginClass) != nil)) {
+            Diagnostics.info("Durbun.start() is not needed in Flutter apps: package:durbun starts the native layer from Dart.")
             return
         }
-        guard Self.buildAllowsRunning || options.allowInReleaseBuilds else {
+        let debugBuild = overrides.releaseBuild.map { !$0 } ?? Self.buildAllowsRunning
+        guard debugBuild || options.allowInReleaseBuilds else {
             Diagnostics.info("Dürbün is disabled in non-DEBUG builds (set allowInReleaseBuilds to force it).")
+            return
+        }
+        // Forced release builds still never run in App Store installs (DEBUG builds never come from there).
+        if !debugBuild && StoreInstallGuard.isStoreInstall {
+            Diagnostics.notice(StoreInstallGuard.message())
             return
         }
         let env = ProcessInfo.processInfo.environment
@@ -141,7 +157,6 @@ final class DurbunCore {
         }
         let environment = AppEnvironment.current()
         let host = (options.host ?? env["DURBUN_HOST"])?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let overrides = self.overrides
         let isDevice = AppEnvironment.isPhysicalIOSDevice
         var configuration = Transport.Configuration()
         configuration.loopbackPort = (overrides.loopbackClient ?? !isDevice) ? options.port : nil
@@ -240,7 +255,7 @@ final class DurbunCore {
     }
 
     /// Desktop state from the host: `{connected, config, mocks, …}` (JSON). Missing fields keep
-    /// their previous value.
+    /// their previous value, except the mock rules: they hold only while the host is connected.
     func applyHostState(_ json: String) {
         guard let data = json.data(using: .utf8),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -252,6 +267,8 @@ final class DurbunCore {
             }
             if object["mocks"] != nil { mocks = MockRule.parseList(object["mocks"]) }
             if let isConnected = object["connected"] as? Bool { connected = isConnected }
+            // See didDisconnect: rules from a peer that went away must not keep rewriting responses.
+            if !connected { mocks = [] }
         }
     }
 
@@ -436,6 +453,9 @@ final class DurbunCore {
         let metrics: MetricsReporter? = lock.withLock {
             guard self.generation == generation else { return nil }
             connected = false
+            // Mock rules hold only while the peer that pushed them is connected: whoever answered the
+            // hello is not authenticated yet. The desktop sends them again in its next welcome.
+            mocks = []
             return self.metrics
         }
         metrics?.stop()

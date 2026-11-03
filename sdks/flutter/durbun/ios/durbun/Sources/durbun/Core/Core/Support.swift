@@ -46,6 +46,11 @@ enum Diagnostics {
     static func info(_ message: @autoclosure () -> String) {
         os_log("%{public}@", log: log, type: .info, message())
     }
+
+    /// Default level: also shown by the device log stream (Console.app, the desktop's syslog reader).
+    static func notice(_ message: @autoclosure () -> String) {
+        os_log("%{public}@", log: log, type: .default, message())
+    }
 }
 
 /// Current thread id as shown by NSLog / Xcode (`pthread_threadid_np`).
