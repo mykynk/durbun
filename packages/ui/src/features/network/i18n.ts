@@ -45,7 +45,7 @@ registerMessages('network', {
       slow: 'Yavaş ≥ {threshold}',
       slowHint: '{threshold} ve daha uzun süren istekler',
       slowThreshold: 'Yavaş eşiği',
-      mocked: "Mock'lananlar",
+      mocked: 'Mock’lananlar',
       reset: 'Filtreleri temizle',
     },
     columns: {
@@ -94,7 +94,7 @@ registerMessages('network', {
     menu: {
       copy: 'Kopyala',
       copyMenu: 'Kopyalama seçenekleri',
-      copyUrl: "URL'yi kopyala",
+      copyUrl: 'URL’yi kopyala',
       copyAs: {
         curl: 'cURL olarak kopyala',
         fetch: 'fetch olarak kopyala',
@@ -124,9 +124,9 @@ registerMessages('network', {
       noUrl: 'URL bilinmiyor (yalnızca yanıt görüldü)',
       desktop: 'Masaüstü (Dürbün)',
       replayHint: 'Aynı isteği masaüstünden yeniden gönderir',
-      mocked: "Mock'landı",
+      mocked: 'Mock’landı',
       mockedBy: 'Mock: {rule}',
-      openRule: "Kuralı Mock'lar sekmesinde aç",
+      openRule: 'Kuralı Mock’lar sekmesinde aç',
       gone: 'Bu istek temizlendi ya da bellek sınırı nedeniyle silindi; son bilinen hali gösteriliyor.',
     },
     general: {
@@ -164,7 +164,7 @@ registerMessages('network', {
       query: 'Sorgu',
       cookies: 'Çerezler',
       noHeaders: 'Başlık yok',
-      noQuery: "Bu URL'de sorgu parametresi yok",
+      noQuery: 'Bu URL’de sorgu parametresi yok',
       noCookies: 'Çerez yok',
       copyCookie: 'Çerez değerini kopyala',
     },
@@ -225,7 +225,7 @@ registerMessages('network', {
       formFields: 'Form alanları',
       binaryTitle: 'İkili veri · {size}',
       binaryHint: 'Bu içerik metin olarak gösterilemiyor.',
-      showHex: "Hex'te göster",
+      showHex: 'Hex’te göster',
       imageAlt: 'Görsel yanıtı: {url}',
       imageTruncated: 'Görsel kesik yakalandığı için gösterilemiyor',
       imageFailed: 'Görsel açılamadı',
