@@ -20,7 +20,7 @@ import type { DeviceLogInput, HubSink, Logger } from '../../types';
 import { sleep } from '../shared/timing';
 import type { Adb } from './adb';
 import { basePackage, type CrashAppMeta } from './deviceApps';
-import { deviceLocalToEpoch, type DeviceClock } from './deviceClock';
+import { asciiDigits, deviceLocalToEpoch, type DeviceClock } from './deviceClock';
 import { READER_CODES, type ReaderReport } from './readers';
 
 export const DROPBOX_TAGS = ['data_app_crash', 'data_app_anr', 'data_app_native_crash', 'SYSTEM_TOMBSTONE'] as const;
@@ -50,8 +50,12 @@ export const DEDUPE_PID_WINDOW_MS = 30_000;
 /** Same package within ±5 s (+1 s: dropbox prints whole seconds). */
 export const DEDUPE_PACKAGE_WINDOW_MS = 6_000;
 
+/**
+ * The date is written with the device locale's digits on some builds ("٢٠٢٦-١١-٠٢ ١١:٤٣:٠٣" in Arabic), the
+ * rest of the line always in ASCII. Only digits, '-', ' ' and ':' can match the date (it goes into `--print`).
+ */
 const HEADER_RE =
-  /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (\S+) \((?:(compressed )?(text|data), (\d+) bytes|contents lost|no file)\)\s*$/;
+  /^(\p{Nd}{4}-\p{Nd}{2}-\p{Nd}{2} \p{Nd}{2}:\p{Nd}{2}:\p{Nd}{2}) (\S+) \((?:(compressed )?(text|data), (\d+) bytes|contents lost|no file)\)\s*$/u;
 /** Every real dump starts with "Drop box contents: N entries"; an empty search ends with "(No entries found.)". */
 const DUMP_RE = /^Drop box contents: \d+|^\(No entries found\.\)/m;
 const REFUSED_RE = /Permission Denial|SecurityException|Can't find service: dropbox|not allowed/i;
@@ -70,8 +74,10 @@ function firstLine(out: string): string {
 
 export interface DropboxHeader {
   tag: string;
-  /** Device-local "yyyy-MM-dd HH:mm:ss". */
+  /** Device-local "yyyy-MM-dd HH:mm:ss", ASCII digits. */
   date: string;
+  /** The date as the device printed it, when its locale writes other digits: `--print` filters must use it. */
+  deviceDate?: string;
   /** Occurrence of this tag + second in the listing (several records can share a second). */
   index: number;
   /** Readable text entry (not binary / lost). */
@@ -79,6 +85,7 @@ export interface DropboxHeader {
   bytes?: number;
 }
 
+/** Same key whatever digits the device locale used (a language switch does not re-read records). */
 export function dropboxKey(h: Pick<DropboxHeader, 'tag' | 'date' | 'index'>): string {
   return `${h.tag}|${h.date}|${h.index}`;
 }
@@ -90,12 +97,13 @@ export function parseDropboxListing(text: string): DropboxHeader[] {
   for (const raw of text.split('\n')) {
     const m = HEADER_RE.exec(raw.endsWith('\r') ? raw.slice(0, -1) : raw);
     if (!m) continue;
-    const date = m[1]!;
+    const date = asciiDigits(m[1]!);
     const tag = m[2]!;
     const k = `${tag}|${date}`;
     const index = counts.get(k) ?? 0;
     counts.set(k, index + 1);
     const h: DropboxHeader = { tag, date, index, text: m[4] === 'text' };
+    if (date !== m[1]) h.deviceDate = m[1]!;
     if (m[5]) h.bytes = Number(m[5]);
     out.push(h);
   }
@@ -158,13 +166,14 @@ export function parseDropboxPrint(text: string): DropboxRecord[] {
       expectHeader = false;
       const m = HEADER_RE.exec(line);
       if (m) {
-        const date = m[1]!;
+        const date = asciiDigits(m[1]!);
         const tag = m[2]!;
         const k = `${tag}|${date}`;
         const index = counts.get(k) ?? 0;
         counts.set(k, index + 1);
         if (m[4] === 'text') {
           const h: DropboxHeader = { tag, date, index, text: true };
+          if (date !== m[1]) h.deviceDate = m[1]!;
           if (m[5]) h.bytes = Number(m[5]);
           cur = { h, lines: [] };
         }
@@ -614,7 +623,8 @@ export class DropboxWatcher {
     let printRefused: string | undefined;
     let printFailed: string | undefined;
     for (const [tag, hs] of wanted) {
-      const dates = [...new Set(hs.map((h) => h.date))];
+      // The device matches `date.contains(arg)` against its own formatting, so filter with its digits.
+      const dates = [...new Set(hs.map((h) => h.deviceDate ?? h.date))];
       const cmd =
         dates.length > DROPBOX_TIMING.maxPrintsPerCall
           ? `dumpsys dropbox --print ${tag}`

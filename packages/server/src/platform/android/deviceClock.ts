@@ -63,11 +63,28 @@ function zoneOffsetMs(utcMs: number, f: Intl.DateTimeFormat): number {
   return asUtc - Math.floor(utcMs / 1000) * 1000;
 }
 
+const DECIMAL_DIGIT_RE = /\p{Nd}/u;
+const NON_ASCII_DIGIT_RE = /(?![0-9])\p{Nd}/gu;
+
+/**
+ * Other scripts' decimal digits → ASCII ("٢٠٢٦-١١-٠٢" → "2026-11-02"). The device formats these dates with
+ * its system locale's digits (Arabic, Persian, Bengali, Marathi, Burmese, …). Unicode assigns decimal digits
+ * only in runs of ten from 0 to 9, so a digit's value is its distance from the start of its run, modulo 10.
+ */
+export function asciiDigits(text: string): string {
+  return text.replace(NON_ASCII_DIGIT_RE, (digit) => {
+    const cp = digit.codePointAt(0)!;
+    let start = cp;
+    while (start > 0 && DECIMAL_DIGIT_RE.test(String.fromCodePoint(start - 1))) start -= 1;
+    return String((cp - start) % 10);
+  });
+}
+
 const LOCAL_RE = /^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d):(\d\d)(?:\.(\d{1,9}))?$/;
 
-/** "2026-11-02 11:43:03" (device local time) → epoch ms, or undefined for anything else. */
+/** "2026-11-02 11:43:03" (device local time, any script's digits) → epoch ms, or undefined for anything else. */
 export function deviceLocalToEpoch(text: string | undefined, clock: DeviceClock = {}): number | undefined {
-  const m = LOCAL_RE.exec((text ?? '').trim());
+  const m = LOCAL_RE.exec(asciiDigits((text ?? '').trim()));
   if (!m) return undefined;
   const [y, mo, d, h, mi, s] = [m[1], m[2], m[3], m[4], m[5], m[6]].map(Number) as [number, number, number, number, number, number];
   if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 60) return undefined;

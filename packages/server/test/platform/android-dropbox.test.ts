@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LogEntry } from '@durbun/protocol';
 import type { Adb } from '../../src/platform/android/adb';
-import type { DeviceClock } from '../../src/platform/android/deviceClock';
+import { asciiDigits, deviceLocalToEpoch, type DeviceClock } from '../../src/platform/android/deviceClock';
 import {
   CrashIndex,
   createDropboxCursor,
@@ -34,6 +34,11 @@ function record(file: string, date?: string) {
   const recs = parseDropboxPrint(fx(file));
   return date ? recs.find((r) => r.date === date)! : recs[0]!;
 }
+
+/** ASCII digits → Arabic-Indic ones (an Arabic-locale device). */
+const ar = (s: string) => s.replace(/[0-9]/g, (c) => String.fromCharCode(0x0660 + Number(c)));
+/** Dropbox output as such a device prints it: header dates in its digits, the rest of the line in ASCII. */
+const arabicDates = (text: string) => text.replace(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?= )/gm, ar);
 
 describe('dumpsys dropbox parsing', () => {
   it('lists headers of the four tags, counting records that share a second', () => {
@@ -78,6 +83,28 @@ describe('dumpsys dropbox parsing', () => {
       [0, 'java.lang.Error: one'],
       [1, 'java.lang.Error: two'],
     ]);
+  });
+
+  it('device dates in the locale digits convert like ASCII ones (dropbox headers, dumpsys package install times)', () => {
+    const at = Date.UTC(2026, 10, 2, 8, 43, 3);
+    expect(deviceLocalToEpoch('٢٠٢٦-١١-٠٢ ١١:٤٣:٠٣', IST)).toBe(at); // Arabic-Indic (ar)
+    expect(deviceLocalToEpoch('۲۰۲۶-۱۱-۰۲ ۱۱:۴۳:۰۳', IST)).toBe(at); // Extended Arabic-Indic (fa)
+    expect(deviceLocalToEpoch('২০২৬-১১-০২ ১১:৪৩:০৩', IST)).toBe(at); // Bengali (bn)
+    const all = (zero: number) => String.fromCodePoint(...Array.from({ length: 10 }, (_, i) => zero + i));
+    // Devanagari, Myanmar, fullwidth, and the adjacent runs of mathematical digits (bold … monospace).
+    for (const zero of [0x0966, 0x1040, 0xff10, 0x1d7ce, 0x1d7d8, 0x1d7f6]) expect(asciiDigits(all(zero))).toBe('0123456789');
+    expect(asciiDigits('2026-11-02 v42 (1.3.2) ½ Ⅻ')).toBe('2026-11-02 v42 (1.3.2) ½ Ⅻ'); // not decimal digits: unchanged
+  });
+
+  it('reads header dates in the device locale digits (Arabic-Indic) and keeps them for --print', () => {
+    const ascii = parseDropboxListing(fx('dropbox-list.txt'));
+    const arabic = parseDropboxListing(arabicDates(fx('dropbox-list.txt')));
+    expect(arabic).toHaveLength(8);
+    expect(arabic.map((h) => ({ ...h, deviceDate: undefined }))).toEqual(ascii);
+    expect(arabic[2]).toMatchObject({ date: '2026-11-02 11:43:03', deviceDate: '٢٠٢٦-١١-٠٢ ١١:٤٣:٠٣' });
+    expect(ascii.some((h) => 'deviceDate' in h)).toBe(false);
+    const print = fx('dropbox-print-data_app_crash.txt');
+    expect(parseDropboxPrint(arabicDates(print)).map(dropboxKey)).toEqual(parseDropboxPrint(print).map(dropboxKey));
   });
 
   it('data_app_crash → crash entry with the Java throwable (previous launch keeps the pid in data only)', () => {
@@ -364,6 +391,33 @@ describe('DropboxWatcher', () => {
     expect(t.calls.slice(before)).toEqual([LIST_CMD]);
     expect(t.pushed).toHaveLength(5);
     expect(t.watcher.polls).toBe(2);
+  });
+
+  it('a device whose locale writes other digits (Arabic) gets the same records, filtered with its own digits', async () => {
+    const ascii = setup();
+    await ascii.watcher.pollNow();
+    const t = setup({
+      listing: arabicDates(fx('dropbox-list.txt')),
+      shell: (cmd) => {
+        const m = /^dumpsys dropbox --print (\S+)/.exec(cmd);
+        return m ? ok(arabicDates(fx(`dropbox-print-${m[1]}.txt`))) : undefined;
+      },
+    });
+    await t.watcher.pollNow();
+    // The device matches `date.contains(arg)` against its own formatting.
+    expect(t.calls.slice(1)).toEqual([
+      `dumpsys dropbox --print data_app_crash ${ar('2026-11-01 18:02:44')}; echo ${DROPBOX_SEP}; dumpsys dropbox --print data_app_crash ${ar('2026-11-02 11:43:03')}`,
+      `dumpsys dropbox --print data_app_anr ${ar('2026-11-02 11:44:58')}`,
+      `dumpsys dropbox --print data_app_native_crash ${ar('2026-11-02 11:43:10')}`,
+      `dumpsys dropbox --print SYSTEM_TOMBSTONE ${ar('2026-11-02 10:15:20')}; echo ${DROPBOX_SEP}; dumpsys dropbox --print SYSTEM_TOMBSTONE ${ar('2026-11-02 11:43:11')}`,
+    ]);
+    const rows = (x: typeof t) => x.pushed.map((e) => [e.tag, e.ts, (e.data as { package?: string }).package]);
+    expect(rows(t)).toHaveLength(5);
+    expect(rows(t)).toEqual(rows(ascii));
+    expect(t.pushed[0]!.ts).toBe(ist(2026, 11, 1, 18, 2, 44));
+    // Same cursor keys whatever the digits: switching the phone's language does not re-read records.
+    expect([...t.cursor.seen.keys()]).toEqual([...ascii.cursor.seen.keys()]);
+    expect(t.readers.at(-1)).toEqual({ status: 'ok' });
   });
 
   it('a native crash seen live counts once, though dropbox files it twice (native_crash + tombstone)', async () => {
