@@ -15,6 +15,7 @@ import type {
   SdkIdentity,
   SdkToServer,
   ServerToSdk,
+  Transport,
 } from '@durbun/protocol';
 import { PROTOCOL_VERSION } from '@durbun/protocol';
 import type { DeviceLogInput, DriverContext, Logger, VirtualSdkSession } from '../types';
@@ -42,6 +43,12 @@ export interface AppIdentity {
   source: string;
   capabilities: SdkCapability[];
   device: { model: string; name: string; osVersion: string; apiLevel?: number; manufacturer: string; isPhysical?: boolean };
+  /**
+   * 'vm-service': a debug build WITHOUT the SDK that Dürbün reaches through its Dart VM service (SPEC §5.6),
+   * as the Flutter VM module would: hello from 'durbun-vm-service' (platform 'dart-vm'), session key
+   * `vm:<pid>:<start>`, no mocks, no events, a 'vm.attached' line. Default: the SDK ('demo').
+   */
+  transport?: Extract<Transport, 'demo' | 'vm-service'>;
 }
 
 export type StopReason = 'crash' | 'user' | 'restart' | 'clear-data' | 'uninstall' | 'demo-stop';
@@ -187,8 +194,9 @@ export abstract class DemoApp implements SimApp {
     this.reportDeviceApp([this.pid], true);
     this.deps.ctx.hub.setProcess({ deviceId: this.deviceId, pid: this.pid, name: this.identity.processName, event: 'started', ts: this.now() });
     this.onProcessStart(reason);
+    const startedAt = this.now();
     this.after(this.rng.int(220, 520), () => {
-      this.openSession(`${this.identity.bundleId}-${Date.now().toString(36)}-${this.rng.hex(8)}`);
+      this.openSession(this.viaVmService ? `vm:${this.pid}:${Math.round(startedAt)}` : `${this.identity.bundleId}-${Date.now().toString(36)}-${this.rng.hex(8)}`);
       this.state = 'running';
       this.startMetrics();
       this.onRunning(firstLaunch);
@@ -226,10 +234,15 @@ export abstract class DemoApp implements SimApp {
     this.after(gapMs, () => this.openSession(key));
   }
 
+  /** Reached through the Dart VM service instead of the SDK (no mocks, no events). */
+  protected get viaVmService(): boolean {
+    return this.identity.transport === 'vm-service';
+  }
+
   private openSession(key: string): void {
     let session: VirtualSdkSession;
     try {
-      session = this.deps.ctx.sdk.openVirtual({ transport: 'demo', deviceId: this.deviceId });
+      session = this.deps.ctx.sdk.openVirtual({ transport: this.identity.transport ?? 'demo', deviceId: this.deviceId });
     } catch (err) {
       this.deps.logger.warn(`demo: could not open an SDK session for ${this.identity.name}`, err);
       return;
@@ -253,15 +266,18 @@ export abstract class DemoApp implements SimApp {
         processName: this.identity.processName,
         debug: true,
       },
-      device: {
-        platform: this.deps.platform,
-        model: this.identity.device.model,
-        manufacturer: this.identity.device.manufacturer,
-        name: this.identity.device.name,
-        osVersion: this.identity.device.osVersion,
-        apiLevel: this.identity.device.apiLevel,
-        isPhysical: this.identity.device.isPhysical ?? false,
-      },
+      // The VM only knows its OS; an SDK describes the device.
+      device: this.viaVmService
+        ? { platform: this.deps.platform }
+        : {
+            platform: this.deps.platform,
+            model: this.identity.device.model,
+            manufacturer: this.identity.device.manufacturer,
+            name: this.identity.device.name,
+            osVersion: this.identity.device.osVersion,
+            apiLevel: this.identity.device.apiLevel,
+            isPhysical: this.identity.device.isPhysical ?? false,
+          },
       session: key,
       capabilities: this.identity.capabilities,
       actions: this.actions(),
@@ -281,7 +297,8 @@ export abstract class DemoApp implements SimApp {
       case 'welcome': {
         this.appId = m.appId;
         this.online = true;
-        this.mocks = m.mocks;
+        this.mocks = this.viaVmService ? [] : m.mocks; // the VM service cannot apply mock rules
+        if (this.viaVmService) this.onVmAttached();
         this.applyConfig(m.config);
         const queued = this.outbox;
         this.outbox = [];
@@ -289,7 +306,7 @@ export abstract class DemoApp implements SimApp {
         return;
       }
       case 'mocks':
-        this.mocks = m.rules;
+        if (!this.viaVmService) this.mocks = m.rules;
         return;
       case 'config':
         this.applyConfig(m.config);
@@ -388,7 +405,19 @@ export abstract class DemoApp implements SimApp {
     this.send(msg);
   }
 
+  /** The 'vm.attached' line the Flutter VM module writes (with the service URL, its token masked). */
+  private onVmAttached(): void {
+    const port = 49_152 + ((this.pid ?? 0) % 16_000);
+    this.deps.ctx.hub.pushSystemLog(this.deviceId, {
+      message: `Attached to ${this.identity.name} through the Dart VM service`,
+      code: 'vm.attached',
+      params: { app: this.identity.name, url: `http://127.0.0.1:${port}/…` },
+      ...(this.appId ? { appId: this.appId } : {}),
+    });
+  }
+
   event(name: string, props?: Record<string, unknown>): void {
+    if (this.viaVmService) return; // analytics events come from the SDK only
     const msg: SdkToServer = { type: 'event', ts: this.now(), name };
     if (props) msg.props = props;
     this.send(msg);

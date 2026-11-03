@@ -9,6 +9,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceApp, LogEntry } from '@durbun/protocol';
 import { createDemoDriver } from '../../src/demo/index';
+import { appScope } from '../../src/hub/appScope';
 import { isServableCrashFile } from '../../src/http/api';
 import { crashReportEntry, isCrashReport, parseIps } from '../../src/platform/ios/crashReport';
 import { createSdkLayer } from '../../src/sdk/index';
@@ -74,11 +75,19 @@ describe('demo device apps (virtual time)', () => {
       'demo:1 com.mykynk.mahalle 5.12.0 (5120) debug adb running=true',
       'demo:1 com.mykynk.pati 2.4.1 (241) debug adb com.android.shell running=true',
       'demo:1 com.mykynk.pati.staging 2.5.0-rc.2 (252) release firebase dev.firebase.appdistribution running=true',
+      'demo:2 com.mykynk.kumbara 3.2.0 (320) debug simulator running=true',
       'demo:2 com.mykynk.pati 2.4.1 (241) debug simulator running=true',
       'demo:3 com.mykynk.kumbara 3.1.0 (310) release store-or-testflight running=true',
       'demo:3 com.mykynk.pati 2.4.1 (241) debug xcode running=false',
     ]);
 
+    // every demo app carries its label, the SDK-less Android builds too (the Android driver reads literal labels)
+    expect(hub.getDeviceApps().filter((a) => a.deviceId === 'demo:1').map((a) => `${a.id}=${a.name}`).sort()).toEqual([
+      'com.mykynk.kumbara=Kumbara',
+      'com.mykynk.mahalle=Mahalle',
+      'com.mykynk.pati.staging=Pati QA',
+      'com.mykynk.pati=Pati',
+    ]);
     // pids match the processes the hub knows; Kumbara has a main and a ":widget" process
     const kumbara = app(hub, 'demo:1', 'com.mykynk.kumbara')!;
     expect(kumbara.pids).toHaveLength(2);
@@ -94,7 +103,9 @@ describe('demo device apps (virtual time)', () => {
     expect(START.getTime() - xcode.lastActivity).toBe(9 * 60_000);
     expect(hub.getApps().some((a) => a.deviceId === 'demo:3')).toBe(false);
     // SDK-less builds have no SDK session; their device lines are attributed by pid
-    expect(hub.getApps().some((a) => a.app.id === 'com.mykynk.kumbara' || a.app.id === 'com.mykynk.pati.staging')).toBe(false);
+    expect(hub.getApps().some((a) => a.transport !== 'vm-service' && (a.app.id === 'com.mykynk.kumbara' || a.app.id === 'com.mykynk.pati.staging'))).toBe(false);
+    // …only Kumbara's debug build on the simulator is reached, through the Dart VM service
+    expect(hub.getApps().filter((a) => a.app.id === 'com.mykynk.kumbara').map((a) => `${a.deviceId} ${a.transport}`)).toEqual(['demo:2 vm-service']);
     const kumbaraLines = hub.getLogs().filter((l) => l.deviceId === 'demo:1' && l.pid !== undefined && kumbara.pids.includes(l.pid));
     expect(kumbaraLines.length).toBeGreaterThan(3);
     expect(Date.now() - kumbara.lastActivity).toBeLessThan(10_000);
@@ -110,7 +121,7 @@ describe('demo device apps (virtual time)', () => {
 
     await demo.stop();
     expect(hub.getDeviceApps().every((a) => !a.running && a.pids.length === 0)).toBe(true);
-    expect(hub.getDeviceApps()).toHaveLength(7); // device facts stay listed
+    expect(hub.getDeviceApps()).toHaveLength(8); // device facts stay listed
   });
 
   it('every line names its origin; crash records from before the session are previousLaunch', async () => {
@@ -181,14 +192,33 @@ describe('demo device apps (virtual time)', () => {
     const rows = hub.getLogs().filter((l) => l.origin === 'crash-report');
     expect(rows.map((l) => (l.data as { previousLaunch: boolean }).previousLaunch)).toEqual([true, false]);
     for (const row of rows) {
-      const data = row.data as { file: string; reportUrl: string };
+      const data = row.data as { file: string; reportUrl: string; pid: number; previousLaunch: boolean };
       const report = parseIps(readFileSync(data.file, 'utf8'));
-      expect(report).toMatchObject({ incomplete: false, symbolicated: false, bundleId: 'com.mykynk.kumbara', pid: row.pid });
+      expect(report).toMatchObject({ incomplete: false, symbolicated: false, bundleId: 'com.mykynk.kumbara', pid: data.pid });
+      // a previous launch's pid stays in data only (it may be another process by now), like the iOS driver's rows
+      expect(row.pid).toBe(data.previousLaunch ? undefined : data.pid);
       expect(isCrashReport(report!)).toBe(true);
       const driver = crashReportEntry(report!, { watchStart: START.getTime(), file: data.file, now: Date.now() });
       const { id: _id, deviceId: _device, source: _source, ...demoRow } = row;
       expect(demoRow).toEqual({ ...driver, data: { reportUrl: data.reportUrl, ...(driver.data as object) } });
     }
+  });
+
+  it('copied .ips reports follow the iOS dedupe policy: unmarked without a live crash row, marked when one matches', async () => {
+    vi.useFakeTimers({ now: START });
+    const { hub, ctx, demo } = setup();
+    await demo.start(ctx);
+    await vi.advanceTimersByTimeAsync(95_000); // Kumbara's live SIGSEGV on the USB iPhone comes at ~100–130 s
+    const kumbara = app(hub, 'demo:3', 'com.mykynk.kumbara')!;
+    expect(kumbara.running).toBe(true);
+    // what the dying process would print had an Objective-C exception ended it (the policy's live device row)
+    hub.pushDeviceLogs('demo:3', [
+      { ts: Date.now(), level: 'fatal', tag: 'Runner', kind: 'crash', origin: 'idevicesyslog', process: 'Runner', pid: kumbara.pids[0], message: "*** Terminating app due to uncaught exception 'NSInvalidArgumentException'" },
+    ]);
+    const live = hub.getLogs().at(-1)!;
+    await vi.advanceTimersByTimeAsync(60_000);
+    const rows = hub.getLogs().filter((l) => l.origin === 'crash-report');
+    expect(rows.map((l) => (l.data as { previousLaunch: boolean; duplicateOf?: number }).duplicateOf)).toEqual([undefined, live.id]);
   });
 
   it('over ~4 virtual minutes: live crashes and ANRs with their dropbox / .ips copies, restarts, calm rates', async () => {
@@ -215,13 +245,18 @@ describe('demo device apps (virtual time)', () => {
     const anrCopy = logs.find((l) => l.origin === 'dropbox' && l.tag === 'data_app_anr');
     expect(anrCopy).toMatchObject({ kind: 'anr', level: 'error', error: { type: 'ANR' } });
     const anrLive = byId.get((anrCopy!.data as { duplicateOf: number }).duplicateOf)!;
-    expect(anrLive).toMatchObject({ origin: 'logcat', kind: 'anr', tag: 'ActivityManager' });
+    expect(anrLive).toMatchObject({ origin: 'logcat', kind: 'anr', tag: 'ActivityManager', process: 'com.mykynk.kumbara', pid: anrCopy!.pid });
+    expect(anrLive.data).toEqual({ reporterPid: 1043, package: 'com.mykynk.kumbara' });
     expect(anrLive.message).toMatch(/^ANR in com\.mykynk\.kumbara/);
+    // …so both rows are Kumbara's in its device-app scope (the copy is hidden as a duplicate of the live row)
+    const kumbaraScope = appScope({ deviceId: 'demo:1', bundleId: 'com.mykynk.kumbara', apps: hub.getApps(), deviceApps: hub.getDeviceApps(), processes: hub.getProcesses() });
+    expect([kumbaraScope.logs(anrLive), kumbaraScope.logs(anrCopy!)]).toEqual([true, true]);
     expect(anrCopy!.error!.stack).toContain('GoalDao_Impl.updateAll');
 
     // iOS device: a live SIGSEGV → syslog exit lines → the copied .ips (not previousLaunch) → relaunch
     const liveIps = logs.filter((l) => l.origin === 'crash-report' && (l.data as { previousLaunch: boolean }).previousLaunch === false);
     expect(liveIps).toHaveLength(1);
+    expect(liveIps[0]!.data).not.toHaveProperty('duplicateOf'); // an SDK-less SIGSEGV leaves no live crash row
     expect(logs.some((l) => l.deviceId === 'demo:3' && l.process === 'ReportCrash' && l.message.includes(`corpse[${liveIps[0]!.pid}] Runner`))).toBe(true);
     expect(app(hub, 'demo:3', 'com.mykynk.kumbara')).toMatchObject({ running: true, crashReports: 2 });
 
@@ -353,6 +388,38 @@ describe('demo device apps (virtual time)', () => {
     expect(sdkOf('demo:1', 'com.mykynk.pati')?.layers).toEqual(['dart', 'android']);
     expect(sdkOf('demo:2', 'com.mykynk.pati')?.layers).toEqual(['dart', 'ios']);
     expect(sdkOf('demo:1', 'com.mykynk.mahalle')).not.toHaveProperty('layers'); // native Android SDK: one layer
+  });
+
+  it('Kumbara\'s debug build on the simulator comes through the Dart VM service: no SDK, no mocks, no events', async () => {
+    vi.useFakeTimers({ now: START });
+    const { hub, ctx, demo } = setup();
+    // a mock rule for its API: the VM service cannot apply it
+    sdk!.setMocks([{ id: 'm1', enabled: true, method: '*', url: 'api.kumbara.app', match: 'contains', action: { type: 'respond', status: 418 }, createdAt: 1 }]);
+    await demo.start(ctx);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    const session = hub.getApps().find((a) => a.deviceId === 'demo:2' && a.app.id === 'com.mykynk.kumbara')!;
+    expect(session).toMatchObject({
+      transport: 'vm-service',
+      connected: true,
+      sdk: { name: 'durbun-vm-service', platform: 'dart-vm' },
+      app: { name: 'Kumbara', version: '3.2.0', build: '320', processName: 'Runner', debug: true },
+    });
+    expect(session.sessionKey).toMatch(/^vm:\d+:\d+$/);
+    expect(session.capabilities).not.toContain('mocks');
+    expect(session.capabilities).not.toContain('events');
+    // the session and the simulator's DeviceApp are the same app (device + bundle id), the pid is the process's
+    expect(app(hub, 'demo:2', 'com.mykynk.kumbara')).toMatchObject({ running: true, pids: [session.app.pid], install: { source: 'simulator' }, buildType: 'debug' });
+
+    const own = hub.getLogs().filter((l) => l.appId === session.id);
+    expect(own.some((l) => l.source === 'app' && l.origin === 'vm-service')).toBe(true);
+    expect(own.some((l) => l.kind === 'event')).toBe(false);
+    expect(own.find((l) => l.code === 'vm.attached')).toMatchObject({ source: 'system', params: { app: 'Kumbara', url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/…$/) } });
+    expect(hub.getLogs().some((l) => l.deviceId === 'demo:2' && l.message.startsWith('The Dart VM service is listening on http://127.0.0.1:'))).toBe(true);
+    const requests = hub.getNetwork().filter((n) => n.appId === session.id);
+    expect(requests.length).toBeGreaterThan(2);
+    expect(requests.every((n) => !n.mocked && n.source === 'dart:io')).toBe(true);
+    expect(hub.getMetrics().some((m) => m.appId === session.id && m.source === 'vm-service' && m.heapMB !== undefined && m.fps !== undefined)).toBe(true);
   });
 
   it('the USB iPhone sounds like a phone: its own daemon pids, no simulator paths', async () => {

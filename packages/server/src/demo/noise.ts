@@ -20,6 +20,24 @@ export function androidLine(pid: number, tid: number, level: LogLevel, tag: stri
   return { ts, level, tag, message, pid, tid };
 }
 
+/**
+ * An ActivityManager "ANR in <pkg>" report as the Android driver emits it (platform/android/logcat.ts
+ * AndroidCrashGrouper): the row is the app's (pid from the report's "PID:" line, process = the package), the
+ * reporting system_server pid goes to data.reporterPid, data.package names the app.
+ */
+export function androidAnrLine(systemServerPid: number, pkg: string, appPid: number, report: string, ts = Date.now()): DeviceLogInput {
+  return {
+    ts,
+    level: 'error',
+    tag: 'ActivityManager',
+    message: report,
+    pid: appPid,
+    process: pkg,
+    kind: 'anr',
+    data: { reporterPid: systemServerPid, package: pkg },
+  };
+}
+
 export function iosLine(
   pid: number,
   process: string,

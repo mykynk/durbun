@@ -13,6 +13,7 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { parseIps, type IpsReport } from '../platform/ios/crashReport';
 import type { DeviceLogInput, DriverContext } from '../types';
 import { type DemoDeviceAppMeta, deviceAppInput, type SimApp, type StopReason } from './appSim';
 import { anrReport } from './content';
@@ -29,7 +30,7 @@ import {
   logcatFatal,
 } from './crashReports';
 import { ANDROID_SYSTEM, IOS_DEVICE_SYSTEM, IPHONE_DEVICE_UDID } from './devices';
-import { androidLine, iosLine } from './noise';
+import { androidAnrLine, androidLine, iosLine } from './noise';
 import type { Rng } from './rng';
 import type { Scheduler } from './scheduler';
 
@@ -43,6 +44,11 @@ export interface DeviceOnlyDeps {
   watchStart: number;
   /** Id of the live device log entry of `kind` just pushed for this pid (for dropbox de-duplication). */
   liveEntryId(deviceId: string, pid: number, kind: 'crash' | 'anr'): number | undefined;
+  /**
+   * iOS: the live crash row a copied .ips duplicates, by the iOS driver's own policy (platform/ios/crashDedupe.ts:
+   * an SDK native crash row or a "*** Terminating app" line, same pid ≤ 60 s or same bundle id ≤ 10 s).
+   */
+  claimIosCrash?(deviceId: string, report: IpsReport): number | undefined;
 }
 
 export interface DeviceOnlyIdentity {
@@ -349,8 +355,8 @@ export class KumbaraAndroid extends DeviceOnlyApp {
     const pid = this.pid as number;
     const ss = ANDROID_SYSTEM.systemServer.pid;
     const ts = this.now();
-    this.systemLog([{ ...androidLine(ss, ss + 2, 'error', 'ActivityManager', anrReport(KUMBARA, pid, new Date(ts)).replace(`${KUMBARA}/.ui.MainActivity`, `${KUMBARA}/.MainActivity`)), kind: 'anr' }]);
-    const liveId = this.deps.liveEntryId(this.deviceId, ss, 'anr');
+    this.systemLog([androidAnrLine(ss, KUMBARA, pid, anrReport(KUMBARA, pid, new Date(ts)).replace(`${KUMBARA}/.ui.MainActivity`, `${KUMBARA}/.MainActivity`), ts)]);
+    const liveId = this.deps.liveEntryId(this.deviceId, pid, 'anr');
     const traces = kumbaraAnrTraces(pid, ts);
     const subject = `Input dispatching timed out (8f2c1a0 ${KUMBARA}/${KUMBARA}.MainActivity (server) is not responding. Waited 5001ms for MotionEvent)`;
     this.deps.sched.after(this.rng.int(8_000, 20_000), () =>
@@ -474,6 +480,11 @@ export class KumbaraIos extends DeviceOnlyApp {
       signalNumber: 11,
       fileName: `Runner-${stamp}.ips`,
     };
+    // Read like the driver reads its copy: the dedupe policy decides on the parsed report. A SIGSEGV of this
+    // SDK-less build leaves no live crash row, so its report normally stays unmarked.
+    const parsed = parseIps(ipsReportText(report));
+    const duplicateOf = parsed ? this.deps.claimIosCrash?.(this.deviceId, parsed) : undefined;
+    if (duplicateOf !== undefined) report.duplicateOf = duplicateOf;
     return ipsCrashReport(report, this.saveCopy(report));
   }
 

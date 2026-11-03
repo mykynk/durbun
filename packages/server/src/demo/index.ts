@@ -1,20 +1,23 @@
 /**
  * Demo driver (SPEC §5.7, §10): three virtual devices ("Pixel 8 · Demo", "iPhone 16 Pro · Demo"
  * simulator, "iPhone 13 · Demo" over USB) producing realistic device logs, apps with the Dürbün SDK
- * (through virtual SDK sessions) producing app logs, events, network traffic and metrics, and apps
- * WITHOUT the SDK (store / Firebase / TestFlight builds) that only show what the OS exposes: device log
- * lines, crash / ANR records and the DeviceApp (version, build type, installer). start()/stop() are
- * idempotent; everything runs on one scheduler timer so stopping leaves nothing behind.
+ * (through virtual SDK sessions) producing app logs, events, network traffic and metrics, a debug build
+ * without the SDK reached through the Dart VM service (Kumbara on the simulator), and apps WITHOUT the SDK
+ * (store / Firebase / TestFlight builds) that only show what the OS exposes: device log lines, crash / ANR
+ * records and the DeviceApp (version, build type, installer). start()/stop() are idempotent; everything runs
+ * on one scheduler timer so stopping leaves nothing behind.
  *
  * Device lines carry the origin the real driver would set (logcat / simctl-log / idevicesyslog, plus
  * dropbox / crash-report records) so every "where does this come from" text in the UI can be seen
  * without a device; the `demo:` device ids and `logs.via: 'demo'` mark the data as demo data.
  */
 import type { DeviceActionId, DeviceActionResult, DeviceReaderState, DriverStatus, LogEntry, ToolCheck } from '@durbun/protocol';
+import { IosCrashIndex } from '../platform/ios/crashDedupe';
 import type { DeviceDriver, DriverContext, HubSink } from '../types';
 import { type DemoRuntime, type DeviceUiState, runDemoAction } from './actions';
 import { restamp, type SimApp } from './appSim';
 import { DeviceOnlyApp, type DeviceOnlyDeps, KumbaraAndroid, KumbaraIos, PatiQaAndroid } from './deviceOnly';
+import { KumbaraDebugIos } from './kumbaraDebug';
 import {
   ANDROID_PROCESS_LIST,
   ANDROID_SYSTEM,
@@ -53,6 +56,8 @@ interface Running {
   kumbaraAndroid: KumbaraAndroid;
   patiQa: PatiQaAndroid;
   kumbaraIos: KumbaraIos;
+  /** Kumbara's debug build on the simulator, reached through the Dart VM service (no SDK). */
+  kumbaraDebug: KumbaraDebugIos;
   watchers: Map<string, () => void>;
   unsubscribe: (() => void)[];
   /** The Pixel's frame-stats reader as last reported (Android driver rules: on change, else ≤ every 5 min). */
@@ -101,7 +106,7 @@ function withDemoOrigins(hub: HubSink): HubSink {
 export function createDemoDriver(): DeviceDriver {
   let running: Running | undefined;
 
-  const allApps = (r: Running): SimApp[] => [r.patiAndroid, r.mahalle, r.patiIos, r.patiUsb, r.kumbaraAndroid, r.patiQa, r.kumbaraIos];
+  const allApps = (r: Running): SimApp[] => [r.patiAndroid, r.mahalle, r.patiIos, r.patiUsb, r.kumbaraAndroid, r.patiQa, r.kumbaraIos, r.kumbaraDebug];
 
   function start(ctx: DriverContext): void {
     const sched = new Scheduler(TICK_MS, (err) => ctx.logger.warn('demo task failed', err));
@@ -131,13 +136,16 @@ export function createDemoDriver(): DeviceDriver {
       ctx.hub.pushSystemLog(id, { message: 'Log stream started (demo)', code: 'logs.streamStarted', params: { via: 'demo' } });
     }
 
-    // Live logcat / syslog crash rows by device + pid, for the dropbox copies' `duplicateOf`.
+    // Live logcat / syslog crash rows by device + pid, for the dropbox copies' `duplicateOf`; the iPhones'
+    // copied .ips reports are matched by the iOS driver's own dedupe policy.
     const liveCrashes = new Map<string, number>();
     const liveKey = (deviceId: string, pid: number, kind: string) => `${deviceId}|${pid}|${kind}`;
+    const iosCrashes = new IosCrashIndex({ owns: (id) => id === IPHONE_ID || id === IPHONE_DEVICE_ID, getApps: () => outer.getApps() });
     const unsubscribe: (() => void)[] = [];
     try {
       unsubscribe.push(
         outer.onLogs((entries: LogEntry[]) => {
+          iosCrashes.add(entries);
           for (const e of entries) {
             if (e.source !== 'device' || e.pid === undefined || (e.kind !== 'crash' && e.kind !== 'anr')) continue;
             if (e.origin === 'dropbox' || e.origin === 'crash-report' || !isDemoDevice(e.deviceId)) continue;
@@ -159,6 +167,7 @@ export function createDemoDriver(): DeviceDriver {
       platform,
       watchStart: now,
       liveEntryId: (d, pid, kind) => liveCrashes.get(liveKey(d, pid, kind)),
+      claimIosCrash: (d, report) => iosCrashes.claim(d, report),
     });
     const patiAndroid = new PatiApp(deps(PIXEL_ID, 'android', 1));
     const mahalle = new MahalleApp(deps(PIXEL_ID, 'android', 2));
@@ -170,14 +179,16 @@ export function createDemoDriver(): DeviceDriver {
     const kumbaraAndroid = new KumbaraAndroid(onlyDeps(PIXEL_ID, 'android', 21));
     const patiQa = new PatiQaAndroid(onlyDeps(PIXEL_ID, 'android', 22));
     const kumbaraIos = new KumbaraIos(onlyDeps(IPHONE_DEVICE_ID, 'ios', 23));
+    const kumbaraDebug = new KumbaraDebugIos(deps(IPHONE_ID, 'ios', 24));
     // How each device reports the SDK builds (SPEC §10.2): Android Studio / flutter run → adb, the
     // simulator → simulator, Xcode on a real iPhone → xcode.
     patiAndroid.deviceApp = { buildType: 'debug', install: { source: 'adb', installer: 'com.android.shell', firstInstall: now - 3 * DAY, lastUpdate: now - 35 * 60_000 } };
     mahalle.deviceApp = { buildType: 'debug', install: { source: 'adb', firstInstall: now - 20 * DAY, lastUpdate: now - 2 * 3_600_000 } };
     patiIos.deviceApp = { buildType: 'debug', install: { source: 'simulator' } };
     patiUsb.deviceApp = { buildType: 'debug', install: { source: 'xcode' } };
+    kumbaraDebug.deviceApp = { buildType: 'debug', install: { source: 'simulator' } };
 
-    const apps: SimApp[] = [patiAndroid, mahalle, patiIos, patiUsb, kumbaraAndroid, patiQa, kumbaraIos];
+    const apps: SimApp[] = [patiAndroid, mahalle, patiIos, patiUsb, kumbaraAndroid, patiQa, kumbaraIos, kumbaraDebug];
     const uiState = (): DeviceUiState => ({ appearance: 'light', fontScale: 1, animations: true, statusBar: 'reset', shots: 0 });
     const deviceState = new Map<string, DeviceUiState>(DEMO_DEVICE_IDS.map((id) => [id, uiState()]));
     const r: Running = {
@@ -192,6 +203,7 @@ export function createDemoDriver(): DeviceDriver {
       kumbaraAndroid,
       patiQa,
       kumbaraIos,
+      kumbaraDebug,
       watchers: new Map(),
       unsubscribe,
     };
@@ -259,8 +271,9 @@ export function createDemoDriver(): DeviceDriver {
     sched.after(1800, () => kumbaraIos.launch('boot'));
     sched.after(2300, () => kumbaraIos.reportEarlierCrash());
     sched.after(3000, () => kumbaraAndroid.launch('boot'));
+    sched.after(2600, () => kumbaraDebug.launch('user')); // `flutter run` on the simulator: the VM service attaches
     sched.after(8000, () => patiQa.launch('user'));
-    logger.info('demo mode started: 3 virtual devices, 3 app sessions, 3 builds without the SDK');
+    logger.info('demo mode started: 3 virtual devices, 3 SDK sessions, 1 VM service session, 3 builds without the SDK');
   }
 
   function stop(r: Running): void {

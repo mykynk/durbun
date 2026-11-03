@@ -3,8 +3,12 @@
  * same record, read by the driver, gives the same LogEntry. Guards the demo against shape drift.
  */
 import { describe, expect, it } from 'vitest';
+import { anrReport } from '../../src/demo/content';
 import { dropboxRecord, KUMBARA_CHANNEL_CRASH, KUMBARA_WIDGET_NPE, kumbaraAnrTraces, localStamp } from '../../src/demo/crashReports';
+import { androidAnrLine } from '../../src/demo/noise';
 import { dropboxToCrash, type DropboxRecord } from '../../src/platform/android/dropbox';
+import { AndroidCrashGrouper } from '../../src/platform/android/logcat';
+import type { DeviceLogInput } from '../../src/types';
 
 const KUMBARA = 'com.mykynk.kumbara';
 // the demo's watch started at 13:00:00.250 local time; dropbox prints whole seconds
@@ -33,6 +37,21 @@ describe('demo dropbox rows = Android driver rows', () => {
       });
       const driver = dropboxToCrash(rec, {}, WATCH_START)!.entry;
       expect(demo).toEqual(driver);
+    }
+  });
+
+  it('the live ActivityManager ANR line: what the logcat parser makes of it (app pid and process, data.package)', () => {
+    const ts = WATCH_START + 170_000;
+    for (const [pkg, pid] of [
+      [KUMBARA, 12_045],
+      ['com.mykynk.mahalle', 6612],
+    ] as const) {
+      const report = anrReport(pkg, pid, new Date(ts));
+      const parsed: DeviceLogInput[] = [];
+      // logcat: system_server (pid 1043) prints the report; the pipeline names the process from its pid table
+      new AndroidCrashGrouper((e) => parsed.push(e)).push({ ts, level: 'error', tag: 'ActivityManager', message: report, pid: 1043, tid: 1045, process: 'system_server' });
+      expect(parsed).toHaveLength(1);
+      expect(androidAnrLine(1043, pkg, pid, report, ts)).toEqual(parsed[0]);
     }
   });
 

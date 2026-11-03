@@ -9,7 +9,7 @@ import { type AppDeps, type CommandOutcome, DemoApp, type StopReason } from './a
 import { anrReport, JAVA_BASKET_CRASH, JAVA_BASKET_CRASH_SDK_STACK, JAVA_TIMEOUT_STACK, MARKET_PRODUCTS, MARKET_STORES, STRICT_MODE_VIOLATION } from './content';
 import { ANDROID_SYSTEM } from './devices';
 import { type FailureKind, type HttpOutcome, type HttpPlan, json, type SimBody } from './http';
-import { androidLine } from './noise';
+import { androidAnrLine, androidLine } from './noise';
 import { petThumbnailPng } from './png';
 import { round, Walk } from './rng';
 
@@ -474,7 +474,7 @@ export class MahalleApp extends DemoApp {
       ),
     ]);
     this.after(900, () => {
-      this.systemLog([{ ...androidLine(ss, ss + 2, 'error', 'ActivityManager', anrReport('com.mykynk.mahalle', pid, new Date())), kind: 'anr' }]);
+      this.systemLog([androidAnrLine(ss, 'com.mykynk.mahalle', pid, anrReport('com.mykynk.mahalle', pid, new Date()))]);
       this.after(2500, () => {
         this.deviceLog([{ level: 'info', tag: 'Choreographer', message: `Skipped ${this.rng.int(280, 340)} frames!  The application may be doing too much work on its main thread.` }]);
         this.log('warn', 'MainThreadWatchdog', 'Ana iş parçacığı 5.4 sn bloke kaldı (SharedPreferences.commit ana thread üzerinde)', { data: { blockedMs: 5400, culprit: 'SessionPrefs.save' } });

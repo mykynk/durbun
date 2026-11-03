@@ -191,6 +191,8 @@ export interface IpsInput {
   signalNumber: number;
   /** Name of the copy, e.g. "Runner-2026-11-02-091412.ips". */
   fileName: string;
+  /** Id of the live row this report duplicates (the iOS dedupe policy decides; the UI hides marked copies). */
+  duplicateOf?: number;
 }
 
 /** Where the copy of a report lives and how the UI downloads it (SPEC §10.3; same as the iOS driver). */
@@ -302,7 +304,8 @@ export function ipsCrashReport(r: IpsInput, copy?: IpsCopy): DeviceLogInput {
   const frames = r.frames.map((f, i) => frameLine(i, f)).join('\n');
   const exc = `${r.exceptionType} (${r.signal})`;
   const termination = `SIGNAL ${r.signalNumber} ${r.indicator}`;
-  return {
+  const previousLaunch = r.reportTs < r.watchStart;
+  const entry: DeviceLogInput = {
     ts: r.reportTs,
     level: 'fatal',
     kind: 'crash',
@@ -318,7 +321,7 @@ export function ipsCrashReport(r: IpsInput, copy?: IpsCopy): DeviceLogInput {
       origin: 'crash-report',
       bundleId: r.bundleId,
       reportTs: r.reportTs,
-      previousLaunch: r.reportTs < r.watchStart,
+      previousLaunch,
       symbolicated: false,
       appName: r.appName,
       version: r.version,
@@ -329,11 +332,15 @@ export function ipsCrashReport(r: IpsInput, copy?: IpsCopy): DeviceLogInput {
       incident: r.incident,
       osVersion: `iPhone OS ${r.osVersion} (${r.osBuild})`,
       bugType: '309',
+      pid: r.pid,
       ...(copy ? { file: copy.file, reportUrl: copy.reportUrl } : {}),
+      ...(r.duplicateOf !== undefined ? { duplicateOf: r.duplicateOf } : {}),
     },
     process: r.process,
-    pid: r.pid,
   };
+  // A previous launch's pid may be another process's by now: data only (like the iOS driver).
+  if (!previousLaunch) entry.pid = r.pid;
+  return entry;
 }
 
 /** Flutter engine + app frames of a SIGSEGV in a release build (`slide` = per-launch ASLR shift). */
