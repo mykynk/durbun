@@ -20,6 +20,11 @@ const Color _muted = Color(0xFF8A8F98);
 const TextStyle _mono =
     TextStyle(fontFamily: 'monospace', fontSize: 12.5, height: 1.35);
 
+/// Page padding that keeps the last line above the home indicator (an
+/// explicit ListView padding drops the safe area).
+EdgeInsets _pagePadding(BuildContext context) =>
+    EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom);
+
 /// Longest text shown in one body view; the rest goes through "Copy".
 const int _maxShownChars = 200 * 1024;
 
@@ -478,7 +483,7 @@ class _CallSummary extends StatelessWidget {
             : '${call.status} ${call.statusText ?? ''}'.trim();
     final timings = call.timings;
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: _pagePadding(context),
       children: <Widget>[
         SelectableText(call.url, style: _mono),
         const SizedBox(height: 12),
@@ -515,7 +520,7 @@ class _ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListView(
-        padding: const EdgeInsets.all(16),
+        padding: _pagePadding(context),
         children: <Widget>[
           SelectableText(call.error ?? '', style: _mono.copyWith(color: _bad))
         ],
@@ -541,7 +546,7 @@ class _HttpPart extends StatelessWidget {
     final t = InspectorStrings.of(context);
     final scheme = Theme.of(context).colorScheme;
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: _pagePadding(context),
       children: <Widget>[
         Text(t.headers, style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 6),
@@ -639,7 +644,7 @@ class BodyView extends StatelessWidget {
         ],
       );
     }
-    var text = prettyJsonText(b.data) ?? b.data;
+    var text = b.displayText ?? b.data;
     final cut = text.length > _maxShownChars;
     if (cut) text = text.substring(0, _maxShownChars);
     return Column(
@@ -856,7 +861,7 @@ class LogDetailPage extends StatelessWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: _pagePadding(context),
         children: <Widget>[
           _Row(t.time, formatClock(log.ts)),
           _Row(t.status, log.isEvent ? t.event : log.level.toUpperCase(),
@@ -908,7 +913,7 @@ class PerformanceTab extends StatelessWidget {
             if (s.fps != null) s.fps!
         ];
         return ListView(
-          padding: const EdgeInsets.all(16),
+          padding: _pagePadding(context),
           children: <Widget>[
             Wrap(
               spacing: 10,
@@ -1043,7 +1048,7 @@ class InfoTab extends StatelessWidget {
               .where((p) => p.isNotEmpty)
               .join(' · ');
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: _pagePadding(context),
             children: <Widget>[
               if (app != null)
                 _Row(

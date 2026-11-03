@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'format.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'views.dart';
@@ -71,6 +72,7 @@ class _DurbunInspectorState extends State<DurbunInspector> {
   @override
   void initState() {
     super.initState();
+    InspectorBody.prettyJson ??= prettyJsonText;
     DurbunInspector._openRequests.addListener(_openPanel);
   }
 

@@ -61,7 +61,7 @@ class InspectorLog {
 
 /// A captured body in wire form.
 class InspectorBody {
-  const InspectorBody({
+  InspectorBody({
     required this.encoding,
     required this.data,
     required this.size,
@@ -77,6 +77,15 @@ class InspectorBody {
   final bool truncated;
 
   bool get isText => encoding == 'utf8';
+
+  /// The text to show: pretty JSON when it is JSON. Computed once (the
+  /// detail page rebuilds while other traffic arrives).
+  String? get displayText =>
+      isText ? (_display ??= prettyJson?.call(data) ?? data) : null;
+  String? _display;
+
+  /// Set by the inspector UI (format.dart) so this file needs no formatter.
+  static String? Function(String text)? prettyJson;
 
   /// Bytes of the captured part (decoded base64 or UTF-8).
   Uint8List get bytes {
