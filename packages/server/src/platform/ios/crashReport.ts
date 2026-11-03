@@ -505,15 +505,23 @@ export interface CrashEntryOptions {
   reportUrl?: string;
   /** Id of the live crash entry this report duplicates (the UI hides marked copies). */
   duplicateOf?: number;
-  /** App display name when the device knows a better one than the report. */
+  /** App display name when the device knows a better one than the report (the host app's, for an extension). */
   appName?: string;
+  /**
+   * Installed app the report belongs to when it is an app extension's (com.x.app for com.x.app.Widget): the
+   * row is the host app's (`data.bundleId`), and `data.extensionBundleId` names the extension.
+   */
+  hostBundleId?: string;
 }
 
 /** The LogEntry (before the hub assigns id/deviceId/source) for one crash report. */
 export function crashReportEntry(r: IpsReport, opts: CrashEntryOptions): DeviceLogInput {
   const now = opts.now ?? Date.now();
   const ts = r.ts ?? now;
-  const name = opts.appName ?? r.appName ?? r.procName ?? r.bundleId ?? 'App';
+  const extension = opts.hostBundleId && r.bundleId && opts.hostBundleId !== r.bundleId ? r.bundleId : undefined;
+  const name = opts.appName ?? (extension ? opts.hostBundleId : (r.appName ?? r.procName ?? r.bundleId)) ?? 'App';
+  // "Pati 2.3.0 (57) · PatiWidget crashed: …" for an extension (its version is the one in the report).
+  const part = extension ? ` · ${r.procName ?? r.appName ?? extension}` : '';
   const ver = r.version ? ` ${r.version}${r.build ? ` (${r.build})` : ''}` : '';
   const previousLaunch = ts < opts.watchStart;
   const stack = crashStack(r);
@@ -523,7 +531,7 @@ export function crashReportEntry(r: IpsReport, opts: CrashEntryOptions): DeviceL
     kind: 'crash',
     origin: 'crash-report',
     tag: CRASH_TAG,
-    message: `${name}${ver} crashed: ${headline(r)}`,
+    message: `${name}${ver}${part} crashed: ${headline(r)}`,
     error: {
       type: r.objcException?.name ?? r.exceptionType ?? 'crash',
       message: crashSummary(r),
@@ -531,7 +539,8 @@ export function crashReportEntry(r: IpsReport, opts: CrashEntryOptions): DeviceL
     },
     data: {
       origin: 'crash-report',
-      bundleId: r.bundleId,
+      bundleId: extension ? opts.hostBundleId : r.bundleId,
+      ...(extension ? { extensionBundleId: extension } : {}),
       reportTs: ts,
       previousLaunch,
       symbolicated: r.symbolicated,
@@ -544,13 +553,16 @@ export function crashReportEntry(r: IpsReport, opts: CrashEntryOptions): DeviceL
       ...(r.incident ? { incident: r.incident } : {}),
       ...(r.osVersion ? { osVersion: r.osVersion } : {}),
       bugType: r.bugType,
+      ...(r.pid !== undefined ? { pid: r.pid } : {}),
       ...(opts.file ? { file: opts.file } : {}),
       ...(opts.reportUrl ? { reportUrl: opts.reportUrl } : {}),
       ...(opts.duplicateOf !== undefined ? { duplicateOf: opts.duplicateOf } : {}),
     },
   };
   if (r.procName) entry.process = r.procName;
-  if (r.pid !== undefined) entry.pid = r.pid;
+  // A previous launch's pid may belong to another process by now, and the hub attaches rows to the live SDK
+  // session of their pid: keep it in data only (as Android's dropbox rows do).
+  if (r.pid !== undefined && !previousLaunch) entry.pid = r.pid;
   return entry;
 }
 

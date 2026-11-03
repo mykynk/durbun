@@ -49,13 +49,15 @@ describe('.ips crash reports (bug_type 309, two-part JSON)', () => {
       origin: 'crash-report',
       tag: 'crash-report',
       process: 'Runner',
-      pid: 1234,
       message:
         'Runner 2.3.0 (57) crashed: Runner/BasketViewModel.swift:42: Fatal error: Unexpectedly found nil while unwrapping an Optional value',
     });
+    // A previous launch's pid may be reused by a live process (the hub maps pids to SDK sessions): data only.
+    expect(e.pid).toBeUndefined();
     expect(e.data).toMatchObject({
       origin: 'crash-report',
       bundleId: 'com.mykynk.pati',
+      pid: 1234,
       previousLaunch: true,
       symbolicated: false,
       version: '2.3.0',
@@ -71,7 +73,11 @@ describe('.ips crash reports (bug_type 309, two-part JSON)', () => {
     for (const line of stack.slice(1)) expect(UI_APPLE_FRAME.test(line)).toBe(true);
     // Display name from the device when known.
     expect(crashReportEntry(r, { watchStart: 0, appName: 'Pati' }).message.startsWith('Pati 2.3.0 (57) crashed:')).toBe(true);
-    expect((crashReportEntry(r, { watchStart: 0 }).data as { previousLaunch: boolean }).previousLaunch).toBe(false);
+    const live = crashReportEntry(r, { watchStart: 0 });
+    expect((live.data as { previousLaunch: boolean }).previousLaunch).toBe(false);
+    // A crash while Dürbün watches keeps its pid on the row (the crashed process' own session).
+    expect(live.pid).toBe(1234);
+    expect(live.data).toMatchObject({ pid: 1234 });
   });
 
   it('ObjC exception: exceptionReason + Last Exception Backtrace before the crashed thread', () => {

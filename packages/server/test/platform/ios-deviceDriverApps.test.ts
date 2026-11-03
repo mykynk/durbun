@@ -126,9 +126,11 @@ describe('IosDeviceDriver · device apps and crash reports', () => {
     // Crash report copied into <tempDir>/crash/<udid>/ and emitted as a crash entry.
     const crash = await waitFor(() => ctx.hub.logs.find((l) => l.entry.origin === 'crash-report'), 8000);
     expect(crash.deviceId).toBe(ID);
-    expect(crash.entry).toMatchObject({ kind: 'crash', level: 'fatal', tag: 'crash-report', process: 'Runner', pid: 1234 });
+    expect(crash.entry).toMatchObject({ kind: 'crash', level: 'fatal', tag: 'crash-report', process: 'Runner' });
     expect(crash.entry.message.startsWith('Pati 2.3.0 (57) crashed:')).toBe(true);
-    expect(crash.entry.data).toMatchObject({ origin: 'crash-report', bundleId: 'com.mykynk.pati', symbolicated: false });
+    // A report from before Dürbün watched the device: its pid stays in data (it may be a live process's by now).
+    expect(crash.entry.pid).toBeUndefined();
+    expect(crash.entry.data).toMatchObject({ origin: 'crash-report', bundleId: 'com.mykynk.pati', symbolicated: false, pid: 1234, previousLaunch: true });
     const copied = path.join(ctx.tempDir, 'crash', UDID, dctl.crashName);
     expect(fs.existsSync(copied)).toBe(true);
     expect((crash.entry.data as { file: string }).file).toBe(copied);
