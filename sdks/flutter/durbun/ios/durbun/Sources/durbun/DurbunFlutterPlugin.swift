@@ -4,8 +4,6 @@
 // From then on URLSession traffic, native crashes, stdout/stderr and Swift `Durbun.log` calls are
 // reported through the Dart side's single desktop connection (one app session), and the desktop
 // state (config, mock rules) and native commands (ios.* tools) arrive from Dart.
-// Never in App Store installs: a release build asks `guard` before Dart starts anything, and `start`
-// refuses in an App Store install (builds without DEBUG), so Dart turns everything off.
 import Flutter
 import Foundation
 
@@ -37,8 +35,6 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
-        case "guard":
-            result(Self.encode(Self.guardReply()))
         case "start":
             result(start(call.arguments as? String))
         case "state":
@@ -61,21 +57,8 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
         return Self.owner === self
     }
 
-    /// Store-install guard, asked by a release build before Dart starts anything.
-    static func guardReply() -> [String: Any] {
-        var reply: [String: Any] = ["platform": "ios", "storeInstall": StoreInstallGuard.isStoreInstall]
-        if let receipt = StoreInstallGuard.receiptName() { reply["receipt"] = receipt }
-        return reply
-    }
-
     /// Starts (or, after a hot restart, restarts) the hosted core; returns the JSON reply for Dart.
     private func start(_ argsJSON: String?) -> String {
-        // Nothing starts in an App Store install; Dart disposes everything it started and prints the one
-        // line. DEBUG builds never come from the App Store, so they skip the receipt.
-        if !DurbunCore.buildAllowsRunning && StoreInstallGuard.isStoreInstall {
-            return Self.encode(["attached": false, "platform": "ios", "storeInstall": true,
-                                "reason": "the app was installed from the App Store"])
-        }
         let args = argsJSON.flatMap { $0.data(using: .utf8) }
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
         let opts = args["options"] as? [String: Any] ?? [:]
