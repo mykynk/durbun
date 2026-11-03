@@ -4,10 +4,7 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.util.Log
 import dev.durbun.internal.DurbunCore
-import dev.durbun.internal.StoreInstallGuard
 import dev.durbun.internal.android.AndroidRuntime
-import dev.durbun.internal.android.InstallSource
-import java.util.Locale
 
 /**
  * Dürbün Android SDK: sends this app's logs, network traffic, crashes, events and performance metrics to
@@ -26,8 +23,8 @@ import java.util.Locale
  * ```
  *
  * Every method is safe to call from any thread, before or after [start], and never throws. Release builds
- * (not debuggable) stay silent unless [DurbunOptions.forceInRelease] is set, and never run when the app was
- * installed from Google Play; ship `durbun-noop` in release builds to leave no Dürbün code in the app at all.
+ * (not debuggable) stay silent unless [DurbunOptions.forceInRelease] is set; a build that depends on
+ * `durbun-noop` instead carries no Dürbün code at all.
  */
 object Durbun {
     /** SDK version reported to the desktop. */
@@ -50,10 +47,6 @@ object Durbun {
     @Volatile
     internal var flutterPluginPresent: () -> Boolean = { classPresent(FLUTTER_PLUGIN_CLASS) }
 
-    /** The package that installed this app, for the store-install guard. Tests replace it. */
-    @Volatile
-    internal var installerLookup: (Context) -> String? = { InstallSource.installerOf(it) }
-
     /** Starts the Android runtime once every check passed. Tests replace it. */
     @Volatile
     internal var runtimeStarter: (Context, DurbunOptions, List<DurbunAction>) -> DurbunCore =
@@ -62,9 +55,9 @@ object Durbun {
     /**
      * Starts capturing and connecting to the desktop (127.0.0.1:9751 through adb reverse, the emulator
      * host alias, then [DurbunOptions.host]). Call once, early in `Application.onCreate`.
-     * A no-op when [DurbunOptions.enabled] is false, when the app is not debuggable (unless forced), when a
-     * release build was installed from Google Play, and in Flutter apps (`package:durbun` starts the native
-     * layer from Dart, so `--dart-define=DURBUN=false` keeps it off too).
+     * A no-op when [DurbunOptions.enabled] is false, when the app is not debuggable (unless forced), and in
+     * Flutter apps (`package:durbun` starts the native layer from Dart, so `--dart-define=DURBUN=false` keeps it
+     * off too).
      */
     @JvmStatic
     @JvmOverloads
@@ -90,12 +83,6 @@ object Durbun {
                 val debuggable = (appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 if (!debuggable && !options.forceInRelease) {
                     Log.i(TAG, "Dürbün is off: this build is not debuggable (set forceInRelease = true to override).")
-                    return
-                }
-                // Forced release builds still never run in store installs (debuggable builds never come from
-                // a store).
-                if (!debuggable && StoreInstallGuard.isStoreInstaller(installerLookup(appContext))) {
-                    Log.i(TAG, StoreInstallGuard.message(Locale.getDefault().language))
                     return
                 }
                 core = runtimeStarter(appContext, options, actions.values.toList())
