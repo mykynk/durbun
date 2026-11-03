@@ -8,12 +8,13 @@ import { failureText, run } from '../exec';
 import { bool, done, ensureDir, fail, isPng, num, screenshotResult, str, tempFileName, validAppId } from '../shared/files';
 import type { ResolvedTool } from '../tools';
 import {
-  devicectl,
+  devicectl as xcrunDevicectl,
   parseDevicectlApps,
   parseDevicectlProcesses,
   pidsForApp,
   toInstalledApps,
   type DevicectlCaps,
+  type DevicectlRunner,
 } from './devicectl';
 
 export interface IosDeviceActionTarget {
@@ -25,6 +26,8 @@ export interface IosDeviceActionTarget {
   screenshotTool: ResolvedTool | null;
   syslogAvailable: boolean;
   restartLogs(): Promise<void>;
+  /** Tests: a fake devicectl (default: `xcrun devicectl`). */
+  devicectl?: DevicectlRunner;
 }
 
 /** Actions that work for a trusted physical device with the given tooling. */
@@ -52,6 +55,7 @@ export async function runIosDeviceAction(
   action: DeviceActionId,
   params: Record<string, unknown>,
 ): Promise<DeviceActionResult> {
+  const devicectl = t.devicectl ?? xcrunDevicectl;
   const dev = ['--device', t.udid];
   const needApp = (): string | DeviceActionResult => {
     const appId = str(params, 'appId');
@@ -159,6 +163,7 @@ export async function runIosDeviceAction(
 }
 
 async function stopApp(t: IosDeviceActionTarget, appId: string): Promise<DeviceActionResult> {
+  const devicectl = t.devicectl ?? xcrunDevicectl;
   const dev = ['--device', t.udid];
   const appsR = await devicectl(['device', 'info', 'apps', ...dev, '--bundle-id', appId], 60_000);
   if (!appsR.ok) return fail(`Could not look up ${appId}: ${appsR.error}`);
@@ -180,6 +185,7 @@ async function stopApp(t: IosDeviceActionTarget, appId: string): Promise<DeviceA
 }
 
 async function installApp(t: IosDeviceActionTarget, file: string | undefined): Promise<DeviceActionResult> {
+  const devicectl = t.devicectl ?? xcrunDevicectl;
   if (!file || !path.isAbsolute(file)) return fail('An absolute .app / .ipa path is required', 'action.invalidParams');
   const st = await fs.promises.stat(file).catch(() => undefined);
   if (!st) return fail(`File not found: ${file}`, 'action.fileNotFound');
@@ -208,6 +214,7 @@ async function installApp(t: IosDeviceActionTarget, file: string | undefined): P
 }
 
 async function screenshot(t: IosDeviceActionTarget): Promise<DeviceActionResult> {
+  const devicectl = t.devicectl ?? xcrunDevicectl;
   await ensureDir(t.ctx.tempDir);
   const name = tempFileName('screenshot', t.label, 'png');
   const file = path.join(t.ctx.tempDir, name);
