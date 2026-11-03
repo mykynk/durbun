@@ -37,18 +37,6 @@ abstract final class Durbun {
 
   /// Starts the SDK without a zone (no `print` capture except `debugPrint`,
   /// no zone errors). Safe to call more than once.
-  ///
-  /// Await it before `runApp`: in release builds it completes once the store
-  /// check has answered, and HttpClients created in the meantime are never
-  /// captured (nor a Dio that sent its first request then: it keeps that
-  /// client). The desktop then shows a warning that says so.
-  ///
-  /// ```dart
-  /// Future<void> main() async {
-  ///   await Durbun.init();
-  ///   runApp(const MyApp());
-  /// }
-  /// ```
   static Future<void> init([DurbunOptions options = const DurbunOptions()]) =>
       _backend.init(options);
 
