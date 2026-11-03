@@ -53,6 +53,16 @@ export function sameDeviceAppIgnoringActivity(a: DeviceApp, b: DeviceApp): boole
   );
 }
 
+/** Invisible direction marks some tools put around names (devicectl: "\u200eWhatsApp"): they break sorting and matching. */
+const BIDI_MARKS = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/** A display name without bidi control marks and outer spaces; undefined when nothing is left. */
+export function cleanAppName(name: string | undefined): string | undefined {
+  if (typeof name !== 'string') return undefined;
+  const clean = name.replace(BIDI_MARKS, '').trim();
+  return clean || undefined;
+}
+
 /** Defensive copy of a wire DeviceApp (older / odd servers: missing arrays or install info never crash the UI). */
 function normalizeDeviceApp(d: DeviceApp): DeviceApp | null {
   if (!d || typeof d.deviceId !== 'string' || typeof d.id !== 'string' || !d.id) return null;
@@ -61,6 +71,7 @@ function normalizeDeviceApp(d: DeviceApp): DeviceApp | null {
   const install = d.install && typeof d.install === 'object' ? d.install : { source: 'unknown' as const };
   return {
     ...d,
+    name: cleanAppName(d.name),
     key,
     pids,
     install: { ...install, source: install.source ?? 'unknown' },
@@ -209,12 +220,16 @@ export function deviceGroup(id: string): DeviceGroup {
 const GROUP_ORDER: Record<DeviceGroup, number> = { live: 0, demo: 1, import: 2, other: 3 };
 const STATE_ORDER: Record<DeviceInfo['state'], number> = { online: 0, unauthorized: 1, offline: 2, disconnected: 3 };
 
-/** Stable device order: live → demo → imported → other; connected before disconnected; then first seen. */
-export function sortDevices(devices: Iterable<DeviceInfo>): DeviceInfo[] {
+/**
+ * Stable device order: live → demo → imported → other; connected before disconnected; then first seen.
+ * `gone` decides what counts as disconnected (the sidebar keeps a device that just dropped in place).
+ */
+export function sortDevices(devices: Iterable<DeviceInfo>, opts: { gone?: (d: DeviceInfo) => boolean } = {}): DeviceInfo[] {
+  const gone = opts.gone ?? ((d: DeviceInfo) => d.state === 'disconnected');
   return [...devices].sort(
     (a, b) =>
       GROUP_ORDER[deviceGroup(a.id)] - GROUP_ORDER[deviceGroup(b.id)] ||
-      (a.state === 'disconnected' ? 1 : 0) - (b.state === 'disconnected' ? 1 : 0) ||
+      (gone(a) ? 1 : 0) - (gone(b) ? 1 : 0) ||
       a.firstSeen - b.firstSeen ||
       a.name.localeCompare(b.name),
   );

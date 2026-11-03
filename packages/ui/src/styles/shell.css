@@ -101,7 +101,7 @@
   padding: 0 8px 4px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-subtle);
+  color: var(--text-meta);
   letter-spacing: 0.01em;
 }
 .sb-section__rule {
@@ -130,7 +130,7 @@
   background: var(--bg-selected);
   color: var(--text);
 }
-.sb-row.is-dim .sb-row__title,
+/* Dimmed (not running / disconnected): the icon fades, the text only turns muted so it stays readable (AA). */
 .sb-row.is-dim .sb-row__icon {
   opacity: 0.6;
 }
@@ -177,6 +177,10 @@
 .sb-row:not(.is-selected):not(:hover) .sb-row__title {
   color: color-mix(in srgb, var(--text) 88%, var(--text-muted));
 }
+.sb-row.is-dim .sb-row__title,
+.sb-row.is-dim:not(.is-selected):not(:hover) .sb-row__title {
+  color: var(--text-muted);
+}
 .sb-row__subtitle {
   display: flex;
   align-items: center;
@@ -184,13 +188,13 @@
   min-width: 0;
   margin-top: 1px;
   font-size: var(--fs-xs);
-  color: var(--text-subtle);
+  color: var(--text-meta);
   line-height: 1.3;
 }
 .sb-row__meta {
   flex-shrink: 0;
   font-size: var(--fs-xs);
-  color: var(--text-subtle);
+  color: var(--text-meta);
   font-variant-numeric: tabular-nums;
   padding-right: 18px;
 }
@@ -240,7 +244,7 @@
   font-size: 9.5px;
   font-weight: 600;
   line-height: 13px;
-  color: var(--text-subtle);
+  color: var(--text-meta);
   letter-spacing: 0.02em;
 }
 .sb-conn--import {
@@ -303,14 +307,20 @@
 .sb-app__ver {
   font-size: var(--fs-xs);
   font-weight: 400;
-  color: var(--text-subtle);
+  color: var(--text-meta);
   flex-shrink: 0;
 }
 .sb-row--app .sb-row__subtitle {
   margin-top: 2px;
 }
+/* The name never yields to the version: "Chrome" stays whole, "1.261030.19 (41161136480)" truncates (full text in
+   the row's tooltip). A name longer than the row truncates itself. */
+.sb-row--app .sb-app__name {
+  flex-shrink: 0;
+  max-width: 100%;
+}
 .sb-row--app .sb-app__ver {
-  flex-shrink: 3;
+  flex: 1 1 0;
   min-width: 0;
 }
 .sb-app__badges {
@@ -377,7 +387,7 @@
   padding: 2px 6px;
   border-radius: 4px;
   font-size: var(--fs-xs);
-  color: var(--text-subtle);
+  color: var(--text-meta);
 }
 .sb-older:hover {
   color: var(--text);
@@ -415,14 +425,14 @@
   color: var(--text);
 }
 .sb-session__meta {
-  color: var(--text-subtle);
+  color: var(--text-meta);
 }
 .sb-empty {
   margin: 14px 8px;
   padding: 12px;
   border: 1px dashed var(--border-strong);
   border-radius: 8px;
-  color: var(--text-subtle);
+  color: var(--text-meta);
   font-size: var(--fs-sm);
   line-height: 1.5;
 }

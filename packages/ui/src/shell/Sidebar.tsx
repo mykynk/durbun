@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Package } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
@@ -14,7 +14,7 @@ import {
   ui,
   useAppGroups,
   useDemoActive,
-  useDevices,
+  useHub,
   useLogVersion,
   useNetworkVersion,
   usePrefs,
@@ -37,6 +37,7 @@ import { usePersistentState } from '../hooks';
 import { formatClock, formatCompact } from '../lib/format';
 import { appVersion, connectionLabel, deviceSubtitle, importLabel, isNetworkOnly, stateTone } from './labels';
 import { setDemo, toggleSidebar } from './actions';
+import { createHoldMemory, isGroupSelected, layoutDeviceApps, orderDevices, type HoldMemory } from './sidebarModel';
 
 const SECTION_ORDER: DeviceGroup[] = ['live', 'demo', 'import', 'other'];
 
@@ -46,24 +47,30 @@ export function Sidebar() {
   const collapsedPref = usePrefs((s) => s.sidebarCollapsed);
   const { narrow, overlay } = useUi(useShallow((s) => ({ narrow: s.narrow, overlay: s.sidebarOverlay })));
   const compact = narrow ? !overlay : collapsedPref;
-  const devices = useDevices();
+  const deviceMap = useHub((s) => s.devices);
   const groups = useAppGroups();
   const scope = useScope();
   const demo = useDemoActive();
   const [collapsedDevices, setCollapsedDevices] = usePersistentState<string[]>('sidebar.collapsedDevices', []);
   useLogVersion({ throttleMs: 1000 });
   useNetworkVersion({ throttleMs: 1000 });
+  // Rows keep their place while a device or an app flickers (see sidebarModel): the memory lives as long as the sidebar.
+  const hold = useRef<HoldMemory>(null);
+  hold.current ??= createHoldMemory();
+  const [, wake] = useReducer((x: number) => x + 1, 0);
+  const now = Date.now();
+  const ordered = orderDevices(Object.values(deviceMap), now, hold.current);
+  const devices = ordered.devices;
+  useWakeAt(ordered.wakeAt, wake);
 
-  const sections = useMemo(() => {
-    const by = new Map<DeviceGroup, DeviceInfo[]>();
-    for (const d of devices) {
-      const g = deviceGroup(d.id);
-      let list = by.get(g);
-      if (!list) by.set(g, (list = []));
-      list.push(d);
-    }
-    return SECTION_ORDER.filter((g) => by.has(g)).map((g) => ({ group: g, devices: by.get(g)! }));
-  }, [devices, groups]);
+  const by = new Map<DeviceGroup, DeviceInfo[]>();
+  for (const d of devices) {
+    const g = deviceGroup(d.id);
+    let list = by.get(g);
+    if (!list) by.set(g, (list = []));
+    list.push(d);
+  }
+  const sections = SECTION_ORDER.filter((g) => by.has(g)).map((g) => ({ group: g, devices: by.get(g)! }));
 
   const toggleDevice = (id: string) =>
     setCollapsedDevices((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]));
@@ -124,6 +131,7 @@ export function Sidebar() {
                   compact={compact}
                   expanded={!collapsedDevices.includes(d.id)}
                   onToggle={() => toggleDevice(d.id)}
+                  hold={hold.current!}
                 />
               ))}
             </div>
@@ -151,6 +159,15 @@ export function Sidebar() {
       {narrow && overlay ? <div className="sb-scrim" onClick={() => ui.setSidebarOverlay(false)} aria-hidden /> : null}
     </>
   );
+}
+
+/** Render again when a held row's hold runs out (nothing else may change by then). */
+function useWakeAt(at: number | undefined, wake: () => void): void {
+  useEffect(() => {
+    if (at === undefined) return;
+    const timer = setTimeout(wake, Math.max(0, at - Date.now()) + 50);
+    return () => clearTimeout(timer);
+  }, [at, wake]);
 }
 
 function FooterLink({ compact, icon, label, hint, accent, onClick }: { compact: boolean; icon: ReactNode; label: string; hint?: string; accent?: boolean; onClick: () => void }) {
@@ -266,6 +283,7 @@ function DeviceNode({
   compact,
   expanded,
   onToggle,
+  hold,
 }: {
   device: DeviceInfo;
   groups: AppGroup[];
@@ -273,6 +291,7 @@ function DeviceNode({
   compact: boolean;
   expanded: boolean;
   onToggle: () => void;
+  hold: HoldMemory;
 }) {
   const t = useT();
   const appOnDevice =
@@ -341,42 +360,18 @@ function DeviceNode({
           <span>{deviceStateText(device)}</span>
         </div>
       ) : null}
-      {expanded && groups.length > 0 && !compact ? <DeviceApps device={device} groups={groups} scope={scope} /> : null}
+      {expanded && groups.length > 0 && !compact ? <DeviceApps device={device} groups={groups} scope={scope} hold={hold} /> : null}
     </div>
   );
 }
 
-/** Above this many apps on one device, the quiet ones fold into "N uygulama daha" / "Son açılanlar". */
-const FOLD_ABOVE = 5;
-
-/** A third-party app counts as active this long after its last log line / process event. */
-const ACTIVE_MS = 3 * 60_000;
-
-function isGroupSelected(g: AppGroup, scope: Scope): boolean {
-  if (scope.kind === 'deviceApp') return scope.deviceId === g.deviceId && scope.bundleId === g.bundleId;
-  return scope.kind === 'app' && g.sessions.some((s) => s.id === scope.appId);
-}
-
-/**
- * Rows a crowded device keeps unfolded: apps connected to Dürbün, the selected one, running developer builds and
- * apps active in the last minutes. "Running" alone is not enough: iOS keeps suspended apps as processes and
- * Android keeps cached ones, so a tester's phone reports dozens of store apps as running.
- */
-function isProminentApp(g: AppGroup, scope: Scope, now: number): boolean {
-  if (g.connected || isGroupSelected(g, scope)) return true;
-  if (!g.running) return false;
-  const da = g.deviceApp;
-  if (da && (da.buildType === 'debug' || da.install.source === 'xcode' || da.install.source === 'simulator')) return true;
-  return now - g.lastActivity < ACTIVE_MS;
-}
-
-function DeviceApps({ device, groups, scope }: { device: DeviceInfo; groups: AppGroup[]; scope: Scope }) {
+function DeviceApps({ device, groups, scope, hold }: { device: DeviceInfo; groups: AppGroup[]; scope: Scope; hold: HoldMemory }) {
   const t = useT();
   const [openRecent, setOpenRecent] = usePersistentState<string[]>('sidebar.openRecent', []);
-  const fold = groups.length > FOLD_ABOVE;
-  const now = Date.now();
-  const shown = fold ? groups.filter((g) => isProminentApp(g, scope, now)) : groups;
-  const folded = fold ? groups.filter((g) => !shown.includes(g)) : [];
+  const [, wake] = useReducer((x: number) => x + 1, 0);
+  // Stable order; a row that stops being prominent (device unplugged, app restarting) keeps its place for a moment.
+  const { shown, folded, wakeAt } = layoutDeviceApps(groups, scope, Date.now(), hold);
+  useWakeAt(wakeAt, wake);
   const recentOpen = openRecent.includes(device.id);
   return (
     <div role="group" className="sb-apps">
@@ -451,7 +446,7 @@ function AppNode({ group, device, scope }: { group: AppGroup; device: DeviceInfo
           )}
           <span className="sb-row__text">
             <span className="sb-row__title">
-              <span className="truncate">{name}</span>
+              <span className="sb-app__name truncate">{name}</span>
               {version ? <span className="sb-app__ver truncate">{version}</span> : null}
             </span>
             <span className="sb-row__subtitle sb-app__badges">
