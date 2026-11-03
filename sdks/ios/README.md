@@ -12,7 +12,8 @@ uygulamasına gönderir.
 
 > **Flutter uygulaması mı?** Bu paketi ayrıca eklemeyin. Flutter paketi
 > [`package:durbun`](../flutter/durbun/README.md) bu iOS çekirdeğini zaten içinde taşır (URLSession,
-> çökmeler, stdout/stderr) ve Dart tarafı başlattığında çalıştırır; `Durbun.start()` gerekmez. Swift
+> çökmeler, stdout/stderr) ve Dart tarafı başlattığında çalıştırır; `Durbun.start()` gerekmez (Flutter
+> uygulamasında çağrılırsa hiçbir şey yapmaz). Swift
 > kodundan log için `import durbun` yazın. Bu sayfa yalnızca Flutter'sız (native-only) iOS uygulamaları
 > içindir. Bu klasördeki kaynakları değiştirirseniz `sdks/flutter/durbun` içinde
 > `dart run tool/sync_native.dart` çalıştırın (plugin birebir kopyasını taşır).
@@ -127,6 +128,14 @@ doğrular). Mock'lanan istekler masaüstünde `mocked` olarak işaretlenir.
 
 - `Durbun.start()` çağrısını `#if DEBUG` içine alın.
 - SDK kendisi de DEBUG olmadan derlendiğinde **hiçbir şey yapmaz** (`allowInReleaseBuilds: true` ile zorlamadıkça).
+- `allowInReleaseBuilds: true` olsa bile uygulama App Store'dan kurulmuşsa SDK başlamaz ve cihaz loguna tek satır
+  yazar: «Dürbün kendini kapattı: uygulama mağazadan kurulmuş (Dürbün mağaza sürümlerinde çalışmaz).» TestFlight,
+  ad-hoc ve geliştirme kurulumlarında çalışır; yine de böyle bir derlemeyi TestFlight'a yüklemeyin (TestFlight
+  derlemesi mağazaya giden derlemenin kendisidir).
+- Bağlantı koptuğunda o bağlantının gönderdiği mock kuralları hemen silinir; masaüstü yeniden bağlanınca tekrar
+  gönderir. Bilinen risk: bağlantıda henüz kimlik doğrulama yok; release'te açık bir derleme, telefondaki başka bir
+  uygulama kendini masaüstü gibi tanıtırsa trafiğini ona da gönderebilir. Böyle derlemeleri yalnızca test
+  cihazlarına dağıtın (eşleştirme anahtarı ileride eklenecek).
 - `DURBUN_DISABLED=1` ortam değişkeni SDK'yı tamamen kapatır; SwiftUI önizlemelerinde (Xcode Previews) SDK zaten devre dışıdır.
 - Bütün G/Ç arka plan kuyruklarında yapılır, kuyruklar sınırlıdır, SDK kendi hatalarını yutar ve
   uygulamayı asla çökertmez. Ağ istekleri dokunulmadan iletilir (tee); zaman aşımları ve sertifika
@@ -161,7 +170,8 @@ node scripts/generate-mock-vectors.mjs   # mock eşleştirme test vakalarını T
 
 > **Flutter app?** Do not add this package separately. The Flutter package
 > [`package:durbun`](../flutter/durbun/README.md) already carries this iOS core (URLSession, crashes,
-> stdout/stderr) and starts it from Dart; no `Durbun.start()` call. Log from Swift with `import durbun`.
+> stdout/stderr) and starts it from Dart; no `Durbun.start()` call (in a Flutter app it does nothing). Log from
+> Swift with `import durbun`.
 > This page is for native-only iOS apps. After changing the sources here, run
 > `dart run tool/sync_native.dart` in `sdks/flutter/durbun` (the plugin carries an exact copy).
 
@@ -220,6 +230,14 @@ path completes the `hello` → `welcome` handshake first wins; the others are cl
 
 - Wrap `Durbun.start()` in `#if DEBUG`.
 - The SDK itself is inert when compiled without `DEBUG` unless `allowInReleaseBuilds: true`.
+- Even with `allowInReleaseBuilds: true` it does not start in an App Store install and writes one line to the
+  device log: «Dürbün turned itself off: this app was installed from the store (Dürbün never runs in store
+  builds).» TestFlight, ad-hoc and development installs keep working; still, never upload such a build to
+  TestFlight (a TestFlight build is the store build itself).
+- When the connection drops, the mock rules it pushed are dropped at once; the desktop sends them again when it
+  reconnects. Known risk: the link is not authenticated yet, so a build running in release can send its traffic to
+  another app on the phone that pretends to be the desktop. Hand such builds to test devices only (a pairing token
+  is planned).
 - `DURBUN_DISABLED=1` turns it off completely; it also stays off inside SwiftUI previews (Xcode Previews).
 - All I/O runs on background queues with bounded buffers; the SDK swallows its own errors and never
   crashes the app. Requests are forwarded untouched (tee); timeouts and certificate validation

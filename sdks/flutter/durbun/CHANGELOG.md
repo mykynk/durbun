@@ -19,6 +19,27 @@
   hello (now it is refused and connects on its next try).
 - durbun_dio: the dart:io adapter is recognized by type instead of its class
   name, so `--obfuscate` builds no longer report those requests twice.
+- Store-install guard: a release build asks the plugin (`guard`) before it
+  starts any transport, listener or capture and stays off when Google Play (any
+  track) or the App Store installed the app, or when the plugin does not
+  answer; one line in the device log says why (Turkish or English). The native
+  `start` refuses in store installs too, and Dart then disposes everything.
+  The standalone Android / iOS SDKs apply the same guard in release builds.
+  `init()` therefore completes only once the guard answered in release builds:
+  await it before `runApp`. When it was not awaited and the first screen was
+  already up, the desktop gets a warning that HttpClients created meanwhile
+  (and a Dio that sent its first request then) are not captured. A `dispose()`
+  while the guard is still being asked now wins: its answer starts nothing.
+- Mock rules end with the connection that pushed them, in every layer (Dart,
+  Kotlin, Swift, hosted and standalone): the peer is not authenticated yet.
+- Android honours `captureNetwork: false`: no OkHttp capture or mocks, and
+  network/mocks are no longer announced.
+- The first hello waits up to 3 s (was 1.5 s) for the native layer, as long as
+  the native start itself.
+- OkHttp shows redacted header values as `••••`, like dart:io and URLSession.
+- A native `Durbun.start()` does nothing in Flutter apps: the plugin starts the
+  native layer from Dart, so no second session opens and `DURBUN=false` keeps
+  it off.
 
 ## 0.1.0
 

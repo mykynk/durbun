@@ -8,7 +8,8 @@
 
 > **Flutter uygulaması mı?** Bu SDK'yı ayrıca eklemeyin. Flutter paketi
 > [`package:durbun`](../flutter/durbun/README.md) bu Android çekirdeğini zaten içinde taşır ve Dart
-> tarafı başlattığında çalıştırır (`Durbun.start` çağrısı gerekmez). Native kodunuzda OkHttp varsa tek
+> tarafı başlattığında çalıştırır (`Durbun.start` çağrısı gerekmez; Flutter uygulamasında çağrılırsa hiçbir şey
+> yapmaz). Native kodunuzda OkHttp varsa tek
 > satır yeter: `.addInterceptor(DurbunInterceptor())`. Bu sayfa yalnızca Flutter'sız (native-only)
 > Android uygulamaları içindir.
 
@@ -94,7 +95,8 @@ val client = OkHttpClient.Builder()
   istekleri kısa devre etmeye izin vermez: `respond` mock'ları atlanır (gecikme ve hata mock'ları çalışır).
 - Gövdeler uygulamanın akışı **tüketilmeden** yakalanır (istek gövdesi yan bir tampona yazılır, yanıt
   `peekBody` ile okunur). SSE (`text/event-stream`), WebSocket, gRPC ve ses/video akışları beklenmez.
-- Gizli başlıkları maskeleyin: `DurbunInterceptor(redactHeaders = setOf("Authorization", "Cookie"))`.
+- Gizli başlıkları maskeleyin: `DurbunInterceptor(redactHeaders = setOf("Authorization", "Cookie"))` (değer `••••`
+  görünür).
 - Masaüstündeki mock kuralları burada uygulanır: `respond` ağa hiç çıkmadan yanıt üretir, `delay` gecikip
   gerçek isteği yapar, `fail` gerçek platform hatasını fırlatır (`SocketTimeoutException`,
   `UnknownHostException`, `ConnectException`, `SSLHandshakeException`).
@@ -173,6 +175,14 @@ olarak) ve **Run garbage collection**.
   değişikliği **gerekmez**.
 - Release'te `durbun-noop` kullanın: kod, thread, soket yok. `durbun` yanlışlıkla release'e girse bile
   uygulama debuggable değilse `Durbun.start()` hiçbir şey yapmaz (`forceInRelease = true` hariç).
+- `forceInRelease = true` olsa bile uygulama Google Play'den (iç test dahil her kanal) kurulmuşsa SDK başlamaz ve
+  logcat'e tek satır yazar: «Dürbün kendini kapattı: uygulama mağazadan kurulmuş (Dürbün mağaza sürümlerinde
+  çalışmaz).» Yalnızca Google Play tanınır: Huawei AppGallery, Galaxy Store veya Amazon'dan kurulan böyle bir
+  derleme çalışır, bu yüzden onu oralara da yüklemeyin.
+- Bağlantı koptuğunda o bağlantının gönderdiği mock kuralları hemen silinir; masaüstü yeniden bağlanınca tekrar
+  gönderir. Bilinen risk: bağlantıda henüz kimlik doğrulama yok; release'te açık bir derleme, telefondaki başka bir
+  uygulama kendini masaüstü gibi tanıtırsa trafiğini ona da gönderebilir. Böyle derlemeleri yalnızca test
+  cihazlarına dağıtın (eşleştirme anahtarı ileride eklenecek).
 - R8/ProGuard için ek kural gerekmez (OkHttp kullanmayan uygulamalar için `-dontwarn okhttp3.**` modülle gelir).
 
 ### Seçenekler (`DurbunOptions`)
@@ -190,6 +200,7 @@ olarak) ve **Run garbage collection**.
 | `captureMetrics` | `true` | CPU, PSS bellek, Java heap, thread sayısı, FPS, takılan kareler |
 | `captureLogcat` | `true` | Masaüstü cihaz loglarını göremiyorsa uygulamanın logcat'ini ilet |
 | `appName` | `null` | Masaüstünde görünen ad (varsayılan: uygulama etiketi) |
+| `captureNetwork` | `true` | `DurbunInterceptor` ile OkHttp yakalama + mock'lar (`false` → interceptor isteğe dokunmaz) |
 
 ### Geliştirme
 
@@ -217,7 +228,7 @@ Mock eşleştirme testi, protokoldeki referans `mockRuleMatches` fonksiyonundan 
 
 > **Flutter app?** Do not add this SDK separately. The Flutter package
 > [`package:durbun`](../flutter/durbun/README.md) already carries this Android core and starts it from
-> Dart (no `Durbun.start` call). If your native code uses OkHttp, one line is enough:
+> Dart (no `Durbun.start` call; in a Flutter app it does nothing). If your native code uses OkHttp, one line is enough:
 > `.addInterceptor(DurbunInterceptor())`. This page is for native-only Android apps.
 
 The Dürbün Android SDK streams your app's **logs, OkHttp traffic (headers, bodies, timings), crashes, custom
@@ -290,7 +301,7 @@ val client = OkHttpClient.Builder()
   interceptors short-circuit, so `respond` mocks are skipped there (delay and failure mocks still work).
 - Bodies are captured **without consuming** the app's streams (request bodies are written to a side buffer,
   responses are read with `peekBody`). SSE, WebSocket, gRPC and audio/video streams are never waited on.
-- Mask secrets: `DurbunInterceptor(redactHeaders = setOf("Authorization", "Cookie"))`.
+- Mask secrets: `DurbunInterceptor(redactHeaders = setOf("Authorization", "Cookie"))` (values show as `••••`).
 - Desktop mock rules apply here: `respond` synthesizes the response without touching the network, `delay`
   waits then performs the real call, `fail` throws the platform's real exception (`SocketTimeoutException`,
   `UnknownHostException`, `ConnectException`, `SSLHandshakeException`).
@@ -345,12 +356,21 @@ Handlers run on the main thread. Built in: **Dump threads** and **Run garbage co
 - Dürbün uses a **plain TCP socket, not HTTP**: no `usesCleartextTraffic` / network security config changes.
 - Ship `durbun-noop` in release builds (no code, threads or sockets). Even if `durbun` ends up in a release
   build, `Durbun.start()` does nothing unless the app is debuggable or `forceInRelease = true`.
+- Even with `forceInRelease = true` the SDK does not start when Google Play (any track, internal testing too)
+  installed the app; it writes one line to logcat: «Dürbün turned itself off: this app was installed from the store
+  (Dürbün never runs in store builds).» Only Google Play is recognised: such a build installed from Huawei
+  AppGallery, Galaxy Store or Amazon runs, so keep it off those stores too.
+- When the connection drops, the mock rules it pushed are dropped at once; the desktop sends them again when it
+  reconnects. Known risk: the link is not authenticated yet, so a build running in release can send its traffic to
+  another app on the phone that pretends to be the desktop. Hand such builds to test devices only (a pairing token
+  is planned).
 - No R8/ProGuard rules needed (`-dontwarn okhttp3.**` ships with the modules for apps without OkHttp).
 
 ### Options (`DurbunOptions`)
 
 `host` (Wi-Fi IP), `port` (9751), `enabled`, `forceInRelease`, `captureBodies` / `maxBodyBytes` (override the
-desktop settings), `maxBufferedMessages` (5000), `captureCrashes`, `captureMetrics`, `captureLogcat`, `appName`.
+desktop settings), `maxBufferedMessages` (5000), `captureCrashes`, `captureMetrics`, `captureLogcat`, `appName`,
+`captureNetwork` (`false` makes `DurbunInterceptor` a pass-through: no capture, no mocks).
 
 ### Development
 
