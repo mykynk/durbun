@@ -168,6 +168,10 @@ class InspectorCall {
   final String source;
   final bool native;
 
+  /// Grows whenever this call changes (response, error, bodies dropped), so
+  /// a page about it rebuilds for its own changes only ([CallWatch]).
+  int revision = 0;
+
   int? status;
   String? statusText;
   List<List<String>> responseHeaders = const <List<String>>[];
@@ -246,6 +250,31 @@ class InspectorCall {
     _responseBody = null;
     _bodyCost = 0;
     bodiesDropped = true;
+    revision++;
+  }
+}
+
+/// Notifies when [call] changes, not on every store notification (the app's
+/// logs notify the store up to five times a second).
+class CallWatch extends ChangeNotifier {
+  CallWatch(this.store, this.call) : _seen = call.revision {
+    store.addListener(_check);
+  }
+
+  final DurbunInspectorStore store;
+  final InspectorCall call;
+  int _seen;
+
+  void _check() {
+    if (call.revision == _seen) return;
+    _seen = call.revision;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    store.removeListener(_check);
+    super.dispose();
   }
 }
 
@@ -581,6 +610,7 @@ class DurbunInspectorStore extends ChangeNotifier {
       ..mocked = m['mocked'] == true
       ..mockRuleId = m['mockRuleId'] as String?;
     _setBody(call, m['body'], request: false);
+    call.revision++;
     if (!wasFailure && call.isFailure) _failuresTotal++;
     _enforceBodyBudget();
     _scheduleNotify();
@@ -596,6 +626,7 @@ class DurbunInspectorStore extends ChangeNotifier {
       ..endTs = _num(m['ts']) ?? _now()
       ..mocked = call.mocked || m['mocked'] == true
       ..mockRuleId = call.mockRuleId ?? m['mockRuleId'] as String?;
+    call.revision++;
     if (!wasFailure && !call.cancelled) _failuresTotal++;
     _scheduleNotify();
   }

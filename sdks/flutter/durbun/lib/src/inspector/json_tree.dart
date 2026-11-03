@@ -52,30 +52,61 @@ List<JsonLine> flattenJson(
   return out;
 }
 
-/// Paths of every container whose subtree has a key or value containing [q].
-Set<String> pathsToMatches(Object? root, String q) {
-  final hits = <String>{};
-  final needle = foldText(q);
-  bool walk(Object? v, String path, String? key) {
-    var hit = key != null && foldText(key).contains(needle);
-    if (v is Map) {
-      for (final e in v.entries) {
-        if (walk(e.value, '$path.${e.key}', '${e.key}')) hit = true;
+/// The tree flattened once per body for search: every node's path, parent,
+/// folded key and folded leaf text, so a query does not walk the tree and
+/// fold every value again.
+class JsonSearchIndex {
+  JsonSearchIndex(Object? root) {
+    void walk(Object? v, String path, String? key, int parent) {
+      final me = _paths.length;
+      final container = v is Map || v is List;
+      _paths.add(path);
+      _parent.add(parent);
+      _container.add(container);
+      _key.add(key == null ? null : foldText(key));
+      _leaf.add(container ? null : foldText('$v'));
+      if (v is Map) {
+        for (final e in v.entries) {
+          walk(e.value, '$path.${e.key}', '${e.key}', me);
+        }
+      } else if (v is List) {
+        for (var i = 0; i < v.length; i++) {
+          walk(v[i], '$path[$i]', null, me);
+        }
       }
-    } else if (v is List) {
-      for (var i = 0; i < v.length; i++) {
-        if (walk(v[i], '$path[$i]', null)) hit = true;
-      }
-    } else if (foldText('$v').contains(needle)) {
-      hit = true;
     }
-    if (hit && (v is Map || v is List)) hits.add(path);
-    return hit;
+
+    walk(root, r'$', null, -1);
   }
 
-  walk(root, r'$', null);
-  return hits;
+  final List<String> _paths = <String>[];
+  final List<int> _parent = <int>[];
+  final List<bool> _container = <bool>[];
+  final List<String?> _key = <String?>[];
+  final List<String?> _leaf = <String?>[];
+
+  /// Paths of every container whose subtree has a key or value containing
+  /// the folded [q] (a container whose own key matches included).
+  Set<String> pathsToMatches(String q) {
+    final hits = <String>{};
+    if (q.isEmpty) return hits;
+    final marked = List<bool>.filled(_paths.length, false);
+    for (var i = 0; i < _paths.length; i++) {
+      final hit = (_key[i]?.contains(q) ?? false) || (_leaf[i]?.contains(q) ?? false);
+      if (!hit) continue;
+      var j = _container[i] ? i : _parent[i];
+      while (j >= 0 && !marked[j]) {
+        marked[j] = true;
+        hits.add(_paths[j]);
+        j = _parent[j];
+      }
+    }
+    return hits;
+  }
 }
+
+/// Paths of every container whose subtree has a key or value containing [q].
+Set<String> pathsToMatches(Object? root, String q) => JsonSearchIndex(root).pathsToMatches(foldText(q));
 
 /// Every container path (for "expand all").
 Set<String> allContainerPaths(Object? root) {
@@ -121,9 +152,24 @@ class _JsonTreeViewState extends State<JsonTreeView> {
   final Set<String> _collapsed = <String>{};
   final Set<String> _opened = <String>{};
   bool _all = false;
+
+  /// Grows with every open / close: the find list rebuilds its lines only
+  /// then (and when the query changes).
+  int _rev = 0;
   List<JsonLine> _lines = const <JsonLine>[];
+  late JsonSearchIndex _index = JsonSearchIndex(widget.value);
+
+  @override
+  void didUpdateWidget(JsonTreeView old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.value, widget.value)) {
+      _index = JsonSearchIndex(widget.value);
+      _rev++;
+    }
+  }
 
   void _toggle(JsonLine l) => setState(() {
+    _rev++;
     if (l.expanded) {
       _collapsed.add(l.path);
       _opened.remove(l.path);
@@ -138,15 +184,17 @@ class _JsonTreeViewState extends State<JsonTreeView> {
   List<SearchLine> _build(String folded, DurbunColors c) {
     final opened = <String>{..._opened};
     if (_all) opened.addAll(allContainerPaths(widget.value));
-    if (folded.isNotEmpty) opened.addAll(pathsToMatches(widget.value, folded));
+    if (folded.isNotEmpty) opened.addAll(_index.pathsToMatches(folded));
     // A match inside a container the user closed opens it again.
     final collapsed = folded.isEmpty ? _collapsed : _collapsed.difference(opened);
     _lines = flattenJson(widget.value, collapsed: collapsed, opened: opened, autoDepth: _all ? 1 << 20 : 3);
-    final base = DurbunType.monoStyle(size: 12.5, color: c.text);
+    final base = _style(c);
     return <SearchLine>[
-      for (final l in _lines) SearchLine(_segments(l, base, c)),
+      for (final l in _lines) SearchLine(_segments(l, base, c), indent: l.depth * 14.0),
     ];
   }
+
+  static TextStyle _style(DurbunColors c) => DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.3);
 
   static List<(String, TextStyle)> _segments(JsonLine l, TextStyle base, DurbunColors c) {
     final out = <(String, TextStyle)>[];
@@ -181,16 +229,20 @@ class _JsonTreeViewState extends State<JsonTreeView> {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     return FindableLines(
+      linesKey: _rev,
       initialQuery: widget.initialQuery,
       onQueryChanged: widget.onQueryChanged,
       padding: widget.padding,
       hint: t.searchJson,
+      textStyle: _style(c),
+      prefixWidth: 14,
       buildLines: (folded) => _build(folded, c),
       actions: <Widget>[
         DIconButton(
           icon: Icons.unfold_more,
           tooltip: t.expandAll,
           onTap: () => setState(() {
+            _rev++;
             _all = true;
             _collapsed.clear();
           }),
@@ -199,6 +251,7 @@ class _JsonTreeViewState extends State<JsonTreeView> {
           icon: Icons.unfold_less,
           tooltip: t.collapseAll,
           onTap: () => setState(() {
+            _rev++;
             _all = false;
             _opened.clear();
             _collapsed
@@ -207,28 +260,21 @@ class _JsonTreeViewState extends State<JsonTreeView> {
           }),
         ),
       ],
-      rowBuilder: (context, i, spans, _) {
+      rowBuilder: (context, i, first, spans) {
         final l = _lines[i];
-        return InkWell(
-          onTap: l.container ? () => _toggle(l) : null,
-          child: Padding(
-            padding: EdgeInsets.only(left: l.depth * 14.0, top: 1, bottom: 1),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                SizedBox(
-                  width: 14,
-                  height: 18,
-                  child: l.container
-                      ? Icon(l.expanded ? Icons.arrow_drop_down : Icons.arrow_right, size: 16, color: c.textSubtle)
-                      : null,
-                ),
-                // Containers toggle on tap; leaves stay selectable.
-                Expanded(
-                  child: l.container ? Text.rich(spans) : SelectableText.rich(spans),
-                ),
-              ],
-            ),
+        final text = Text.rich(spans, maxLines: 1, softWrap: false, overflow: TextOverflow.clip);
+        if (!first || !l.container) return Row(children: <Widget>[const SizedBox(width: 14), Expanded(child: text)]);
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _toggle(l),
+          child: Row(
+            children: <Widget>[
+              SizedBox(
+                width: 14,
+                child: Icon(l.expanded ? Icons.arrow_drop_down : Icons.arrow_right, size: 16, color: c.textSubtle),
+              ),
+              Expanded(child: text),
+            ],
           ),
         );
       },

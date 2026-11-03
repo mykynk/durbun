@@ -1,5 +1,15 @@
 ## Unreleased (phase 3)
 
+- In-app panel fixes: pages opened from a list row (request, log, compare,
+  filter sheets) build their theme from their own route context, so a row
+  removed while the page is open no longer throws "Looking up a deactivated
+  widget's ancestor" when MediaQuery changes (keyboard, theme). Find in body
+  is fast on large bodies: the detail page rebuilds for its own call only
+  (not on every app log), the query is debounced (200 ms) and needs 2
+  letters, lines and matches are cached, the JSON tree is indexed once, rows
+  have one height (long lines cut by screen width, one selection area) so a
+  match is reached with one jump.
+
 - In-app panel: find in request and response bodies (JSON preview and code
   view, now with line numbers) with a match count, previous / next, the
   current match in its own colour and scrolled into view; the find text is

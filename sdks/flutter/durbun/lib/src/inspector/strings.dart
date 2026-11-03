@@ -230,6 +230,8 @@ class InspectorStrings {
   String get searchJson => _('JSON’da ara…', 'Search JSON…');
   String get findInBody => _('Gövdede bul…', 'Find in body…');
   String get noMatchShort => _('Bulunamadı', 'No match');
+  // Short: it sits inside the find field next to its buttons.
+  String get findMinChars => _('≥ 2 harf', '2+ chars');
   String get prevMatch => _('Önceki eşleşme', 'Previous match');
   String get nextMatch => _('Sonraki eşleşme', 'Next match');
   String get expandAll => _('Tümünü aç', 'Expand all');

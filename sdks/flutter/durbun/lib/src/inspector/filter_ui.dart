@@ -251,8 +251,8 @@ Future<void> showFilterSheet(
     useSafeArea: true,
     showDragHandle: true,
     backgroundColor: DurbunColors.of(context).bgPanel,
-    builder: (_) => DurbunTheme.wrap(
-      context,
+    builder: (routeContext) => DurbunTheme.wrap(
+      routeContext,
       StatefulBuilder(
         builder: (sheet, setSheet) {
           void changed() {
@@ -338,8 +338,8 @@ Future<void> showQueryHelp(BuildContext context,
     useSafeArea: true,
     showDragHandle: true,
     backgroundColor: DurbunColors.of(context).bgPanel,
-    builder: (_) => DurbunTheme.wrap(
-      context,
+    builder: (routeContext) => DurbunTheme.wrap(
+      routeContext,
       Builder(builder: (sheet) {
         final c = DurbunColors.of(sheet);
         final t = InspectorStrings.of(sheet);

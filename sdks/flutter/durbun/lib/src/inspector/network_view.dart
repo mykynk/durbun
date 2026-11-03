@@ -388,8 +388,8 @@ class CallRow extends StatelessWidget {
           FocusManager.instance.primaryFocus?.unfocus();
           if (onTap != null) return onTap!();
           Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => DurbunTheme.wrap(
-                  context,
+              builder: (routeContext) => DurbunTheme.wrap(
+                  routeContext,
                   CallDetailPage(
                       call: call, store: store, bodyQuery: bodyQuery))));
         },
@@ -559,6 +559,13 @@ class _CallDetailPageState extends State<CallDetailPage> {
   bool _replaying = false;
 
   InspectorCall get call => widget.call;
+  late final CallWatch _watch = CallWatch(widget.store, widget.call);
+
+  @override
+  void dispose() {
+    _watch.dispose();
+    super.dispose();
+  }
 
   Future<void> _replay() async {
     final t = InspectorStrings.of(context);
@@ -593,8 +600,10 @@ class _CallDetailPageState extends State<CallDetailPage> {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
+    // Only this call's changes rebuild the page: a store notification for an
+    // unrelated log line rebuilt the bodies and ran the search again.
     return ListenableBuilder(
-      listenable: widget.store,
+      listenable: _watch,
       builder: (context, _) {
         final failed = call.error != null && !call.cancelled;
         final reason = call.statusText?.isNotEmpty == true
@@ -707,8 +716,8 @@ class _CallDetailPageState extends State<CallDetailPage> {
                             icon: Icons.compare_arrows,
                             onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute<void>(
-                                    builder: (_) => DurbunTheme.wrap(
-                                        context,
+                                    builder: (routeContext) => DurbunTheme.wrap(
+                                        routeContext,
                                         ComparePickerPage(
                                             base: call,
                                             store: widget.store)))),
@@ -1081,6 +1090,20 @@ class _BodyPaneState extends State<BodyPane> {
   /// Kept across Preview and Code.
   late String _query = widget.initialQuery;
 
+  String? _codeText;
+  List<SearchLine> _codeLines = const <SearchLine>[];
+
+  /// The code view's lines, built once per text (not on every rebuild).
+  List<SearchLine> _codeLinesFor(String text, TextStyle style) {
+    if (!identical(text, _codeText) && text != _codeText) {
+      _codeText = text;
+      final raw = text.replaceAll('\r\n', '\n').split('\n');
+      if (raw.length > 1 && raw.last.isEmpty) raw.removeLast();
+      _codeLines = <SearchLine>[for (final l in raw) SearchLine(<(String, TextStyle)>[(l, style)])];
+    }
+    return _codeLines;
+  }
+
   static const int _maxShownChars = 200 * 1024;
 
   Object? _parsedJson(InspectorBody b) {
@@ -1208,10 +1231,10 @@ class _BodyPaneState extends State<BodyPane> {
       var text = mode == 1 ? (b.displayText ?? b.data) : b.data;
       final cut = text.length > _maxShownChars;
       if (cut) text = text.substring(0, _maxShownChars);
-      final rows = codeRows(text);
-      final style = DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.35);
-      final numStyle = DurbunType.monoStyle(size: 10.5, color: c.textSubtle, height: 1.55);
-      final gutter = 8.0 + 7.0 * '${rows.isEmpty ? 1 : rows.last.$1}'.length;
+      final style = DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.3);
+      final lines = _codeLinesFor(text, style);
+      final numStyle = DurbunType.monoStyle(size: 10.5, color: c.textSubtle, height: 1.3);
+      final gutter = 8.0 + 7.0 * '${lines.isEmpty ? 1 : lines.length}'.length;
       content = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -1221,19 +1244,19 @@ class _BodyPaneState extends State<BodyPane> {
                 child: Callout(tone: CalloutTone.warning, title: t.truncated(formatBytes(b.size)))),
           Expanded(
             child: FindableLines(
+              linesKey: identityHashCode(lines),
               initialQuery: _query,
               onQueryChanged: (v) => _query = v,
               padding: _pagePadding(context).copyWith(left: 4, top: 2),
-              buildLines: (_) => <SearchLine>[for (final r in rows) SearchLine(<(String, TextStyle)>[(r.$2, style)])],
-              // Line numbers on the left (only on a line's first piece).
-              rowBuilder: (context, i, spans, _) => Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              textStyle: style,
+              prefixWidth: gutter + 8,
+              buildLines: (_) => lines,
+              // Line numbers on the left, on a line's first row only.
+              rowBuilder: (context, i, first, spans) => Row(
                 children: <Widget>[
-                  SizedBox(
-                      width: gutter,
-                      child: Text(rows[i].$3 ? '${rows[i].$1}' : '', textAlign: TextAlign.right, style: numStyle)),
+                  SizedBox(width: gutter, child: Text(first ? '${i + 1}' : '', textAlign: TextAlign.right, style: numStyle)),
                   const SizedBox(width: 8),
-                  Expanded(child: SelectableText.rich(spans)),
+                  Expanded(child: Text.rich(spans, maxLines: 1, softWrap: false, overflow: TextOverflow.clip)),
                 ],
               ),
             ),
@@ -1249,26 +1272,6 @@ class _BodyPaneState extends State<BodyPane> {
       ],
     );
   }
-}
-
-/// [text] as code rows: (1-based line number, piece, first piece of the
-/// line). Long lines (minified JSON) are cut into pieces of a few screen
-/// lines, so a row is cheap to lay out and a found match is on screen.
-List<(int, String, bool)> codeRows(String text, {int piece = 400}) {
-  final out = <(int, String, bool)>[];
-  final lines = text.replaceAll('\r\n', '\n').split('\n');
-  if (lines.length > 1 && lines.last.isEmpty) lines.removeLast();
-  for (var n = 0; n < lines.length; n++) {
-    final l = lines[n];
-    if (l.length <= piece) {
-      out.add((n + 1, l, true));
-      continue;
-    }
-    for (var at = 0; at < l.length; at += piece) {
-      out.add((n + 1, l.substring(at, at + piece > l.length ? l.length : at + piece), at == 0));
-    }
-  }
-  return out;
 }
 
 /// Classic 16-byte hex dump (first 8 KB).

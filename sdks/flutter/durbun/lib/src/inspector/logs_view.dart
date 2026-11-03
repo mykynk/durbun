@@ -478,7 +478,7 @@ class LogRow extends StatelessWidget {
           // The keyboard would come back with the search field's focus.
           FocusManager.instance.primaryFocus?.unfocus();
           final action = await Navigator.of(context).push<(String, String)>(
-            MaterialPageRoute<(String, String)>(builder: (_) => DurbunTheme.wrap(context, LogDetailPage(log: l, repeats: item.repeats))),
+            MaterialPageRoute<(String, String)>(builder: (routeContext) => DurbunTheme.wrap(routeContext, LogDetailPage(log: l, repeats: item.repeats))),
           );
           if (action != null) onTagAction?.call(action.$1, action.$2);
         },
@@ -557,8 +557,8 @@ class _NetLogRow extends StatelessWidget {
         onTap: () {
           FocusManager.instance.primaryFocus?.unfocus();
           Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => DurbunTheme.wrap(
-                  context, CallDetailPage(call: call, store: store))));
+              builder: (routeContext) => DurbunTheme.wrap(
+                  routeContext, CallDetailPage(call: call, store: store))));
         },
         child: Container(
           padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),

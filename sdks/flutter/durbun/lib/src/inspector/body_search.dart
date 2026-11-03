@@ -2,7 +2,14 @@
 /// match count and previous / next, the current match in its own colour and
 /// scrolled into view. The JSON tree and the code view both show their
 /// content as [SearchLine]s through [FindableLines].
+///
+/// Built for large bodies on a phone in debug mode: the query is debounced,
+/// lines and matches are cached per (content, query), every line's folded
+/// text is computed once, and rows have one fixed height (long lines are cut
+/// into screen-wide rows), so jumping to a match is one scroll offset.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
@@ -11,13 +18,19 @@ import 'text_match.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// One shown line: styled pieces, matched as one string.
+/// One logical line: styled pieces, matched as one string.
 class SearchLine {
-  const SearchLine(this.segments);
+  SearchLine(this.segments, {this.indent = 0});
 
   final List<(String, TextStyle)> segments;
 
-  String get text => segments.map((s) => s.$1).join();
+  /// Left indent of every row of the line (JSON depth).
+  final double indent;
+
+  late final String text = segments.length == 1 ? segments.first.$1 : segments.map((s) => s.$1).join();
+
+  /// [text] folded for search ([foldText]), computed once.
+  late final String folded = foldText(text);
 }
 
 /// A match: line index and its range in [SearchLine.text].
@@ -28,40 +41,65 @@ List<Occurrence> findOccurrences(List<SearchLine> lines, String foldedQuery, {in
   final out = <Occurrence>[];
   if (foldedQuery.isEmpty) return out;
   for (var i = 0; i < lines.length && out.length < limit; i++) {
-    for (final (s, e) in matchRanges(lines[i].text, <String>[foldedQuery])) {
-      out.add((i, s, e));
-      if (out.length >= limit) break;
+    final f = lines[i].folded;
+    var at = f.indexOf(foldedQuery);
+    while (at >= 0 && out.length < limit) {
+      out.add((i, at, at + foldedQuery.length));
+      at = f.indexOf(foldedQuery, at + foldedQuery.length);
     }
   }
   return out;
 }
 
-/// [line] as spans, every range in [ranges] marked, [current] (if any) in
-/// the stronger colour.
-TextSpan markLine(SearchLine line, List<(int, int)> ranges, (int, int)? current, Color mark, Color currentMark) {
-  if (ranges.isEmpty) {
-    return TextSpan(children: <InlineSpan>[for (final (t, st) in line.segments) TextSpan(text: t, style: st)]);
-  }
+/// The part [from]..[to] of [line] as spans, every range in [ranges] marked
+/// (clipped to the part), [current] (if any) in the stronger colour.
+TextSpan markSlice(SearchLine line, int from, int to, List<(int, int)> ranges, (int, int)? current, Color mark, Color currentMark) {
   final spans = <InlineSpan>[];
   var offset = 0;
   for (final (text, style) in line.segments) {
     final segStart = offset, segEnd = offset + text.length;
-    var at = segStart;
-    for (final (s, e) in ranges) {
-      if (e <= at || s >= segEnd) continue;
-      final from = s < at ? at : s;
-      final to = e > segEnd ? segEnd : e;
-      if (from > at) spans.add(TextSpan(text: text.substring(at - segStart, from - segStart), style: style));
-      final isCurrent = current != null && current.$1 == s && current.$2 == e;
-      spans.add(TextSpan(
-          text: text.substring(from - segStart, to - segStart),
-          style: style.copyWith(backgroundColor: isCurrent ? currentMark : mark)));
-      at = to;
-    }
-    if (at < segEnd) spans.add(TextSpan(text: text.substring(at - segStart), style: style));
     offset = segEnd;
+    final a = segStart > from ? segStart : from;
+    final b = segEnd < to ? segEnd : to;
+    if (a >= b) continue;
+    var at = a;
+    for (final (s, e) in ranges) {
+      if (e <= at || s >= b) continue;
+      final x = s < at ? at : s;
+      final y = e > b ? b : e;
+      if (x > at) spans.add(TextSpan(text: text.substring(at - segStart, x - segStart), style: style));
+      final isCurrent = current != null && current.$1 == s && current.$2 == e;
+      spans.add(TextSpan(text: text.substring(x - segStart, y - segStart), style: style.copyWith(backgroundColor: isCurrent ? currentMark : mark)));
+      at = y;
+    }
+    if (at < b) spans.add(TextSpan(text: text.substring(at - segStart, b - segStart), style: style));
   }
   return TextSpan(children: spans);
+}
+
+/// The whole of [line] marked (tests and simple callers).
+TextSpan markLine(SearchLine line, List<(int, int)> ranges, (int, int)? current, Color mark, Color currentMark) =>
+    markSlice(line, 0, line.text.length, ranges, current, mark, currentMark);
+
+/// A screen row: a piece [from]..[to] of logical line [line].
+typedef VisualRow = (int line, int from, int to);
+
+/// Cuts [lines] into rows of at most [charsFor] characters (monospace), one
+/// row for an empty line.
+List<VisualRow> wrapRows(List<SearchLine> lines, int Function(SearchLine line) charsFor) {
+  final out = <VisualRow>[];
+  for (var i = 0; i < lines.length; i++) {
+    final n = lines[i].text.length;
+    final w = charsFor(lines[i]);
+    if (n <= w) {
+      out.add((i, 0, n));
+      continue;
+    }
+    for (var at = 0; at < n; at += w) {
+      out.add((i, at, at + w > n ? n : at + w));
+    }
+  }
+  return out;
 }
 
 /// The find bar: field, "3 / 12" (or "No match"), previous, next.
@@ -70,16 +108,19 @@ class FindBar extends StatelessWidget {
       {super.key,
       required this.controller,
       required this.onChanged,
+      required this.onSubmitted,
       required this.total,
       required this.current,
       required this.onPrev,
       required this.onNext,
       this.hint,
       this.capped = false,
+      this.tooShort = false,
       this.trailing = const <Widget>[]});
 
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
   final int total;
 
   /// 0-based index of the selected match.
@@ -90,6 +131,9 @@ class FindBar extends StatelessWidget {
 
   /// [total] hit the search limit.
   final bool capped;
+
+  /// The query is shorter than the minimum.
+  final bool tooShort;
   final List<Widget> trailing;
 
   @override
@@ -97,6 +141,15 @@ class FindBar extends StatelessWidget {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     final searching = controller.text.trim().isNotEmpty;
+    final String label;
+    if (tooShort) {
+      label = t.findMinChars;
+    } else if (total == 0) {
+      label = t.noMatchShort;
+    } else {
+      label = '${current + 1} / $total${capped ? '+' : ''}';
+    }
+    final missing = !tooShort && total == 0;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 6),
       child: Row(
@@ -106,17 +159,17 @@ class FindBar extends StatelessWidget {
               hint: hint ?? t.findInBody,
               controller: controller,
               onChanged: onChanged,
-              onSubmitted: (_) => onNext(),
+              onSubmitted: onSubmitted,
               trailing: !searching
                   ? null
                   : Padding(
                       padding: const EdgeInsets.only(right: 2),
                       child: Text(
-                        total == 0 ? t.noMatchShort : '${current + 1} / $total${capped ? '+' : ''}',
+                        label,
                         style: DurbunType.monoStyle(
                             size: 11.5,
-                            color: total == 0 ? c.danger : c.textMuted,
-                            weight: total == 0 ? FontWeight.w600 : FontWeight.w500),
+                            color: missing ? c.danger : c.textMuted,
+                            weight: missing ? FontWeight.w600 : FontWeight.w500),
                       ),
                     ),
             ),
@@ -130,28 +183,46 @@ class FindBar extends StatelessWidget {
   }
 }
 
-/// Lines with find: [buildLines] makes the lines for the folded query (the
-/// JSON tree opens containers around matches), [rowBuilder] draws a line
-/// from its marked spans. The query survives a rebuild with a new
-/// [initialQuery] only when the parent changes it.
+/// Lines with find.
+///
+/// [buildLines] makes the lines for the folded query (the JSON tree opens
+/// containers around matches); it runs again only when [linesKey] or the
+/// applied query changes. [rowBuilder] draws one fixed-height row: the part
+/// of a line in `spans`, `first` for the line's first row (where the tree
+/// draws its arrow and the code view its line number). [prefixWidth] is the
+/// width that row prefix takes.
 class FindableLines extends StatefulWidget {
   const FindableLines(
       {super.key,
+      required this.linesKey,
       required this.buildLines,
       required this.rowBuilder,
+      required this.textStyle,
+      this.prefixWidth = 0,
       this.initialQuery = '',
       this.onQueryChanged,
       this.padding = EdgeInsets.zero,
       this.actions = const <Widget>[],
-      this.hint});
+      this.hint,
+      this.minChars = 2,
+      this.debounce = const Duration(milliseconds: 200)});
 
+  final Object linesKey;
   final List<SearchLine> Function(String foldedQuery) buildLines;
-  final Widget Function(BuildContext context, int index, TextSpan spans, bool hasMatch) rowBuilder;
+  final Widget Function(BuildContext context, int line, bool first, TextSpan spans) rowBuilder;
+
+  /// The monospace style of the text (measured for row height and width).
+  final TextStyle textStyle;
+  final double prefixWidth;
   final String initialQuery;
   final ValueChanged<String>? onQueryChanged;
   final EdgeInsets padding;
   final List<Widget> actions;
   final String? hint;
+
+  /// Shorter queries do not search (one letter matches almost everything).
+  final int minChars;
+  final Duration debounce;
 
   @override
   State<FindableLines> createState() => FindableLinesState();
@@ -160,20 +231,46 @@ class FindableLines extends StatefulWidget {
 class FindableLinesState extends State<FindableLines> {
   late final TextEditingController _field = TextEditingController(text: widget.initialQuery);
   final ScrollController _scroll = ScrollController();
-  final Map<int, GlobalKey> _keys = <int, GlobalKey>{};
-  int _current = 0;
-  int _revealTry = 0;
+  Timer? _debounce;
 
-  String get _folded => foldText(_field.text.trim());
+  /// The folded query the results are for (lags the field by the debounce).
+  late String _applied = _effective(widget.initialQuery);
+  int _current = 0;
+
+  /// Times the lines and matches were computed (tests: the debounce and the
+  /// cache work).
+  int searches = 0;
+
+  /// Times this widget was built (tests: a store notification for another
+  /// call does not rebuild the body).
+  int builds = 0;
+
+  Object? _cacheKey;
+  List<SearchLine> _lines = const <SearchLine>[];
+  List<Occurrence> _occ = const <Occurrence>[];
+  Map<int, List<(int, int)>> _byLine = const <int, List<(int, int)>>{};
+
+  Object? _rowsKey;
+  List<VisualRow> _rows = const <VisualRow>[];
+  double _rowHeight = 18;
+
+  /// The line of the selected match (tests).
+  int? get currentLine => _occ.isEmpty ? null : _occ[_current].$1;
+
+  String _effective(String raw) {
+    final f = foldText(raw.trim());
+    return f.length < widget.minChars ? '' : f;
+  }
 
   @override
   void initState() {
     super.initState();
-    if (_folded.isNotEmpty) _revealAfterFrame();
+    if (_applied.isNotEmpty) _revealAfterFrame();
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _field.dispose();
     _scroll.dispose();
     super.dispose();
@@ -181,94 +278,149 @@ class FindableLinesState extends State<FindableLines> {
 
   void _onChanged(String v) {
     widget.onQueryChanged?.call(v);
-    setState(() => _current = 0);
+    _debounce?.cancel();
+    _debounce = Timer(widget.debounce, _apply);
+    setState(() {}); // The counter's "too short" state follows the field.
+  }
+
+  void _apply() {
+    _debounce?.cancel();
+    final next = _effective(_field.text);
+    if (!mounted || next == _applied) return;
+    setState(() {
+      _applied = next;
+      _current = 0;
+    });
     _revealAfterFrame();
   }
 
-  void _step(int by, int total) {
-    if (total == 0) return;
-    setState(() => _current = (_current + by) % total); // Dart's % is never negative here.
-    _revealAfterFrame();
-  }
-
-  /// The line of the selected match, for tests.
-  int? currentLine;
-
-  void _revealAfterFrame() {
-    _revealTry = 0;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _reveal());
-  }
-
-  /// Scrolls the current match's line into view: directly when the row is
-  /// built, else jumps to an estimate (rows vary in height) and tries again.
-  void _reveal() {
-    final line = currentLine;
-    if (!mounted || line == null || !_scroll.hasClients) return;
-    final ctx = _keys[line]?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(ctx, alignment: 0.3, duration: const Duration(milliseconds: 120));
-      return;
+  void _onSubmitted(String _) {
+    // Enter: search now if the text changed, else the next match.
+    if (_effective(_field.text) != _applied) {
+      _apply();
+    } else {
+      _step(1);
     }
-    if (_revealTry++ > 20) return;
-    final pos = _scroll.position;
-    final count = _lineCount == 0 ? 1 : _lineCount;
-    final perLine = (pos.maxScrollExtent + pos.viewportDimension) / count;
-    _scroll.jumpTo((line * perLine - pos.viewportDimension * 0.3).clamp(0.0, pos.maxScrollExtent));
-    WidgetsBinding.instance.addPostFrameCallback((_) => _reveal());
   }
 
-  int _lineCount = 0;
+  void _step(int by) {
+    if (_occ.isEmpty) return;
+    setState(() => _current = (_current + by) % _occ.length); // Never negative here.
+    _revealAfterFrame();
+  }
+
+  void _revealAfterFrame() => WidgetsBinding.instance.addPostFrameCallback((_) => _reveal());
+
+  /// Rows have one height: the selected match's row is at a known offset.
+  void _reveal() {
+    if (!mounted || _occ.isEmpty || !_scroll.hasClients) return;
+    final (line, start, _) = _occ[_current];
+    var row = 0;
+    for (var i = 0; i < _rows.length; i++) {
+      final r = _rows[i];
+      if (r.$1 != line) continue;
+      row = i;
+      if (start < r.$3) break;
+    }
+    final pos = _scroll.position;
+    final target = widget.padding.top + row * _rowHeight - pos.viewportDimension * 0.3;
+    _scroll.jumpTo(target.clamp(0.0, pos.maxScrollExtent));
+  }
+
+  void _ensureResults() {
+    final key = (widget.linesKey, _applied);
+    if (key == _cacheKey) return;
+    _cacheKey = key;
+    searches++;
+    _lines = widget.buildLines(_applied);
+    _occ = findOccurrences(_lines, _applied);
+    final byLine = <int, List<(int, int)>>{};
+    for (final (l, s, e) in _occ) {
+      (byLine[l] ??= <(int, int)>[]).add((s, e));
+    }
+    _byLine = byLine;
+    if (_current >= _occ.length) _current = _occ.isEmpty ? 0 : _occ.length - 1;
+  }
+
+  void _ensureRows(double width, TextScaler scaler) {
+    final key = (_cacheKey, width, scaler);
+    if (key == _rowsKey) return;
+    _rowsKey = key;
+    final tp = TextPainter(
+        text: TextSpan(text: 'MMMMMMMMMM', style: widget.textStyle),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler)
+      ..layout();
+    final charW = tp.width / 10;
+    _rowHeight = (tp.height + 2).ceilToDouble();
+    tp.dispose();
+    final avail = width - widget.padding.horizontal - widget.prefixWidth - 6;
+    _rows = wrapRows(_lines, (l) {
+      final n = ((avail - l.indent) / charW).floor();
+      return n < 8 ? 8 : n;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    builds++;
     final c = DurbunColors.of(context);
-    final folded = _folded;
-    final lines = widget.buildLines(folded);
-    _lineCount = lines.length;
-    final occ = findOccurrences(lines, folded);
-    final capped = occ.length >= 5000;
-    if (_current >= occ.length) _current = occ.isEmpty ? 0 : occ.length - 1;
-    final cur = occ.isEmpty ? null : occ[_current];
-    currentLine = cur?.$1;
-    final byLine = <int, List<(int, int)>>{};
-    for (final (l, s, e) in occ) {
-      (byLine[l] ??= <(int, int)>[]).add((s, e));
-    }
+    _ensureResults();
+    final raw = foldText(_field.text.trim());
+    final tooShort = raw.isNotEmpty && raw.length < widget.minChars;
+    final cur = _occ.isEmpty ? null : _occ[_current];
     final currentMark = c.warning.withValues(alpha: 0.55);
+    final scaler = MediaQuery.textScalerOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         FindBar(
           controller: _field,
           onChanged: _onChanged,
-          total: occ.length,
+          onSubmitted: _onSubmitted,
+          total: tooShort ? 0 : _occ.length,
           current: _current,
-          capped: capped,
+          capped: _occ.length >= 5000,
+          tooShort: tooShort,
           hint: widget.hint,
-          onPrev: () => _step(-1, occ.length),
-          onNext: () => _step(1, occ.length),
+          onPrev: () => _step(-1),
+          onNext: () => _step(1),
           trailing: widget.actions,
         ),
         Expanded(
-          child: ListView.builder(
-            controller: _scroll,
-            padding: widget.padding,
-            itemCount: lines.length,
-            itemBuilder: (context, i) {
-              final ranges = byLine[i] ?? const <(int, int)>[];
-              final spans = markLine(lines[i], ranges, cur != null && cur.$1 == i ? (cur.$2, cur.$3) : null, c.hlMark, currentMark);
-              return KeyedSubtree(
-                key: _keys.putIfAbsent(i, GlobalKey.new),
-                child: Container(
-                  // Lines with a match carry a bar on the left, so they are
-                  // found while scrolling.
-                  decoration: BoxDecoration(
-                    border: Border(
-                        left: BorderSide(
-                            color: ranges.isEmpty ? Colors.transparent : (cur != null && cur.$1 == i ? c.warning : c.hlMark),
-                            width: 3)),
-                  ),
-                  child: widget.rowBuilder(context, i, spans, ranges.isNotEmpty),
+          child: LayoutBuilder(
+            builder: (context, box) {
+              _ensureRows(box.maxWidth, scaler);
+              // One selection area for the list: rows are plain Text.rich
+              // (a SelectableText per row is heavy).
+              return SelectionArea(
+                child: ListView.builder(
+                  controller: _scroll,
+                  padding: widget.padding,
+                  itemExtent: _rowHeight,
+                  itemCount: _rows.length,
+                  itemBuilder: (context, i) {
+                    final (line, from, to) = _rows[i];
+                    final ranges = _byLine[line] ?? const <(int, int)>[];
+                    final isCur = cur != null && cur.$1 == line;
+                    final spans = markSlice(_lines[line], from, to, ranges,
+                        isCur ? (cur.$2, cur.$3) : null, c.hlMark, currentMark);
+                    final hit = ranges.any((r) => r.$1 < to && r.$2 > from);
+                    final curHere = isCur && cur.$2 < to && cur.$3 > from;
+                    return DecoratedBox(
+                      // Rows with a match carry a bar on the left.
+                      decoration: BoxDecoration(
+                        border: Border(
+                            left: BorderSide(
+                                color: !hit ? Colors.transparent : (curHere ? c.warning : c.hlMark),
+                                width: 3)),
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.only(left: _lines[line].indent),
+                        child: widget.rowBuilder(context, line, from == 0, spans),
+                      ),
+                    );
+                  },
                 ),
               );
             },

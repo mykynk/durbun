@@ -119,7 +119,7 @@ class _ComparePickerPageState extends State<ComparePickerPage> {
   void _pick(InspectorCall other) {
     FocusManager.instance.primaryFocus?.unfocus();
     Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
-      builder: (_) => DurbunTheme.wrap(context, CompareCallsPage(a: widget.base, b: other)),
+      builder: (routeContext) => DurbunTheme.wrap(routeContext, CompareCallsPage(a: widget.base, b: other)),
     ));
   }
 
