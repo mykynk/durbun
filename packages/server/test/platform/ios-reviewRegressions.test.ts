@@ -372,7 +372,8 @@ describe('IosDeviceDriver (review regressions)', () => {
     const driver = new IosDeviceDriver({
       socketPath: mux.socketPath,
       devicectl: run,
-      timing: { appsEveryMs: 60_000, processesEveryMs: 200, crashesEveryMs: 200, crashStartDelayMs: 50 },
+      // No detach grace: this test is about devicectl not holding the disconnect back.
+      timing: { appsEveryMs: 60_000, processesEveryMs: 200, crashesEveryMs: 200, crashStartDelayMs: 50, detachGraceMs: 0 },
     });
     mux.onPort(5, 62078, fakeLockdown({ DeviceName: 'Test iPhone', ProductType: 'iPhone16,2', ProductVersion: '27.2' }));
     mux.pair(UDID, false);
