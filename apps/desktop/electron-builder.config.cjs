@@ -2,7 +2,11 @@
  * electron-builder: Dürbün.app + .dmg for Apple silicon, without a signing identity (identity: null).
  * The fuses step re-applies an ad-hoc signature (resetAdHocDarwinSignature), so the bundle's signature
  * is valid: a downloaded copy then asks "open anyway?" instead of reporting the app as damaged.
- * The embedded server (dist/server.mjs) and the UI (dist/ui) go to Contents/Resources/server.
+ * The embedded server (dist/server.mjs) and the UI (dist/ui) go into app.asar (server/…), next to the
+ * main process, so the asar integrity fuse covers the code that actually runs: a changed server.mjs or
+ * UI file no longer loads. Electron's main process imports ESM and reads files from inside the asar;
+ * the server only spawns external tools (adb, xcrun), nothing from the archive.
+ * hardenedRuntime stays off: it needs a signing identity (Developer ID); turn it on together with one.
  * @type {import('electron-builder').Configuration}
  */
 module.exports = {
@@ -14,12 +18,8 @@ module.exports = {
   productName: 'Dürbün'.normalize('NFD'),
   copyright: 'Dürbün',
   directories: { output: 'release', buildResources: 'build' },
-  files: ['out/**', 'package.json'],
-  extraResources: [
-    { from: '../../dist/server.mjs', to: 'server/server.mjs' },
-    { from: '../../dist/server.mjs.map', to: 'server/server.mjs.map' },
-    { from: '../../dist/ui', to: 'server/ui', filter: ['**/*'] },
-  ],
+  // paths.ts finds the server at <app.asar>/server/server.mjs; scripts/dist.mjs checks it is there.
+  files: ['out/**', 'package.json', { from: '../../dist', to: 'server', filter: ['server.mjs', 'server.mjs.map', 'ui/**/*'] }],
   asar: true,
   npmRebuild: false,
   electronLanguages: ['en', 'tr'],

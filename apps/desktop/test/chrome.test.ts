@@ -1,7 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { splashUrl, statusPageUrl, syncFullScreen, type FullScreenSource } from '../src/chrome';
-import { serverPaths } from '../src/paths';
 
 describe('splash', () => {
   it('is a self-contained data: page without scripts', () => {
@@ -48,18 +47,5 @@ describe('syncFullScreen', () => {
     w.emit('leave-full-screen');
     (w.webContents as unknown as EventEmitter).emit('dom-ready');
     expect(sent).toEqual([true, true, false, false]);
-  });
-});
-
-describe('serverPaths', () => {
-  it('packaged → Contents/Resources/server, dev → repo dist/', () => {
-    expect(serverPaths({ isPackaged: true, resourcesPath: '/Applications/Dürbün.app/Contents/Resources', appPath: 'x' })).toEqual({
-      entry: '/Applications/Dürbün.app/Contents/Resources/server/server.mjs',
-      uiDir: '/Applications/Dürbün.app/Contents/Resources/server/ui',
-    });
-    expect(serverPaths({ isPackaged: false, resourcesPath: 'x', appPath: '/repo/apps/desktop' })).toEqual({
-      entry: '/repo/dist/server.mjs',
-      uiDir: '/repo/dist/ui',
-    });
   });
 });

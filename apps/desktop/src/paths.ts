@@ -1,6 +1,7 @@
 /**
- * Where the embedded server and the UI build are. Packaged: Contents/Resources/server/{server.mjs,ui}
- * (electron-builder extraResources). Development (`npm run app`): the repo's dist/ (`npm run build`).
+ * Where the embedded server and the UI build are. Packaged: inside app.asar, <app.asar>/server/
+ * {server.mjs,ui} (electron-builder `files`), so the asar integrity fuse covers them. Development
+ * (`npm run app`): the repo's dist/ (`npm run build`).
  */
 import path from 'node:path';
 
@@ -11,7 +12,9 @@ export interface ServerPaths {
 
 export function serverPaths(opts: { isPackaged: boolean; resourcesPath: string; appPath: string }): ServerPaths {
   if (opts.isPackaged) {
-    const dir = path.join(opts.resourcesPath, 'server');
+    // appPath is Contents/Resources/app.asar. Nothing is read from Resources/ outside the archive (an
+    // older layout put the server there, where no fuse protected it).
+    const dir = path.join(opts.appPath, 'server');
     return { entry: path.join(dir, 'server.mjs'), uiDir: path.join(dir, 'ui') };
   }
   const repo = path.resolve(opts.appPath, '..', '..');
