@@ -470,7 +470,8 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
 
     companion object {
         const val SOURCE = "okhttp"
-        private const val REDACTED = "[redacted]"
+        /** Same marker as the Dart (dart:io) and Swift (URLSession) layers. */
+        private const val REDACTED = "••••"
         private const val HARD_LIMIT = 64L * 1024 * 1024
 
         private val STREAMING_TYPES = listOf(

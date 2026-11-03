@@ -407,8 +407,44 @@ class InterceptorTest {
         client(DurbunInterceptor(setOf("Authorization"))).newCall(
             Request.Builder().url(url).header("Authorization", "Bearer secret-token").build(),
         ).execute().close()
-        assertEquals("[redacted]", headerValue(requestFor(url), "Authorization"))
+        assertEquals("••••", headerValue(requestFor(url), "Authorization"))
         assertEquals("Bearer secret-token", server.requests.last().header("Authorization"))
+    }
+
+    @Test
+    fun flutterRedactionListUsesTheSameMarkerOnRequestsAndResponses() {
+        // Hosted by Flutter: DurbunOptions(redactHeaders:) from Dart reaches every OkHttp client.
+        connect().redactedHeaders = setOf("authorization", "x-request-id")
+        val url = server.url("/users")
+        client().newCall(
+            Request.Builder().url(url).header("Authorization", "Bearer secret-token").header("X-Trace", "t-1").build(),
+        ).execute().use { it.body!!.string() }
+        val request = requestFor(url)
+        assertEquals("same marker as dart:io and URLSession", "••••", headerValue(request, "Authorization"))
+        assertEquals("t-1", headerValue(request, "X-Trace"))
+        assertEquals("••••", headerValue(responseFor(request), "X-Request-Id"))
+        assertEquals("Bearer secret-token", server.requests.last().header("Authorization"))
+    }
+
+    @Test
+    fun captureNetworkOffIsAPlainPassThroughWithoutMocks() {
+        desktop.mocks = listOf(
+            mapOf(
+                "id" to "m1", "enabled" to true, "method" to "GET", "url" to "/users", "match" to "contains",
+                "action" to mapOf("type" to "respond", "status" to 418), "createdAt" to 1,
+            ),
+        )
+        val core = connect(DurbunOptions(captureNetwork = false))
+        val caps = desktop.await("hello").listAt("capabilities")
+        assertFalse("network" in caps)
+        assertFalse("mocks" in caps)
+        assertTrue(core.mockRules.isNotEmpty())
+        val url = server.url("/users")
+        client().newCall(Request.Builder().url(url).build()).execute().use { assertEquals(200, it.code) }
+        assertEquals("the real server answered (no mock)", 1, server.requests.size)
+        core.log(Level.INFO, "test", "after the call", null, null)
+        desktop.await("log") { it["message"] == "after the call" }
+        assertFalse(desktop.messages().any { it["type"] == "net.request" })
     }
 
     @Test
