@@ -723,6 +723,11 @@ ACTUALLY does — trust it over older wording above.
 | `process.started`, `process.died` | `{process, pid}` |
 | `marker` (kind `marker`) | `{label ('' when none), n}` — markers without a device have `deviceId: ''` (global: show in every scope) |
 | `logs.streamStarted`, `logs.streamStopped`, `logs.streamError` | `{via, detail?}` |
+| `logs.connectionLost` (warn, iPhone) | `{via, connection: 'usb' \| 'wifi', graceSeconds, detail}` — every drop of the last usbmux connection |
+| `logs.connectionRestored` (iPhone) | `{via, connection, seconds, detail}` — back within the grace (else `device.disconnected` follows) |
+| `logs.streamStalled` (warn, iPhone) | `{via, seconds, detail}` — idevicesyslog alive but silent; restarted with backoff 2 s, 5 s, 15 s, then every 30 s |
+| `logs.scopeNotApplied` (warn, iPhone) | `{via, reason: 'devicectlMissing' \| 'appListFailed', device}` — every line is shown |
+| `logs.scopeApplied` (iPhone) | `{via, device}` — the app list is readable again; system lines are left out |
 | `vm.attached` / `vm.detached` / `vm.attachFailed` | `{app, url}` / `{app, reason}` / `{url, error}` |
 | `vm.hotRestart`, `vm.hotReload` (kind `lifecycle`) | `{app}` |
 Empty-string params count as missing for i18n candidates. Replays performed by the desktop appear on the
@@ -736,7 +741,9 @@ names start with `📁 `.
   `device.networkIdle` (a `net:` device whose last session closed), `demo.stopped`.
 - `DeviceInfo.logs.code`: `logs.adbMissing`, `logs.deviceOffline`, `device.unauthorized`, `device.untrusted`,
   `logs.processExited`, `logs.idevicesyslogMissing`, `logs.usbmuxdUnavailable`, `logs.simctlMissing`,
-  `logs.networkOnly` (`net:` devices: only SDK data, no device logs).
+  `logs.networkOnly` (`net:` devices: only SDK data, no device logs), `logs.scopeNotApplied` (status
+  `streaming`: the iPhone 'apps' scope cannot be applied, every line is shown), `logs.streamStalled` (status
+  `error`: the stream is silent while the device is attached; Dürbün restarts it).
 - `DriverStatus.code`: `logs.adbMissing`, `driver.adbError`, `logs.simctlMissing`, `driver.simctlError`,
   `logs.usbmuxdUnavailable`, `logs.idevicesyslogMissing`, `driver.initFailed`, `driver.statusFailed`,
   `demo.active`, `demo.inactive`.
@@ -1005,5 +1012,14 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
 - `SessionExport.deviceApps?: DeviceApp[]`.
 - `ToolCheck.code?` / `params?` for wording variants, e.g. `doctor.node.embedded {electron, node}` when the
   server runs inside Dürbün.app.
+- `ServerSettings.iosDeviceLogScope?: 'apps' | 'all'` (default 'apps'): physical iPhones keep the lines of
+  third-party apps (DeviceApp pids / process names), crash-relevant system lines and lines of not-yet-listed
+  processes with third-party-looking names (kept until the process listing they trigger decides).
+- Crash/ANR entries (kind crash | anr, or origin dropbox | crash-report) survive log-ring eviction in a small
+  protected store (≤ 5 000) on the server and in the UI (`logStore.kept`, a plain head trim that never rebuilds
+  the list); a scoped clear subtracts only the crash records it removed from `DeviceApp.crashReports`.
+- `/sdk` WebSocket: refused when `Sec-Fetch-Site` is cross-site or the `Origin` is not loopback / one of this Mac's
+  own addresses; the raw SDK TCP port closes a connection whose first line is not JSON (a browser's no-cors POST).
+  Mock rules a peer pushed are cleared when it disconnects, in every SDK layer.
 - The UI document is served with a Content-Security-Policy (scripts only from the server, hashed when inline;
   WebSocket to the same host; `blob:` / `data:` for images and media; `frame-ancestors 'none'`).
