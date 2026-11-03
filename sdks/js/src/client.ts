@@ -498,6 +498,9 @@ export class DurbunClient implements NetworkHost {
   }
 
   private onDisconnected(): void {
+    // Mock rules hold only while the peer that pushed them is connected: whoever answered the hello is not
+    // authenticated yet. The desktop sends them again in its next welcome.
+    this.mocks = [];
     this.debug('desktop connection lost; buffering');
     this.metrics?.stop();
   }

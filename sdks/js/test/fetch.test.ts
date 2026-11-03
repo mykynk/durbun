@@ -226,6 +226,20 @@ describe('fetch mocks', () => {
     expect((await exchange(d, '/custom')).done.error).toBe('Sunucu bakımda');
   });
 
+  it('mock rules end with the connection that pushed them', async () => {
+    const d = await start({ mocks: [rule({ id: 'm-json', url: '/json', action: { type: 'respond', status: 418, body: 'teapot' } })] });
+    expect((await fetch(`${server.url}/json`)).status).toBe(418);
+    expect(server.hits).toHaveLength(0);
+    // Whoever answered the hello is not authenticated: once it is gone, its rules must not stay active.
+    await d.close();
+    desktop = undefined;
+    await waitFor(() => !Durbun.isConnected, 3_000, 'disconnect');
+    const res = await fetch(`${server.url}/json`);
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(server.hits).toHaveLength(1);
+  });
+
   it('mock rules can be changed live and are scoped by method / app', async () => {
     const d = await start({}, { appId: 'com.mykynk.pati' });
     await (await fetch(`${server.url}/json`)).text();
