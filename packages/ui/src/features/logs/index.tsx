@@ -23,6 +23,7 @@ import {
 import { LOG_LEVELS, type AppSession, type LogEntry, type LogLevel, type LogSource } from '@durbun/protocol';
 import {
   ALL_SCOPE,
+  DESKTOP_DEVICE_ID,
   compileNoiseRules,
   isCrashEntry,
   logStore,
@@ -36,6 +37,7 @@ import {
   useLogVersion,
   usePrefs,
   scopeLogCounts,
+  useServerSettings,
   useUi,
 } from '../../data';
 import {
@@ -64,17 +66,18 @@ import { rankOf, type LogRow, type RowFilter, type SourceToggles } from './model
 import { buildHighlighter } from './model/highlight';
 import { appIdentity, type AppIdentity } from './model/frames';
 import { analyzeEntry } from './model/analyze';
-import { exportFileName, exportJson, exportTxt } from './model/export';
+import { exportCount, exportFileName, exportJson, exportTxt } from './model/export';
 import { makeTerm, pushHistory, sanitizeSavedFilters, toggleTerm, type QueryField, type SavedFilter } from './model/queryEdit';
 import { useLiveCrashes } from './live';
 import { LogList, type LogListHandle } from './components/LogList';
-import { EXPAND_JSON, EXPAND_LINES, EXPAND_STACK, type RowDisplay } from './components/LogRow';
+import { EXPAND_JSON, EXPAND_LINES, EXPAND_STACK, type DeviceMark, type RowDisplay } from './components/LogRow';
+import { deviceMarks, keepCrashRelevant } from './model/devices';
 import { FilterChips, LogsToolbar, SourceFilters } from './components/Toolbar';
-import { DetailPanel, displayText, entryAsLine } from './components/DetailPanel';
+import { DetailPanel, displayText, rowAsLines } from './components/DetailPanel';
 import { Histogram } from './components/Histogram';
-import { CrashBanner, NewLinesPill, PausedBar, crashTitle } from './components/Banners';
+import { CrashBanner, IosScopeNote, NewLinesPill, PausedBar, crashTitle } from './components/Banners';
 import { NoLogsState, NoMatchState, type ActiveFilter } from './components/EmptyStates';
-import { CrashRecordsNote, ExplainEmpty, crashReaderText, crashRecordsState } from '../../sources';
+import { CrashRecordsNote, ExplainEmpty, NotRunningNote, crashReaderText, crashRecordsState, useIosSystemLinesHidden } from '../../sources';
 import { HighlightRulesDialog, NoiseRulesDialog, SavedFiltersDialog } from './components/RulesDialogs';
 
 const ALL_SOURCES: SourceToggles = { device: true, app: true, system: true };
@@ -229,7 +232,10 @@ export default function LogsView() {
     return () => clearInterval(id);
   }, [compiledQuery.hasAge, active]);
 
-  const noiseFn = useMemo(() => cachedNoise(compileNoiseRules(noiseRules)), [noiseRules]);
+  // With the server's 'apps' scope for iPhones, the daemon lines that still arrive are the crash-relevant ones
+  // (a server that does not report the setting streams everything).
+  const iosAppsScope = useServerSettings((s) => !!s.reported?.has('iosDeviceLogScope') && (s.settings.iosDeviceLogScope ?? 'apps') === 'apps');
+  const noiseFn = useMemo(() => cachedNoise(keepCrashRelevant(compileNoiseRules(noiseRules), iosAppsScope)), [noiseRules, iosAppsScope]);
 
   const filter = useMemo<RowFilter>(
     () => ({
@@ -369,9 +375,54 @@ export default function LogsView() {
     [appForEntry],
   );
 
+  // Several devices share the list ('all' scope): each row says which one it came from. Devices count when they
+  // are online or still have lines in the buffer (a phone that just left keeps its rows).
+  const hubDevices = useHub((s) => s.devices);
+  const markSig = useMemo(() => {
+    if (compiledScope.scope.kind !== 'all') return '';
+    const ids = new Set<string>();
+    for (const dv of Object.values(hubDevices)) if (dv.state === 'online' && dv.id !== DESKTOP_DEVICE_ID) ids.add(dv.id);
+    for (const [id, c] of logStore.countsByDevice) if (c.total > 0 && id && id !== DESKTOP_DEVICE_ID) ids.add(id);
+    if (ids.size < 2) return '';
+    return [...ids]
+      .sort()
+      .map((id) => `${id}\t${deviceDisplayName(hubDevices[id], id)}`)
+      .join('\n');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compiledScope.scope.kind, hubDevices, v, lang]);
+  const deviceMark = useMemo(() => {
+    if (!markSig) return undefined;
+    const marks = deviceMarks(
+      markSig.split('\n').map((line) => {
+        const tab = line.indexOf('\t');
+        return { id: line.slice(0, tab), name: line.slice(tab + 1) };
+      }),
+    );
+    return (e: LogEntry): DeviceMark | undefined => marks.get(e.deviceId);
+  }, [markSig]);
+
+  // Device names for texts that name the device in any scope (a merged connection row): keyed on the names only.
+  const namesSig = useMemo(
+    () =>
+      Object.values(hubDevices)
+        .map((dv) => `${dv.id}\t${deviceDisplayName(dv)}`)
+        .sort()
+        .join('\n'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hubDevices, lang],
+  );
+  const deviceName = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const line of namesSig ? namesSig.split('\n') : []) {
+      const tab = line.indexOf('\t');
+      names.set(line.slice(0, tab), line.slice(tab + 1));
+    }
+    return (id: string): string | undefined => names.get(id) || undefined;
+  }, [namesSig]);
+
   const d = useMemo<RowDisplay>(
-    () => ({ timeFormat, wrap: wrapLines, lang, hl, impliedProcesses, identity, appName }),
-    [timeFormat, wrapLines, lang, hl, impliedProcesses, identity, appName],
+    () => ({ timeFormat, wrap: wrapLines, lang, hl, impliedProcesses, identity, appName, device: deviceMark, deviceName }),
+    [timeFormat, wrapLines, lang, hl, impliedProcesses, identity, appName, deviceMark, deviceName],
   );
   const rowHeight = Math.max(density === 'comfortable' ? 24 : 20, Math.round(fontSize * 1.45));
   const measureKey = `${fontSize}|${density}|${wrapLines}`;
@@ -562,7 +613,8 @@ export default function LogsView() {
           break;
         case 'lines':
           listRef.current?.pinRow(row.id);
-          toggleExpand(row.id, EXPAND_LINES);
+          // A merged connection row keeps its expansion while it moves down with each new event.
+          toggleExpand(row.flap?.key ?? row.id, EXPAND_LINES);
           break;
         case 'stack':
           listRef.current?.pinRow(row.id);
@@ -589,7 +641,7 @@ export default function LogsView() {
       selectRow(row, false);
       const items: MenuItem[] = [
         { label: t('logs.ctx.copyMessage'), icon: Copy, onSelect: () => void copy(displayText(e)) },
-        { label: t('logs.ctx.copyLine'), onSelect: () => void copy(entryAsLine(e, row.n)) },
+        { label: t('logs.ctx.copyLine'), onSelect: () => void copy(rowAsLines(row)) },
         { label: t('logs.ctx.copyJson'), icon: Braces, onSelect: () => void copy(JSON.stringify(e, null, 2)) },
         { type: 'separator' },
       ];
@@ -701,14 +753,15 @@ export default function LogsView() {
       }
       try {
         const scope = scopeLabel();
+        const count = exportCount(rows);
         if (fmt === 'txt') {
-          const header = [t('logs.export.headerTitle'), t('logs.export.headerScope', { scope }), t('logs.export.headerRows', { count: rows.length })];
+          const header = [t('logs.export.headerTitle'), t('logs.export.headerScope', { scope }), t('logs.export.headerRows', { count })];
           if (appliedQuery.trim()) header.push(t('logs.export.headerQuery', { query: appliedQuery.trim() }));
           downloadText(exportTxt(rows, { text: displayText, header }), exportFileName('txt'));
         } else {
           downloadText(exportJson(rows, { exportedAt: new Date().toISOString(), scope, query: appliedQuery.trim() || undefined }), exportFileName('json'), 'application/json');
         }
-        toast.success(t('logs.export.done', { count: rows.length }));
+        toast.success(t('logs.export.done', { count }));
       } catch (err) {
         toast.error(errorText(err));
       }
@@ -879,6 +932,12 @@ export default function LogsView() {
   );
   const onRemoveChip = useCallback((id: string) => setSaved((cur) => sanitizeSavedFilters(cur).filter((f) => f.id !== id)), [setSaved]);
 
+  /* ───── scope notes ───── */
+  // Physical iPhones whose system-process lines the server leaves out ('apps' log scope): said once.
+  const hiddenIphones = useIosSystemLinesHidden();
+  const [iosNoteSeen, setIosNoteSeen] = usePersistentState<boolean>('logs.iosScopeNote', false);
+  const iosPhones = iosNoteSeen === true ? [] : hiddenIphones;
+
   /* ───── derived UI bits ───── */
   // Store-wide counter for this scope (incremental in the store, O(sessions) here) — no timer re-render.
   const scopedTotal = useMemo(
@@ -958,8 +1017,14 @@ export default function LogsView() {
           onToggleNoise={onToggleNoise}
         />
       </div>
-      {bannerCrashes.length ? <CrashBanner crashes={bannerCrashes} appName={appName} onGoto={gotoCrash} onDismiss={dismissCrash} /> : null}
+      {bannerCrashes.length ? <CrashBanner crashes={bannerCrashes} appName={appName} device={deviceMark} onGoto={gotoCrash} onDismiss={dismissCrash} /> : null}
       {paused ? <PausedBar pending={snap.pending} onResume={togglePause} /> : null}
+      {iosPhones.length > 0 ? (
+        <IosScopeNote device={iosPhones.length === 1 ? deviceDisplayName(iosPhones[0]) : undefined} onOpenSettings={() => ui.openSettings('logs')} onDismiss={() => setIosNoteSeen(true)} />
+      ) : null}
+      {/* The scoped app is closed but the list is not empty (its earlier lines, the device's own separators): say why
+          nothing new arrives and offer to launch it. An empty list says the same in its empty state. */}
+      {!empty ? <NotRunningNote capability="logs" className="lg-idle" /> : null}
       <SplitPane id="logs.detail" sizedPane="second" defaultSize={460} minSize={340} maxSize={0.62} collapsed={detail ? null : 'second'} onOverlayDismiss={() => setDetailOpen(false)} className="lg-split">
         <div className="lg-main">
           {!empty ? <HistogramSlot model={model} version={snap.version} win={win} onJump={onHistogramJump} /> : null}
@@ -1012,7 +1077,7 @@ export default function LogsView() {
         </div>
         {detail}
       </SplitPane>
-      <NoiseRulesDialog open={dialog === 'noise'} onClose={() => setDialog(null)} />
+      <NoiseRulesDialog open={dialog === 'noise'} onClose={() => setDialog(null)} keepsCrashLines={iosAppsScope && hiddenIphones.length > 0} />
       <HighlightRulesDialog open={dialog === 'highlight'} onClose={() => setDialog(null)} />
       <SavedFiltersDialog open={dialog === 'saved'} onClose={() => setDialog(null)} saved={saved} onChange={(next) => setSaved(next)} onApply={setQueryNow} />
     </div>

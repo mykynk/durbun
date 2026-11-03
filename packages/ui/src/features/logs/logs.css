@@ -300,6 +300,9 @@
 .lg-banner__sep {
   color: var(--text-subtle);
 }
+.lg-banner__dev {
+  flex-shrink: 0;
+}
 .lg-banner__headline {
   color: var(--text);
   overflow: hidden;
@@ -335,6 +338,43 @@
 }
 .lg-paused .btn {
   margin-left: auto;
+}
+
+/* One calm note above the list (iPhone system lines left out by the server's log scope). */
+.lg-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 5px 12px;
+  background: color-mix(in srgb, var(--info-soft) 70%, transparent);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  flex-shrink: 0;
+}
+.lg-note > svg {
+  flex: 0 0 auto;
+  color: var(--info);
+}
+.lg-note__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+.lg-note__text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.lg-note .btn {
+  flex: 0 0 auto;
+}
+
+/* The scoped app is closed while its list still has rows (NotRunningNote). */
+.lg-idle {
+  flex-shrink: 0;
+  margin: 6px 8px 0;
 }
 
 /* ───────────── layout ───────────── */
@@ -608,6 +648,36 @@
   flex: 0 0 14px;
   color: var(--text-subtle);
   opacity: 0.85;
+}
+/* Which device a row came from (several devices in one list): a dot in the device's hue + its name. */
+.lg-dev {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 var(--lg-dev-w, 11ch);
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.lg-dev__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lg-dev::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: oklch(68% 0.15 var(--dev-h));
+}
+.lg-dev--inline {
+  flex: 0 1 auto;
+  max-width: 18ch;
 }
 .lg-who {
   display: inline-flex;
@@ -916,6 +986,12 @@
 .lg-crash__src {
   color: var(--text-subtle);
 }
+/* The build that crashed (from the device's record): "3.1.0 (310)". */
+.lg-crash__build {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text);
+}
 /* ANR reason, abort message…: one line; the full text is in the expanded row and the detail panel */
 .lg-crash__detail {
   flex: 1 1 0;
@@ -999,6 +1075,56 @@
   color: var(--warning);
 }
 .lg-sep--warn .lg-sep__text {
+  color: var(--text);
+}
+/* A flapping connection merged into one separator (expandable list of the events). */
+.lg-flaprow {
+  display: block;
+}
+.lg-pos:hover > .lg-flaprow {
+  background-image: linear-gradient(color-mix(in srgb, var(--text) 4%, transparent), color-mix(in srgb, var(--text) 4%, transparent));
+}
+.lg-flaprow.is-selected {
+  background-color: var(--bg-selected);
+  outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: -1px;
+}
+.lg-sep__toggle {
+  padding: 1px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.lg-sep__toggle:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.lg-flap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 14px 8px 44px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.lg-flap--detail {
+  padding: 0;
+}
+.lg-flap__ev {
+  display: flex;
+  gap: 10px;
+}
+.lg-flap__time {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-subtle);
+}
+.lg-flap__hint {
+  margin: 4px 0 0;
   color: var(--text);
 }
 .lg-marker {
@@ -1356,6 +1482,10 @@
   flex-direction: column;
   gap: 6px;
 }
+.lg-rules__note {
+  margin: 0 0 10px;
+  line-height: 1.45;
+}
 .lg-rules__row {
   display: grid;
   grid-template-columns: auto 120px 130px 1fr auto;
@@ -1434,6 +1564,7 @@
   /* room for tag + process chips side by side (com.apple.UIKit · Runner, ConnectivityService · system_server) */
   .lg-listwrap {
     --lg-who-w: 30ch;
+    --lg-dev-w: 13ch;
   }
 }
 @container loglist (min-width: 1500px) {
@@ -1444,6 +1575,7 @@
 @container loglist (max-width: 980px) {
   .lg-listwrap {
     --lg-who-w: 18ch;
+    --lg-dev-w: 8ch;
   }
   .lg-proc {
     display: none;
@@ -1462,6 +1594,13 @@
   }
   .lg-expand {
     padding-left: 12px;
+  }
+  /* Only the colored dot; the name is in its tooltip. */
+  .lg-dev:not(.lg-dev--inline) {
+    flex-basis: 7px;
+  }
+  .lg-dev:not(.lg-dev--inline) .lg-dev__name {
+    display: none;
   }
 }
 

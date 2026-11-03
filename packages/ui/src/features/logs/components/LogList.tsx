@@ -2,10 +2,11 @@ import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, use
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { LogEntry } from '@durbun/protocol';
 import { networkStore, useNetworkVersion, type TimeFormat } from '../../../data';
-import { formatClock, formatOffset } from '../../../components';
+import { formatOffset } from '../../../components';
 import { t } from '../../../i18n';
 import type { RowModel } from '../model/rowModel';
 import type { LogRow } from '../model/types';
+import { entryClock } from '../model/records';
 import { LogRowView, type RowDisplay } from './LogRow';
 
 export interface LogListHandle {
@@ -51,7 +52,7 @@ export interface LogListProps {
 function rowTime(e: LogEntry, prev: LogRow | undefined, base: number | undefined, fmt: TimeFormat): string {
   if (fmt === 'relative') return formatOffset(e.ts - (base ?? e.ts));
   if (fmt === 'delta') return prev ? formatOffset(e.ts - (prev.last ?? prev.e).ts) : formatOffset(0);
-  return formatClock(e.ts);
+  return entryClock(e);
 }
 
 /** How long after a wheel/touch/key/drag gesture a scroll event counts as the user's. */
@@ -320,7 +321,7 @@ export const LogList = memo(function LogList(props: LogListProps) {
                 time={rowTime(row.e, prev, base, d.timeFormat)}
                 net={net}
                 selected={row.id === selectedId}
-                expanded={expanded.get(row.id) ?? 0}
+                expanded={expanded.get(row.flap?.key ?? row.id) ?? 0}
                 flash={row.id === flashId}
                 d={d}
               />

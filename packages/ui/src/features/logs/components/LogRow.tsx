@@ -32,9 +32,10 @@ import { t, type Lang } from '../../../i18n';
 import { analyzeEntry, jsonPreview, type EntryAnalysis } from '../model/analyze';
 import { frameDisplayText, parseStack, type AppIdentity, type StackLine } from '../model/frames';
 import { highlightSegments, type Highlighter } from '../model/highlight';
-import { systemText } from '../model/systemText';
+import { flapSummary, flapTimeRange, systemText } from '../model/systemText';
 import { isPreviousLaunch, type LogRow } from '../model/types';
-import { entrySourceText, isDeviceCrashRecord, isUnsymbolicated } from '../../../sources/text';
+import { crashWhen, crashedBuildOf, recordUnsymbolicated } from '../model/records';
+import { entrySourceText, isDeviceCrashRecord } from '../../../sources/text';
 import type { TimeFormat } from '../../../data';
 
 /** Expansion bits per row. */
@@ -52,6 +53,17 @@ export interface RowDisplay {
   impliedProcesses: ReadonlySet<string>;
   identity(e: LogEntry): AppIdentity;
   appName(e: LogEntry): string | undefined;
+  /** Device marker per row — only while lines of several devices share the list ('all' scope). */
+  device?: (e: LogEntry) => DeviceMark | undefined;
+  /** The hub's display name of a device, in every scope (texts that name the device, e.g. a merged connection row). */
+  deviceName?: (deviceId: string) => string | undefined;
+}
+
+/** Which device a row came from: its name (full in tooltips, short on the chip) and a stable hue (`--dev-h`). */
+export interface DeviceMark {
+  name: string;
+  short?: string;
+  hue: number;
 }
 
 export interface LogRowProps {
@@ -95,13 +107,33 @@ export function HlText({ text, hl, max = MAX_LINE }: { text: string; hl: Highlig
   );
 }
 
-function SourceIcon({ e }: { e: LogEntry }) {
+function SourceIcon({ e, d }: { e: LogEntry; d: RowDisplay }) {
   const Icon = e.source === 'device' ? Smartphone : e.source === 'app' ? Box : Binoculars;
+  const dev = d.device?.(e);
   return (
-    <span className="lg-src" title={entrySourceText(e)}>
+    <span className="lg-src" title={dev ? `${dev.name} · ${entrySourceText(e)}` : entrySourceText(e)}>
       <Icon size={12} aria-hidden />
     </span>
   );
+}
+
+/** Compact device chip (several devices in one list): the name, tinted with the device's hue. */
+function DeviceChip({ e, d, className }: { e: LogEntry; d: RowDisplay; className?: string }) {
+  const dev = d.device?.(e);
+  if (!dev) return null;
+  return (
+    <span className={clsx('lg-dev', className)} style={{ '--dev-h': dev.hue } as CSSProperties} title={dev.name}>
+      <span className="lg-dev__name">{dev.short ?? dev.name}</span>
+    </span>
+  );
+}
+
+/** "EXC_BAD_ACCESS (SIGSEGV) · …" instead of "EXC_BAD_ACCESS: EXC_BAD_ACCESS (SIGSEGV) · …" (.ips summaries start with the type). */
+export function errorHeadParts(err: Pick<NonNullable<LogEntry['error']>, 'type' | 'message'>): { type?: string; rest?: string } {
+  const type = err.type?.trim() || undefined;
+  const message = err.message?.trim() || undefined;
+  if (type && message && message.startsWith(type)) return { type, rest: message.slice(type.length) };
+  return { type, rest: message ? (type ? `: ${message}` : message) : undefined };
 }
 
 function LevelLetter({ level }: { level: LogLevel }) {
@@ -237,8 +269,10 @@ function ExpandedBody({ e, a, expanded, d }: { e: LogEntry; a: EntryAnalysis; ex
       if (e.error?.message && !e.message.includes(e.error.message)) {
         blocks.push(
           <div key="eh" className="lg-line lg-cause">
-            {e.error.type ? `${e.error.type}: ` : ''}
-            {e.error.message}
+            {(() => {
+              const h = errorHeadParts(e.error);
+              return `${h.type ?? ''}${h.rest ?? ''}`;
+            })()}
           </div>,
         );
       }
@@ -269,7 +303,8 @@ function TextRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
       <div className="lg-line1">
         <span className="lg-time tnum">{time}</span>
         <LevelLetter level={e.level} />
-        <SourceIcon e={e} />
+        <SourceIcon e={e} d={d} />
+        <DeviceChip e={e} d={d} />
         <Who e={e} d={d} />
         <span className="lg-msg">
           {a.headline ? (
@@ -295,7 +330,8 @@ function EventRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
       <div className="lg-line1">
         <span className="lg-time tnum">{time}</span>
         <LevelLetter level={e.level} />
-        <SourceIcon e={e} />
+        <SourceIcon e={e} d={d} />
+        <DeviceChip e={e} d={d} />
         <span className="lg-who">
           <span className="lg-event-tag">
             <Sparkles size={11} aria-hidden />
@@ -390,9 +426,10 @@ function NetworkRow({ row, time, net, selected, flash, d }: LogRowProps) {
         <span className="lg-lvl lg-lvl--net" aria-hidden>
           <ArrowRight size={11} />
         </span>
-        <span className="lg-src" title={t('logs.kind.network')}>
+        <span className="lg-src" title={d.device?.(e) ? `${d.device(e)!.name} · ${t('logs.kind.network')}` : t('logs.kind.network')}>
           <Globe size={12} aria-hidden />
         </span>
+        <DeviceChip e={e} d={d} />
         <span className="lg-who">
           {app ? (
             <button
@@ -432,6 +469,9 @@ function CrashRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
   const who = d.appName(e) ?? e.process ?? e.tag;
   // Android dropbox / iOS .ips: a record the device kept itself (any build, no SDK needed).
   const record = isDeviceCrashRecord(e);
+  // The build that crashed: from this record, or from the device's own record of this live crash.
+  const built = crashedBuildOf(e) ?? (row.rec ? crashedBuildOf(row.rec) : undefined);
+  const builtTip = built ? t(c.kind === 'anr' ? 'logs.row.anrInBuild' : 'logs.row.crashedInBuild', { build: built }) : undefined;
   return (
     <div
       className={clsx('lg-row lg-crash', `lg-crash--${c.kind}`, selected && 'is-selected', flash && 'is-flash', open && 'is-expanded')}
@@ -449,14 +489,20 @@ function CrashRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
           <span className="lg-crash__meta">
             <span className="lg-crash__kind">{kindLabel}</span>
             {who ? <span>{who}</span> : null}
+            {built ? (
+              <span className="lg-crash__build tnum" title={`${builtTip} · ${t('sources.crash.fromDevice')}`}>
+                {built}
+              </span>
+            ) : null}
+            <DeviceChip e={e} d={d} className="lg-dev--inline" />
             <SourceLabel e={e} record={record} />
             {c.previousLaunch ? (
               <span className="lg-prev" title={record ? t('sources.crash.previousLaunchTip') : t('logs.row.previousLaunchTip')}>
                 <History size={11} aria-hidden />
-                {t('logs.row.previousLaunch')} · {formatClock(e.ts)}
+                {record ? t('logs.row.beforeWatching') : t('logs.row.previousLaunch')} · {crashWhen(e)}
               </span>
             ) : null}
-            {record && isUnsymbolicated(e) ? (
+            {record && recordUnsymbolicated(e) ? (
               <span className="lg-unsym" title={t('sources.crash.unsymbolicatedTip')}>
                 {t('sources.crash.unsymbolicated')}
               </span>
@@ -529,7 +575,9 @@ function lifecycleIcon(code: string | undefined) {
   }
 }
 
-function SeparatorRow({ row, selected, flash }: LogRowProps) {
+function SeparatorRow(props: LogRowProps) {
+  const { row, selected, flash, d } = props;
+  if (row.flap) return <FlapRow {...props} />;
   const e = row.e;
   const Icon = lifecycleIcon(e.code);
   const tone = e.level === 'warn' || e.level === 'error' || e.code === 'process.died' || e.code === 'app.disconnected' ? 'warn' : e.code?.endsWith('connected') || e.code === 'process.started' ? 'ok' : 'neutral';
@@ -538,11 +586,47 @@ function SeparatorRow({ row, selected, flash }: LogRowProps) {
       <span className="lg-sep__rule" />
       <span className="lg-sep__label">
         <Icon size={12} aria-hidden />
+        {/* Device separators name their device already; app / process ones do not. */}
+        {e.code?.startsWith('device.') ? null : <DeviceChip e={e} d={d} />}
         <span className="lg-sep__text">{systemText(e)}</span>
         <span className="lg-sep__time tnum">{formatClock(e.ts, { ms: false })}</span>
         {row.n > 1 ? <span className="lg-repeat tnum">×{row.n}</span> : null}
       </span>
       <span className="lg-sep__rule" />
+    </div>
+  );
+}
+
+/** A flapping connection: one line («Bağlantı 6 kez koptu ve geri geldi · 40 sn içinde»), the events when expanded. */
+function FlapRow({ row, selected, expanded, flash, d }: LogRowProps) {
+  const events = row.flap!.events;
+  const first = events[0]!;
+  const sum = flapSummary(events, d.deviceName?.(row.e.deviceId) ?? d.device?.(row.e)?.name, d.lang);
+  const open = (expanded & EXPAND_LINES) !== 0;
+  const tip = sum.hint ? `${sum.text} — ${sum.hint}` : sum.text;
+  return (
+    <div className={clsx('lg-flaprow', selected && 'is-selected', flash && 'is-flash')} data-row={row.id}>
+      <div className="lg-sep lg-sep--warn">
+        <span className="lg-sep__rule" />
+        <button type="button" tabIndex={-1} className="lg-sep__label lg-sep__toggle" data-act="lines" aria-expanded={open} title={`${tip} · ${open ? t('logs.row.collapse') : t('logs.flap.expand')}`}>
+          {open ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}
+          <Unplug size={12} aria-hidden />
+          <span className="lg-sep__text">{sum.text}</span>
+          <span className="lg-sep__time tnum">{flapTimeRange(first.ts, row.e.ts, (ts) => formatClock(ts, { ms: false }))}</span>
+        </button>
+        <span className="lg-sep__rule" />
+      </div>
+      {open ? (
+        <div className="lg-flap">
+          {events.map((ev) => (
+            <div key={ev.id} className="lg-flap__ev">
+              <span className="lg-flap__time tnum">{formatClock(ev.ts, { ms: false })}</span>
+              <span>{systemText(ev)}</span>
+            </div>
+          ))}
+          {sum.hint ? <p className="lg-flap__hint">{sum.hint}</p> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

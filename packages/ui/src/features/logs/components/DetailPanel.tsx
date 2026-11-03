@@ -1,19 +1,20 @@
 import { useMemo, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { ChevronDown, ChevronUp, Copy, Download, ExternalLink, Funnel, FunnelX, History, LocateFixed, X } from 'lucide-react';
-import type { LogEntry, NetworkEntry } from '@durbun/protocol';
+import type { DeviceInfo, LogEntry, NetworkEntry } from '@durbun/protocol';
 import { Button, CodeView, CopyButton, IconButton, JsonTree, LevelBadge, MethodBadge, StatusBadge, copyText, formatBytes, formatClock, formatDateTime, formatDuration, toast } from '../../../components';
 import { networkStore, useHub, useNetworkVersion } from '../../../data';
 import { deviceDisplayName, t } from '../../../i18n';
 import { analyzeEntry } from '../model/analyze';
-import { formatTxtEntry } from '../model/export';
+import { formatTxtEntry, formatTxtRow } from '../model/export';
 import { parseStack } from '../model/frames';
 import type { QueryField } from '../model/queryEdit';
-import { systemText } from '../model/systemText';
+import { flapSummary, systemText } from '../model/systemText';
 import { isPreviousLaunch, type LogRow } from '../model/types';
+import { crashForeground, crashedBuildOf, entryClock, isNativeTombstone, isWholeSecond, recordUnsymbolicated } from '../model/records';
 import type { ExplainSource } from '../../../data';
-import { entryOrigin, entrySourceText, isDeviceCrashRecord, isUnsymbolicated, sourceHint } from '../../../sources/text';
-import { StackLines, type RowDisplay } from './LogRow';
+import { entryOrigin, entrySourceText, isDeviceCrashRecord, sourceHint } from '../../../sources/text';
+import { StackLines, errorHeadParts, type RowDisplay } from './LogRow';
 import { downloadUrl } from '../../../lib/download';
 
 export interface DetailPanelProps {
@@ -52,8 +53,19 @@ export function entryAsLine(e: LogEntry, repeat = 1): string {
   return formatTxtEntry(e, { text: displayText }, repeat);
 }
 
-function preciseTime(ts: number): string {
-  return `${formatDateTime(ts, { seconds: false })}:${formatClock(ts).slice(6)}`;
+/** "Copy as line" of a row: ×N for a folded row, one line per event for a merged connection row. */
+export function rowAsLines(row: LogRow): string {
+  return formatTxtRow(row, { text: displayText });
+}
+
+/** "Android 15", "iOS 27.2" (other platforms report their own, e.g. "macOS 27.2"). */
+function osLabel(d: Pick<DeviceInfo, 'platform' | 'osVersion'>): string {
+  const v = d.osVersion ?? '';
+  return d.platform === 'android' ? `Android ${v}` : d.platform === 'ios' && !/^i(Phone )?OS/i.test(v) ? `iOS ${v}` : v;
+}
+
+function preciseTime(e: Pick<LogEntry, 'ts' | 'origin' | 'data'>): string {
+  return `${formatDateTime(e.ts, { seconds: false })}:${entryClock(e).slice(6)}`;
 }
 
 const KIND_QUERY: Partial<Record<NonNullable<LogEntry['kind']>, string>> = {
@@ -126,7 +138,13 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
   const errorStack = useMemo(() => (e.error?.stack ? parseStack(e.error.stack, identity) : null), [e, identity]);
 
   const meta: MetaRow[] = [];
-  meta.push({ key: 'time', label: t('logs.detail.fields.time'), value: preciseTime(e.ts), copy: new Date(e.ts).toISOString() });
+  const seconds = isWholeSecond(e);
+  meta.push({
+    key: 'time',
+    label: t('logs.detail.fields.time'),
+    value: seconds ? <span title={t('logs.detail.secondsOnly')}>{preciseTime(e)}</span> : preciseTime(e),
+    copy: new Date(e.ts).toISOString(),
+  });
   meta.push({ key: 'level', label: t('logs.detail.fields.level'), value: <LevelBadge level={e.level} variant="text" />, copy: e.level, filter: { field: 'level', value: e.level } });
   const origin = entryOrigin(e);
   const originHint = origin && ORIGIN_HINT[origin] ? sourceHint(ORIGIN_HINT[origin]!) : undefined;
@@ -138,14 +156,20 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
     filter: { field: 'source', value: e.source },
   });
   const record = isDeviceCrashRecord(e);
-  const report = record ? crashReportDownload(e) : undefined;
-  const unsymbolicated = record && isUnsymbolicated(e);
+  // The device's own record: this row itself, or the record the server matched to this live crash line.
+  const rec = record ? e : row?.rec && row.rec.id !== e.id && row.id === e.id ? row.rec : undefined;
+  const report = rec ? crashReportDownload(rec) : undefined;
+  const unsymbolicated = !!rec && recordUnsymbolicated(rec);
+  const built = rec ? crashedBuildOf(rec) : undefined;
+  const foreground = rec ? crashForeground(rec) : undefined;
   if (record) {
     const notes = [t('sources.crash.fromDevice')];
-    if (isPreviousLaunch(e)) notes.push(t('logs.row.previousLaunch'));
+    if (isPreviousLaunch(e)) notes.push(t('logs.row.beforeWatching'));
     if (unsymbolicated) notes.push(t('sources.crash.unsymbolicated'));
     meta.push({ key: 'record', label: t('sources.crash.recordLabel'), value: <span title={t('sources.crash.fromDeviceTip')}>{notes.join(' · ')}</span>, copy: notes.join(' · ') });
   }
+  if (built) meta.push({ key: 'build', label: t('logs.detail.fields.crashedBuild'), value: built, copy: built });
+  if (foreground !== undefined) meta.push({ key: 'fg', label: t('logs.detail.fields.foreground'), value: foreground ? t('logs.detail.foregroundYes') : t('logs.detail.foregroundNo') });
   meta.push({ key: 'kind', label: t('logs.detail.fields.kind'), value: kindLabel, copy: e.kind ?? 'text', filter: e.kind && KIND_QUERY[e.kind] ? { field: 'is', value: KIND_QUERY[e.kind]! } : undefined });
   if (e.tag) meta.push({ key: 'tag', label: t('logs.detail.fields.tag'), value: e.tag, copy: e.tag, filter: { field: 'tag', value: e.tag } });
   if (e.process) meta.push({ key: 'process', label: t('logs.detail.fields.process'), value: e.process, copy: e.process, filter: { field: 'process', value: e.process } });
@@ -157,7 +181,7 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
       copy: String(e.pid ?? e.tid ?? ''),
       filter: e.pid !== undefined ? { field: 'pid', value: e.pid } : undefined,
     });
-  meta.push({ key: 'device', label: t('logs.detail.fields.device'), value: device ? `${deviceDisplayName(device)}${device.osVersion ? ` · ${device.osVersion}` : ''}` : e.deviceId || '—', copy: e.deviceId });
+  meta.push({ key: 'device', label: t('logs.detail.fields.device'), value: device ? `${deviceDisplayName(device)}${device.osVersion ? ` · ${osLabel(device)}` : ''}` : e.deviceId || '—', copy: e.deviceId });
   if (app)
     meta.push({
       key: 'app',
@@ -186,13 +210,16 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
   };
 
   const lines = message.split('\n').length;
+  const errHead = e.error ? errorHeadParts(e.error) : undefined;
+  const crashedText = built && a.crash ? t(a.crash.kind === 'anr' ? 'logs.row.anrInBuild' : 'logs.row.crashedInBuild', { build: built }) : undefined;
+  const flap = row?.id === e.id ? row.flap : undefined;
 
   return (
     <aside className="lg-detail" aria-label={t('logs.detail.title')}>
       <header className="lg-detail__head">
         <LevelBadge level={e.level} />
-        <span className="lg-detail__time tnum" title={new Date(e.ts).toISOString()}>
-          {formatClock(e.ts)}
+        <span className="lg-detail__time tnum" title={seconds ? `${new Date(e.ts).toISOString()} · ${t('logs.detail.secondsOnly')}` : new Date(e.ts).toISOString()}>
+          {entryClock(e)}
         </span>
         {e.kind && e.kind !== 'text' ? <span className="lg-detail__kind">{kindLabel}</span> : e.tag ? <span className="lg-detail__kind mono">{e.tag}</span> : null}
         <span className="grow" />
@@ -208,22 +235,25 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
             <div className="lg-detail__crash-title selectable">{a.crash.title}</div>
             <div className="lg-detail__crash-meta">
               {d.appName(e) ?? e.process ?? e.tag}
+              {crashedText ? ` · ${crashedText}` : ''}
+              {foreground ? ` · ${t('logs.detail.wasForeground')}` : ''}
               {a.crash.detail ? ` · ${a.crash.detail}` : ''}
             </div>
             {a.crash.previousLaunch ? (
-              <div className="lg-prev" title={t('logs.row.previousLaunchTip')}>
+              <div className="lg-prev" title={record ? t('sources.crash.previousLaunchTip') : t('logs.row.previousLaunchTip')}>
                 <History size={12} aria-hidden />
-                {t('logs.row.previousLaunch')} · {preciseTime(e.ts)}
+                {record ? t('logs.row.beforeWatching') : t('logs.row.previousLaunch')} · {preciseTime(e)}
               </div>
             ) : null}
           </section>
         ) : null}
 
-        {record && (report || unsymbolicated) ? (
+        {rec && (report || unsymbolicated || !record) ? (
           <section className="lg-detail__sec lg-detail__record">
+            {!record ? <p className="lg-detail__symb">{t('logs.detail.recordOfLive', { origin: entryOrigin(rec) === 'crash-report' ? '.ips' : 'dropbox' })}</p> : null}
             {unsymbolicated ? (
               <p className="lg-detail__symb">
-                <strong>{t('sources.crash.symbolicateTitle')}.</strong> {t('sources.crash.symbolicate')}
+                <strong>{t('sources.crash.symbolicateTitle')}.</strong> {isNativeTombstone(rec) ? t('logs.detail.symbolicateNative') : t('sources.crash.symbolicate')}
               </p>
             ) : null}
             {report ? (
@@ -254,6 +284,21 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
           </section>
         ) : null}
 
+        {flap ? (
+          <section className="lg-detail__sec">
+            <h3 className="lg-detail__h">{t('logs.flap.title')}</h3>
+            <p className="lg-detail__symb">{flapSummary(flap.events, d.deviceName?.(e.deviceId) ?? d.device?.(e)?.name, d.lang).text}</p>
+            <div className="lg-flap lg-flap--detail">
+              {flap.events.map((ev) => (
+                <div key={ev.id} className="lg-flap__ev">
+                  <span className="lg-flap__time tnum">{formatClock(ev.ts, { ms: false })}</span>
+                  <span>{systemText(ev)}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         <section className="lg-detail__sec">
           <div className="lg-detail__sechead">
             <h3 className="lg-detail__h">{t('logs.detail.message')}</h3>
@@ -276,10 +321,10 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
               <h3 className="lg-detail__h">{t('logs.detail.error')}</h3>
               {e.error.stack ? <CopyButton size="xs" value={e.error.stack} label={t('logs.detail.copyStack')} /> : null}
             </div>
-            {e.error.type || e.error.message ? (
+            {errHead && (errHead.type || errHead.rest) ? (
               <div className="lg-detail__errhead selectable mono">
-                {e.error.type ? <span className="lg-detail__errtype">{e.error.type}</span> : null}
-                {e.error.message ? <span>{e.error.type ? ': ' : ''}{e.error.message}</span> : null}
+                {errHead.type ? <span className="lg-detail__errtype">{errHead.type}</span> : null}
+                {errHead.rest ? <span>{errHead.rest}</span> : null}
               </div>
             ) : null}
             {errorStack ? (
@@ -338,7 +383,7 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
         <Button size="sm" variant="primary" icon={LocateFixed} title={t('logs.detail.showInContextTip')} onClick={() => onShowInContext(e.id)}>
           {t('logs.detail.showInContext')}
         </Button>
-        <Button size="sm" icon={Copy} onClick={() => void copy(entryAsLine(e, row?.n ?? 1))}>
+        <Button size="sm" icon={Copy} onClick={() => void copy(row?.id === e.id ? rowAsLines(row) : entryAsLine(e))}>
           {t('logs.detail.copyLine')}
         </Button>
         <Button size="sm" variant="ghost" onClick={() => void copy(JSON.stringify(e, null, 2))}>

@@ -1,9 +1,10 @@
-import { memo } from 'react';
-import { ArrowDown, Hourglass, OctagonX, Pause, Play, TriangleAlert, X } from 'lucide-react';
+import { memo, type CSSProperties } from 'react';
+import { ArrowDown, Hourglass, Info, OctagonX, Pause, Play, Settings2, TriangleAlert, X } from 'lucide-react';
 import type { LogEntry } from '@durbun/protocol';
 import { Button, IconButton, formatClock } from '../../../components';
 import { t, useT } from '../../../i18n';
 import { analyzeEntry } from '../model/analyze';
+import type { DeviceMark } from './LogRow';
 
 /** "Pati çöktü · <headline>" for a crash-like entry. */
 export function crashTitle(e: LogEntry, appName: string | undefined): string {
@@ -20,12 +21,14 @@ export function crashTitle(e: LogEntry, appName: string | undefined): string {
 export interface CrashBannerProps {
   crashes: readonly LogEntry[];
   appName(e: LogEntry): string | undefined;
+  /** Several devices in the list: which one crashed (the same app may run on more than one). */
+  device?: (e: LogEntry) => DeviceMark | undefined;
   onGoto(e: LogEntry): void;
   onDismiss(lastId: number): void;
 }
 
 /** Loud, dismissible banner for live crashes / ANRs / Flutter errors in scope (SPEC §1.1-7). */
-export const CrashBanner = memo(function CrashBanner({ crashes, appName, onGoto, onDismiss }: CrashBannerProps) {
+export const CrashBanner = memo(function CrashBanner({ crashes, appName, device, onGoto, onDismiss }: CrashBannerProps) {
   useT(); // re-render on language change (memoized)
   const latest = crashes[crashes.length - 1];
   if (!latest) return null;
@@ -33,11 +36,17 @@ export const CrashBanner = memo(function CrashBanner({ crashes, appName, onGoto,
   const kind = a.crash?.kind ?? 'crash';
   const Icon = kind === 'anr' ? Hourglass : kind === 'flutter-error' ? TriangleAlert : OctagonX;
   const more = crashes.length - 1;
+  const dev = device?.(latest);
   return (
     <div className={`lg-banner lg-banner--${kind}`} role="alert">
       <Icon size={16} className="lg-banner__icon" aria-hidden />
       <div className="lg-banner__text">
         <span className="lg-banner__title">{crashTitle(latest, appName(latest))}</span>
+        {dev ? (
+          <span className="lg-dev lg-dev--inline lg-banner__dev" style={{ '--dev-h': dev.hue } as CSSProperties} title={dev.name}>
+            <span className="lg-dev__name">{dev.short ?? dev.name}</span>
+          </span>
+        ) : null}
         <span className="lg-banner__sep" aria-hidden>
           ·
         </span>
@@ -82,5 +91,27 @@ export const NewLinesPill = memo(function NewLinesPill({ count, onClick }: { cou
       {count > 0 ? <span className="tnum">{t('logs.newPill', { count })}</span> : <span>{t('logs.backToLive')}</span>}
       <kbd className="lg-pill__kbd">G</kbd>
     </button>
+  );
+});
+
+/**
+ * Physical iPhones with `iosDeviceLogScope: 'apps'` (the server's default): their daemons' lines are left out on
+ * purpose. Said once, calmly, with the way to see everything (dismissal is remembered).
+ */
+export const IosScopeNote = memo(function IosScopeNote({ device, onOpenSettings, onDismiss }: { device?: string; onOpenSettings(): void; onDismiss(): void }) {
+  useT(); // re-render on language change (memoized)
+  return (
+    <div className="lg-note" role="note">
+      <Info size={13} aria-hidden />
+      <p className="lg-note__text">
+        <strong>{device ? t('sources.iosScope.titleFor', { device }) : t('sources.iosScope.title')}.</strong> {t('sources.iosScope.body')}
+      </p>
+      <Button size="sm" variant="ghost" icon={Settings2} onClick={onOpenSettings}>
+        {t('sources.iosScope.open')}
+      </Button>
+      <Button size="sm" variant="ghost" onClick={onDismiss}>
+        {t('logs.iosScope.dismiss')}
+      </Button>
+    </div>
   );
 });
