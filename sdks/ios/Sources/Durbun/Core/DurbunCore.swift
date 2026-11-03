@@ -141,11 +141,6 @@ final class DurbunCore {
             Diagnostics.info("Dürbün is disabled in non-DEBUG builds (set allowInReleaseBuilds to force it).")
             return
         }
-        // Forced release builds still never run in App Store installs (DEBUG builds never come from there).
-        if !debugBuild && StoreInstallGuard.isStoreInstall {
-            Diagnostics.notice(StoreInstallGuard.message())
-            return
-        }
         let env = ProcessInfo.processInfo.environment
         // Explicit opt-out, and SwiftUI previews (no desktop there; stdout belongs to the preview agent).
         if env["DURBUN_DISABLED"] == "1" || env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" { return }
