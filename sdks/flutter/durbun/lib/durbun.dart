@@ -25,3 +25,4 @@ export 'src/core/types.dart'
         DurbunMockDecision,
         DurbunPrintCapture;
 export 'src/flutter/durbun.dart' show Durbun, DurbunNetwork;
+export 'src/inspector/inspector.dart' show DurbunInspector;

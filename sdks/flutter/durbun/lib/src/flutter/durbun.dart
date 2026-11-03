@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../core/options.dart';
 import '../core/types.dart';
+import '../inspector/inspector.dart';
 import 'backend.dart';
 import 'backend_stub.dart'
     if (dart.library.io) 'backend_io.dart'
@@ -180,10 +181,24 @@ abstract final class Durbun {
   static Future<bool> flush({Duration timeout = const Duration(seconds: 5)}) =>
       _backend.flush(timeout);
 
+  /// Opens the in-app inspector panel. Needs a mounted `DurbunInspector`
+  /// (e.g. `MaterialApp(builder: DurbunInspector.builder)`); handy from a
+  /// debug menu when the bubble is hidden.
+  static void showInspector() => DurbunInspector.show();
+
   /// Stops the SDK and removes every hook it installed (mainly for tests).
   static Future<void> dispose() async {
     await _backend.dispose();
     _backend = backend.createDurbunBackend();
+  }
+}
+
+/// Desktop state for the in-app inspector (not exported from the package).
+Map<String, Object?>? durbunInspectorState() {
+  try {
+    return Durbun._backend.inspectorState();
+  } catch (_) {
+    return null;
   }
 }
 
