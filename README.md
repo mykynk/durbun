@@ -84,8 +84,20 @@ Finder'da Dürbün'e sağ tıklayın → **Aç** → **Aç**. macOS bu seçeneğ
 Gizlilik ve Güvenlik → en altta Dürbün için **Yine de Aç**. Bu yalnızca bir kez gerekir.
 
 - Port 9750 / 9751. Bir Dürbün zaten çalışıyorsa (ör. `npm start`) uygulama onu açar; o kapanınca
-  kendi sunucusunu başlatır. Sürümler farklıysa menü çubuğundaki simge bunu söyler. Port başka bir
-  programdaysa sırayla 9760, 9770, 9780'i dener ve hangi portu kullandığını menü çubuğundaki simgede söyler.
+  kendi sunucusunu başlatır. Sürümler farklıysa menü çubuğundaki simge bunu söyler. Pencere yalnızca
+  kendini kanıtlayan bir Dürbün'e verilir: `/api/health` adı ve sürümü, `/` adresinde de Dürbün arayüzü
+  (ya da arayüzü derlenmemiş Dürbün'ün bilgi sayfası). Yalnızca `/api/health`'e Dürbün gibi yanıt veren
+  bir program başka bir program sayılır. Port başka bir programdaysa sırayla 9760, 9770, 9780'i dener ve
+  hangi portu kullandığını menü çubuğundaki simgede söyler.
+- Pencere sunucuyu `http://127.0.0.1:<port>` adresinden açar, sağlık denetimi de aynı adrese yapılır
+  (`localhost` önce ::1'i dener, orada başka bir program olabilir). Önceki sürümün `localhost` adresinde
+  sakladığı arayüz tercihleri (tema, dil, gürültü ve vurgu kuralları, panel boyutları) ve sayfa
+  yakınlaştırması (Görünüm → Yakınlaştır / Uzaklaştır) ilk açılışta bir kez yeni adrese taşınır.
+- Menü çubuğundaki uyarılar sistem diline göre Türkçe ya da İngilizcedir; sunucunun İngilizce metni
+  tanılama günlüğüne yazılır.
+- Sunucu ve arayüz `app.asar` içindedir; Electron'un bütünlük denetimi değiştirilmiş bir sunucu ya da
+  arayüz dosyasını çalıştırmaz. Hardened Runtime bir imza kimliği (Developer ID) gerektirdiği için şimdilik
+  kapalı; imzalı sürümle birlikte açılacak.
 - `adb`, `flutter`, `idevicesyslog` gibi araçlar için PATH'i ve araçların ayarlarını (`ANDROID_HOME`,
   `JAVA_HOME`, fvm, `DEVELOPER_DIR`) giriş kabuğunuzdan kendisi okur. Kabuk 3 saniyede yanıt vermezse
   menü çubuğundaki simge bunu da söyler.
