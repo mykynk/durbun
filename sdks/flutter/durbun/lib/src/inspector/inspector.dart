@@ -37,6 +37,7 @@ class DurbunInspector extends StatefulWidget {
     this.openOnShake = true,
     this.navigatorKey,
     this.store,
+    this.defaultHosts = const <String>[],
   });
 
   /// For `MaterialApp.builder` / `CupertinoApp.builder`.
@@ -59,6 +60,12 @@ class DurbunInspector extends StatefulWidget {
 
   /// Store to show (tests); defaults to the one the SDK feeds.
   final DurbunInspectorStore? store;
+
+  /// Hosts the panel lists by default: exact names or `*.example.com`
+  /// (empty: all). Requests to other hosts (analytics, Firebase Storage …)
+  /// are still captured and still reach the desktop; on the phone they are
+  /// hidden until ticked under Network → Filters → Hosts.
+  final List<String> defaultHosts;
 
   static final ValueNotifier<int> _openRequests = ValueNotifier<int>(0);
 
@@ -86,6 +93,7 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   void initState() {
     super.initState();
     InspectorBody.prettyJson ??= prettyJsonText;
+    _store.defaultHosts = widget.defaultHosts;
     DurbunInspector._openRequests.addListener(_openPanel);
     WidgetsBinding.instance.addObserver(this);
     _syncShake();
@@ -94,6 +102,7 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   @override
   void didUpdateWidget(DurbunInspector old) {
     super.didUpdateWidget(old);
+    _store.defaultHosts = widget.defaultHosts;
     _syncShake();
   }
 

@@ -129,6 +129,15 @@ Sınırlar ve ayarlar:
   (plugin'e yeni dosya eklendiğinde CocoaPods projesi yenilenmeli).
 - Telefonda hiçbir şey tutulmasın istiyorsanız `DurbunOptions(inspector: false)`
   verin.
+- Panelde yalnızca kendi API'lerinizin görünmesi için varsayılan hostları verin:
+  `DurbunInspector(defaultHosts: ['api.ornek.com', '*.ornek.com'], child: child!)`.
+  Başka hostlara giden istekler (analitik, Firebase Storage …) yine yakalanır ve
+  masaüstüne gider; panelde gizlenir, filtre satırında "N istek başka hostta"
+  yazar ve Ağ → Filtreler → Hostlar'dan işaretlenince görünür. Liste boşsa
+  bütün hostlar gösterilir.
+- İstek ve yanıt gövdesinde (önizleme ve kod) **Gövdede bul**: eşleşme sayısı,
+  önceki/sonraki ve eşleşmeye kaydırma. Ağ listesinde "Gövdelerde de ara"
+  açıkken bir isteğe girince arama gövdede dolu açılır.
 - Panel uygulamanın kendi navigator'ında açılır (`MaterialApp.builder` içinde
   bulunur). Başka bir navigator için `DurbunInspector(navigatorKey: …)` verin.
 - Dürbün'ün kapalı olduğu derlemelerde (`DURBUN=false`, ya da define verilmemiş
@@ -458,6 +467,13 @@ Options:
   `openOnShake: false` turns shaking off, `showBubble: true` adds a small
   Dürbün button. The accelerometer is read only while the app is in front.
 - After updating the SDK run `cd ios && pod install` once.
+- `DurbunInspector(defaultHosts: ['api.example.com', '*.example.com'], …)`
+  lists only your own APIs. Requests to other hosts (analytics, Firebase
+  Storage …) are still captured and still reach the desktop; on the phone
+  they are hidden, counted ("N on other hosts") and listed once ticked under
+  Network → Filters → Hosts. Empty: every host.
+- Find in the request and response bodies (preview and code): a match count,
+  previous / next, and the match scrolled into view.
 - `DurbunOptions(inspector: false)` keeps nothing on the device.
 - In builds where Dürbün is off, only the app is drawn.
 

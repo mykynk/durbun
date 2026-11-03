@@ -6,6 +6,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'body_search.dart';
 import 'compare_view.dart';
 import 'filter_ui.dart';
 import 'format.dart';
@@ -34,7 +35,7 @@ class _NetworkViewState extends State<NetworkView> {
   List<QueryClause> _clauses = const <QueryClause>[];
 
   bool _matches(InspectorCall c) =>
-      callMatchesFilters(c, _filters) &&
+      callMatchesFilters(c, _filters, isDefaultHost: widget.store.isDefaultHost) &&
       callMatchesQuery(c, _clauses, bodies: _filters.searchBodies);
 
   @override
@@ -103,30 +104,7 @@ class _NetworkViewState extends State<NetworkView> {
                 ),
             ],
           ),
-          if (hosts.isNotEmpty)
-            SheetSection(
-              title: t.host,
-              children: <Widget>[
-                DToggle(
-                  label: t.allHosts,
-                  selected: _filters.host == null,
-                  onTap: () {
-                    _filters.host = null;
-                    changed();
-                  },
-                ),
-                for (final h in hosts)
-                  DToggle(
-                    label: h,
-                    mono: true,
-                    selected: _filters.host == h,
-                    onTap: () {
-                      _filters.host = _filters.host == h ? null : h;
-                      changed();
-                    },
-                  ),
-              ],
-            ),
+          if (hosts.isNotEmpty) _HostsSection(filters: _filters, store: widget.store, changed: changed),
           const SizedBox(height: 8),
           SheetSwitch(label: t.errorsOnly, hint: t.failedHint, icon: Icons.warning_amber_rounded, value: _filters.errorsOnly, onChanged: (v) {
             _filters.errorsOnly = v;
@@ -158,7 +136,8 @@ class _NetworkViewState extends State<NetworkView> {
         ActiveChip(label: m == 'OTHER' ? t.other : m, mono: m != 'OTHER', color: m == 'OTHER' ? null : c.method(m), onRemove: () => setState(() => f.methods.remove(m))),
       for (final st in f.statuses)
         ActiveChip(label: st == 'fail' ? t.failed : st, mono: st != 'fail', color: _statusColor(c, st), onRemove: () => setState(() => f.statuses.remove(st))),
-      if (f.host != null) ActiveChip(label: f.host!, mono: true, onRemove: () => setState(() => f.host = null)),
+      for (final h in f.extraHosts) ActiveChip(label: h, mono: true, onRemove: () => setState(() => f.extraHosts.remove(h))),
+      for (final h in f.hiddenHosts) ActiveChip(label: '−$h', mono: true, onRemove: () => setState(() => f.hiddenHosts.remove(h))),
       if (f.errorsOnly) ActiveChip(label: t.errorsOnly, onRemove: () => setState(() => f.errorsOnly = false)),
       if (f.slowOnly) ActiveChip(label: t.slowOnly, onRemove: () => setState(() => f.slowOnly = false)),
       if (f.mockedOnly) ActiveChip(label: t.mockedOnly, onRemove: () => setState(() => f.mockedOnly = false)),
@@ -170,8 +149,14 @@ class _NetworkViewState extends State<NetworkView> {
       for (final st in const <String>['4xx', '5xx'])
         if (!f.statuses.contains(st)) DToggle(label: st, mono: true, color: _statusColor(c, st), selected: false, onTap: () => setState(() => f.statuses.add(st))),
     ];
+    final otherHosts = widget.store.calls.where((x) {
+      final h = hostOf(x);
+      return !f.showsHost(h, isDefault: widget.store.isDefaultHost(h));
+    }).length;
     return <Widget>[
       FilterButton(count: f.activeCount, onTap: () => _openFilters(hosts)),
+      // Says that requests are left out by the host list, and opens it.
+      if (otherHosts > 0) DToggle(label: t.otherHostsHidden(otherHosts), icon: Icons.visibility_off_outlined, selected: false, onTap: () => _openFilters(hosts)),
       ...active,
       ...quick,
     ];
@@ -228,7 +213,11 @@ class _NetworkViewState extends State<NetworkView> {
                       seqOf: (x) => x.seq,
                       filterKey: '${_filters.signature}#${_search.text}',
                       newText: t.newItems,
-                      itemBuilder: (context, call) => CallRow(call: call, store: widget.store, terms: terms),
+                      itemBuilder: (context, call) => CallRow(
+                          call: call,
+                          store: widget.store,
+                          terms: terms,
+                          bodyQuery: _filters.searchBodies && terms.isNotEmpty ? terms.first : null),
                     ),
             ),
             if (widget.store.droppedCalls > 0)
@@ -245,6 +234,99 @@ class _NetworkViewState extends State<NetworkView> {
   }
 }
 
+/// The filter sheet's host list: every host seen, its request count, the
+/// default ones marked; ticked hosts are listed.
+class _HostsSection extends StatelessWidget {
+  const _HostsSection({required this.filters, required this.store, required this.changed});
+
+  final NetFilters filters;
+  final DurbunInspectorStore store;
+  final VoidCallback changed;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    final counts = <String, int>{};
+    for (final x in store.calls) {
+      final h = hostOf(x);
+      if (h.isNotEmpty) counts[h] = (counts[h] ?? 0) + 1;
+    }
+    // Default hosts first, then the others; busiest first in each.
+    final hosts = counts.keys.toList()
+      ..sort((a, b) {
+        final da = store.isDefaultHost(a), db = store.isDefaultHost(b);
+        if (da != db) return da ? -1 : 1;
+        return counts[b]!.compareTo(counts[a]!);
+      });
+    void set(String h, bool on) {
+      if (store.isDefaultHost(h)) {
+        on ? filters.hiddenHosts.remove(h) : filters.hiddenHosts.add(h);
+      } else {
+        on ? filters.extraHosts.add(h) : filters.extraHosts.remove(h);
+      }
+      changed();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 14, 8, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(t.hostsTitle, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.textMuted, letterSpacing: 0.2)),
+                      const SizedBox(height: 2),
+                      Text(t.hostsHint, style: TextStyle(fontSize: 11.5, color: c.textMeta)),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    filters.hiddenHosts.clear();
+                    filters.extraHosts.addAll(hosts.where((h) => !store.isDefaultHost(h)));
+                    changed();
+                  },
+                  child: Text(t.showAllHosts),
+                ),
+                if (store.defaultHosts.isNotEmpty)
+                  TextButton(
+                    onPressed: () {
+                      filters.hiddenHosts.clear();
+                      filters.extraHosts.clear();
+                      changed();
+                    },
+                    child: Text(t.defaultHostsOnly),
+                  ),
+              ],
+            ),
+          ),
+          for (final h in hosts)
+            CheckboxListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: const EdgeInsets.only(left: 4, right: 8),
+              value: filters.showsHost(h, isDefault: store.isDefaultHost(h)),
+              onChanged: (v) => set(h, v ?? false),
+              title: Text(h, maxLines: 1, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: 12.5, color: c.text)),
+              secondary: Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
+                if (store.defaultHosts.isNotEmpty && store.isDefaultHost(h)) DBadge(t.defaultHost, tone: BadgeTone.accent),
+                Text('${counts[h]}', style: DurbunType.monoStyle(size: 11.5, color: c.textMeta)),
+              ]),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 /// One request: status · method · path (+ badges) over host · source · size · time.
 class CallRow extends StatelessWidget {
   const CallRow(
@@ -252,7 +334,8 @@ class CallRow extends StatelessWidget {
       required this.call,
       required this.store,
       this.terms = const <String>[],
-      this.onTap});
+      this.onTap,
+      this.bodyQuery});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
@@ -262,6 +345,10 @@ class CallRow extends StatelessWidget {
 
   /// Replaces opening the detail page (the compare picker).
   final VoidCallback? onTap;
+
+  /// Set while the list searches bodies: the detail opens on the body with
+  /// this text found.
+  final String? bodyQuery;
 
   @override
   Widget build(BuildContext context) {
@@ -302,7 +389,9 @@ class CallRow extends StatelessWidget {
           if (onTap != null) return onTap!();
           Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (_) => DurbunTheme.wrap(
-                  context, CallDetailPage(call: call, store: store))));
+                  context,
+                  CallDetailPage(
+                      call: call, store: store, bodyQuery: bodyQuery))));
         },
         child: Container(
           padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
@@ -443,17 +532,30 @@ class _SourceBadge extends StatelessWidget {
 /* ───────────────────────────── detail ───────────────────────────── */
 
 class CallDetailPage extends StatefulWidget {
-  const CallDetailPage({super.key, required this.call, required this.store});
+  const CallDetailPage(
+      {super.key, required this.call, required this.store, this.bodyQuery});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
+
+  /// Opens on the body that contains this text, with it found.
+  final String? bodyQuery;
 
   @override
   State<CallDetailPage> createState() => _CallDetailPageState();
 }
 
 class _CallDetailPageState extends State<CallDetailPage> {
-  int _tab = 0;
+  late int _tab = _firstTab();
+
+  int _firstTab() {
+    final q = widget.bodyQuery;
+    if (q == null || q.isEmpty) return 0;
+    bool has(InspectorBody? b) => b != null && b.isText && foldText(b.data).contains(q);
+    if (has(widget.call.responseBody)) return 2;
+    if (has(widget.call.requestBody)) return 1;
+    return 0;
+  }
   bool _replaying = false;
 
   InspectorCall get call => widget.call;
@@ -662,7 +764,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
                 Expanded(
                   child: switch (_tab) {
                     0 => _GeneralTab(call: call, store: widget.store),
-                    1 => _HttpTab(call: call, request: true),
+                    1 => _HttpTab(call: call, request: true, bodyQuery: widget.bodyQuery),
                     2 => call.state == InspectorCallState.pending
                         ? EmptyState(
                             icon: Icons.hourglass_empty,
@@ -670,7 +772,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
                             body: t.waitingResponse)
                         : call.error != null
                             ? _ErrorTab(call: call)
-                            : _HttpTab(call: call, request: false),
+                            : _HttpTab(call: call, request: false, bodyQuery: widget.bodyQuery),
                     _ => _TimingTab(call: call),
                   },
                 ),
@@ -822,10 +924,11 @@ class _ErrorTab extends StatelessWidget {
 }
 
 class _HttpTab extends StatefulWidget {
-  const _HttpTab({required this.call, required this.request});
+  const _HttpTab({required this.call, required this.request, this.bodyQuery});
 
   final InspectorCall call;
   final bool request;
+  final String? bodyQuery;
 
   @override
   State<_HttpTab> createState() => _HttpTabState();
@@ -880,6 +983,7 @@ class _HttpTabState extends State<_HttpTab> {
                     ? call.requestContentType
                     : call.responseContentType,
                 dropped: call.bodiesDropped,
+                initialQuery: widget.bodyQuery ?? '',
               ),
             1 => _PairsList(pairs: headers, empty: t.noHeaders),
             2 => _PairsList(pairs: cookies, empty: t.noCookies),
@@ -954,12 +1058,16 @@ class BodyPane extends StatefulWidget {
       required this.body,
       required this.hasBody,
       this.contentType,
-      this.dropped = false});
+      this.dropped = false,
+      this.initialQuery = ''});
 
   final InspectorBody? body;
   final bool hasBody;
   final String? contentType;
   final bool dropped;
+
+  /// Find text to open with (the list's body search).
+  final String initialQuery;
 
   @override
   State<BodyPane> createState() => _BodyPaneState();
@@ -969,6 +1077,9 @@ class _BodyPaneState extends State<BodyPane> {
   int _mode = 0;
   Object? _json;
   bool _jsonParsed = false;
+
+  /// Kept across Preview and Code.
+  late String _query = widget.initialQuery;
 
   static const int _maxShownChars = 200 * 1024;
 
@@ -1054,6 +1165,8 @@ class _BodyPaneState extends State<BodyPane> {
     if (mode == 0 && json != null) {
       content = JsonTreeView(
           value: json,
+          initialQuery: _query,
+          onQueryChanged: (v) => _query = v,
           padding: _pagePadding(context).copyWith(top: 4, left: 8));
     } else if (mode == 0 && isImage) {
       content = ListView(
@@ -1095,17 +1208,36 @@ class _BodyPaneState extends State<BodyPane> {
       var text = mode == 1 ? (b.displayText ?? b.data) : b.data;
       final cut = text.length > _maxShownChars;
       if (cut) text = text.substring(0, _maxShownChars);
-      content = ListView(
-        padding: _pagePadding(context),
+      final rows = codeRows(text);
+      final style = DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.35);
+      final numStyle = DurbunType.monoStyle(size: 10.5, color: c.textSubtle, height: 1.55);
+      final gutter = 8.0 + 7.0 * '${rows.isEmpty ? 1 : rows.last.$1}'.length;
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          SelectableText(text,
-              style: DurbunType.monoStyle(size: 12.5, color: c.text)),
-          if (cut || b.truncated) ...<Widget>[
-            const SizedBox(height: 8),
-            Callout(
-                tone: CalloutTone.warning,
-                title: t.truncated(formatBytes(b.size))),
-          ],
+          if (cut || b.truncated)
+            Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                child: Callout(tone: CalloutTone.warning, title: t.truncated(formatBytes(b.size)))),
+          Expanded(
+            child: FindableLines(
+              initialQuery: _query,
+              onQueryChanged: (v) => _query = v,
+              padding: _pagePadding(context).copyWith(left: 4, top: 2),
+              buildLines: (_) => <SearchLine>[for (final r in rows) SearchLine(<(String, TextStyle)>[(r.$2, style)])],
+              // Line numbers on the left (only on a line's first piece).
+              rowBuilder: (context, i, spans, _) => Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  SizedBox(
+                      width: gutter,
+                      child: Text(rows[i].$3 ? '${rows[i].$1}' : '', textAlign: TextAlign.right, style: numStyle)),
+                  const SizedBox(width: 8),
+                  Expanded(child: SelectableText.rich(spans)),
+                ],
+              ),
+            ),
+          ),
         ],
       );
     }
@@ -1113,16 +1245,30 @@ class _BodyPaneState extends State<BodyPane> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         header,
-        if (b.truncated && mode == 0 && json == null && b.isText)
-          Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-              child: Callout(
-                  tone: CalloutTone.warning,
-                  title: t.truncated(formatBytes(b.size)))),
         Expanded(child: content),
       ],
     );
   }
+}
+
+/// [text] as code rows: (1-based line number, piece, first piece of the
+/// line). Long lines (minified JSON) are cut into pieces of a few screen
+/// lines, so a row is cheap to lay out and a found match is on screen.
+List<(int, String, bool)> codeRows(String text, {int piece = 400}) {
+  final out = <(int, String, bool)>[];
+  final lines = text.replaceAll('\r\n', '\n').split('\n');
+  if (lines.length > 1 && lines.last.isEmpty) lines.removeLast();
+  for (var n = 0; n < lines.length; n++) {
+    final l = lines[n];
+    if (l.length <= piece) {
+      out.add((n + 1, l, true));
+      continue;
+    }
+    for (var at = 0; at < l.length; at += piece) {
+      out.add((n + 1, l.substring(at, at + piece > l.length ? l.length : at + piece), at == 0));
+    }
+  }
+  return out;
 }
 
 /// Classic 16-byte hex dump (first 8 KB).

@@ -211,10 +211,14 @@ class DSearchField extends StatefulWidget {
       required this.onChanged,
       this.controller,
       this.trailing,
-      this.onHelp});
+      this.onHelp,
+      this.onSubmitted});
 
   final String hint;
   final ValueChanged<String> onChanged;
+
+  /// Enter on the keyboard (find: next match).
+  final ValueChanged<String>? onSubmitted;
   final TextEditingController? controller;
   final Widget? trailing;
   final VoidCallback? onHelp;
@@ -256,6 +260,7 @@ class _DSearchFieldState extends State<DSearchField> {
             child: TextField(
               controller: controller,
               onChanged: widget.onChanged,
+              onSubmitted: widget.onSubmitted,
               autocorrect: false,
               enableSuggestions: false,
               textInputAction: TextInputAction.search,

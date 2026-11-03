@@ -20,6 +20,23 @@ import 'text_match.dart';
 typedef InspectorBodyResolver = Map<String, Object?> Function(
     Map<Object?, Object?> pending);
 
+/// Whether [host] matches one of [patterns]: `api.example.com` exactly,
+/// `*.example.com` for it and its subdomains, `*` for all. No patterns: true.
+bool hostMatchesPatterns(String host, List<String> patterns) {
+  if (patterns.isEmpty) return true;
+  final h = host.toLowerCase();
+  for (final raw in patterns) {
+    final p = raw.trim().toLowerCase();
+    if (p.isEmpty) continue;
+    if (p == '*' || p == h) return true;
+    if (p.startsWith('*.')) {
+      final base = p.substring(2);
+      if (h == base || h.endsWith('.$base')) return true;
+    }
+  }
+  return false;
+}
+
 /// One log line, event or crash.
 class InspectorLog {
   InspectorLog({
@@ -332,6 +349,14 @@ class DurbunInspectorStore extends ChangeNotifier {
 
   /// Set by the IO backend: builds the client's current hello.
   Map<String, Object?>? Function()? helloProvider;
+
+  /// Hosts the panel lists by default ([DurbunInspector.defaultHosts]):
+  /// exact names or `*.example.com`. Empty: every host. Calls to other
+  /// hosts are still captured (and sent to the desktop); the panel hides
+  /// them until they are ticked in its filters.
+  List<String> defaultHosts = const <String>[];
+
+  bool isDefaultHost(String host) => hostMatchesPatterns(host, defaultHosts);
 
   /// Lines / calls evicted since the last [clear] (the ring is full).
   int get droppedLogs => _droppedLogs;

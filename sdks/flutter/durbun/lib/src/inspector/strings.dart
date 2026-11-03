@@ -180,6 +180,12 @@ class InspectorStrings {
   String get statusTitle => _('Durum', 'Status');
   String get host => 'Host';
   String get flags => _('Diğer', 'Other');
+  String get hostsTitle => _('Hostlar', 'Hosts');
+  String get hostsHint => _('İşaretli hostların istekleri listelenir.', 'Requests to the ticked hosts are listed.');
+  String get defaultHost => _('varsayılan', 'default');
+  String get showAllHosts => _('Tümünü göster', 'Show all');
+  String get defaultHostsOnly => _('Yalnızca varsayılanlar', 'Defaults only');
+  String otherHostsHidden(int n) => _('$n istek başka hostta', '$n on other hosts');
   String get failedHint => _('4xx, 5xx ya da bağlantı hatası', '4xx, 5xx or a transport error');
   String get other => _('Diğer', 'Other');
   String get failed => _('Başarısız', 'Failed');
@@ -222,6 +228,10 @@ class InspectorStrings {
   String get code => _('Kod', 'Code');
   String get hex => 'Hex';
   String get searchJson => _('JSON’da ara…', 'Search JSON…');
+  String get findInBody => _('Gövdede bul…', 'Find in body…');
+  String get noMatchShort => _('Bulunamadı', 'No match');
+  String get prevMatch => _('Önceki eşleşme', 'Previous match');
+  String get nextMatch => _('Sonraki eşleşme', 'Next match');
   String get expandAll => _('Tümünü aç', 'Expand all');
   String get collapseAll => _('Tümünü kapat', 'Collapse all');
   String get noBody => _('Gövde yok', 'No body');

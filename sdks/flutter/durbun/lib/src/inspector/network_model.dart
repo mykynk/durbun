@@ -20,20 +20,29 @@ class NetFilters {
 
   final Set<String> methods = <String>{};
   final Set<String> statuses = <String>{};
-  String? host;
+
+  /// Hosts outside the default list the user ticked, and default hosts
+  /// they unticked.
+  final Set<String> extraHosts = <String>{};
+  final Set<String> hiddenHosts = <String>{};
   bool errorsOnly = false;
   bool slowOnly = false;
   bool mockedOnly = false;
   bool searchBodies = false;
 
   bool get isEmpty =>
-      methods.isEmpty && statuses.isEmpty && host == null && !errorsOnly && !slowOnly && !mockedOnly;
+      methods.isEmpty && statuses.isEmpty && extraHosts.isEmpty && hiddenHosts.isEmpty && !errorsOnly && !slowOnly && !mockedOnly;
+
+  /// Whether calls to [host] are listed; [isDefault] says whether it is in
+  /// the default host list.
+  bool showsHost(String host, {required bool isDefault}) =>
+      isDefault ? !hiddenHosts.contains(host) : extraHosts.contains(host);
 
   /// Filters away from their default (the badge on the Filters button).
   int get activeCount =>
       methods.length +
       statuses.length +
-      (host != null ? 1 : 0) +
+      (extraHosts.isNotEmpty || hiddenHosts.isNotEmpty ? 1 : 0) +
       (errorsOnly ? 1 : 0) +
       (slowOnly ? 1 : 0) +
       (mockedOnly ? 1 : 0) +
@@ -41,13 +50,14 @@ class NetFilters {
 
   /// Changes whenever a filter does (tells the live list to follow again).
   String get signature =>
-      '${methods.join(',')}|${statuses.join(',')}|$host|$errorsOnly|$slowOnly|$mockedOnly|$searchBodies';
+      '${methods.join(',')}|${statuses.join(',')}|${extraHosts.join(',')}|${hiddenHosts.join(',')}|$errorsOnly|$slowOnly|$mockedOnly|$searchBodies';
 
   void reset() {
     searchBodies = false;
     methods.clear();
     statuses.clear();
-    host = null;
+    extraHosts.clear();
+    hiddenHosts.clear();
     errorsOnly = false;
     slowOnly = false;
     mockedOnly = false;
@@ -216,10 +226,11 @@ bool callMatchesQuery(InspectorCall c, List<QueryClause> clauses, {bool bodies =
   return true;
 }
 
-bool callMatchesFilters(InspectorCall c, NetFilters f) {
+bool callMatchesFilters(InspectorCall c, NetFilters f, {bool Function(String host)? isDefaultHost}) {
+  final host = hostOf(c);
+  if (!f.showsHost(host, isDefault: isDefaultHost?.call(host) ?? true)) return false;
   if (f.methods.isNotEmpty && !f.methods.contains(methodChip(c.method))) return false;
   if (f.statuses.isNotEmpty && !f.statuses.contains(statusClass(c))) return false;
-  if (f.host != null && hostOf(c) != f.host) return false;
   if (f.errorsOnly && !c.isFailure) return false;
   if (f.slowOnly && !isSlow(c)) return false;
   if (f.mockedOnly && !c.mocked) return false;

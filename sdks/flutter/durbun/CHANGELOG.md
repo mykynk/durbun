@@ -1,5 +1,15 @@
 ## Unreleased (phase 3)
 
+- In-app panel: find in request and response bodies (JSON preview and code
+  view, now with line numbers) with a match count, previous / next, the
+  current match in its own colour and scrolled into view; the find text is
+  kept between Preview and Code. A body search in the list opens the detail
+  on that body with the match found.
+- `DurbunInspector(defaultHosts: [...])`: the panel lists only these hosts
+  (exact or `*.domain`); other hosts are counted ("N on other hosts") and
+  can be ticked in under Network → Filters → Hosts. Capture and the desktop
+  are unchanged.
+
 - In-app panel: compare two requests, as on the desktop. "Compare…" on a
   request's detail lists the same method and path first; General, Headers,
   Response body and Request body tabs, with the desktop's line diff (LCS with

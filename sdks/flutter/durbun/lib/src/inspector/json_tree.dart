@@ -3,6 +3,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'body_search.dart';
 import 'strings.dart';
 import 'text_match.dart';
 import 'theme.dart';
@@ -98,10 +99,19 @@ Set<String> allContainerPaths(Object? root) {
 }
 
 class JsonTreeView extends StatefulWidget {
-  const JsonTreeView({super.key, required this.value, this.padding = const EdgeInsets.fromLTRB(12, 4, 12, 24)});
+  const JsonTreeView(
+      {super.key,
+      required this.value,
+      this.padding = const EdgeInsets.fromLTRB(12, 4, 12, 24),
+      this.initialQuery = '',
+      this.onQueryChanged});
 
   final Object? value;
   final EdgeInsets padding;
+
+  /// Find text to start with (kept by the body pane across modes).
+  final String initialQuery;
+  final ValueChanged<String>? onQueryChanged;
 
   @override
   State<JsonTreeView> createState() => _JsonTreeViewState();
@@ -110,8 +120,8 @@ class JsonTreeView extends StatefulWidget {
 class _JsonTreeViewState extends State<JsonTreeView> {
   final Set<String> _collapsed = <String>{};
   final Set<String> _opened = <String>{};
-  String _query = '';
   bool _all = false;
+  List<JsonLine> _lines = const <JsonLine>[];
 
   void _toggle(JsonLine l) => setState(() {
     if (l.expanded) {
@@ -123,76 +133,36 @@ class _JsonTreeViewState extends State<JsonTreeView> {
     }
   });
 
-  @override
-  Widget build(BuildContext context) {
-    final c = DurbunColors.of(context);
-    final t = InspectorStrings.of(context);
+  /// The tree as lines; containers around a match open, so every match is
+  /// on a visible line.
+  List<SearchLine> _build(String folded, DurbunColors c) {
     final opened = <String>{..._opened};
     if (_all) opened.addAll(allContainerPaths(widget.value));
-    if (_query.isNotEmpty) opened.addAll(pathsToMatches(widget.value, _query));
-    final lines = flattenJson(widget.value, collapsed: _collapsed, opened: opened, autoDepth: _all ? 1 << 20 : 3);
-    return Column(
-      children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: DSearchField(hint: t.searchJson, onChanged: (v) => setState(() => _query = v.trim())),
-              ),
-              const SizedBox(width: 4),
-              DIconButton(
-                icon: Icons.unfold_more,
-                tooltip: t.expandAll,
-                onTap: () => setState(() {
-                  _all = true;
-                  _collapsed.clear();
-                }),
-              ),
-              DIconButton(
-                icon: Icons.unfold_less,
-                tooltip: t.collapseAll,
-                onTap: () => setState(() {
-                  _all = false;
-                  _opened.clear();
-                  _collapsed
-                    ..clear()
-                    ..addAll(allContainerPaths(widget.value).where((p) => p != r'$'));
-                }),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            padding: widget.padding,
-            itemCount: lines.length,
-            itemBuilder: (context, i) => _line(context, c, lines[i]),
-          ),
-        ),
-      ],
-    );
+    if (folded.isNotEmpty) opened.addAll(pathsToMatches(widget.value, folded));
+    // A match inside a container the user closed opens it again.
+    final collapsed = folded.isEmpty ? _collapsed : _collapsed.difference(opened);
+    _lines = flattenJson(widget.value, collapsed: collapsed, opened: opened, autoDepth: _all ? 1 << 20 : 3);
+    final base = DurbunType.monoStyle(size: 12.5, color: c.text);
+    return <SearchLine>[
+      for (final l in _lines) SearchLine(_segments(l, base, c)),
+    ];
   }
 
-  Widget _line(BuildContext context, DurbunColors c, JsonLine l) {
-    final base = DurbunType.monoStyle(size: 12.5, color: c.text);
-    final spans = <InlineSpan>[];
+  static List<(String, TextStyle)> _segments(JsonLine l, TextStyle base, DurbunColors c) {
+    final out = <(String, TextStyle)>[];
     if (l.key != null) {
-      spans
-        ..add(highlightSpan(l.key!, _query, base.copyWith(color: c.jsonKey), c.hlMark))
-        ..add(TextSpan(text: ': ', style: base.copyWith(color: c.textSubtle)));
+      out
+        ..add((l.key!, base.copyWith(color: c.jsonKey)))
+        ..add((': ', base.copyWith(color: c.textSubtle)));
     } else if (l.index != null) {
-      spans.add(TextSpan(text: '${l.index}: ', style: base.copyWith(color: c.textSubtle)));
+      out.add(('${l.index}: ', base.copyWith(color: c.textSubtle)));
     }
     final v = l.value;
     if (v is Map || v is List) {
       final n = v is Map ? v.length : (v as List).length;
       final open = v is Map ? '{' : '[';
       final close = v is Map ? '}' : ']';
-      spans.add(TextSpan(
-        text: l.expanded ? open : '$open $n $close',
-        style: base.copyWith(color: c.textMuted),
-      ));
+      out.add((l.expanded ? open : '$open $n $close', base.copyWith(color: c.textMuted)));
     } else {
       final (text, color) = switch (v) {
         null => ('null', c.jsonNull),
@@ -201,29 +171,67 @@ class _JsonTreeViewState extends State<JsonTreeView> {
         String s => ('"$s"', c.jsonString),
         _ => ('$v', c.text),
       };
-      spans.add(highlightSpan(text, _query, base.copyWith(color: color), c.hlMark));
+      out.add((text, base.copyWith(color: color)));
     }
-    return InkWell(
-      onTap: l.container ? () => _toggle(l) : null,
-      child: Padding(
-        padding: EdgeInsets.only(left: l.depth * 14.0, top: 1, bottom: 1),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            SizedBox(
-              width: 14,
-              height: 18,
-              child: l.container
-                  ? Icon(l.expanded ? Icons.arrow_drop_down : Icons.arrow_right, size: 16, color: c.textSubtle)
-                  : null,
-            ),
-            // Containers toggle on tap; leaves stay selectable.
-            Expanded(
-              child: l.container ? Text.rich(TextSpan(children: spans)) : SelectableText.rich(TextSpan(children: spans)),
-            ),
-          ],
+    return out;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    return FindableLines(
+      initialQuery: widget.initialQuery,
+      onQueryChanged: widget.onQueryChanged,
+      padding: widget.padding,
+      hint: t.searchJson,
+      buildLines: (folded) => _build(folded, c),
+      actions: <Widget>[
+        DIconButton(
+          icon: Icons.unfold_more,
+          tooltip: t.expandAll,
+          onTap: () => setState(() {
+            _all = true;
+            _collapsed.clear();
+          }),
         ),
-      ),
+        DIconButton(
+          icon: Icons.unfold_less,
+          tooltip: t.collapseAll,
+          onTap: () => setState(() {
+            _all = false;
+            _opened.clear();
+            _collapsed
+              ..clear()
+              ..addAll(allContainerPaths(widget.value).where((p) => p != r'$'));
+          }),
+        ),
+      ],
+      rowBuilder: (context, i, spans, _) {
+        final l = _lines[i];
+        return InkWell(
+          onTap: l.container ? () => _toggle(l) : null,
+          child: Padding(
+            padding: EdgeInsets.only(left: l.depth * 14.0, top: 1, bottom: 1),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SizedBox(
+                  width: 14,
+                  height: 18,
+                  child: l.container
+                      ? Icon(l.expanded ? Icons.arrow_drop_down : Icons.arrow_right, size: 16, color: c.textSubtle)
+                      : null,
+                ),
+                // Containers toggle on tap; leaves stay selectable.
+                Expanded(
+                  child: l.container ? Text.rich(spans) : SelectableText.rich(spans),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

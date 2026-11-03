@@ -113,8 +113,10 @@ bool logMatches(InspectorLog l, LogFilters f, List<QueryClause> q) {
   return true;
 }
 
-bool callMatchesLogQuery(InspectorCall c, LogFilters f, List<QueryClause> q) {
+bool callMatchesLogQuery(InspectorCall c, LogFilters f, List<QueryClause> q, {bool Function(String host)? isDefaultHost}) {
   if (!f.network || f.events || f.crashes) return false;
+  // Only the default hosts (DurbunInspector.defaultHosts), as on Network.
+  if (isDefaultHost != null && !isDefaultHost(hostOf(c))) return false;
   if (f.errorsOnly && !c.isFailure) return false;
   if (f.source == 'native' && !c.native) return false;
   if (f.source == 'flutter' && c.native) return false;
@@ -135,7 +137,7 @@ List<StreamItem> buildStream(DurbunInspectorStore store, LogFilters f, List<Quer
     for (final l in store.logs)
       if (logMatches(l, f, q)) StreamItem.log(l),
     for (final c in store.calls)
-      if (callMatchesLogQuery(c, f, q)) StreamItem.call(c),
+      if (callMatchesLogQuery(c, f, q, isDefaultHost: store.isDefaultHost)) StreamItem.call(c),
   ]..sort((a, b) => a.ts.compareTo(b.ts));
   final out = <StreamItem>[];
   for (final it in items) {

@@ -65,13 +65,24 @@ class _InspectorHomeState extends State<InspectorHome> {
             ),
             ListenableBuilder(
               listenable: store,
-              builder: (context, _) => _TopTabs(
-                index: _tab,
-                onChanged: (i) => setState(() => _tab = i),
-                errors: store.errorCount,
-                failures: store.failureCount,
-                calls: store.calls.length,
-              ),
+              builder: (context, _) {
+                // Requests to hosts outside the default list do not count
+                // on the badge (they are not listed).
+                final listed = store.defaultHosts.isEmpty
+                    ? store.calls
+                    : store.calls
+                        .where((x) => store.isDefaultHost(x.uri?.host ?? ''))
+                        .toList();
+                return _TopTabs(
+                  index: _tab,
+                  onChanged: (i) => setState(() => _tab = i),
+                  errors: store.errorCount,
+                  failures: store.defaultHosts.isEmpty
+                      ? store.failureCount
+                      : listed.where((x) => x.isFailure).length,
+                  calls: listed.length,
+                );
+              },
             ),
             // The status bar below takes the bottom inset.
             Expanded(
