@@ -160,6 +160,17 @@
   --sdk-js: #f0d74e;
   --sdk-dart: #40c4ff;
   --sdk-demo: #9587f7;
+
+  /*
+   * Small status text that must stay readable (WCAG AA, ≥ 4.5:1 on bg-app, bg-hover, bg-selected and
+   * bg-elevated): versions and counts in the sidebar, source / build badges, panel meta lines.
+   */
+  --text-meta: #858ea2;
+  --badge-accent: #a397f8;
+  --badge-dart: #40c4ff;
+  --badge-info: #4ea1ff;
+  --badge-warning: #f5b544;
+  --badge-success: #3dd68c;
 }
 
 /* ───────────── Light ───────────── */
@@ -266,6 +277,13 @@
   --sdk-js: #8a6d00;
   --sdk-dart: #0175c2;
   --sdk-demo: #5b4be0;
+
+  --text-meta: #5d667a;
+  --badge-accent: #4a3acb;
+  --badge-dart: #075592;
+  --badge-info: #1a5fd0;
+  --badge-warning: #8a5a00;
+  --badge-success: #17703f;
 }
 
 /* No data-theme yet (before the boot script ran): follow the OS. */
@@ -284,6 +302,12 @@
     --text-muted: #5b6476;
     --text-subtle: #8a93a6;
     --accent: #5b4be0;
+    --text-meta: #5d667a;
+    --badge-accent: #4a3acb;
+    --badge-dart: #075592;
+    --badge-info: #1a5fd0;
+    --badge-warning: #8a5a00;
+    --badge-success: #17703f;
   }
 }
 

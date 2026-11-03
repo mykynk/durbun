@@ -4,7 +4,7 @@
  * and summarizes (pure helpers are exported for tests).
  */
 import { useMemo } from 'react';
-import type { AppSession, DeviceApp, DeviceInfo } from '@durbun/protocol';
+import type { AppSession, DeviceApp, DeviceInfo, ServerSettings } from '@durbun/protocol';
 import {
   explainSources,
   type ExplainAction,
@@ -17,9 +17,29 @@ import {
 } from '../data/explain';
 import { appGroupKey, deviceAppKey, groupApps, useHub, type AppGroup, type HubState } from '../data/stores/hub';
 import { useScope, type Scope } from '../data/stores/scope';
+import { useServerSettings } from '../data/stores/server';
 import { scopeDeviceId } from '../data/scope';
+import { isOwnApp, ownAppIndex, type OwnAppIndex } from '../data/ownApps';
 
 type HubLike = Pick<HubState, 'apps' | 'devices'> & Partial<Pick<HubState, 'deviceApps'>>;
+
+/* ───────────── own apps (build advice only for the team's apps) ───────────── */
+
+let ownCache: { apps: unknown; deviceApps: unknown; index: OwnAppIndex } | undefined;
+
+/** Own-app index of the hub (cached per apps / deviceApps object: the selectors below run on every hub change). */
+export function hubOwnIndex(hub: HubLike): OwnAppIndex {
+  const deviceApps = hub.deviceApps ?? {};
+  if (ownCache && ownCache.apps === hub.apps && ownCache.deviceApps === deviceApps) return ownCache.index;
+  const index = ownAppIndex(Object.values(hub.apps), Object.values(deviceApps));
+  ownCache = { apps: hub.apps, deviceApps, index };
+  return index;
+}
+
+/** Whether an app group is plausibly the team's own (`data/ownApps.ts`): sessions count as proof on their own. */
+export function groupIsOwn(group: Pick<AppGroup, 'bundleId' | 'sessions'>, index: OwnAppIndex): boolean {
+  return group.sessions.length > 0 || isOwnApp(group.bundleId, index);
+}
 
 export interface ExplainedApp {
   key: string;
@@ -28,10 +48,18 @@ export interface ExplainedApp {
   result: ExplainResult;
 }
 
-/** Explain one app group (device + bundle id). */
-export function explainGroup(group: AppGroup, device: DeviceInfo | undefined): ExplainedApp {
-  const input: ExplainInput = { device, deviceApp: group.deviceApp, sessions: group.sessions };
+/**
+ * Explain one app group (device + bundle id). `own: false` = probably not the team's app (no build advice);
+ * omitted = own.
+ */
+export function explainGroup(group: AppGroup, device: DeviceInfo | undefined, own?: boolean): ExplainedApp {
+  const input: ExplainInput = { device, deviceApp: group.deviceApp, sessions: group.sessions, ...(own === false ? { own: false } : {}) };
   return { key: group.key, group, input, result: explainSources(input) };
+}
+
+/** Explain a group with its ownership taken from the hub. */
+function explainInHub(hub: HubLike, g: AppGroup): ExplainedApp {
+  return explainGroup(g, hub.devices[g.deviceId], groupIsOwn(g, hubOwnIndex(hub)));
 }
 
 /** The app group for a key, from the hub (sessions + device report). */
@@ -68,15 +96,22 @@ function deviceAppSig(d: DeviceApp | undefined): string {
   return `${d.key}:${d.name ?? ''}:${d.version ?? ''}:${d.build ?? ''}:${d.buildType}:${d.install.source}:${d.install.installer ?? ''}:${d.running ? 1 : 0}:${d.pids.join(',')}:${d.processName ?? ''}:${d.crashReports ?? 0}`;
 }
 
+function readerSig(r: DeviceInfo['readers']): string {
+  if (!r) return '';
+  return `${r.crashReports?.status ?? ''}/${r.crashReports?.code ?? ''}/${r.crashReports?.detail ?? ''}|${r.frameStats?.status ?? ''}/${r.frameStats?.code ?? ''}/${r.frameStats?.detail ?? ''}`;
+}
+
 function deviceSig(d: DeviceInfo | undefined): string {
   if (!d) return '';
-  return `${d.id}:${d.name}:${d.platform}:${d.kind}:${d.state}:${d.logs.status}:${d.logs.code ?? ''}:${d.logs.via ?? ''}`;
+  // Readers decide the crash / metrics rows; actions decide what can be offered (e.g. launching the app).
+  return `${d.id}:${d.name}:${d.platform}:${d.kind}:${d.state}:${d.logs.status}:${d.logs.code ?? ''}:${d.logs.via ?? ''}:${readerSig(d.readers)}:${d.actions.join(',')}`;
 }
 
 /** Everything an app group's explanation depends on (no stats, no lastActivity). */
 export function explainSignature(hub: HubLike, keys: readonly string[]): string {
   let out = '';
   const devicesSeen = new Set<string>();
+  const index = keys.length > 0 ? hubOwnIndex(hub) : undefined;
   for (const key of keys) {
     const deviceId = key.slice(0, key.indexOf('|'));
     if (!devicesSeen.has(deviceId)) {
@@ -84,7 +119,14 @@ export function explainSignature(hub: HubLike, keys: readonly string[]): string 
       out += `D${deviceSig(hub.devices[deviceId])}\n`;
     }
     out += `A${deviceAppSig(hub.deviceApps?.[key])}\n`;
-    for (const a of Object.values(hub.apps)) if (appGroupKey(a) === key) out += `S${sessionSig(a)}\n`;
+    let sessions = 0;
+    for (const a of Object.values(hub.apps)) {
+      if (appGroupKey(a) !== key) continue;
+      sessions++;
+      out += `S${sessionSig(a)}\n`;
+    }
+    // Ownership follows other apps too (a debug build of a sibling app makes this one "own").
+    out += `O${sessions > 0 || isOwnApp(key.slice(key.indexOf('|') + 1), index!) ? 1 : 0}\n`;
   }
   return out;
 }
@@ -97,7 +139,7 @@ export function useAppExplain(key: string | undefined): ExplainedApp | null {
     const hub = useHub.getState();
     const g = groupFor(hub, key);
     if (!g) return null;
-    return explainGroup(g, hub.devices[g.deviceId]);
+    return explainInHub(hub, g);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, sig]);
 }
@@ -114,7 +156,7 @@ export function explainScope(scope: Scope, hub: HubLike): ScopeExplain {
   const items: ExplainedApp[] = [];
   for (const key of keys) {
     const g = groupFor(hub, key);
-    if (g) items.push(explainGroup(g, hub.devices[g.deviceId]));
+    if (g) items.push(explainInHub(hub, g));
   }
   return { kind, deviceId, device: deviceId ? hub.devices[deviceId] : undefined, items };
 }
@@ -205,4 +247,58 @@ export function useCrashRecordsState(): CrashRecordsState {
   });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   return useMemo(() => crashRecordsState(scope, useHub.getState()), [scope, sig]);
+}
+
+/* ───────────── a scoped app that is not running ───────────── */
+
+/**
+ * The one app of an app scope when it is not running on a device that is online: its views are empty because
+ * it is closed, not because something is missing (the Logs view says "{app} şu an açık değil" and offers to
+ * launch it). Undefined for device / all scopes, running apps and offline devices.
+ */
+export function idleApp(scope: Pick<ScopeExplain, 'kind' | 'items'>): ExplainedApp | undefined {
+  if (scope.kind !== 'app' || scope.items.length !== 1) return undefined;
+  const item = scope.items[0]!;
+  const notes = item.result.notes ?? [];
+  return notes.includes('notRunning') && item.result.context?.deviceOnline ? item : undefined;
+}
+
+/** `idleApp` of the current scope. */
+export function useIdleApp(): ExplainedApp | undefined {
+  return idleApp(useScopeExplain());
+}
+
+/* ───────────── iPhone log scope (ServerSettings.iosDeviceLogScope) ───────────── */
+
+/** Physical iPhones whose device log is streamed live by the server (not demo, imported or `net:` devices). */
+function isLiveIphone(d: DeviceInfo): boolean {
+  return d.platform === 'ios' && d.kind === 'physical' && d.state === 'online' && !/^(demo|import|net):/.test(d.id);
+}
+
+/**
+ * iPhones in scope whose system-process lines the server leaves out (`iosDeviceLogScope` 'apps', the default):
+ * the Logs view can say so and point to Ayarlar › Loglar › iPhone log kapsamı. Empty when the server does not
+ * report the setting (older servers stream everything) or it is 'all'. An iPhone whose stream reports
+ * `logs.scopeNotApplied` (no devicectl, app list unreadable) shows every line, so it is left out.
+ */
+export function iosSystemLinesHidden(
+  scope: Scope,
+  hub: Pick<HubState, 'apps' | 'devices'>,
+  settings: Pick<ServerSettings, 'iosDeviceLogScope'>,
+  reported: ReadonlySet<string> | undefined,
+): DeviceInfo[] {
+  if (!reported?.has('iosDeviceLogScope') || (settings.iosDeviceLogScope ?? 'apps') !== 'apps') return [];
+  const one = scope.kind === 'all' ? undefined : scopeDeviceId(scope, hub);
+  const devices = scope.kind === 'all' ? Object.values(hub.devices) : one && hub.devices[one] ? [hub.devices[one]!] : [];
+  return devices.filter((d) => isLiveIphone(d) && d.logs.code !== 'logs.scopeNotApplied');
+}
+
+/** `iosSystemLinesHidden` for the current scope; re-renders only when the answer changes. */
+export function useIosSystemLinesHidden(): DeviceInfo[] {
+  const scope = useScope();
+  const settings = useServerSettings((s) => s.settings);
+  const reported = useServerSettings((s) => s.reported);
+  const sig = useHub((s) => iosSystemLinesHidden(scope, s, settings, reported).map((d) => `${d.id}:${d.name}`).join('|'));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => iosSystemLinesHidden(scope, useHub.getState(), settings, reported), [scope, sig, settings, reported]);
 }

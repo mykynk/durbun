@@ -21,10 +21,10 @@
   background: color-mix(in srgb, var(--src) 14%, transparent);
 }
 .src-badge--sdk {
-  --src: var(--accent);
+  --src: var(--badge-accent);
 }
 .src-badge--vm-service {
-  --src: var(--sdk-dart);
+  --src: var(--badge-dart);
 }
 .src-badge--device-only {
   --src: var(--text-muted);
@@ -33,31 +33,32 @@
   font-weight: 500;
 }
 .src-badge--demo {
-  --src: var(--sdk-demo);
+  --src: var(--badge-accent);
 }
 .src-badge--import {
-  --src: var(--text-subtle);
+  --src: var(--text-meta);
 }
+/* Badge text uses the --badge-* / --text-meta tokens: readable (≥ 4.5:1) on every sidebar row state, both themes. */
 .build-badge {
-  color: var(--text-subtle);
-  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-meta);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
   font-weight: 500;
 }
 .build-badge--play,
 .build-badge--store-or-testflight,
 .build-badge--other-store {
-  color: var(--info);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info) 35%, transparent);
+  color: var(--badge-info);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--badge-info) 35%, transparent);
 }
 .build-badge--firebase {
-  color: var(--warning);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 35%, transparent);
+  color: var(--badge-warning);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--badge-warning) 35%, transparent);
 }
 .build-badge--debug,
 .build-badge--xcode,
 .build-badge--simulator {
-  color: var(--success);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 30%, transparent);
+  color: var(--badge-success);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--badge-success) 30%, transparent);
 }
 
 /* ───────────── status icons ───────────── */
@@ -108,7 +109,7 @@
 }
 .src-panel__ver {
   font-size: var(--fs-sm);
-  color: var(--text-subtle);
+  color: var(--text-meta);
   flex-shrink: 0;
 }
 .src-panel__badges {
@@ -119,7 +120,7 @@
 }
 .src-panel__run {
   font-size: var(--fs-xs);
-  color: var(--text-subtle);
+  color: var(--text-meta);
 }
 .src-panel__run.is-on {
   color: var(--success);
@@ -130,7 +131,7 @@
   gap: 8px;
   min-width: 0;
   font-size: var(--fs-xs);
-  color: var(--text-subtle);
+  color: var(--text-meta);
 }
 .src-panel__summary {
   margin: 0;
@@ -181,7 +182,7 @@
 }
 .src-row__status {
   font-size: var(--fs-xs);
-  color: var(--text-subtle);
+  color: var(--text-meta);
   flex-shrink: 0;
 }
 .src-row__status--yes {
@@ -390,12 +391,12 @@
 }
 .src-cell__src {
   font-size: var(--fs-xs);
-  color: var(--text-subtle);
+  color: var(--text-meta);
 }
 .src-explainer__caption {
   margin: 6px 0 0;
   font-size: var(--fs-xs);
-  color: var(--text-subtle);
+  color: var(--text-meta);
 }
 .src-code {
   font-family: var(--font-mono);

@@ -40,7 +40,10 @@ export type ExplainReason =
   | 'noSdk'
   /** Release build without the SDK (store / Firebase / ad-hoc): SDK-less methods only. */
   | 'releaseWithoutSdk'
-  /** Installed from a store (Play, App Store / TestFlight): the SDK is never enabled there. */
+  /**
+   * Installed from a store (Play, App Store / TestFlight) and no SDK session in this run: the device's own data only.
+   * Whether a store build has the SDK is the team's call (`--dart-define=DURBUN=true`); this one does not.
+   */
   | 'storeBuild'
   /** Network capture from outside the app is impossible: SSL pinning + Android user-CA policy (no proxy route). */
   | 'noOutsideNetwork'
@@ -74,7 +77,7 @@ export type ExplainReason =
   | 'networkOnly'
   /** In-app tools need the SDK / VM service, but device tools (launch, stop, clear data, screenshot) still work. */
   | 'deviceToolsAvailable'
-  /** The SDK is running inside a build installed from a store — store builds should ship with it off. */
+  /** Informational: the SDK is running inside a build installed from a store (the team turned it on there). */
   | 'sdkInStoreBuild'
   /** The device's own crash / ANR records cannot be read (`DeviceInfo.readers.crashReports`, worded by its code). */
   | 'crashReportsUnavailable'
@@ -85,7 +88,17 @@ export type ExplainReason =
   /** A Flutter session whose native core is not attached (`sdk.layers` without 'android' / 'ios'): Dart data only. */
   | 'nativeLayerMissing'
   /** Demo device and app: sample data, explained as a real device would be. */
-  | 'demoData';
+  | 'demoData'
+  /**
+   * Not running and no SDK / VM-service session ever seen for it: whether it has the SDK shows once it runs, so
+   * nothing is claimed about the build (any build may have it on, store builds included).
+   */
+  | 'notSeenYet'
+  /**
+   * Probably not one of the team's apps (no SDK / VM session or developer install ever, no shared bundle prefix;
+   * `ExplainInput.own`): only what the device shows from outside, without build advice.
+   */
+  | 'notOwnApp';
 
 /** A button the UI can offer next to a reason. */
 export type ExplainAction =
@@ -95,7 +108,9 @@ export type ExplainAction =
   | 'useDebugBuild'
   | 'buildWithDurbunFlag'
   | 'addInterceptor'
-  | 'startProcessMetrics';
+  | 'startProcessMetrics'
+  /** Start the app on the device (device action `app-launch`): a not-running app shows what it sends once it runs. */
+  | 'launchApp';
 
 export interface ExplainRow {
   capability: ExplainCapability;
@@ -113,6 +128,11 @@ export interface ExplainInput {
   deviceApp?: DeviceApp;
   /** SDK / VM-service sessions of the same app on the same device (connected first). */
   sessions: AppSession[];
+  /**
+   * Whether the app is plausibly the team's own (`data/ownApps.ts`). `false`: no build advice (debug build, DURBUN
+   * flag, SDK guide), just what the device shows from outside. Undefined = own (callers that do not know).
+   */
+  own?: boolean;
 }
 
 /** Summary used by compact badges: which single source best describes the app. */
@@ -154,6 +174,10 @@ export interface ExplainContext {
   readers?: DeviceInfo['readers'];
   /** A demo device / app: sample data, explained like the real device and build it stands for. */
   demo?: boolean;
+  /** `false` when the app is probably not the team's own (`ExplainInput.own`); absent otherwise. */
+  own?: boolean;
+  /** Not running and no SDK / VM-service session ever seen: the build's SDK is unknown until it runs. */
+  unseen?: boolean;
 }
 
 export interface ExplainResult {
@@ -362,6 +386,9 @@ export function explainContext(input: ExplainInput): ExplainContext {
     ...(layers ? { layers } : {}),
     ...(device?.readers ? { readers: device.readers } : {}),
     ...(transport !== 'import' && isDemo(input) ? { demo: true } : {}),
+    ...(input.own === false ? { own: false } : {}),
+    // Only an online device can say an app is not running (a disconnected one marks every app stopped).
+    ...(transport === 'none' && !connected && da && !da.running && input.sessions.length === 0 && device?.state === 'online' ? { unseen: true } : {}),
   };
 }
 
@@ -430,8 +457,11 @@ export function explainSources(input: ExplainInput): ExplainResult {
   }
 
   /* app-level notes */
-  if (input.device && !ctx.deviceOnline) notes.push('readOnly');
-  else if (!ctx.running && (input.deviceApp || input.sessions.length > 0)) notes.push('notRunning');
+  if (input.device && !ctx.deviceOnline) {
+    // Gone or offline: what came before stays. A device waiting for "Trust" / USB debugging is attached: its rows
+    // say what to do, and nothing is known about its apps yet.
+    if (ctx.deviceState !== 'unauthorized') notes.push('readOnly');
+  } else if (!ctx.running && (input.deviceApp || input.sessions.length > 0)) notes.push('notRunning');
   if (ctx.transport === 'sdk' && isStoreLike(ctx.build) && !ctx.demo) notes.push('sdkInStoreBuild');
   const native = nativeLayerOf(ctx);
   if (native === 'active') notes.push('nativeLayerActive');
@@ -447,11 +477,17 @@ export function explainSources(input: ExplainInput): ExplainResult {
   const crashSrc = crashReaderDown ? undefined : crashReadable;
   const logProblems = deviceLogProblems(ctx);
   const rows: ExplainRow[] = [];
+  // Unplugged: what arrived before the disconnect stays readable; nothing about the build explains the silence.
+  const gone = Boolean(input.device) && ctx.deviceState === 'disconnected' && !netOnly;
+  const own = input.own !== false;
 
   const appSrc: ExplainSource | undefined = ctx.transport === 'sdk' ? 'sdk' : ctx.transport === 'vm-service' ? 'vm-service' : undefined;
   const nativeSrc: ExplainSource[] = native === 'active' ? ['native-layer'] : [];
-  const buildReason = noSdkReason(ctx.build);
-  const buildActions = noSdkActions(ctx.build, p);
+  // Without the app's own data: an app that is not the team's gets no build advice; an app that has not run yet
+  // gets no claim about its build (the team may have turned the SDK on in any build, store builds included).
+  const buildReason: ExplainReason = !own ? 'notOwnApp' : ctx.unseen ? 'notSeenYet' : noSdkReason(ctx.build);
+  const launch: ExplainAction[] = ctx.unseen && ctx.deviceOnline && input.device?.actions.includes('app-launch') ? ['launchApp'] : [];
+  const buildActions: ExplainAction[] = own ? [...(buildReason === 'notSeenYet' ? launch : []), ...noSdkActions(ctx.build, p)] : [];
   const androidNative = p === 'android' && (ctx.sdkPlatform === 'flutter' || ctx.sdkPlatform === 'android' || ctx.transport === 'vm-service');
 
   /* logs */
@@ -462,6 +498,8 @@ export function explainSources(input: ExplainInput): ExplainResult {
     rows.push(row('logs', partial ? 'partial' : 'yes', [appSrc, ...nativeSrc, ...(logSrc ? [logSrc] : [])], reasons, logProblems.actions));
   } else if (logSrc) {
     rows.push(row('logs', 'yes', [logSrc], isReleaseLike(ctx.build) ? ['releaseLogsDependOnApp'] : []));
+  } else if (gone && deviceLogSource(p)) {
+    rows.push(row('logs', 'partial', [deviceLogSource(p)!], ['readOnly']));
   } else {
     const reasons: ExplainReason[] = logProblems.reasons.length ? logProblems.reasons : [buildReason];
     rows.push(row('logs', 'no', [], reasons, logProblems.actions.length ? logProblems.actions : buildActions));
@@ -506,7 +544,7 @@ export function explainSources(input: ExplainInput): ExplainResult {
   } else {
     const o = outside();
     if (o) rows.push(o);
-    else if (p === 'ios-device') rows.push(row('metrics', 'no', [], ['iosNoDeviceMetrics'], isDebugLike(ctx.build) ? ['openSdkGuide', 'attachVm'] : isStoreLike(ctx.build) ? ['useDebugBuild'] : ['buildWithDurbunFlag']));
+    else if (p === 'ios-device') rows.push(row('metrics', 'no', [], ['iosNoDeviceMetrics'], !own ? [] : isDebugLike(ctx.build) ? ['openSdkGuide', 'attachVm'] : isStoreLike(ctx.build) ? ['useDebugBuild'] : ['buildWithDurbunFlag']));
     else rows.push(row('metrics', 'no', [], [buildReason], buildActions));
   }
 
@@ -523,6 +561,9 @@ export function explainSources(input: ExplainInput): ExplainResult {
   } else if (deviceCrash.length > 0) {
     // Live crash lines of the device log only.
     rows.push(row('crashes', 'partial', deviceCrash, unreadable, unreadableActions));
+  } else if (gone && deviceCrashSource(p)) {
+    // The records read before the disconnect stay; new ones come once it is plugged back in.
+    rows.push(row('crashes', 'partial', [deviceCrashSource(p)!, ...(deviceLogSource(p) ? [deviceLogSource(p)!] : [])], ['readOnly']));
   } else {
     const reasons: ExplainReason[] = [...(logProblems.reasons.length ? logProblems.reasons : unreadable.length ? [] : [buildReason]), ...unreadable];
     rows.push(row('crashes', 'no', [], reasons, logProblems.actions.length ? logProblems.actions : unreadable.length ? unreadableActions : buildActions));
@@ -530,9 +571,11 @@ export function explainSources(input: ExplainInput): ExplainResult {
 
   /* mocks */
   const offline = Boolean(input.device) && !ctx.deviceOnline;
-  if (ctx.transport === 'sdk') {
-    if (offline) rows.push(row('mocks', 'no', [], ['readOnly']));
-    else if (has('mocks')) rows.push(row('mocks', 'yes', ['sdk']));
+  if (offline) {
+    // Rules run inside a connected app: none is here now, whatever the build.
+    rows.push(row('mocks', 'no', [], ['readOnly']));
+  } else if (ctx.transport === 'sdk') {
+    if (has('mocks')) rows.push(row('mocks', 'yes', ['sdk']));
     else rows.push(row('mocks', 'no', [], ['sdkLacksCapability'], ['openSdkGuide']));
   } else if (ctx.transport === 'vm-service') {
     rows.push(row('mocks', 'no', [], ['vmServiceNoMocks'], ['openSdkGuide']));

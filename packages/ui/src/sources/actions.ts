@@ -1,8 +1,12 @@
 import type { ExplainAction, ExplainContext } from '../data/explain';
-import { useHub, type AppGroup } from '../data/stores/hub';
+import { appGroupName, useHub, type AppGroup } from '../data/stores/hub';
 import { ui, type SdkGuideTab } from '../data/stores/ui';
+import { sendCommand } from '../data/commands';
 import { requestDeviceSection } from '../features/device/request';
 import { showInPerf } from '../features/perf/request';
+import { toast } from '../components/Toast';
+import { errorText } from '../i18n/codes';
+import { t } from '../i18n';
 import { TIP_ACTIONS } from './text';
 import type { ExplainedApp } from './model';
 
@@ -34,10 +38,33 @@ export function mainPidOf(group: AppGroup): { pid: number; name: string } | unde
   return undefined;
 }
 
+/**
+ * The app can be started from here: it is not running, its device is online and offers `app-launch` (Android,
+ * simulators, iPhones with devicectl). Reads the hub, so the button follows the device's live state.
+ */
+export function canLaunchApp(group: Pick<AppGroup, 'deviceId' | 'bundleId' | 'running'> | undefined): boolean {
+  if (!group || group.running || !group.bundleId) return false;
+  const device = useHub.getState().devices[group.deviceId];
+  return Boolean(device && device.state === 'online' && device.actions.includes('app-launch'));
+}
+
+/** `app-launch` for the app; failures say why (localized server code). */
+export async function launchApp(group: AppGroup): Promise<boolean> {
+  const app = appGroupName(group);
+  try {
+    await sendCommand({ name: 'device.action', deviceId: group.deviceId, action: 'app-launch', params: { appId: group.bundleId } });
+    return true;
+  } catch (err) {
+    toast.error(t('sources.launch.failed', { app }), { description: errorText(err) });
+    return false;
+  }
+}
+
 /** Whether an action can run right now (tips are never buttons; process metrics need a live pid). */
 export function actionAvailable(action: ExplainAction, item: ExplainedApp | undefined): boolean {
   if (TIP_ACTIONS.has(action)) return false;
   if (action === 'startProcessMetrics') return Boolean(item && mainPidOf(item.group));
+  if (action === 'launchApp') return canLaunchApp(item?.group);
   return true;
 }
 
@@ -73,6 +100,9 @@ export function runExplainAction(action: ExplainAction, item: ExplainedApp | und
       showInPerf({ kind: 'process', deviceId: item.group.deviceId, pid: main.pid, name: main.name }, { poll: true });
       return;
     }
+    case 'launchApp':
+      if (item && canLaunchApp(item.group)) void launchApp(item.group);
+      return;
     default:
       return;
   }

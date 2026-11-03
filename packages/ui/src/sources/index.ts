@@ -13,12 +13,32 @@ export {
   RichText,
   CrashRecordsNote,
   FrameStatsNote,
+  NotRunningEmpty,
+  NotRunningNote,
+  IosLogScopeNote,
 } from './components';
 export type { ExplainEmptyProps } from './components';
 export { DataSourcesDialog, DataSourcesExplainer, buildMatrix } from './DataSourcesDialog';
-export { explainGroup, explainScope, groupFor, scopeGroupKeys, explainSignature, useAppExplain, useScopeExplain, pickEmptyReason, crashRecordsState, useCrashRecordsState } from './model';
+export {
+  explainGroup,
+  explainScope,
+  groupFor,
+  scopeGroupKeys,
+  explainSignature,
+  useAppExplain,
+  useScopeExplain,
+  pickEmptyReason,
+  crashRecordsState,
+  useCrashRecordsState,
+  idleApp,
+  useIdleApp,
+  iosSystemLinesHidden,
+  useIosSystemLinesHidden,
+  hubOwnIndex,
+  groupIsOwn,
+} from './model';
 export type { ExplainedApp, ScopeExplain, EmptyExplanation, CrashRecordsState } from './model';
-export { runExplainAction, actionAvailable, guideTabFor, mainPidOf } from './actions';
+export { runExplainAction, actionAvailable, guideTabFor, mainPidOf, canLaunchApp, launchApp } from './actions';
 export {
   capabilityLabel,
   statusLabel,

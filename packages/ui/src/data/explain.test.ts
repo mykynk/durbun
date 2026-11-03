@@ -207,7 +207,7 @@ describe('explainSources — builds without the SDK', () => {
     expect(r.notes).toEqual([]);
   });
 
-  it('the SDK inside a store build is flagged', () => {
+  it('the SDK inside a store build gets an informational note (the team may ship it there)', () => {
     const r = ex({ device: PIXEL, deviceApp: deviceApp(PIXEL, { buildType: 'release', source: 'play' }), sessions: [session(PIXEL)] });
     expect(r.notes).toEqual(['sdkInStoreBuild']);
   });
@@ -344,6 +344,87 @@ describe('explainSources — lifecycle and recordings', () => {
     const before = JSON.stringify(input);
     expect(ex(input)).toEqual(ex(input));
     expect(JSON.stringify(input)).toBe(before);
+  });
+});
+
+/* ───────────── disconnected devices, apps that have not run, apps that are not the team's ───────────── */
+
+describe('explainSources — a disconnected device', () => {
+  it('logs and crashes stay readable and never blame the store build (regression: "mağaza sürümlerinde SDK açılmaz")', () => {
+    const dev = { ...IPHONE, state: 'disconnected' as const, logs: { status: 'stopped' as const } };
+    const r = ex({ device: dev, deviceApp: deviceApp(dev, { buildType: 'release', source: 'store-or-testflight', running: false, pids: [] }), sessions: [] });
+    expect(r.notes).toEqual(['readOnly']);
+    expect(row(r, 'logs')).toEqual({ capability: 'logs', status: 'partial', sources: ['idevicesyslog'], reasons: ['readOnly'], actions: [] });
+    expect(row(r, 'crashes')).toEqual({ capability: 'crashes', status: 'partial', sources: ['crash-report', 'idevicesyslog'], reasons: ['readOnly'], actions: [] });
+    expect(row(r, 'mocks')).toMatchObject({ status: 'no', reasons: ['readOnly'] });
+    expect(row(r, 'tools')).toMatchObject({ status: 'no', reasons: ['readOnly'] });
+    // Network really depends on the build: it keeps its reason.
+    expect(row(r, 'network').reasons).toEqual(['storeBuild', 'noOutsideNetwork']);
+    const android = { ...PIXEL, state: 'disconnected' as const };
+    const play = ex({ device: android, deviceApp: deviceApp(android, { buildType: 'release', source: 'play', running: false, pids: [] }), sessions: [] });
+    expect(row(play, 'logs')).toMatchObject({ status: 'partial', sources: ['logcat'], reasons: ['readOnly'] });
+    expect(row(play, 'crashes')).toMatchObject({ status: 'partial', sources: ['dropbox', 'logcat'], reasons: ['readOnly'] });
+    expect(row(play, 'mocks').reasons).toEqual(['readOnly']);
+  });
+
+  it('an iPhone waiting for "Trust" is attached, not gone: no read-only note, the rows say what to do', () => {
+    const dev = { ...IPHONE, state: 'unauthorized' as const, stateCode: 'device.untrusted', logs: { status: 'unavailable' as const, code: 'device.untrusted' } };
+    const r = ex({ device: dev, deviceApp: deviceApp(dev, { buildType: 'release', source: 'store-or-testflight', running: false, pids: [] }), sessions: [] });
+    expect(r.notes).toEqual([]);
+    expect(row(r, 'logs')).toMatchObject({ status: 'no', reasons: ['deviceLogsUnavailable'], actions: ['openDoctor'] });
+  });
+});
+
+describe('explainSources — an app that is not running and has not connected yet', () => {
+  const xcodePati = (p: Partial<DeviceApp> = {}) => deviceApp(IPHONE, { id: 'com.mykynk.pati', name: 'Pati', version: '2.4.1', build: '241', buildType: 'debug', source: 'xcode', running: false, pids: [], ...p });
+  const launchable = { ...IPHONE, actions: ['app-launch', 'app-stop', 'screenshot'] as DeviceInfo['actions'] };
+
+  it('claims nothing about its SDK (regression: «Pati içinde Dürbün SDK’sı yok») and offers to launch it', () => {
+    const r = ex({ device: launchable, deviceApp: xcodePati(), sessions: [] });
+    expect(r.context?.unseen).toBe(true);
+    expect(r.notes).toEqual(['notRunning']);
+    for (const c of ['network', 'mocks', 'tools'] as const) {
+      expect(row(r, c).reasons, c).toContain('notSeenYet');
+      expect(row(r, c).reasons, c).not.toContain('noSdk');
+    }
+    expect(row(r, 'network')).toEqual({ capability: 'network', status: 'no', sources: [], reasons: ['notSeenYet', 'noOutsideNetwork'], actions: ['launchApp', 'openSdkGuide', 'attachVm'] });
+    // A device that cannot start apps: no launch button.
+    expect(row(ex({ device: IPHONE, deviceApp: xcodePati(), sessions: [] }), 'network').actions).toEqual(['openSdkGuide', 'attachVm']);
+  });
+
+  it('a store build that has not run is not claimed to lack the SDK; a running app or a known session is not "unseen"', () => {
+    // The team may ship the SDK in a store build too (no install-source guard since 2026-11-02).
+    const play = ex({ device: PIXEL, deviceApp: deviceApp(PIXEL, { buildType: 'release', source: 'play', running: false, pids: [] }), sessions: [] });
+    expect(play.context?.unseen).toBe(true);
+    expect(row(play, 'network').reasons).toEqual(['notSeenYet', 'noOutsideNetwork']);
+    expect(row(play, 'mocks').reasons).not.toContain('storeBuild');
+    // Running without an SDK session: now it is known.
+    const playRunning = ex({ device: PIXEL, deviceApp: deviceApp(PIXEL, { buildType: 'release', source: 'play' }), sessions: [] });
+    expect(row(playRunning, 'network').reasons).toEqual(['storeBuild', 'noOutsideNetwork']);
+    const running = ex({ device: launchable, deviceApp: xcodePati({ running: true, pids: [902] }), sessions: [] });
+    expect(running.context?.unseen).toBeUndefined();
+    expect(row(running, 'network').reasons).toEqual(['noSdk', 'noOutsideNetwork']);
+    const old = ex({ device: PIXEL, deviceApp: deviceApp(PIXEL, { buildType: 'debug', source: 'adb', running: false, pids: [] }), sessions: [session(PIXEL, { connected: false })] });
+    expect(old.context?.unseen).toBeUndefined();
+    expect(old.badge).toBe('sdk');
+  });
+});
+
+describe('explainSources — apps that are not the team’s (ExplainInput.own = false)', () => {
+  it('what the device shows from outside, without build advice', () => {
+    const whatsapp = deviceApp(IPHONE, { id: 'net.whatsapp.WhatsApp', name: 'WhatsApp', version: '25.31.74', buildType: 'release', source: 'store-or-testflight', processName: 'WhatsApp' });
+    const r = ex({ device: IPHONE, deviceApp: whatsapp, sessions: [], own: false });
+    expect(r.context?.own).toBe(false);
+    expect(row(r, 'logs')).toMatchObject({ status: 'yes', sources: ['idevicesyslog'] });
+    expect(row(r, 'crashes')).toMatchObject({ status: 'yes', sources: ['crash-report', 'idevicesyslog'] });
+    expect(row(r, 'network')).toEqual({ capability: 'network', status: 'no', sources: [], reasons: ['notOwnApp', 'noOutsideNetwork'], actions: [] });
+    expect(row(r, 'metrics')).toEqual({ capability: 'metrics', status: 'no', sources: [], reasons: ['iosNoDeviceMetrics'], actions: [] });
+    expect(row(r, 'mocks')).toEqual({ capability: 'mocks', status: 'no', sources: [], reasons: ['notOwnApp'], actions: [] });
+    expect(row(r, 'tools')).toEqual({ capability: 'tools', status: 'no', sources: [], reasons: ['notOwnApp', 'deviceToolsAvailable'], actions: [] });
+    const advice = new Set<string>(['useDebugBuild', 'buildWithDurbunFlag', 'openSdkGuide', 'attachVm', 'addInterceptor']);
+    expect(r.rows.flatMap((x) => x.actions).filter((a) => advice.has(a))).toEqual([]);
+    // Unknown ownership (callers that do not say) keeps the advice.
+    expect(row(ex({ device: IPHONE, deviceApp: whatsapp, sessions: [] }), 'network').actions).toEqual(['useDebugBuild', 'buildWithDurbunFlag']);
   });
 });
 

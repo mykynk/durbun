@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode, type RefObject } from 'react';
 import { clsx } from 'clsx';
-import { BookOpen, CircleCheck, CircleDashed, CircleMinus, Info, Lightbulb, Stethoscope, type LucideIcon } from 'lucide-react';
+import { BookOpen, CircleCheck, CircleDashed, CircleMinus, Info, Lightbulb, Play, Settings2, Stethoscope, type LucideIcon } from 'lucide-react';
 import { useT } from '../i18n';
 import { deviceDisplayName, logStatusText } from '../i18n/codes';
 import type { DeviceInfo } from '@durbun/protocol';
@@ -33,7 +33,7 @@ import {
   tipText,
   type ReasonTextOptions,
 } from './text';
-import { pickEmptyReason, useAppExplain, useCrashRecordsState, useScopeExplain, type ExplainedApp } from './model';
+import { idleApp, pickEmptyReason, useAppExplain, useCrashRecordsState, useIdleApp, useIosSystemLinesHidden, useScopeExplain, type EmptyExplanation, type ExplainedApp } from './model';
 import { actionAvailable, runExplainAction } from './actions';
 import './sources.css';
 
@@ -235,8 +235,10 @@ export function SourcesPanel({ item, onNavigate }: { item: ExplainedApp; onNavig
       <PanelHeader item={item} />
       <p className="src-panel__summary">{summaryText(item.result.badge, ctx)}</p>
       {notes.map((n) => (
-        <Callout key={n} tone={n === 'sdkInStoreBuild' ? 'warn' : 'info'} compact className="src-note">
+        <Callout key={n} tone="info" compact className="src-note">
           <RichText text={reasonText(n, ctx, undefined, reasonOptions(item.input.device))} />
+          {/* A closed app: starting it is the one thing that makes its data come (shown once per panel). */}
+          {n === 'notRunning' ? <ActionButtons actions={['launchApp']} item={item} seen={seen} /> : null}
         </Callout>
       ))}
       <ul className="src-matrix">
@@ -310,6 +312,17 @@ export interface ExplainEmptyProps {
 }
 
 /**
+ * Reasons that belong to the device, not to an app's build: every app of the device has them. Several apps with
+ * only these get one sentence about the device instead of "none of the apps has the SDK" (an iPhone waiting for
+ * «Güven», an unplugged phone, a device log that does not come).
+ */
+const DEVICE_REASONS: ReadonlySet<ExplainReason> = new Set<ExplainReason>(['readOnly', 'deviceLogsUnavailable', 'toolMissing', 'networkOnly']);
+
+function deviceWide(pick: EmptyExplanation): boolean {
+  return !pick.single && pick.reasons.length > 0 && pick.reasons.every((r) => DEVICE_REASONS.has(r));
+}
+
+/**
  * Scope-specific empty state: when the scoped app(s) cannot have this capability, say why (naming the app and
  * build) with the actions that would enable it; otherwise render `fallback`.
  */
@@ -317,6 +330,16 @@ export function ExplainEmpty({ capability, icon, fallback, includePartial, onAct
   const t = useT();
   const scope = useScopeExplain();
   const pick = pickEmptyReason(capability, scope, { includePartial });
+  // The app is simply closed: say so (and offer to start it) instead of "nothing yet" or an SDK setup hint.
+  // A capability the app can never have still says why first.
+  const idle = idleApp(scope);
+  if (idle && (!pick.structural || pick.status === 'partial')) {
+    return (
+      <NotRunningEmpty item={idle} capability={capability} icon={icon} size={size}>
+        {children}
+      </NotRunningEmpty>
+    );
+  }
   // 'partial' over several apps (e.g. CPU/memory by polling on a whole device) is better served by the view's own empty state.
   if (!pick.structural || scope.kind === 'none' || (pick.status === 'partial' && !pick.single)) return <>{fallback}</>;
   const single = pick.single;
@@ -324,10 +347,14 @@ export function ExplainEmpty({ capability, icon, fallback, includePartial, onAct
   const app = ctx?.appName || single?.group.bundleId;
   const titleKey = capability === 'metrics' && pick.status === 'no' ? 'sources.empty.metrics.noTitle' : `sources.empty.${capability}.title`;
   const title = single ? t(titleKey, { app }) : t(`sources.empty.${capability}.deviceTitle`);
-  const perApp = single ? null : (
+  const items = single ? [single] : pick.rows.filter((r) => r.row.status !== 'yes').map((r) => r.item).slice(0, 4);
+  // The device itself is the reason (waiting for «Güven», unplugged…): say it once, not per app.
+  const wide = deviceWide(pick);
+  const perApp = single ? null : wide ? (
+    <ReasonList item={items[0]} reasons={pick.reasons} capability={capability} />
+  ) : (
     <p className="src-empty__lead">{t(`sources.empty.${capability}.device`)}</p>
   );
-  const items = single ? [single] : pick.rows.filter((r) => r.row.status !== 'yes').map((r) => r.item).slice(0, 4);
   return (
     <EmptyState
       size={size}
@@ -338,7 +365,7 @@ export function ExplainEmpty({ capability, icon, fallback, includePartial, onAct
           {perApp}
           {single ? (
             <ReasonList item={single} reasons={pick.reasons} capability={capability} />
-          ) : (
+          ) : wide ? null : (
             <ul className="src-empty__apps">
               {items.map((it) => {
                 const row = it.result.rows.find((r) => r.capability === capability);
@@ -367,6 +394,91 @@ export function ExplainEmpty({ capability, icon, fallback, includePartial, onAct
   );
 }
 
+/**
+ * Empty state of a scoped app that is not running: "{app} şu an açık değil" + what shows up once it opens, with a
+ * launch button when the device can start it. `ExplainEmpty` renders it by itself; views can use it directly.
+ */
+export function NotRunningEmpty({ item, capability, icon, size = 'lg', children }: { item: ExplainedApp; capability: ExplainCapability; icon?: IconType; size?: 'sm' | 'md' | 'lg'; children?: ReactNode }) {
+  const t = useT();
+  const app = item.result.context?.appName || item.group.bundleId;
+  const launchable = actionAvailable('launchApp', item);
+  return (
+    <EmptyState
+      size={size}
+      icon={icon}
+      title={t('sources.idle.title', { app })}
+      description={<p className="src-empty__lead">{t(`sources.idle.body.${capability}`, { app })}</p>}
+      actions={
+        launchable ? (
+          <Button variant="primary" size="md" icon={Play} onClick={() => runExplainAction('launchApp', item)}>
+            {actionLabel('launchApp')}
+          </Button>
+        ) : undefined
+      }
+    >
+      {children}
+      <button type="button" className="src-link" onClick={() => ui.openDataSources()}>
+        <BookOpen size={13} aria-hidden />
+        {t('sources.general')}
+      </button>
+    </EmptyState>
+  );
+}
+
+/**
+ * Compact form for a list that is not empty (the device's own system rows are there): "{app} şu an açık değil",
+ * what shows up once it opens, and the launch button. Null when the scoped app is running or not online.
+ */
+export function NotRunningNote({ capability, className }: { capability: ExplainCapability; className?: string }) {
+  const t = useT();
+  const item = useIdleApp();
+  if (!item) return null;
+  const app = item.result.context?.appName || item.group.bundleId;
+  return (
+    <Callout
+      tone="info"
+      compact
+      title={t('sources.idle.title', { app })}
+      className={clsx('src-idle-note', className)}
+      actions={
+        actionAvailable('launchApp', item) ? (
+          <Button size="sm" icon={Play} onClick={() => runExplainAction('launchApp', item)}>
+            {actionLabel('launchApp')}
+          </Button>
+        ) : undefined
+      }
+    >
+      <p>{t(`sources.idle.body.${capability}`, { app })}</p>
+    </Callout>
+  );
+}
+
+/**
+ * Above the log list of a scope with a live iPhone: its system processes are left out by the server
+ * (`iosDeviceLogScope` 'apps'), and where to change that. Null when nothing is hidden.
+ */
+export function IosLogScopeNote({ className }: { className?: string }) {
+  const t = useT();
+  const hidden = useIosSystemLinesHidden();
+  if (hidden.length === 0) return null;
+  const one = hidden.length === 1 ? hidden[0] : undefined;
+  return (
+    <Callout
+      tone="info"
+      compact
+      title={one ? t('sources.iosScope.titleFor', { device: deviceDisplayName(one) }) : t('sources.iosScope.title')}
+      className={clsx('src-ios-scope', className)}
+      actions={
+        <Button size="sm" icon={Settings2} onClick={() => ui.openSettings('logs')}>
+          {t('sources.iosScope.open')}
+        </Button>
+      }
+    >
+      <p>{t('sources.iosScope.body')}</p>
+    </Callout>
+  );
+}
+
 /** Compact callout variant (Mocks list, tools card) — null when nothing structural to say. */
 export function ExplainCallout({ capability, onAction, className }: { capability: ExplainCapability; onAction?: (a: ExplainAction) => boolean | void; className?: string }) {
   const t = useT();
@@ -381,6 +493,8 @@ export function ExplainCallout({ capability, onAction, className }: { capability
     <Callout tone="info" compact title={title} className={clsx('src-callout', className)}>
       {single ? (
         <ReasonList item={single} reasons={pick.reasons} capability={capability} device={devices[single.group.deviceId]} />
+      ) : deviceWide(pick) && pick.rows[0] ? (
+        <ReasonList item={pick.rows[0].item} reasons={pick.reasons} capability={capability} device={devices[pick.rows[0].item.group.deviceId]} />
       ) : (
         <p>{t(`sources.empty.${capability}.device`)}</p>
       )}
