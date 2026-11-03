@@ -1,5 +1,16 @@
 ## Unreleased (phase 3)
 
+- In-app inspector redesigned after the desktop UI: the same tokens (colors,
+  level / method / status / JSON colors, FNV-1a tag hues), logo, top bar and
+  status bar. Logs: live stream with pause, level toggles, quick filters, query
+  language, merged repeats, request rows, tag actions. Network: table rows,
+  method / status / slow / mocked chips, host picker, query and body search,
+  General / Request / Response / Timing detail with a searchable JSON tree,
+  code / hex views, cookies and query, phase bars, Replay and Copy as cURL /
+  fetch / dio / Swift / Kotlin (ported from the desktop). Mocks, Performance
+  (tiles and charts) and Device ("what is captured") tabs. Tested at 320 px,
+  landscape, tablet and 2× text.
+
 - In-app inspector: `MaterialApp(builder: DurbunInspector.builder)` adds a
   draggable bubble and a panel on the phone. The panel has network (dart:io,
   Dio, OkHttp, URLSession, with cURL, pretty JSON and image preview), logs,

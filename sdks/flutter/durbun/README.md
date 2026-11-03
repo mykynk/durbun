@@ -82,28 +82,37 @@ MaterialApp(
 );
 ```
 
-Ekranda sürüklenebilir küçük bir balon çıkar; dokununca panel açılır. Mac'e
-bağlı olmak gerekmez, testçi telefonda kendi başına bakabilir.
+Ekranda sürüklenebilir küçük bir Dürbün balonu çıkar; dokununca panel açılır.
+Mac'e bağlı olmak gerekmez, testçi telefonda kendi başına bakabilir. Panel
+masaüstü Dürbün'ün tasarımını (aynı renkler, seviye ve durum renkleri, etiket
+renkleri, açık/koyu tema) ve sekmelerini taşır:
 
-- **Ağ:** dart:io, `package:http`, Dio, native OkHttp ve URLSession istekleri tek
-  listede, en yenisi üstte. Durum, süre, boyut, kaynak (`dart:io` / `dio` /
-  `okhttp` / `urlsession`) ve mock rozeti görünür. Adres, metot, durum kodu
-  ile arama yapılır, "Yalnızca hatalı" filtresi vardır. Ayrıntıda başlıklar,
-  okunaklı JSON gövde, görsel önizleme, zamanlamalar, **cURL olarak kopyala** ve
-  **tümünü metin olarak kopyala** bulunur.
-- **Loglar:** `Durbun.log`, `print` / `debugPrint`, Flutter hataları, event'ler ve
-  Kotlin/Swift native logları. Seviye filtresi, arama, `data` ağacı, yığın izi
-  ve kopyalama.
-- **Hatalar:** çökmeler ve hata logları ayrı sekmede. Native çökmeler bir sonraki
-  açılışta native katmandan gelir ve burada da görünür. Balon üzerindeki kırmızı
-  rozet, panel son açıldığından beri gelen hata ve başarısız istekleri sayar.
-- **Performans:** FPS, takılan kareler, build/raster süreleri, bellek ve FPS
-  grafiği.
-- **Bilgi:** uygulama, cihaz, yakalanan katmanlar (`dart`, `android`, `ios`),
-  masaüstü bağlantısı ve etkin mock kuralları.
+- **Loglar:** canlı akış (en yenisi altta, yukarı kaydırınca durur, "↓ N yeni"
+  ile döner), V D I W E seviye düğmeleri, *Sadece hatalar · Çökmeler · Ağ ·
+  Olaylar · Flutter · Native* hızlı filtreleri, masaüstündeki sorgu dili
+  (`tag:auth -tag:frame level:warn is:crash`), art arda aynı satırların `×N`
+  olarak birleşmesi, akış içinde istek satırları. Ayrıntıda mesaj, açılıp
+  kapanan veri ağacı, uygulama satırları öne çıkan yığın izi, "yalnızca bu
+  etiket / bu etiketi gizle".
+- **Ağ:** dart:io, `package:http`, Dio, OkHttp ve URLSession tek tabloda: durum,
+  metot, yol (sorgu soluk), host, kaynak, boyut, süre (yavaşlar sarı/kırmızı),
+  GraphQL işlemi, mock ve hata etiketi ("DNS çözümlenemedi" gibi). Metot ve
+  durum düğmeleri, *Sadece hatalar · Yavaş ≥ 1 sn · Mock'lananlar*, host seçimi,
+  `status:4xx method:post host:api is:slow` sorguları ve gövdelerde arama.
+  Ayrıntıda Genel / İstek / Yanıt / Zamanlama sekmeleri; gövde için aranabilir
+  JSON ağacı, Kod ve Hex görünümü, görsel önizleme; başlıklar, çerezler ve sorgu
+  parametreleri; DNS, bağlantı, TLS, TTFB çubukları; **Tekrar gönder** ve
+  **Farklı kopyala** (cURL, fetch, Dart dio, Swift, Kotlin).
+- **Mock'lar:** masaüstünden gelen kurallar ve kaç kez uygulandıkları.
+- **Performans:** FPS, takılan kare, build/raster, bellek, heap, CPU kutucukları;
+  FPS, kare süresi ve bellek grafikleri.
+- **Cihaz:** uygulama, cihaz, yakalanan katmanlar (Dart / Kotlin / Swift),
+  masaüstü bağlantısı ve "Neler görünüyor?": her veri kaynağının açık olup
+  olmadığı ve değilse nedeni.
 
 Panel, masaüstünün aldığı mesajların aynısını gösterir. Masaüstü bağlıyken
-ikisi birlikte çalışır.
+ikisi birlikte çalışır. Alttaki durum çubuğu bağlantıyı ve log, hata, istek
+sayılarını gösterir.
 
 Sınırlar ve ayarlar:
 
@@ -412,23 +421,24 @@ Swift `Durbun.info("message", tag: "tag")` (`import durbun`).
 
 ## In-app inspector (no Mac needed)
 
-One line in `MaterialApp` puts a draggable bubble on the screen. Tapping it opens
-a panel on the phone itself:
+One line in `MaterialApp` puts a draggable Dürbün bubble on the screen; tapping
+it opens a panel with the desktop's design and tabs, on the phone, with or
+without a Mac:
 
 ```dart
 MaterialApp(builder: DurbunInspector.builder, home: const HomePage());
 ```
 
-- **Network:** dart:io, `package:http`, Dio, native OkHttp and URLSession in one
-  list. It shows status, duration, size, source and mocks, with search and a
-  failures-only filter. The detail has headers, pretty JSON, image preview,
-  timings, copy as cURL and copy all.
-- **Logs:** `Durbun.log`, `print`, Flutter errors, events and native logs, with a
-  level filter, search, the data tree and stack traces.
-- **Errors:** crashes and error logs. The bubble's red badge counts errors and
-  failed requests that arrived since the panel was last opened.
-- **Performance:** FPS, janky frames, build/raster times, memory and an FPS chart.
-- **Info:** app, device, captured layers, desktop connection and active mocks.
+- **Logs:** live stream with pause, V D I W E level toggles, quick filters, the
+  desktop query language, merged repeats, request rows, data tree, stack traces
+  and tag actions.
+- **Network:** dart:io, Dio, OkHttp and URLSession in one table with method and
+  status chips, slow / mocked / failed filters, host picker, query and body
+  search. Detail tabs General / Request / Response / Timing: searchable JSON
+  tree, code and hex views, image preview, headers, cookies, query, phase bars,
+  Replay and Copy as cURL / fetch / dio / Swift / Kotlin.
+- **Mocks** from the desktop, **Performance** tiles and charts, **Device** with
+  the captured layers and what each data source needs.
 
 The panel shows the same messages the desktop receives. On the phone it keeps
 about 2,000 log lines, 300 requests and 24 MB of bodies, and says when the
