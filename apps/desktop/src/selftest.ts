@@ -2,16 +2,31 @@
  * Self-test for packaged builds: `DURBUN_DESKTOP_SELFTEST=<report.json> Dürbün.app/Contents/MacOS/Dürbün`
  * waits for the UI, checks the security/notification/chrome wiring from inside the window, writes a
  * JSON report (+ a PNG of the page) and quits through the normal quit path (which stops the server). External links are
- * recorded instead of opened. DURBUN_DESKTOP_SELFTEST_NOTIFY=1 also shows one real notification.
+ * recorded instead of opened. DURBUN_DESKTOP_SELFTEST_NOTIFY=1 also shows one real notification. The page's
+ * console is part of the report; `cspViolations` lists what the server's Content-Security-Policy refused
+ * (the deliberate example.com fetch below is expected there).
  */
 import { BrowserWindow, type WebContents } from 'electron';
 import { promises as fsp } from 'node:fs';
 import type { Notifier } from './notifier';
 
+export interface ConsoleEntry {
+  level: string;
+  message: string;
+  source: string;
+}
+
+/** Console lines that come from a Content-Security-Policy refusal. */
+export function cspViolations(entries: readonly ConsoleEntry[]): ConsoleEntry[] {
+  return entries.filter((e) => /Content Security Policy|Refused to /i.test(e.message));
+}
+
 export interface SelfTestContext {
   reportFile: string;
   wc: WebContents;
   externalOpened: string[];
+  /** Everything the window's page logged since it was created. */
+  consoleLog: readonly ConsoleEntry[];
   notifier: Notifier;
   info(): Record<string, unknown>;
   quit(): void;
@@ -19,7 +34,7 @@ export interface SelfTestContext {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const PAGE_CHECKS = `(async () => {
+export const PAGE_CHECKS = `(async () => {
   const style = (sel, prop) => { const el = document.querySelector(sel); return el ? getComputedStyle(el).getPropertyValue(prop) : null; };
   const out = {
     href: location.href,
@@ -36,8 +51,9 @@ const PAGE_CHECKS = `(async () => {
     topbarAppRegion: style('.topbar', '-webkit-app-region') || style('.topbar', 'app-region'),
     sbHeaderPaddingLeft: style('.sb-header', 'padding-left'),
   };
-  out.health = await fetch('/api/health').then((r) => r.json(), (e) => 'error: ' + e.message);
-  out.doctor = await fetch('/api/doctor').then((r) => r.json(), (e) => 'error: ' + e.message);
+  // A non-JSON answer (an older or a different server) is reported, not fatal to the whole report.
+  out.health = await fetch('/api/health').then((r) => r.json()).catch((e) => 'error: ' + e.message);
+  out.doctor = await fetch('/api/doctor').then((r) => r.json()).catch((e) => 'error: ' + e.message);
   out.externalFetch = await fetch('https://example.com/', { mode: 'no-cors' }).then(() => 'allowed', (e) => 'blocked (' + e.message + ')');
   return out;
 })()`;
@@ -70,6 +86,8 @@ export async function runSelfTest(ctx: SelfTestContext): Promise<void> {
       report.notifications = [...ctx.notifier.outcomes];
     }
     report.app = ctx.info();
+    report.console = [...ctx.consoleLog];
+    report.cspViolations = cspViolations(ctx.consoleLog);
   } catch (err) {
     report.error = (err as Error).stack ?? String(err);
   }

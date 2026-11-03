@@ -5,8 +5,11 @@
  *  - single instance (a second launch focuses the window)
  *  - PATH / ANDROID_HOME / … from the login shell before the server starts (Finder gives a bare env)
  *  - port 9750 / SDK 9751 (DURBUN_PORT / DURBUN_SDK_PORT override); a Dürbün already on the port is
- *    reused (and replaced by our own server when it stops); a port held by another program → a nearby
- *    free port
+ *    reused once it proves it is one (health + its UI; replaced by our own server when it stops); a port
+ *    held by another program → a nearby free port
+ *  - the window loads http://127.0.0.1:<port>, the host the probe checked (never "localhost", which
+ *    Chromium tries on ::1 first); the UI preferences and the page zoom of the old localhost origin are
+ *    moved over once
  *  - data dir ~/.durbun (shared with the CLI; DURBUN_DATA_DIR overrides; DURBUN_USER_DATA_DIR moves the
  *    Electron profile, DURBUN_DEMO=1 starts with demo data, DURBUN_DEBUG=1 logs verbosely)
  *  - menu-bar item, closing the window keeps capturing; Quit (⌘Q / menu bar) stops the server cleanly
@@ -24,12 +27,14 @@ import { createQuitFlow } from './lifecycle';
 import { installFileLog, type FileLog, type ScopedLogger } from './log';
 import { appMenuTemplate, serverLabel, trayMenuTemplate, type MenuHandlers, type ServerState } from './menu';
 import { decideNavigation, isAllowedPermission, isAllowedRequest, isAppUrl, REQUEST_FILTER_URLS } from './navigation';
+import { attachNotices, bundledServerVersion, serverWarnings } from './notices';
 import { createNotifier, type Notifier, type NotifyRequest } from './notifier';
 import { devIconPath, serverPaths } from './paths';
-import { DEFAULT_HTTP_PORT, DEFAULT_SDK_PORT, isPortFree, parsePortEnv, probeDurbun, watchAttached, type DurbunProbe } from './ports';
+import { DEFAULT_HTTP_PORT, DEFAULT_SDK_PORT, isPortFree, parsePortEnv, probeDurbun, proveDurbun, watchAttached, type DurbunProbe } from './ports';
 import { createReloadGuard, resolveFailure, type FailureChoice } from './recovery';
-import { runSelfTest } from './selftest';
-import { startOrAttachServer } from './startup';
+import { runSelfTest, type ConsoleEntry } from './selftest';
+import { startedOrigin, startOrAttachServer } from './startup';
+import { applyZoomLevel, BLANK_PAGE, LEGACY_HOST, legacyOriginFor, migrateUiStorage, planZoomMove, recordZoomMoved } from './storageMigration';
 import { renderTrayBitmap } from './trayIcon';
 import { fitBounds, MIN_SIZE, readWindowState, THEME_BACKGROUND, writeWindowState, type Theme, type WindowState } from './windowState';
 
@@ -38,6 +43,8 @@ interface EmbeddedServer {
   url: string;
   info: { ports?: { http?: number; sdk?: number } };
   warnings: string[];
+  /** Structured twins of `warnings` (code, params, English message); absent in older bundles. */
+  notices?: unknown[];
   sdkListening: boolean;
   stop(): Promise<void>;
 }
@@ -55,9 +62,13 @@ interface ServerModule {
   ): Promise<EmbeddedServer>;
   /** "Is a Dürbün answering on this port?" (absent in bundles older than phase 3). */
   probeServer?(port: number): Promise<DurbunProbe | undefined>;
+  /** The bundled server's version (absent in older bundles: the app's own version stands in). */
+  SERVER_VERSION?: string;
 }
 
 const STOP_TIMEOUT_MS = 12_000;
+/** The one-time preference move must never hold the window back for long. */
+const STORAGE_MIGRATION_TIMEOUT_MS = 4_000;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const selfTestFile = process.env.DURBUN_DESKTOP_SELFTEST || '';
 
@@ -95,7 +106,10 @@ function run(): void {
   let stopWatch: (() => void) | null = null;
   let shellEnv: { result: ShellEnvResult; changed: ShellEnvKey[] } | null = null;
   const externalOpened: string[] = [];
+  const consoleLog: ConsoleEntry[] = [];
   const stateFile = path.join(app.getPath('userData'), 'window-state.json');
+  const migrationFile = path.join(app.getPath('userData'), 'storage-migration.json');
+  let zoomChecked = false;
   let winState: WindowState = readWindowState(stateFile);
   const dataDir = process.env.DURBUN_DATA_DIR ? path.resolve(process.env.DURBUN_DATA_DIR) : path.join(os.homedir(), '.durbun');
 
@@ -251,7 +265,8 @@ function run(): void {
     win = w;
     if (winState.maximized) w.maximize();
     w.once('ready-to-show', () => {
-      if (!w.isDestroyed()) w.show();
+      // A self-test run shows the window without taking the focus from what the user is doing.
+      if (!w.isDestroyed()) selfTestFile ? w.showInactive() : w.show();
     });
 
     let saveTimer: NodeJS.Timeout | undefined;
@@ -283,6 +298,12 @@ function run(): void {
     });
 
     const wc = w.webContents;
+    if (selfTestFile) {
+      // The self-test reports what the page logged, e.g. "Refused to …" from the server's CSP.
+      wc.on('console-message', (details) => {
+        if (consoleLog.length < 200) consoleLog.push({ level: details.level, message: details.message.slice(0, 2_000), source: details.sourceId });
+      });
+    }
     let retries = 0;
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
       if (!isMainFrame || !appOrigin || !isAppUrl(url, appOrigin) || code === -3 /* aborted */) return;
@@ -312,17 +333,25 @@ function run(): void {
     void w.loadURL(appOrigin ?? statusPage(theme));
   }
 
-  function loadUi(origin: string): void {
+  /**
+   * Show the UI of the server on `port`. First, once per port, the UI preferences of the localhost origin
+   * the window used up to 0.1.x move to `origin`; its page zoom moves once (storageMigration.ts).
+   */
+  async function loadUi(port: number, origin: string): Promise<void> {
+    await moveUiPreferences(port, origin);
+    if (isQuitting()) return;
     appOrigin = origin;
     refreshMenus();
     if (!win || win.isDestroyed()) createWindow();
     else void win.loadURL(origin);
+    if (win) moveZoomLevel(win, origin);
     if (selfTestFile && win) {
       win.webContents.once('did-finish-load', () =>
         void runSelfTest({
           reportFile: selfTestFile,
           wc: win!.webContents,
           externalOpened,
+          consoleLog,
           notifier,
           info: () => ({
             language: t === STRINGS.tr ? 'tr' : 'en',
@@ -336,12 +365,74 @@ function run(): void {
             path: process.env.PATH,
             windowBounds: win && !win.isDestroyed() ? win.getBounds() : null,
             windowButtonPosition: win && !win.isDestroyed() ? win.getWindowButtonPosition() : null,
+            zoomLevel: win && !win.isDestroyed() ? win.webContents.getZoomLevel() : null,
             isPackaged: app.isPackaged,
             logFile: log.file,
           }),
           quit: () => app.quit(),
         }),
       );
+    }
+  }
+
+  /**
+   * Chromium keeps the zoom per host, so the localhost level of 0.1.x would reset once on 127.0.0.1. It is
+   * read from the profile's Preferences and set when the window first shows the UI on the new host;
+   * Chromium then keeps it for that host. Never by loading http://localhost (::1 may be another program).
+   */
+  function moveZoomLevel(w: BrowserWindow, origin: string): void {
+    if (zoomChecked) return;
+    zoomChecked = true;
+    const host = new URL(origin).hostname;
+    const plan = planZoomMove(migrationFile, path.join(app.getPath('userData'), 'Preferences'), host);
+    const record = () => void recordZoomMoved(migrationFile).catch((err) => log.warn(`could not record the zoom move: ${(err as Error).message}`));
+    if (plan.kind === 'none') record();
+    if (plan.kind !== 'move') return;
+    const wc = w.webContents;
+    const onLoad = () => {
+      let shown = '';
+      try {
+        shown = new URL(wc.getURL()).hostname;
+      } catch {
+        /* not a URL yet */
+      }
+      if (shown !== host) return; // the splash or a status page: wait for the UI
+      wc.off('did-finish-load', onLoad);
+      if (applyZoomLevel(wc, plan.level)) log.info(`page zoom ${plan.level} moved from ${LEGACY_HOST} to ${host}`);
+      record();
+    };
+    wc.on('did-finish-load', onLoad);
+  }
+
+  async function moveUiPreferences(port: number, origin: string): Promise<void> {
+    const file = migrationFile;
+    // A hidden window shows empty data: documents of both origins (no request leaves the app).
+    const page = async () => {
+      const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false } });
+      return {
+        open: async (o: string) => {
+          await w.loadURL(BLANK_PAGE, { baseURLForDataURL: `${o}/` });
+        },
+        run: <T,>(script: string) => w.webContents.executeJavaScript(script, true) as Promise<T>,
+        close: () => {
+          if (!w.isDestroyed()) w.destroy();
+        },
+      };
+    };
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const result = await Promise.race([
+        migrateUiStorage(port, file, page, origin),
+        new Promise<'timeout'>((resolve) => {
+          timer = setTimeout(() => resolve('timeout'), STORAGE_MIGRATION_TIMEOUT_MS);
+        }),
+      ]);
+      if (result === 'timeout') log.warn(`moving the UI preferences to ${origin} takes too long; the window opens without waiting`);
+      else if (result.kind === 'moved') log.info(`UI preferences: ${result.keys} key(s) copied from ${legacyOriginFor(port)} to ${origin}`);
+    } catch (err) {
+      log.warn(`UI preferences could not be moved to ${origin}: ${(err as Error).message}`);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -366,8 +457,10 @@ function run(): void {
     const sdkPort = parsePortEnv(process.env.DURBUN_SDK_PORT, DEFAULT_SDK_PORT);
     const uiDir = existsSync(path.join(paths.uiDir, 'index.html')) ? paths.uiDir : undefined;
     const verbose = Boolean(process.env.DURBUN_DEBUG);
-    // "Is it a real Dürbün?" is the server's own definition (GET /api/health), not a copy of it.
-    const probe = (port: number) => (typeof mod.probeServer === 'function' ? mod.probeServer(port) : probeDurbun(port));
+    // "Is it a real Dürbün?": the server's own health check (GET /api/health), plus a semver version and
+    // the Dürbün UI (or its no-UI page) at "/" before the window is handed to it.
+    const health = (port: number) => (typeof mod.probeServer === 'function' ? mod.probeServer(port) : probeDurbun(port));
+    const probe = (port: number) => proveDurbun(port, { health });
     const outcome = await startOrAttachServer(httpPort, sdkPort, {
       probe,
       isFree: isPortFree,
@@ -385,12 +478,12 @@ function run(): void {
     if (isQuitting() || outcome.kind === 'cancelled') return; // a server started meanwhile is stopped by stopServer()
     if (outcome.kind === 'failed') return fail(outcome.error);
     if (outcome.kind === 'attached') {
-      const mine = app.getVersion();
-      const warnings = outcome.version !== mine && outcome.version !== '?' ? [t.attachedVersionNotice(outcome.version, mine)] : [];
-      log.info(`a Dürbün ${outcome.version} already runs on port ${outcome.port}; opening it`);
+      const warnings = attachNotices(t, outcome, bundledServerVersion(mod, app.getVersion()));
+      log.info(`a Dürbün ${outcome.version} already runs on port ${outcome.port} (${outcome.page ?? 'ui'}); opening ${outcome.origin}`);
       for (const w of warnings) log.warn(w);
       setState({ kind: 'attached', port: outcome.port, warnings });
-      loadUi(`http://localhost:${outcome.port}`);
+      await loadUi(outcome.port, outcome.origin);
+      if (isQuitting()) return;
       // When that Dürbün stops (its terminal closed), this app starts its own server instead of
       // leaving the window on a dead page.
       stopWatch = watchAttached(outcome.port, {
@@ -406,13 +499,15 @@ function run(): void {
     }
     const started = outcome.server;
     server = started;
-    const port = started.info?.ports?.http ?? (Number(new URL(started.url).port) || outcome.port);
-    const warnings = [...started.warnings, ...shellWarnings()];
-    if (outcome.fallback) warnings.unshift(t.portFallbackNotice(httpPort, port));
-    for (const w of warnings) log.warn(w);
-    log.info(`server running at ${started.url}`);
+    const { port, origin } = startedOrigin(started, outcome.port);
+    const fallback = outcome.fallback ? [t.portFallbackNotice(httpPort, port)] : [];
+    const shell = shellWarnings();
+    // The log keeps the server's own (English) wording; the tray speaks the app's language.
+    for (const w of [...fallback, ...(started.warnings ?? []), ...shell]) log.warn(w);
+    const warnings = [...fallback, ...serverWarnings(t, started), ...shell];
+    log.info(`server running at ${origin}`);
     setState({ kind: 'running', port, warnings });
-    loadUi(`http://localhost:${port}`);
+    await loadUi(port, origin);
   }
 
   /** The login shell could not be asked: say so, tools may then be missing (Finder's bare PATH). */
