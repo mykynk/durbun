@@ -23,6 +23,13 @@ interface PendingCommand {
 const describeMeta = (meta: SdkAttachMeta) => `${meta.transport}${meta.remote ? ` ${meta.remote}` : ''}`;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** "POST / HTTP/1.1": a browser (fetch / form / <img>) or an HTTP tool talking to the raw SDK port. */
+const HTTP_REQUEST_LINE = /^[A-Z]+ \S+ HTTP\/\d(?:\.\d)?$/;
+const NOT_HTTP_BODY = 'This is the Dürbün SDK port: it speaks NDJSON, not HTTP. Open Dürbün on its HTTP port (9750 by default).\n';
+const NOT_HTTP_RESPONSE =
+  `HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n` +
+  `Content-Length: ${Buffer.byteLength(NOT_HTTP_BODY)}\r\n\r\n${NOT_HTTP_BODY}`;
+
 /** Same as `createSdkLayer`, with overridable timings (tests use short ones). */
 export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides: Partial<SdkTimings> = {}): SdkLayer {
   const timings: SdkTimings = { ...DEFAULT_SDK_TIMINGS, ...overrides };
@@ -149,6 +156,26 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
     }
   });
 
+  /**
+   * Every SDK starts with its JSON `hello`. A stream whose first line is something else is not an SDK —
+   * typically a web page's no-cors POST to the raw port, whose body could carry a forged hello: closed
+   * before any of it is read (an HTTP client gets a short 400 that says what this port is).
+   */
+  function refuseNonSdkStream(stream: Duplex, connection: SdkConnection, meta: SdkAttachMeta, line: string): void {
+    const http = HTTP_REQUEST_LINE.test(line);
+    logger.warn(
+      `closed an SDK connection from ${describeMeta(meta)}: its first line is not JSON${http ? ` but an HTTP request ("${line.slice(0, 80)}"), e.g. from a web page` : ''}`,
+    );
+    if (http && stream.writable) {
+      try {
+        stream.write(NOT_HTTP_RESPONSE);
+      } catch {
+        // the connection is closed below anyway
+      }
+    }
+    connection.close('the first line is not JSON', 1002);
+  }
+
   function attachStream(stream: Duplex, meta: SdkAttachMeta): void {
     if (closed || stream.destroyed) {
       if (!stream.destroyed) stream.destroy();
@@ -159,14 +186,19 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
     const connection = new SdkConnection(host, meta, wire, true);
     conn = connection;
     connections.add(connection);
+    let firstLine = true;
     const decoder = new NdjsonDecoder({
       maxLineBytes: MAX_FRAME_BYTES,
       onLine: (line) => {
+        if (connection.closed) return;
+        const first = firstLine;
+        firstLine = false;
         let value: unknown;
         try {
           value = JSON.parse(line);
         } catch {
-          logger.debug(`ignored a non-JSON line (${line.length} chars) from ${describeMeta(meta)}`);
+          if (first) refuseNonSdkStream(stream, connection, meta, line);
+          else logger.debug(`ignored a non-JSON line (${line.length} chars) from ${describeMeta(meta)}`);
           return;
         }
         connection.receive(value);

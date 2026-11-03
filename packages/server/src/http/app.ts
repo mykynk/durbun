@@ -2,7 +2,8 @@
  * The HTTP/WebSocket control plane: one node:http server with
  *   - static UI (or the "please build" page),
  *   - REST /api/* (loopback + allowed origins only),
- *   - WebSocket upgrades: /ui (loopback + allowed origins) and /sdk (open; handed to the SDK layer).
+ *   - WebSocket upgrades: /ui (loopback + allowed origins) and /sdk (any address, no pages of other sites;
+ *     handed to the SDK layer).
  * It also owns the runtime state the UI can change: demo on/off, SDK listener binding (LAN toggle), driver
  * status broadcasts, settings/mocks propagation. Built from plain dependencies so tests can pass fakes.
  */
@@ -28,7 +29,7 @@ import type { ClearEvent, DeviceDriver, DriverContext, FlutterVmModule, Hub, Hub
 import { SERVER_VERSION } from '../version';
 import { createApiHandler } from './api';
 import { CommandError, createCommandRouter, withTimeout } from './commands';
-import { checkLocalAccess } from './security';
+import { checkLocalAccess, checkSdkUpgrade } from './security';
 import { createStaticHandler } from './static';
 import { UiChannel } from './uiSocket';
 import { errorMessage, sendError } from './util';
@@ -59,6 +60,8 @@ export interface HttpAppDeps {
   fetchImpl?: typeof fetch;
   uploadLimitBytes?: number;
   importLimitBytes?: number;
+  /** This Mac's own addresses and host names, for /sdk pages (tests); default ownHostNames() per upgrade. */
+  ownHostNames?: () => Iterable<string>;
 }
 
 export interface SdkListenerState {
@@ -66,6 +69,8 @@ export interface SdkListenerState {
   port: number;
   listening: boolean;
   error?: string;
+  /** errno code of the failed listen (e.g. 'EADDRINUSE'). */
+  errorCode?: string;
 }
 
 export interface HttpApp {
@@ -333,7 +338,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
         const code = (err as NodeJS.ErrnoException).code;
         const message =
           code === 'EADDRINUSE' ? `Port ${deps.ports.sdk} is already used by another program` : `Could not listen on ${host}:${deps.ports.sdk}: ${errorMessage(err)}`;
-        sdkListener = { host, port: deps.ports.sdk, listening: false, error: message };
+        sdkListener = { host, port: deps.ports.sdk, listening: false, error: message, ...(code ? { errorCode: code } : {}) };
         logger.warn(`SDK listener: ${message}`);
         return false;
       }
@@ -435,6 +440,12 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
       return;
     }
     if (pathname === '/sdk' || pathname === '/sdk/') {
+      const access = checkSdkUpgrade(req, deps.ownHostNames?.());
+      if (!access.ok) {
+        logger.warn(`blocked WebSocket /sdk from ${req.socket.remoteAddress ?? '?'}: ${access.reason}`);
+        rejectUpgrade(socket, 403, 'Forbidden');
+        return;
+      }
       sdkWss.handleUpgrade(req, socket, head, (ws) => {
         const remote = `${req.socket.remoteAddress ?? '?'}:${req.socket.remotePort ?? '?'}`;
         try {

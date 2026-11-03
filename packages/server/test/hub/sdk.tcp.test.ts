@@ -174,10 +174,10 @@ describe('SDK layer over raw TCP', () => {
     expect(hub.getLogs().filter((l) => l.code === 'app.disconnected')).toHaveLength(1);
   });
 
-  it('survives chunked frames, split UTF-8 and garbage input', async () => {
+  it('survives chunked frames, split UTF-8 and garbage input after a JSON first line', async () => {
     const port = await setup();
     const c = await connect(port);
-    c.writeRaw('this is not json\n{"type":"log","message":"before hello"}\n[1,2,3]\n');
+    c.writeRaw('{"type":"log","message":"before hello"}\nthis is not json\n[1,2,3]\n');
     const helloBytes = Buffer.from(`${JSON.stringify(hello())}\n`);
     for (let i = 0; i < helloBytes.length; i += 7) {
       c.writeRaw(helloBytes.subarray(i, i + 7));
@@ -196,6 +196,45 @@ describe('SDK layer over raw TCP', () => {
     expect(messages).toEqual(['Ödeme başarılı ✓ 🐾 İstanbul', 'still alive']);
     expect(hub.getLogs().some((l) => l.message === 'before hello')).toBe(false);
     expect(c.closed).toBe(false);
+  });
+
+  it('closes a stream whose first line is not JSON: the exact bytes of a web page\'s no-cors POST', async () => {
+    const port = await setup();
+    // fetch('http://127.0.0.1:<port>/', { method: 'POST', mode: 'no-cors', body }) from https://evil.example
+    // in Chrome: the request line and headers come first, the forged hello is the body.
+    const body = `${JSON.stringify(hello({ app: { name: 'Bank', id: 'com.example.bank', version: '1.0.0' }, session: 'forged' }))}\n`;
+    const bytes =
+      `POST / HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: keep-alive\r\nContent-Length: ${Buffer.byteLength(body)}\r\n` +
+      'sec-ch-ua-platform: "macOS"\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\r\n' +
+      'sec-ch-ua: "Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"\r\nContent-Type: text/plain;charset=UTF-8\r\nsec-ch-ua-mobile: ?0\r\n' +
+      'Accept: */*\r\nOrigin: https://evil.example\r\nSec-Fetch-Site: cross-site\r\nSec-Fetch-Mode: no-cors\r\nSec-Fetch-Dest: empty\r\n' +
+      'Referer: https://evil.example/\r\nAccept-Encoding: gzip, deflate, br, zstd\r\nAccept-Language: tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7\r\n\r\n' +
+      body;
+    const socket = net.connect(port, '127.0.0.1');
+    let reply = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (d: string) => (reply += d));
+    const closedSocket = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    socket.on('error', () => {});
+    await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
+    socket.write(bytes);
+    await closedSocket;
+    expect(reply).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+    expect(reply).toContain('Dürbün SDK port');
+    expect(reply).not.toContain('welcome');
+    expect(hub.getApps()).toEqual([]);
+    expect(hub.getDevices()).toEqual([]);
+    expect(sdk.connectionCount()).toBe(0);
+
+    // A first line that is neither JSON nor HTTP closes the stream too; a real SDK still connects.
+    const junk = await connect(port);
+    junk.writeRaw('\r\n\nhello there\n');
+    await waitFor(() => junk.closed, 2000);
+    const c = await connect(port);
+    c.writeRaw('\n\r\n');
+    c.send(hello());
+    await c.next('welcome');
+    expect(hub.getApps()).toHaveLength(1);
   });
 
   it('closes connections without hello, pings established ones and closes idle ones', async () => {

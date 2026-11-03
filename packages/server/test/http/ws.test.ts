@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
@@ -146,9 +147,46 @@ describe('WS /ui access control', () => {
 });
 
 describe('WS /sdk', () => {
-  it('accepts any origin and hands the socket to the SDK layer', async () => {
+  /** HTTP status of a /sdk upgrade with these headers (101 = accepted). */
+  async function upgradeStatus(headers: Record<string, string>, url = `ws://127.0.0.1:${t!.port}/sdk`): Promise<number> {
+    const ws = new WebSocket(url, { headers });
+    return new Promise<number>((resolve) => {
+      ws.once('open', () => {
+        ws.terminate();
+        resolve(101);
+      });
+      ws.once('unexpected-response', (_req, res) => {
+        resolve(res.statusCode ?? 0);
+        ws.terminate();
+      });
+      ws.once('error', () => resolve(-1));
+    });
+  }
+
+  /** First response line for raw handshake bytes. */
+  async function rawHandshake(bytes: string): Promise<string> {
+    const socket = net.connect(t!.port, '127.0.0.1');
+    socket.on('error', () => {});
+    let reply = '';
+    socket.setEncoding('utf8');
+    const line = new Promise<string>((resolve) => {
+      socket.on('data', (d: string) => {
+        reply += d;
+        const nl = reply.indexOf('\r\n');
+        if (nl >= 0) resolve(reply.slice(0, nl));
+      });
+      socket.once('close', () => resolve(reply.split('\r\n')[0] ?? ''));
+    });
+    await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
+    socket.write(bytes);
+    const first = await line;
+    socket.destroy();
+    return first;
+  }
+
+  it('hands app sockets to the SDK layer: no Origin (Node ws, dart:io) or the ws URL\'s own origin (React Native)', async () => {
     t = await startTestApp();
-    const ws = new WebSocket(`ws://127.0.0.1:${t.port}/sdk`, { headers: { Origin: 'http://192.168.1.50:8081' } });
+    const ws = new WebSocket(`ws://127.0.0.1:${t.port}/sdk`);
     await new Promise<void>((resolve, reject) => {
       ws.once('open', () => resolve());
       ws.once('error', reject);
@@ -160,6 +198,80 @@ describe('WS /sdk', () => {
     expect(t.sdk.sockets[0]!.meta.transport).toBe('websocket');
     expect(t.sdk.sockets[0]!.meta.remote).toMatch(/^127\.0\.0\.1:\d+$/);
     ws.terminate();
+    // React Native (OkHttp / SocketRocket) sends the http origin of the ws URL it connects to.
+    expect(await upgradeStatus({ Origin: `http://127.0.0.1:${t.port}` })).toBe(101);
+    expect(await upgradeStatus({ Origin: `http://localhost:${t.port}` }, `ws://localhost:${t.port}/sdk`)).toBe(101);
+    // Over the LAN the Host is the Mac's address; the app's origin names the same one.
+    expect(await upgradeStatus({ Host: `192.168.1.20:${t.port}`, Origin: `http://192.168.1.20:${t.port}` })).toBe(101);
+  });
+
+  it('refuses web pages of other sites, keeps pages of local dev servers (the JS SDK in a browser)', async () => {
+    t = await startTestApp({ ownHostNames: () => ['192.168.1.20', 'Yusufs-MBP.local'] });
+    const refused: Record<string, string>[] = [
+      { Origin: 'https://evil.example', 'Sec-Fetch-Site': 'cross-site' },
+      { Origin: 'https://evil.example' },
+      { Origin: `http://evil.example:${t.port}` },
+      { Origin: 'null' },
+      { Origin: 'file://' },
+      { Origin: 'http://192.168.1.50:8081' }, // a page on another machine
+      { 'Sec-Fetch-Site': 'cross-site' },
+      { 'Sec-Fetch-Site': 'same-site' },
+      { Host: `192.168.1.20:${t.port}`, Origin: `http://192.168.1.21:${t.port}` },
+    ];
+    for (const headers of refused) expect(await upgradeStatus(headers), JSON.stringify(headers)).toBe(403);
+    expect(t.sdk.sockets).toHaveLength(0);
+
+    const accepted: Record<string, string>[] = [
+      { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' }, // Vite dev server on this Mac
+      { Origin: 'http://localhost:3000', 'Sec-Fetch-Site': 'cross-site' }, // localhost page → ws://127.0.0.1
+      { Origin: 'http://[::1]:8081' },
+      { Host: `192.168.1.20:${t.port}`, Origin: 'http://192.168.1.20:3000', 'Sec-Fetch-Site': 'same-site' }, // LAN page served by this Mac
+      { Origin: `http://127.0.0.1:${t.port}`, 'Sec-Fetch-Site': 'same-origin' },
+      { 'Sec-Fetch-Site': 'none' },
+    ];
+    for (const headers of accepted) expect(await upgradeStatus(headers), JSON.stringify(headers)).toBe(101);
+  });
+
+  it('refuses DNS-rebinding pages on any port, takes pages served from this Mac\'s LAN address or .local name', async () => {
+    t = await startTestApp({ ownHostNames: () => ['192.168.1.20', 'yusufs-mbp.local'] });
+    // After a rebind the hostile page's own public name resolves to 127.0.0.1: same host, any port, any metadata.
+    const rebind = `rebind.attacker.example:${t.port}`;
+    const refused: Record<string, string>[] = [
+      { Host: rebind, Origin: `http://rebind.attacker.example:${t.port}`, 'Sec-Fetch-Site': 'same-origin' },
+      { Host: rebind, Origin: `http://rebind.attacker.example:${t.port}` },
+      { Host: rebind, Origin: 'http://rebind.attacker.example', 'Sec-Fetch-Site': 'same-site' },
+      { Host: rebind, Origin: 'https://rebind.attacker.example', 'Sec-Fetch-Site': 'cross-site' },
+      { Host: `yusufs-mbp.example:${t.port}`, Origin: `http://yusufs-mbp.example:${t.port}` },
+    ];
+    for (const headers of refused) expect(await upgradeStatus(headers), JSON.stringify(headers)).toBe(403);
+    expect(t.sdk.sockets).toHaveLength(0);
+
+    const accepted: Record<string, string>[] = [
+      // the JS SDK on http://192.168.1.20:5173 (this Mac) dials ws://localhost and ws://127.0.0.1 first
+      { Host: `localhost:${t.port}`, Origin: 'http://192.168.1.20:5173', 'Sec-Fetch-Site': 'cross-site' },
+      { Origin: 'http://192.168.1.20:5173', 'Sec-Fetch-Site': 'cross-site' },
+      { Host: `localhost:${t.port}`, Origin: 'http://yusufs-mbp.local:5173', 'Sec-Fetch-Site': 'cross-site' },
+      // React Native: the Android emulator's alias of this Mac, another Mac's Bonjour name over the LAN
+      { Host: `10.0.2.2:${t.port}`, Origin: `http://10.0.2.2:${t.port}` },
+      { Host: `ofis-mac.local:${t.port}`, Origin: `http://ofis-mac.local:${t.port}` },
+      { Host: `[fd00::20]:${t.port}`, Origin: `http://[fd00::20]:${t.port}` },
+    ];
+    for (const headers of accepted) expect(await upgradeStatus(headers), JSON.stringify(headers)).toBe(101);
+  });
+
+  it('refuses the exact WebSocket handshake of a page on another site', async () => {
+    t = await startTestApp();
+    const handshake = (origin: string, site: string) =>
+      `GET /sdk HTTP/1.1\r\nHost: 127.0.0.1:${t!.port}\r\nConnection: Upgrade\r\nPragma: no-cache\r\nCache-Control: no-cache\r\n` +
+      'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:144.0) Gecko/20100101 Firefox/144.0\r\nUpgrade: websocket\r\n' +
+      `Origin: ${origin}\r\nSec-WebSocket-Version: 13\r\nAccept-Encoding: gzip, deflate, br, zstd\r\nAccept-Language: tr-TR,tr;q=0.8,en-US;q=0.5,en;q=0.3\r\n` +
+      'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Extensions: permessage-deflate\r\n' +
+      `Sec-Fetch-Dest: empty\r\nSec-Fetch-Mode: websocket\r\nSec-Fetch-Site: ${site}\r\n\r\n`;
+    expect(await rawHandshake(handshake('https://evil.example', 'cross-site'))).toBe('HTTP/1.1 403 Forbidden');
+    expect(t.sdk.sockets).toHaveLength(0);
+    expect(await rawHandshake(handshake('http://localhost:5173', 'same-site'))).toBe('HTTP/1.1 101 Switching Protocols');
+    for (let i = 0; i < 100 && t.sdk.sockets.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(t.sdk.sockets).toHaveLength(1);
   });
 });
 
