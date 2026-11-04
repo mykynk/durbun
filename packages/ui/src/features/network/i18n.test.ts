@@ -10,6 +10,7 @@ import { COLUMNS } from './model/columns';
 import { STATUS_CLASSES, TYPE_CATEGORIES } from './model/filters';
 import { COPY_FORMATS } from './model/copyAs';
 import { TIMING_PHASES } from './model/waterfall';
+import { SHARE_REPORT_KEYS } from './share';
 import { MATCH_TYPES, FAIL_ERRORS, ACTION_TYPES } from '../mocks/model/rules';
 
 const ROOTS = [join(__dirname), join(__dirname, '../mocks')];
@@ -58,6 +59,7 @@ describe('network + mocks dictionaries', () => {
       'network.body.kinds': ['empty', 'notCaptured', 'json', 'image', 'svg', 'html', 'xml', 'javascript', 'css', 'text', 'form', 'multipart', 'binary'],
       'network.body.modes': ['preview', 'code', 'hex'],
       'network.detail.tabs': ['general', 'request', 'response', 'timing'],
+      'network.share.report': SHARE_REPORT_KEYS,
       'network.sections': ['body', 'headers', 'query', 'cookies'],
       'network.compare.tabs': ['general', 'headers', 'response', 'request'],
       'mocks.match': MATCH_TYPES,

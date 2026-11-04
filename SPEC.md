@@ -653,7 +653,10 @@ Request table (status, method, host, path / GraphQL op, type, size, duration, st
 sortable, column toggles), filters (text, body search via server, method, status class, content type,
 host, errors only, slow), detail (Genel / İstek / Yanıt / Zamanlama; headers, query params, cookies,
 body viewers: JSON tree, raw/pretty code, image preview, hex for binary, truncated notice), copy as
-cURL / fetch / Dart(dio) / Swift / Kotlin(OkHttp), replay and edit-&-replay, create mock from request,
+cURL / fetch / Dart(dio) / Swift / Kotlin(OkHttp), share report (Markdown-light text identical to the in-app
+panel's: request line, outcome, time local + UTC, app, device, client, trace IDs, mock note, error, headers,
+bodies cut at 20 000 chars, cURL; secret headers / query keys / JSON and form fields masked as `••••` by default;
+copy or save as .md), replay and edit-&-replay, create mock from request,
 HAR export (filtered / single), compare two responses (diff). Mocks tab: rule list (enable, reorder,
 duplicate, delete, hit count), editor (method, URL pattern + match type with live tester against recent
 requests, action respond/delay/fail, status presets, header rows, body editor with JSON validate/format,

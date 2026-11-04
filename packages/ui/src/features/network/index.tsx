@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { ArrowLeftRight, BookOpen, Columns3, Copy, Drama, Eraser, FileDown, FilterX, Link2, Pause, PencilLine, Play, Radio, RotateCw, ScrollText, X } from 'lucide-react';
+import { ArrowLeftRight, BookOpen, Columns3, Copy, Drama, Eraser, FileDown, FilterX, Link2, Pause, PencilLine, Play, Radio, RotateCw, ScrollText, Share2, X } from 'lucide-react';
 import type { NetworkEntry, UiCommand } from '@durbun/protocol';
 import {
   ALL_SCOPE,
@@ -56,6 +56,7 @@ import { FilterBar, MainToolbar } from './components/Toolbars';
 import { DetailPanel } from './components/DetailPanel';
 import { ReplayDialog } from './components/ReplayDialog';
 import { CompareDialog } from './components/CompareDialog';
+import { ShareDialog } from './components/ShareDialog';
 import { copyEntryAs, copyUrl, createMockFrom, downloadHarFor, harFileName, replayRequest, showInLogs } from './actions';
 import { useBodySearch } from './useBodySearch';
 import { ExplainEmpty } from '../../sources';
@@ -118,9 +119,10 @@ export default function NetworkView() {
   const [compareBase, setCompareBase] = useState<string | null>(null);
   const [comparePair, setComparePair] = useState<[NetworkEntry, NetworkEntry] | null>(null);
   const [replayEntry, setReplayEntry] = useState<NetworkEntry | null>(null);
+  const [shareEntry, setShareEntry] = useState<NetworkEntry | null>(null);
   /** Entry returned by a replay before the store has it. */
   const [fallbackEntry, setFallbackEntry] = useState<NetworkEntry | null>(null);
-  const dialogOpen = !!comparePair || !!replayEntry;
+  const dialogOpen = !!comparePair || !!replayEntry || !!shareEntry;
 
   /* ── rows ── */
   const chronological = isChronological(sort);
@@ -252,6 +254,8 @@ export default function NetworkView() {
   const rowMenu = (e: NetworkEntry): MenuItem[] => {
     const base = compareBase && compareBase !== e.id ? networkStore.get(compareBase) : undefined;
     return [
+      { label: t('network.share.menu'), icon: Share2, onSelect: () => setShareEntry(e) },
+      { type: 'separator' },
       { label: t('network.menu.copyUrl'), icon: Link2, onSelect: () => void copyUrl(e) },
       ...COPY_FORMATS.map((f): MenuItem => ({ label: t(`network.menu.copyAs.${f}`), icon: f === 'curl' ? Copy : undefined, onSelect: () => void copyEntryAs(e, f) })),
       { type: 'separator' },
@@ -435,6 +439,7 @@ export default function NetworkView() {
     { id: 'network.bodySearch', title: bodySearch ? t('network.commands.bodySearchOff') : t('network.commands.bodySearchOn'), group, keywords: ['body', 'gövde', 'search', 'ara'], run: () => setBodySearch(!bodySearch) },
     ...(sel
       ? [
+          { id: 'network.sel.share', title: t('network.share.title'), group, icon: Share2, keywords: ['share', 'paylaş', 'report', 'rapor', 'bug', 'hata', 'markdown'], run: () => setShareEntry(sel) },
           { id: 'network.sel.curl', title: t('network.menu.copyAs.curl'), group, icon: Copy, keywords: ['curl', 'copy', 'kopyala'], run: () => void copyEntryAs(sel, 'curl') },
           { id: 'network.sel.replay', title: t('network.menu.replay'), group, icon: RotateCw, keywords: ['replay', 'tekrar', 'gönder'], run: () => void doReplay(sel) },
           { id: 'network.sel.edit', title: t('network.menu.editReplayEllipsis'), group, icon: PencilLine, keywords: ['edit', 'düzenle', 'replay'], run: () => setReplayEntry(sel) },
@@ -604,6 +609,7 @@ export default function NetworkView() {
             onReplay={() => void doReplay(selected)}
             onEditReplay={() => setReplayEntry(selected)}
             onCompare={() => setCompareBase(selected.id)}
+            onShare={() => setShareEntry(selected)}
           />
         ) : (
           <span />
@@ -613,6 +619,7 @@ export default function NetworkView() {
         setFallbackEntry(res);
         select(res.id, { reveal: true });
       }} /> : null}
+      {shareEntry ? <ShareDialog entry={shareEntry} gone={!networkStore.get(shareEntry.id)} onClose={() => setShareEntry(null)} /> : null}
       {comparePair ? (
         <CompareDialog
           a={comparePair[0]}

@@ -11,6 +11,7 @@ import {
   PencilLine,
   RotateCw,
   ScrollText,
+  Share2,
   X,
 } from 'lucide-react';
 import type { NetworkDetail, NetworkEntry } from '@durbun/protocol';
@@ -53,9 +54,10 @@ export interface DetailPanelProps {
   onReplay: () => void;
   onEditReplay: () => void;
   onCompare: () => void;
+  onShare: () => void;
 }
 
-export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCompare }: DetailPanelProps) {
+export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCompare, onShare }: DetailPanelProps) {
   const t = useT();
   const [savedTab, setTab] = usePersistentState<DetailTab>('network.detailTab', 'response');
   const tab = DETAIL_TABS.includes(savedTab) ? savedTab : 'response';
@@ -85,6 +87,9 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
         onClose={onClose}
         tools={
           <>
+            <Button size="sm" variant="ghost" icon={Share2} onClick={onShare} title={t('network.share.title')}>
+              {t('network.share.button')}
+            </Button>
             <DropdownMenu items={copyItems} aria-label={t('network.menu.copyMenu')}>
               {(p) => (
                 <Button size="sm" variant="ghost" icon={Copy} iconRight={ChevronDown} {...p}>
