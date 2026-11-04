@@ -7,11 +7,36 @@ import Foundation
 protocol HostLink: AnyObject {
     /// A batch of encoded messages (one JSON object each, no newline). Called on the relay queue.
     func deliver(_ lines: [String])
+    /// A batch of this app's own os_log lines, encoded like `deliver`'s. The host shows them in its
+    /// in-app panel and sends them to the desktop only when the desktop cannot read the device's logs.
+    func deliverDeviceLogs(_ lines: [String])
     /// The native action list changed (JSON array of `AppAction` descriptors).
     func actionsChanged(_ descriptorsJSON: String)
     /// Waits until the host handed everything it received to the desktop's socket. Called off the
     /// main thread only (the host needs the main thread to answer); false on timeout.
     func flush(timeout: TimeInterval) -> Bool
+}
+
+extension HostLink {
+    func deliverDeviceLogs(_ lines: [String]) { deliver(lines) }
+}
+
+/// Hosted mode: what the host wants of this app's own os_log lines (`state.deviceLogs`).
+struct HostDeviceLogs: Equatable {
+    /// Read them: the in-app panel shows them, or the desktop gets them.
+    var read = false
+    /// Someone is looking (panel open, or a desktop without device logs): read often.
+    var fast = false
+    /// The host sends these lines on to the desktop (it cannot read the device's logs itself).
+    var desktop = false
+
+    init() {}
+
+    init(json: [String: Any], fallback: HostDeviceLogs) {
+        read = json["read"] as? Bool ?? fallback.read
+        fast = json["fast"] as? Bool ?? fallback.fast
+        desktop = json["desktop"] as? Bool ?? fallback.desktop
+    }
 }
 
 /// Batches encoded lines on a serial queue and hands them to the `HostLink` (bounded buffer: the

@@ -148,13 +148,22 @@ class InfoView extends StatelessWidget {
           final sources = store.calls.map((x) => x.source.toLowerCase()).toSet();
           final hasAndroid = layers.contains('android');
           final hasIos = layers.contains('ios');
+          final deviceLogs = store.nativeDeviceLogs;
+          final nativeLogs = switch (deviceLogs) {
+            'logcat' => ('Kotlin · Log · logcat', null),
+            'os_log' => ('Swift · print · os_log', null),
+            'off' => (hasIos ? 'Swift · Durbun.log' : 'Kotlin · Durbun.log', t.srcDeviceLogsOff),
+            _ when hasIos => ('Swift · print', t.srcOsLogNeedsIos15),
+            _ when hasAndroid => ('Kotlin · Durbun.log', null),
+            _ => ('Kotlin · Swift', t.srcNoNative),
+          };
           final rows = <(String, String, bool, String?)>[
             (t.srcDartHttp, 'dart:io · package:http', caps.contains('network'), caps.contains('network') ? null : t.srcNetworkOff),
             (t.srcDio, 'durbun_dio', sources.contains('dio'), sources.contains('dio') ? null : t.srcDioHint),
             if (platform != 'ios') (t.srcOkHttp, 'DurbunInterceptor', hasAndroid && caps.contains('network'), hasAndroid ? t.srcOkHttpHint : t.srcNoNative),
             if (platform != 'android') (t.srcUrlSession, t.srcAutomatic, hasIos && caps.contains('network'), hasIos ? null : t.srcNoNative),
             (t.srcAppLogs, 'Durbun.log · print · debugPrint', true, null),
-            (t.srcNativeLogs, hasIos ? 'Swift · os_log' : 'Kotlin · Log', hasAndroid || hasIos, hasAndroid || hasIos ? null : t.srcNoNative),
+            (t.srcNativeLogs, nativeLogs.$1, hasAndroid || hasIos, nativeLogs.$2),
             (t.srcCrashes, t.srcCrashesDetail, caps.contains('crash'), caps.contains('crash') ? t.srcCrashesHint : t.srcErrorsOff),
             (t.srcMetrics, 'FPS · jank · ${t.memory}', caps.contains('metrics'), caps.contains('metrics') ? null : t.srcMetricsOff),
           ];

@@ -112,7 +112,10 @@ renkleri, açık/koyu tema) ve sekmelerini taşır:
   olmadığı ve değilse nedeni.
 
 Panel, masaüstünün aldığı mesajların aynısını gösterir. Masaüstü bağlıyken
-ikisi birlikte çalışır. Alttaki durum çubuğu bağlantıyı ve log, hata, istek
+ikisi birlikte çalışır. Uygulamanın kendi native logları (Android logcat'i,
+iOS 15+ `os_log` / `Logger` / `NSLog`) Mac'e bağlı olmasa da panelde görünür;
+host uygulamada ayar gerekmez. Masaüstü bunları USB'de cihazdan kendisi okur,
+satırlar iki kez gelmez. Alttaki durum çubuğu bağlantıyı ve log, hata, istek
 sayılarını gösterir.
 
 Sınırlar ve ayarlar:
@@ -194,8 +197,8 @@ SSL pinning'e dokunulmaz.
 | Kaynak | Ne gönderir | Ne zaman |
 |---|---|---|
 | Dart SDK (bu paket) | Dart logları, `print`, Flutter hataları, Dart çökmeleri, dart:io HTTP (package:http, Dio varsayılan adaptörü, `NetworkImage`), FPS/jank/bellek, `flutter.*` araçları | Dürbün açıkken |
-| Android native katmanı (bu plugin içinde) | Kotlin/Java `Durbun.log`, yakalanmamış Kotlin/Java çökmeleri, OkHttp (`DurbunInterceptor` ile), Wi-Fi'de (adb yokken) uygulamanın kendi logcat'i, `android.dumpThreads` / `android.gc` araçları | Dart tarafı başlatınca |
-| iOS native katmanı (bu plugin içinde) | URLSession trafiği (otomatik), Objective-C istisnaları ve Swift çökmeleri, Swift `print`/stdout/stderr, `Durbun.log` (Swift), `ios.*` araçları | Dart tarafı başlatınca |
+| Android native katmanı (bu plugin içinde) | Kotlin/Java `Durbun.log`, yakalanmamış Kotlin/Java çökmeleri, OkHttp (`DurbunInterceptor` ile), uygulamanın kendi logcat'i (`Log.d` vb.; panelde her zaman, masaüstüne yalnızca adb yokken, ör. Wi-Fi), `android.dumpThreads` / `android.gc` araçları | Dart tarafı başlatınca |
+| iOS native katmanı (bu plugin içinde) | URLSession trafiği (otomatik), Objective-C istisnaları ve Swift çökmeleri, Swift `print`/stdout/stderr, `Durbun.log` (Swift), iOS 15+ `os_log` / `Logger` / `NSLog` (panelde her zaman, masaüstüne yalnızca cihaz loglarını okuyamıyorsa, ör. Wi-Fi), `ios.*` araçları | Dart tarafı başlatınca |
 | SDK'sız (eski build, Dürbün kapalı release) | Cihaz logları, sistem çökme kayıtları, Android süreç/kare istatistikleri — masaüstü bunları cihazdan okur | Her zaman |
 
 Native çökmeler: Android'de çökme anında doğrudan masaüstüne gider; masaüstüne
@@ -327,7 +330,7 @@ dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı sat�
 | `enabled` | `null` | `null`: debug/profile açık, release yalnızca `--dart-define=DURBUN=true` ile; `true`/`false` her şeyi ezer |
 | `host` / `port` | `null` / `9751` | Wi-Fi için masaüstü adresi (`'ip'` veya `'ip:port'`) |
 | `captureNetwork` | `true` | dart:io HTTP yakalama + mock'lar (iOS'ta URLSession, Android'de OkHttp yakalamayı da açar/kapatır) |
-| `capturePrint` | `auto` | `auto` / `always` / `never` (`never` native stdout/logcat iletimini de kapatır) |
+| `capturePrint` | `auto` | `auto` / `always` / `never` (`never` native stdout'u ve logcat / `os_log` okumayı da kapatır; panelde de görünmezler) |
 | `captureErrors` | `true` | Flutter hataları ve çökmeler (native çökmeler dahil) |
 | `metrics` | `true` | FPS, jank, bellek, CPU |
 | `maxBufferedMessages` | `5000` | bağlantı yokken tutulan mesaj sayısı |
@@ -352,6 +355,10 @@ dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı sat�
 - `dart:developer` `log()` çağrıları SDK'dan değil, masaüstünün Dart VM Service
   bağlantısından (debug) gelir.
 - FPS yalnızca çizim yapılırken raporlanır (boşta bekleyen uygulama "0 FPS" görünmez).
+- iOS `os_log` / `Logger` / `NSLog` satırları uygulamanın kendi log deposundan
+  birkaç saniyede bir okunur (panel açıkken ya da masaüstüne giderken saniyede bir).
+  iOS `debug` seviyesini depoda tutmaz, bu satırlar panelde görünmez; iOS 13–14'te
+  bu kaynak yoktur. `com.apple.*` sistem satırları atlanır.
 - Aynı süreçte birden fazla Flutter engine varsa native katmanı yalnızca ilk
   başlatan engine kullanır.
 - Native-only (Flutter'sız) uygulamalar `sdks/android` ve `sdks/ios` SDK'larını
@@ -457,7 +464,10 @@ MaterialApp(builder: DurbunInspector.builder, home: const HomePage());
 - **Mocks** from the desktop, **Performance** tiles and charts, **Device** with
   the captured layers and what each data source needs.
 
-The panel shows the same messages the desktop receives. On the phone it keeps
+The panel shows the same messages the desktop receives, plus the app's own
+native logs (Android logcat, iOS 15+ `os_log` / `Logger` / `NSLog`) with or
+without a Mac and with no setup in the host app (`capturePrint: never` turns
+them off). On the phone it keeps
 about 2,000 log lines, 300 requests and 24 MB of bodies, and says when the
 oldest entries were removed.
 
@@ -524,8 +534,8 @@ session ("SDK" badge). No proxy is involved, so SSL pinning is untouched.
 | Source | Sends | When |
 |---|---|---|
 | Dart SDK | Dart logs, `print`, Flutter errors, Dart crashes, dart:io HTTP, FPS/jank/memory, `flutter.*` tools | while Dürbün is on |
-| Android layer (in this plugin) | Kotlin/Java `Durbun.log`, uncaught Kotlin/Java crashes, OkHttp (with `DurbunInterceptor`), the app's own logcat over Wi-Fi (no adb), `android.*` tools | once Dart starts it |
-| iOS layer (in this plugin) | URLSession traffic (automatic), Objective-C exceptions and Swift crashes, Swift `print`/stdout/stderr, Swift `Durbun.log`, `ios.*` tools | once Dart starts it |
+| Android layer (in this plugin) | Kotlin/Java `Durbun.log`, uncaught Kotlin/Java crashes, OkHttp (with `DurbunInterceptor`), the app's own logcat (`Log.d` …; always in the panel, to the desktop only without adb, e.g. Wi-Fi), `android.*` tools | once Dart starts it |
+| iOS layer (in this plugin) | URLSession traffic (automatic), Objective-C exceptions and Swift crashes, Swift `print`/stdout/stderr, Swift `Durbun.log`, iOS 15+ `os_log` / `Logger` / `NSLog` (always in the panel, to the desktop only when it cannot read device logs, e.g. Wi-Fi), `ios.*` tools | once Dart starts it |
 | No SDK (old builds, release builds with Dürbün off) | device logs, system crash records, Android process/frame stats, read by the desktop | always |
 
 Native crashes: Android sends them to the desktop at crash time; if the desktop
@@ -566,7 +576,10 @@ on URLSession and are captured by the native layer (`DurbunDioInterceptor` does
 not report them twice). Traffic in background isolates is not captured.
 `HttpClient`s created before `Durbun.run/init` are not wrapped. WebSockets:
 handshake only. `dart:developer` `log()` comes from the desktop's VM-service
-bridge (debug). With several Flutter engines in one process only the first one
+bridge (debug). iOS `os_log` / `Logger` / `NSLog` lines are read from the app's
+own log store every few seconds (every second while the panel is open or they
+go to the desktop); iOS does not keep `debug` entries, iOS 13–14 has no such
+store, and `com.apple.*` lines are skipped. With several Flutter engines in one process only the first one
 that starts Dürbün gets the native layer. Native-only apps use `sdks/android` /
 `sdks/ios`; do not add those to a Flutter app as well (duplicate classes).
 

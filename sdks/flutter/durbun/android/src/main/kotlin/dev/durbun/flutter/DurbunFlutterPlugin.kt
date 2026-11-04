@@ -26,6 +26,8 @@ import io.flutter.plugin.common.MethodChannel
  *
  *  - Kotlin `Durbun.log/event`, `DurbunInterceptor` (OkHttp) and uncaught Kotlin/Java exceptions are reported
  *    through the Dart side's single desktop connection (one app session);
+ *  - this app's own logcat (`Log.*`, third-party SDKs) goes to Dart as `deviceLogs` while Dart asks for it: the
+ *    in-app panel shows it, and Dart sends it on only when the desktop cannot read the device's logs;
  *  - the desktop state (config, mock rules) and native commands (`android.dumpThreads`, `android.gc`, the
  *    app's own `Durbun.addAction` tools) arrive from Dart.
  */
@@ -154,6 +156,8 @@ class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 "commands" to core.hostedCommands(),
                 "app" to linkedMapOf("name" to app["name"], "version" to app["version"], "build" to app["build"]),
                 "urlSession" to false,
+                // This app's own logcat, read while Dart asks for it (`state.deviceLogs.read`).
+                "deviceLogs" to if (options.captureLogcat) "logcat" else null,
             ),
         )
     }
@@ -181,6 +185,16 @@ class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     plugin.channel?.invokeMethod("events", lines)
                 } catch (t: Throwable) {
                     Log.d(TAG, "Dürbün could not forward native messages", t)
+                }
+            }
+        }
+
+        override fun deliverDeviceLogs(lines: List<String>) {
+            plugin.main.post {
+                try {
+                    plugin.channel?.invokeMethod("deviceLogs", lines)
+                } catch (t: Throwable) {
+                    Log.d(TAG, "Dürbün could not forward logcat lines", t)
                 }
             }
         }

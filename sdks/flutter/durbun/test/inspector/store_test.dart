@@ -357,4 +357,36 @@ void main() {
       expect(store.logs, isEmpty);
     });
   });
+
+  group('device logs (logcat / os_log)', () {
+    test('framework chatter stays out, the app and its SDKs stay in', () {
+      final store = DurbunInspectorStore(notifyDelay: Duration.zero);
+      const tags = <String>[
+        'VRI[MainActivity]@49a8a30',
+        'ViewRootImpl@3f2a[MainActivity]',
+        'SV[173170265 MainActivity]',
+        'HWUI',
+        'InsetsController',
+        'com.apple.network',
+        'NETMERA',
+        'com.google.firebase',
+        'FlutterGeolocator',
+        'Foundation',
+      ];
+      for (final tag in tags) {
+        store.ingestDeviceLog(jsonEncode(<String, Object?>{
+          'type': 'log',
+          'ts': 1700000000000,
+          'level': 'info',
+          'tag': tag,
+          'message': 'from $tag',
+        }));
+      }
+      store.ingestDeviceLog('not json');
+      store.ingestDeviceLog('[1,2]');
+      expect(store.logs.map((l) => l.tag),
+          <String>['NETMERA', 'com.google.firebase', 'FlutterGeolocator', 'Foundation']);
+      expect(store.logs.every((l) => l.native), isTrue);
+    });
+  });
 }

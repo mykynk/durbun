@@ -359,6 +359,8 @@ class InspectorStrings {
   String get srcNoNative => _('Native katman başlamadı (plugin kayıtlı değil ya da bu platform değil).', 'The native layer did not start (plugin not registered, or another platform).');
   String get srcAppLogs => _('Uygulama logları', 'App logs');
   String get srcNativeLogs => _('Native loglar', 'Native logs');
+  String get srcOsLogNeedsIos15 => _('os_log / Logger satırlarını okumak iOS 15 ister; print ve Durbun.log gelir.', 'Reading os_log / Logger lines needs iOS 15; print and Durbun.log come through.');
+  String get srcDeviceLogsOff => _('capturePrint: never ile kapatılmış; Durbun.log gelir.', 'Turned off with capturePrint: never; Durbun.log comes through.');
   String get srcCrashes => _('Hatalar ve çökmeler', 'Errors and crashes');
   String get srcCrashesDetail => _('Flutter hataları · Dart · Kotlin · Swift', 'Flutter errors · Dart · Kotlin · Swift');
   String get srcCrashesHint => _('Native çökmeler bir sonraki açılışta gelir.', 'Native crashes arrive on the next launch.');

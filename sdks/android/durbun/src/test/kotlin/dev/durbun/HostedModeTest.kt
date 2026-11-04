@@ -4,6 +4,7 @@ import dev.durbun.internal.DurbunCore
 import dev.durbun.internal.HostLink
 import dev.durbun.internal.HostState
 import dev.durbun.internal.Json
+import dev.durbun.internal.LogcatController
 import dev.durbun.internal.PendingCrashStore
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -28,11 +29,19 @@ class HostedModeTest {
         val lines: MutableList<String> = CopyOnWriteArrayList()
         val batches: MutableList<Int> = Collections.synchronizedList(ArrayList())
         val actions: MutableList<String> = CopyOnWriteArrayList()
+        val deviceLogs: MutableList<String> = CopyOnWriteArrayList()
 
         override fun deliver(lines: List<String>) {
             batches += lines.size
             this.lines += lines
         }
+
+        override fun deliverDeviceLogs(lines: List<String>) {
+            deviceLogs += lines
+        }
+
+        fun deviceLogMessages(): List<String?> =
+            deviceLogs.mapNotNull { Json.parseObject(it) }.map { it["message"] as String? }
 
         override fun actionsChanged(descriptorsJson: String) {
             actions += descriptorsJson
@@ -178,9 +187,71 @@ class HostedModeTest {
         val core = hosted(link)
         core.forwardLogcat(1_000L, Level.INFO, "flutter", "print from Dart", 1)
         core.forwardLogcat(1_001L, Level.WARN, "OkHttp", "native line", 2)
-        waitUntil { link.lines.isNotEmpty() }
+        waitUntil { link.deviceLogs.isNotEmpty() }
         Thread.sleep(100)
-        assertEquals(listOf("native line"), link.messages("log").map { it["message"] })
+        assertEquals(listOf("native line"), link.deviceLogMessages())
+    }
+
+    @Test
+    fun logcatLinesTravelApartFromOtherMessages() {
+        val link = RecordingLink()
+        val core = hosted(link)
+        core.log(Level.INFO, "auth", "from Durbun.log", null, null)
+        core.forwardLogcat(System.currentTimeMillis(), Level.WARN, "NETMERA", "push token refreshed", 7)
+        waitUntil { link.deviceLogs.isNotEmpty() && link.lines.isNotEmpty() }
+        Thread.sleep(100)
+        // Dart routes `deviceLogs` itself (panel always, desktop only without device logs).
+        assertEquals(listOf("push token refreshed"), link.deviceLogMessages())
+        assertEquals(listOf("from Durbun.log"), link.messages("log").map { it["message"] })
+        val line = Json.parseObject(link.deviceLogs.single())!!
+        assertEquals("NETMERA", line["tag"])
+        assertEquals("warn", line["level"])
+        assertEquals(7L, line["tid"])
+    }
+
+    @Test
+    fun hostDecidesWhenLogcatIsReadWithOrWithoutADesktop() {
+        val link = RecordingLink()
+        val switches = Collections.synchronizedList(ArrayList<Boolean>())
+        val core = hosted(link) {
+            it.logcat = object : LogcatController {
+                override fun setEnabled(enabled: Boolean) {
+                    switches += enabled
+                }
+
+                override fun stop() = Unit
+            }
+        }
+        // No desktop at all: the in-app panel still wants the app's logcat.
+        core.applyHostState("""{"connected":false,"deviceLogs":{"read":true,"desktop":false}}""")
+        assertEquals(listOf(true), switches)
+        // A desktop over USB reads logcat itself: the panel keeps reading, nothing is announced.
+        core.applyHostState("""{"connected":true,"config":{"deviceLogsAvailable":true},"deviceLogs":{"read":true,"desktop":false}}""")
+        assertEquals(true, switches.last())
+        Thread.sleep(100)
+        assertTrue(link.messages("log").none { (it["message"] as String).startsWith("The desktop cannot read") })
+        // Wi-Fi without adb: Dart sends the lines on, and the desktop is told why it gets them.
+        core.applyHostState("""{"connected":true,"config":{"deviceLogsAvailable":false},"deviceLogs":{"desktop":true}}""")
+        waitUntil { link.messages("log").any { (it["message"] as String).startsWith("The desktop cannot read") } }
+        // Panel off and no desktop need: stop reading.
+        core.applyHostState("""{"connected":false,"deviceLogs":{"read":false,"desktop":false}}""")
+        assertEquals(false, switches.last())
+    }
+
+    @Test
+    fun captureLogcatOffNeverReads() {
+        val switches = Collections.synchronizedList(ArrayList<Boolean>())
+        val core = hosted(RecordingLink(), DurbunOptions(captureMetrics = false, captureLogcat = false)) {
+            it.logcat = object : LogcatController {
+                override fun setEnabled(enabled: Boolean) {
+                    switches += enabled
+                }
+
+                override fun stop() = Unit
+            }
+        }
+        core.applyHostState("""{"connected":true,"deviceLogs":{"read":true,"desktop":true}}""")
+        assertTrue(switches.none { it })
     }
 
     @Test

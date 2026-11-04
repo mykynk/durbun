@@ -7,6 +7,7 @@ import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/protocol.dart' show durbunEnabledByDefault;
 import 'package:durbun/src/flutter/backend_io.dart';
 import 'package:durbun/src/flutter/native_bridge.dart';
+import 'package:durbun/src/inspector/store.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -126,7 +127,10 @@ void main() {
       'urlSession': false,
     };
 
-    Future<FakeSdkConnection> startSdk({List<String> redact = const <String>[]}) async {
+    Future<FakeSdkConnection> startSdk({
+      List<String> redact = const <String>[],
+      DurbunPrintCapture capturePrint = DurbunPrintCapture.auto,
+    }) async {
       await Durbun.init(
         DurbunOptions(
           enabled: true,
@@ -136,12 +140,14 @@ void main() {
           metrics: false,
           useBackgroundIsolate: false,
           redactHeaders: redact,
+          capturePrint: capturePrint,
         ),
       );
       return desktop.nextConnection();
     }
 
     setUp(() async {
+      DurbunInspectorStore.instance = DurbunInspectorStore(notifyDelay: Duration.zero);
       desktop = await FakeDesktop.start(appId: 'app:native');
       calls.clear();
       startReply = (_) => jsonEncode(attachedReply());
@@ -348,6 +354,83 @@ void main() {
       await Durbun.dispose();
       expect(calls.map((c) => c.method), contains('stop'));
     });
+
+    String deviceLine(String message, {String tag = 'NETMERA'}) => jsonEncode(<String, Object?>{
+      'type': 'log',
+      'ts': 1700000000000,
+      'level': 'info',
+      'tag': tag,
+      'message': message,
+      'kind': 'text',
+    });
+
+    Map<String, Object?> lastDeviceLogsState() {
+      final state = _json(calls.lastWhere((c) => c.method == 'state').arguments);
+      return (state['deviceLogs']! as Map).cast<String, Object?>();
+    }
+
+    Future<void> connectedStatePushed() => eventually(
+      () => calls.any((c) => c.method == 'state' && _json(c.arguments)['connected'] == true),
+    );
+
+    List<String> panelMessages() =>
+        [for (final l in DurbunInspectorStore.instance.logs) l.message];
+
+    test('device logs (Wi-Fi, no adb): the panel and the desktop both get them', () async {
+      final conn = await startSdk(); // the fake desktop reads no device logs
+      await connectedStatePushed();
+      await nativeCall('deviceLogs', <String>[
+        deviceLine('push token refreshed'),
+        deviceLine('ViewPostIme pointer 1', tag: 'VRI[MainActivity]@49a8a30'),
+        '',
+      ]);
+      final sent = await conn.waitFor((m) => m['type'] == 'log' && m['message'] == 'push token refreshed');
+      expect(sent['tag'], 'NETMERA');
+      // The desktop keeps the framework chatter (it has its own noise filter)…
+      await conn.waitFor((m) => m['type'] == 'log' && m['message'] == 'ViewPostIme pointer 1');
+      // …the panel, which keeps a bounded number of lines, does not.
+      expect(panelMessages(), isNot(contains('ViewPostIme pointer 1')));
+      expect(panelMessages().where((m) => m == 'push token refreshed'), hasLength(1),
+          reason: 'the desktop copy is not counted twice in the panel');
+      expect(DurbunInspectorStore.instance.logs.firstWhere((l) => l.message == 'push token refreshed').native, isTrue);
+      await eventually(() => lastDeviceLogsState()['desktop'] == true);
+      expect(lastDeviceLogsState(), <String, Object?>{'read': true, 'fast': true, 'desktop': true});
+      expect(DurbunInspectorStore.instance.nativeDeviceLogs, isNull, reason: 'the reply named no source');
+    });
+
+    test('device logs (USB): the desktop reads them itself, the panel still shows them', () async {
+      desktop.config = FakeDesktop.defaultConfig(deviceLogsAvailable: true);
+      startReply = (_) => jsonEncode(<String, Object?>{...attachedReply(), 'deviceLogs': 'logcat'});
+      final conn = await startSdk();
+      await connectedStatePushed();
+      await nativeCall('deviceLogs', <String>[deviceLine('Firebase configured', tag: 'FirebaseApp')]);
+      Durbun.log('marker');
+      await conn.waitForLog('marker');
+      expect(conn.received.where((m) => m['message'] == 'Firebase configured'), isEmpty);
+      expect(panelMessages(), contains('Firebase configured'));
+      expect(DurbunInspectorStore.instance.nativeDeviceLogs, 'logcat');
+      expect(lastDeviceLogsState(), <String, Object?>{'read': true, 'fast': false, 'desktop': false});
+      // Opening the panel asks the native side to read more often (iOS os_log).
+      DurbunInspectorStore.instance.panelOpen.value = true;
+      await eventually(() => lastDeviceLogsState()['fast'] == true);
+    });
+
+    test('device logs before the first welcome wait for the desktop to say where it is', () async {
+      await desktop.close();
+      desktop = await FakeDesktop.start(appId: 'app:native', autoWelcome: false);
+      final conn = await startSdk();
+      await nativeCall('deviceLogs', <String>[deviceLine('early native line')]);
+      expect(panelMessages(), contains('early native line'), reason: 'the panel does not wait');
+      conn.sendWelcome(config: FakeDesktop.defaultConfig(deviceLogsAvailable: false));
+      await conn.waitFor((m) => m['type'] == 'log' && m['message'] == 'early native line');
+    });
+
+    test('capturePrint: never leaves the device logs off', () async {
+      await startSdk(capturePrint: DurbunPrintCapture.never);
+      await connectedStatePushed();
+      expect(lastDeviceLogsState()['read'], isFalse);
+      expect(DurbunInspectorStore.instance.nativeDeviceLogs, 'off');
+    });
   });
 
   group('NativeStartInfo', () {
@@ -358,12 +441,14 @@ void main() {
       final info = NativeStartInfo.parse(
         '{"attached":true,"platform":"ios","capabilities":["network"],'
         '"actions":[{"id":"ios.appearance","kind":"select"},{"kind":"no id"}],'
-        '"urlSession":true}',
+        '"urlSession":true,"deviceLogs":"os_log"}',
       )!;
       expect(info.platform, 'ios');
       expect(info.actions.map((a) => a['id']), <String>['ios.appearance']);
       expect(info.capturesUrlSession, isTrue);
       expect(info.commands, isEmpty);
+      expect(info.deviceLogs, 'os_log');
+      expect(NativeStartInfo.parse('{"attached":true,"deviceLogs":null}')!.deviceLogs, isNull);
     });
   });
 }

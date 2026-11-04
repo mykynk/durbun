@@ -163,6 +163,7 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
     if (navigator == null) return;
     setState(() => _open = true);
     _store.markSeen();
+    _store.panelOpen.value = true;
     try {
       await navigator.push<void>(
         MaterialPageRoute<void>(
@@ -175,6 +176,7 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
     } finally {
       if (mounted) setState(() => _open = false);
       _store.markSeen();
+      _store.panelOpen.value = false;
     }
   }
 

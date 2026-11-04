@@ -37,6 +37,31 @@ bool hostMatchesPatterns(String host, List<String> patterns) {
   return false;
 }
 
+/// Logcat tags of Android's own rendering, input and window machinery, as in
+/// the desktop's default noise rules (plus the GPU stack of common phones).
+const Set<String> _noisyDeviceLogTags = <String>{
+  'chatty', 'OpenGLRenderer', 'InputMethodManager', 'InsetsController',
+  'ImeTracker', 'BLASTBufferQueue', 'BLASTBufferQueue_Java', 'SurfaceFlinger',
+  'SurfaceComposerClient', 'SurfaceView', 'Gralloc4', 'gralloc4', 'qdgralloc',
+  'GraphicBufferAllocator', 'AHardwareBuffer', 'BufferQueueProducer',
+  'EGL_emulation', 'HostConnection', 'libEGL', 'HWUI', 'vulkan',
+  'AdrenoGLES-0', 'AdrenoVK-0', 'AdrenoUtils', 'CompatibilityChangeReporter',
+  'CompatChangeReporter', 'AutofillManager', 'ProfileInstaller', 'FrameEvents',
+  'InputTransport', 'TrafficStats', 'nativeloader',
+};
+
+/// Whether a device-log line with this tag is framework chatter: the tags
+/// above, `ViewRootImpl…` / `VRI[…]` (touch dispatch per window), `SV[…]`
+/// (SurfaceView) and Apple's own subsystems (`com.apple.…`).
+bool isNoisyDeviceLogTag(Object? tag) {
+  if (tag is! String) return false;
+  return _noisyDeviceLogTags.contains(tag) ||
+      tag.startsWith('ViewRootImpl') ||
+      tag.startsWith('VRI[') ||
+      tag.startsWith('SV[') ||
+      tag.startsWith('com.apple.');
+}
+
 /// One log line, event or crash.
 class InspectorLog {
   InspectorLog({
@@ -386,6 +411,31 @@ class DurbunInspectorStore extends ChangeNotifier {
   List<String> defaultHosts = const <String>[];
 
   bool isDefaultHost(String host) => hostMatchesPatterns(host, defaultHosts);
+
+  /// Whether the panel is on screen (set by `DurbunInspector`). The native
+  /// layer reads the app's own os_log lines more often while it is.
+  final ValueNotifier<bool> panelOpen = ValueNotifier<bool>(false);
+
+  /// Where the native layer reads the app's own device-log lines from:
+  /// `logcat`, `os_log` (iOS 15+), `off` (`capturePrint: never`) or null
+  /// (no native layer, or iOS 13/14).
+  String? nativeDeviceLogs;
+
+  /// Takes one of the app's own device-log lines (logcat / os_log, encoded
+  /// by the native layer). Framework chatter ([isNoisyDeviceLogTag]) stays
+  /// out: the panel keeps a bounded number of lines and that chatter would
+  /// push the app's own lines out. The desktop's copy is not filtered here.
+  void ingestDeviceLog(String line) {
+    if (_disposed) return;
+    try {
+      final decoded = jsonDecode(line);
+      if (decoded is! Map<String, Object?>) return;
+      if (isNoisyDeviceLogTag(decoded['tag'])) return;
+      _take(decoded, native: true);
+    } catch (_) {
+      // A malformed line must never reach the app.
+    }
+  }
 
   /// Lines / calls evicted since the last [clear] (the ring is full).
   int get droppedLogs => _droppedLogs;

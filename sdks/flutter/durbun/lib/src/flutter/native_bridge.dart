@@ -5,6 +5,12 @@
 // here. When the plugin is not registered (pure-Dart use, other platforms,
 // unit tests) every call fails with MissingPluginException and the SDK simply
 // runs without the native layer.
+//
+// The app's own device-log lines (Android logcat, iOS os_log / Logger / NSLog)
+// come apart from the other native messages (`deviceLogs`): the in-app panel
+// shows every one of them, and the desktop gets them only when it cannot read
+// the device's logs itself (Wi-Fi without adb / idevicesyslog), the same rule
+// `capturePrint` applies to print().
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
@@ -14,6 +20,9 @@ import 'package:flutter/services.dart';
 
 import '../core/client.dart';
 import '../core/options.dart';
+import '../core/protocol.dart' show SdkConfig;
+import '../core/types.dart' show DurbunPrintCapture;
+import '../inspector/store.dart' show DurbunInspectorStore;
 
 /// Method channel shared with `DurbunFlutterPlugin` (Android + iOS).
 const String kDurbunNativeChannel = 'dev.durbun/native';
@@ -31,6 +40,7 @@ class NativeStartInfo {
     required this.commands,
     required this.app,
     required this.capturesUrlSession,
+    this.deviceLogs,
   });
 
   final String platform;
@@ -39,6 +49,10 @@ class NativeStartInfo {
   final Set<String> commands;
   final Map<String, Object?>? app;
   final bool capturesUrlSession;
+
+  /// Where the native layer reads the app's own device-log lines from:
+  /// `logcat`, `os_log`, or null (none: iOS 13/14, or `capturePrint: never`).
+  final String? deviceLogs;
 
   /// Parses the `start` reply; null when the native side did not attach.
   static NativeStartInfo? parse(Object? reply) {
@@ -53,6 +67,7 @@ class NativeStartInfo {
       commands: <String>{for (final c in _list(json['commands'])) c.toString()},
       app: _map(json['app']),
       capturesUrlSession: json['urlSession'] == true,
+      deviceLogs: json['deviceLogs'] is String ? json['deviceLogs'] as String : null,
     );
   }
 }
@@ -81,15 +96,60 @@ class NativeBridge {
   bool _statePushScheduled = false;
   String? _lastState;
 
+  /// `capturePrint`: it governs the app's own device-log lines too.
+  DurbunPrintCapture _consoleMode = DurbunPrintCapture.auto;
+
+  /// Device-log lines that arrived before the desktop said whether it reads
+  /// the device's logs itself; sent or dropped once it does.
+  final List<String> _pendingDeviceLogs = <String>[];
+
+  /// Bound of the lines held for the desktop's answer (a start-up burst
+  /// replays the whole logcat buffer of the app).
+  static const int maxPendingDeviceLogs = 1000;
+
+  /// The panel store whose [DurbunInspectorStore.panelOpen] is followed.
+  DurbunInspectorStore? _panelStore;
+
   /// Info from the native side once it attached (null otherwise).
   NativeStartInfo? get info => _info;
 
   bool get isAttached => _info != null && !_stopped;
 
+  /// The in-app panel's store while the SDK feeds it (`inspector: true`).
+  DurbunInspectorStore? get _panel {
+    final store = DurbunInspectorStore.existing;
+    return store != null && store.attached ? store : null;
+  }
+
+  /// Whether the desktop gets the app's device-log lines: true / false, or
+  /// null while unknown (no welcome yet, `auto`).
+  bool? get _desktopWantsDeviceLogs => switch (_consoleMode) {
+    DurbunPrintCapture.never => false,
+    DurbunPrintCapture.always => true,
+    DurbunPrintCapture.auto =>
+      _client.configKnown ? !_client.config.deviceLogsAvailable : null,
+  };
+
+  /// `state.deviceLogs` for the native side: read the lines at all (panel or
+  /// desktop), read them often (panel open, or a desktop that needs them),
+  /// and whether they reach the desktop (for its one-time note).
+  Map<String, Object?> _deviceLogsState() {
+    final desktop = _desktopWantsDeviceLogs == true;
+    final panel = _panel;
+    final read =
+        _consoleMode != DurbunPrintCapture.never && (panel != null || desktop);
+    return <String, Object?>{
+      'read': read,
+      'fast': read && (desktop || (panel?.panelOpen.value ?? false)),
+      'desktop': desktop,
+    };
+  }
+
   /// Starts the native layer for this session. Completes (never throws) once
   /// it attached, declined or turned out to be missing.
   Future<void> start(DurbunOptions options) async {
     if (!_platformSupported || _stopped) return;
+    _consoleMode = options.capturePrint;
     try {
       _channel.setMethodCallHandler(_onNativeCall);
       final args = jsonEncode(<String, Object?>{
@@ -124,6 +184,14 @@ class NativeBridge {
           forwardCommand: _forwardCommand,
         ),
       );
+      final panel = _panel;
+      if (panel != null) {
+        panel.nativeDeviceLogs = info.deviceLogs ??
+            (_consoleMode == DurbunPrintCapture.never ? 'off' : null);
+        _panelStore = panel;
+        panel.panelOpen.addListener(_scheduleStatePush);
+      }
+      _client.addConfigListener(_onConfig);
       _client.addStateListener(_scheduleStatePush);
       _scheduleStatePush();
     } on MissingPluginException {
@@ -139,6 +207,10 @@ class NativeBridge {
     if (_stopped) return;
     _stopped = true;
     _client.removeStateListener(_scheduleStatePush);
+    _client.removeConfigListener(_onConfig);
+    _panelStore?.panelOpen.removeListener(_scheduleStatePush);
+    _panelStore = null;
+    _pendingDeviceLogs.clear();
     final wasAttached = _info != null;
     _info = null;
     _safeClearHandler();
@@ -169,6 +241,10 @@ class NativeBridge {
             }
           }
           return null;
+        case 'deviceLogs':
+          final lines = call.arguments;
+          if (lines is List) _onDeviceLogs(lines);
+          return null;
         case 'actions':
           _client.updateNativeActions(_actionList(_decode(call.arguments)));
           return null;
@@ -183,13 +259,54 @@ class NativeBridge {
     return null;
   }
 
+  /// The app's own logcat / os_log lines: every one to the panel, to the
+  /// desktop only when it cannot read the device's logs (held until it says).
+  void _onDeviceLogs(List<Object?> lines) {
+    final panel = _panel;
+    final desktop = _desktopWantsDeviceLogs;
+    for (final line in lines) {
+      if (line is! String || line.isEmpty) continue;
+      panel?.ingestDeviceLog(line);
+      if (desktop == true) {
+        _sendDeviceLog(line, panel);
+      } else if (desktop == null) {
+        _pendingDeviceLogs.add(line);
+      }
+    }
+    final extra = _pendingDeviceLogs.length - maxPendingDeviceLogs;
+    if (extra > 0) _pendingDeviceLogs.removeRange(0, extra);
+  }
+
+  /// The panel already has the line: its desktop copy must not count twice.
+  void _sendDeviceLog(String line, DurbunInspectorStore? panel) {
+    if (panel == null) {
+      _client.sendEncoded(line);
+    } else {
+      panel.withoutTap(() => _client.sendEncoded(line));
+    }
+  }
+
+  void _onConfig(SdkConfig config) {
+    if (_pendingDeviceLogs.isEmpty) return;
+    final pending = List<String>.of(_pendingDeviceLogs);
+    _pendingDeviceLogs.clear();
+    if (_desktopWantsDeviceLogs != true) return;
+    final panel = _panel;
+    for (final line in pending) {
+      _sendDeviceLog(line, panel);
+    }
+  }
+
   void _scheduleStatePush() {
     if (_statePushScheduled || _stopped) return;
     _statePushScheduled = true;
     scheduleMicrotask(() {
       _statePushScheduled = false;
       if (_stopped || _info == null) return;
-      final state = jsonEncode(_client.describeState());
+      final state = jsonEncode(<String, Object?>{
+        ..._client.describeState(),
+        'deviceLogs': _deviceLogsState(),
+      });
       if (state == _lastState) return;
       _lastState = state;
       _invoke('state', state);

@@ -149,7 +149,9 @@ doğrular). Mock'lanan istekler masaüstünde `mocked` olarak işaretlenir.
 - Yakalanan istekler paylaşılan `HTTPCookieStorage` / `URLCache` ile iletilir (ephemeral oturumların
   ayrı çerez deposu yerine).
 - WKWebView ve AVPlayer trafiği URLSession protokollerinden geçmez.
-- `os_log` / `Logger` mesajları SDK'dan değil, cihaz loglarından gelir (masaüstü bunları zaten akıtır).
+- `os_log` / `Logger` / `NSLog` mesajlarını masaüstü cihaz loglarından okur (simülatör, USB). Okuyamadığında
+  (Wi-Fi, `idevicesyslog` yok) SDK iOS 15+'ta uygulamanın kendi log deposundan saniyede bir okuyup
+  gönderir; iOS `debug` seviyesini tutmaz, `com.apple.*` satırları atlanır. `captureStdout: false` kapatır.
 - `regex` mock kuralları NSRegularExpression (ICU) ile çalışır; tipik URL kalıplarında JavaScript ile
   aynıdır, yalnızca JS'e özgü egzotik sözdizimi farklı davranabilir.
 - FPS / takılan kare yalnızca iOS'ta (macOS'ta CADisplayLink yok).
@@ -250,7 +252,10 @@ path completes the `hello` → `welcome` handshake first wins; the others are cl
 - Intercepted requests use the shared `HTTPCookieStorage` / `URLCache` (instead of an ephemeral
   session's private cookie store).
 - WKWebView and AVPlayer traffic does not go through URLSession protocols.
-- `os_log` / `Logger` messages come from device logs (which the desktop already streams), not from the SDK.
+- The desktop reads `os_log` / `Logger` / `NSLog` messages from device logs (simulator, USB). When it
+  cannot (Wi-Fi, no `idevicesyslog`), the SDK reads the app's own log store once a second on iOS 15+ and
+  sends them; iOS does not keep `debug` entries, `com.apple.*` lines are skipped. `captureStdout: false`
+  turns it off.
 - `regex` mock rules use NSRegularExpression (ICU): identical to JavaScript for typical URL patterns,
   only exotic JS-specific syntax may differ.
 - FPS / janky frames are iOS-only (no CADisplayLink on macOS).

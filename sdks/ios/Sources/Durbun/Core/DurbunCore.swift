@@ -66,6 +66,15 @@ final class DurbunCore {
     /// Hosted mode (Flutter plugin): the Dart SDK owns the connection; messages go through the relay.
     private var relay: HostRelay?
     private var hostLink: HostLink?
+    /// This app's own os_log / Logger / NSLog lines (`OSLogCapture`, iOS 15+), created on first use.
+    private var osLog: OSLogCapture?
+    /// `captureStdout`: console output of every kind (stdout/stderr and the unified log).
+    private var captureConsole = false
+    private var osLogAnnounced = false
+    /// Hosted: what the host wants of the os_log lines (`state.deviceLogs`).
+    private var hostDeviceLogs = HostDeviceLogs()
+    /// Lines seen on stdout/stderr: their NSLog copy in the unified log is sent once.
+    private let recentConsole = RecentConsoleLines()
 
     init() {
         let builtins = BuiltinActions()
@@ -94,6 +103,8 @@ final class DurbunCore {
     var appIdentifier: String? { lock.withLock { environment?.app.id } }
     /// True while running hosted by the Flutter plugin.
     var isHosted: Bool { lock.withLock { running && relay != nil } }
+    /// Diagnostics/tests: how often this app's own os_log lines are read right now.
+    var osLogMode: OSLogCapture.Mode { lock.withLock { osLog }?.currentMode ?? .off }
 
     /// Diagnostics/tests: active link origin, bound USB listener port, buffered message count.
     var transportSnapshot: (activeOrigin: Transport.Origin?, listenerPort: UInt16?, buffered: Int)? {
@@ -175,6 +186,9 @@ final class DurbunCore {
             connected = false
             config = .defaults
             mocks = []
+            captureConsole = options.captureStdout
+            osLogAnnounced = false
+            hostDeviceLogs = HostDeviceLogs()
             self.environment = environment
             self.transport = transport
             policy = NetworkCapturePolicy(
@@ -223,6 +237,9 @@ final class DurbunCore {
             config = .defaults
             mocks = []
             requestCounter = 0
+            captureConsole = options.captureStdout
+            osLogAnnounced = false
+            hostDeviceLogs = HostDeviceLogs()
             self.environment = environment
             self.transport = nil
             self.relay = relay
@@ -249,14 +266,16 @@ final class DurbunCore {
         return true
     }
 
-    /// Desktop state from the host: `{connected, config, mocks, …}` (JSON). Missing fields keep
-    /// their previous value, except the mock rules: they hold only while the host is connected.
+    /// Desktop state from the host: `{connected, config, mocks, deviceLogs, …}` (JSON). Missing fields
+    /// keep their previous value, except the mock rules: they hold only while the host is connected.
+    /// `deviceLogs: {read, fast, desktop}` says whether the host wants this app's os_log lines (its
+    /// in-app panel, or a desktop that cannot read device logs), with or without a desktop.
     func applyHostState(_ json: String) {
         guard let data = json.data(using: .utf8),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return }
-        lock.withLock {
-            guard running, relay != nil else { return }
+        let hosted: Bool = lock.withLock {
+            guard running, relay != nil else { return false }
             if let newConfig = object["config"] as? [String: Any] {
                 config = SdkConfig(json: newConfig, fallback: config)
             }
@@ -264,7 +283,12 @@ final class DurbunCore {
             if let isConnected = object["connected"] as? Bool { connected = isConnected }
             // See didDisconnect: rules from a peer that went away must not keep rewriting responses.
             if !connected { mocks = [] }
+            if let wanted = object["deviceLogs"] as? [String: Any] {
+                hostDeviceLogs = HostDeviceLogs(json: wanted, fallback: hostDeviceLogs)
+            }
+            return true
         }
+        if hosted { applyDeviceLogs() }
     }
 
     /// A desktop `command` forwarded by the host (JSON); the result goes back as `command.result`.
@@ -301,9 +325,9 @@ final class DurbunCore {
     func stop() {
         lifecycle.lock()
         defer { lifecycle.unlock() }
-        let (transport, stdio, metrics, crash, observer, relay) = lock.withLock {
-            () -> (Transport?, StdioCapture?, MetricsReporter?, Bool, NSObjectProtocol?, HostRelay?) in
-            let result = (self.transport, self.stdio, self.metrics, crashCapture, foregroundObserver, self.relay)
+        let (transport, stdio, metrics, crash, observer, relay, osLog) = lock.withLock {
+            () -> (Transport?, StdioCapture?, MetricsReporter?, Bool, NSObjectProtocol?, HostRelay?, OSLogCapture?) in
+            let result = (self.transport, self.stdio, self.metrics, crashCapture, foregroundObserver, self.relay, self.osLog)
             generation += 1
             running = false
             connected = false
@@ -312,6 +336,7 @@ final class DurbunCore {
             self.transport = nil
             self.stdio = nil
             self.metrics = nil
+            self.osLog = nil
             crashCapture = false
             foregroundObserver = nil
             policy.active = false
@@ -321,6 +346,7 @@ final class DurbunCore {
         if let observer { NotificationCenter.default.removeObserver(observer) }
         metrics?.stop()
         stdio?.stop()
+        osLog?.stop()
         if crash { CrashCapture.uninstall() }
         NetworkCapture.uninstall()
         transport?.stop()
@@ -407,6 +433,7 @@ final class DurbunCore {
         for entry in entries {
             // Hosted by Flutter: the engine echoes Dart's print() as "flutter: …"; Dart sends those itself.
             if hosted && entry.text.hasPrefix("flutter: ") { continue }
+            recentConsole.remember(entry.text, ts: entry.ts)
             let firstLine = entry.text.prefix(while: { $0 != "\n" })
             let classification = OutputFormatting.classify(String(firstLine))
             sendLog(
@@ -416,6 +443,63 @@ final class DurbunCore {
                 message: entry.text,
                 kind: classification.kind
             )
+        }
+    }
+
+    // MARK: The app's own unified log (os_log / Logger / NSLog)
+
+    /// Standalone: forwards this app's os_log lines while the desktop cannot read the device's logs
+    /// (Wi-Fi). Hosted: reads them while the host asks (its in-app panel shows them; the host decides
+    /// what reaches the desktop). `OSLogStore` needs iOS 15; older systems get a one-time note instead.
+    private func applyDeviceLogs() {
+        let (mode, announce, capture): (OSLogCapture.Mode, Bool, OSLogCapture?) = lock.withLock {
+            guard running, captureConsole else { return (.off, false, osLog) }
+            let toDesktop: Bool
+            let mode: OSLogCapture.Mode
+            if relay != nil {
+                toDesktop = hostDeviceLogs.read && hostDeviceLogs.desktop
+                mode = hostDeviceLogs.read ? (hostDeviceLogs.fast ? .fast : .slow) : .off
+            } else {
+                toDesktop = connected && !config.deviceLogsAvailable
+                mode = toDesktop ? .fast : .off
+            }
+            let announce = toDesktop && !osLogAnnounced
+            if announce { osLogAnnounced = true }
+            if mode != .off, osLog == nil, OSLogCapture.isAvailable {
+                osLog = OSLogCapture { [weak self] entries in self?.sendDeviceLogs(entries) }
+            }
+            return (mode, announce, osLog)
+        }
+        if announce {
+            let message = OSLogCapture.isAvailable
+                ? "The desktop cannot read this device's logs, so Dürbün forwards this app's own os_log / Logger / NSLog lines over the SDK connection."
+                : "The desktop cannot read this device's logs, and reading this app's own os_log / Logger lines needs iOS 15: print, stdout/stderr and Durbun.log still come through."
+            sendLog(ts: Clock.nowMs(), level: .info, tag: "durbun", message: message, kind: "text")
+        }
+        capture?.setMode(mode)
+    }
+
+    private func sendDeviceLogs(_ entries: [OSLogCapture.Entry]) {
+        let link: HostLink? = lock.withLock { running ? hostLink : nil }
+        var lines: [String] = []
+        for entry in entries where !recentConsole.contains(entry.message, near: entry.ts) {
+            let message = WireMessage.log(
+                ts: entry.ts, level: entry.level, tag: entry.tag, message: entry.message,
+                data: nil, error: nil, kind: "text", tid: entry.tid
+            )
+            guard link != nil else {
+                send(message)
+                continue
+            }
+            let line = JSONWriter.line(message)
+            lines.append(String(decoding: line.last == 0x0A ? line.dropLast() : line[...], as: UTF8.self))
+        }
+        guard let link else { return }
+        var start = 0
+        while start < lines.count {
+            let end = min(start + 256, lines.count)
+            link.deliverDeviceLogs(Array(lines[start..<end]))
+            start = end
         }
     }
 
@@ -442,6 +526,7 @@ final class DurbunCore {
             return self.metrics
         }
         metrics?.start(intervalMs: welcome.config.metricsIntervalMs)
+        applyDeviceLogs()
     }
 
     private func didDisconnect(generation: Int) {
@@ -454,6 +539,8 @@ final class DurbunCore {
             return self.metrics
         }
         metrics?.stop()
+        // Paused, not lost: the next read starts where this one ended.
+        applyDeviceLogs()
     }
 
     private func handle(_ message: ServerMessage, generation: Int) {
@@ -467,6 +554,7 @@ final class DurbunCore {
                 return (self.metrics, connected)
             }
             if isConnected { metrics?.start(intervalMs: newConfig.metricsIntervalMs) }
+            applyDeviceLogs()
         case let .command(id, name, params):
             commands.handle(name: name, params: params) { [weak self] result in
                 self?.send(WireMessage.commandResult(id: id, ok: result.ok, data: result.data, error: result.error))

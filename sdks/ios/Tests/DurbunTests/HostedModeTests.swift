@@ -132,4 +132,72 @@ final class HostedModeTests: XCTestCase {
         link.flushResult = false
         XCTAssertFalse(core.flush(timeout: 0.1), "on the main thread the host cannot answer")
     }
+
+    // MARK: The app's own os_log lines
+
+    func testHostDecidesWhenTheAppsOwnOSLogIsRead() throws {
+        try XCTSkipUnless(OSLogCapture.isAvailable, "OSLogStore needs macOS 12 / iOS 15")
+        let link = RecordingLink()
+        let core = DurbunCore.shared
+        core.startHosted(options: hostedOptions(stdout: true), link: link)
+        XCTAssertEqual(core.osLogMode, .off, "nobody asked yet")
+        core.applyHostState(#"{"connected":false,"deviceLogs":{"read":true,"fast":false,"desktop":false}}"#)
+        XCTAssertEqual(core.osLogMode, .slow, "the in-app panel reads them without any desktop")
+        core.applyHostState(#"{"deviceLogs":{"fast":true}}"#)
+        XCTAssertEqual(core.osLogMode, .fast, "panel open: read often")
+        XCTAssertFalse(link.messages("log").contains { Self.isDesktopNote($0) }, "a desktop with device logs gets no note")
+        core.applyHostState(#"{"connected":true,"config":{"deviceLogsAvailable":false},"deviceLogs":{"desktop":true}}"#)
+        XCTAssertTrue(spinUntil(timeout: 5) { link.messages("log").contains { Self.isDesktopNote($0) } })
+        core.applyHostState(#"{"deviceLogs":{"read":false,"fast":false,"desktop":false}}"#)
+        XCTAssertEqual(core.osLogMode, .off)
+    }
+
+    func testCaptureStdoutOffNeverReadsOSLog() {
+        let core = DurbunCore.shared
+        core.startHosted(options: hostedOptions(stdout: false), link: RecordingLink())
+        core.applyHostState(#"{"connected":true,"deviceLogs":{"read":true,"fast":true,"desktop":true}}"#)
+        XCTAssertEqual(core.osLogMode, .off)
+    }
+
+    func testOSLogRecordsAreFilteredAndTaggedLikeTheDesktop() {
+        func record(_ message: String, level: Int = 3, subsystem: String = "", sender: String = "Runner", tid: UInt64 = 42) -> OSLogCapture.Record {
+            OSLogCapture.Record(
+                date: Date(timeIntervalSince1970: 1_800_000_000.25),
+                level: level,
+                subsystem: subsystem,
+                sender: sender,
+                message: message,
+                threadId: tid
+            )
+        }
+        XCTAssertEqual(
+            OSLogCapture.entry(from: record("Configured", level: 2, subsystem: "com.google.firebase")),
+            OSLogCapture.Entry(ts: 1_800_000_000_250, level: .info, tag: "com.google.firebase", message: "Configured", tid: 42)
+        )
+        XCTAssertEqual(OSLogCapture.entry(from: record("NSLog line", sender: "Foundation"))?.tag, "Foundation")
+        XCTAssertEqual(OSLogCapture.entry(from: record("bare os_log", sender: ""))?.tag, "os_log")
+        XCTAssertEqual(OSLogCapture.entry(from: record("db failed", level: 4, subsystem: "app"))?.level, .error)
+        XCTAssertEqual(OSLogCapture.entry(from: record("serious", level: 5, subsystem: "app"))?.level, .error, "fault is not a crash")
+        XCTAssertEqual(OSLogCapture.entry(from: record("notice", level: 3, subsystem: "app"))?.level, .info)
+        XCTAssertNil(OSLogCapture.entry(from: record("x", tid: 0))?.tid)
+        XCTAssertNil(OSLogCapture.entry(from: record("activating connection", subsystem: "com.apple.xpc")), "Apple's own lines")
+        XCTAssertNil(OSLogCapture.entry(from: record("relay dropped 3", subsystem: Diagnostics.subsystem)), "the SDK's own diagnostics")
+        XCTAssertNil(OSLogCapture.entry(from: record("flutter: from Dart")), "Dart sends its print() itself")
+        XCTAssertNil(OSLogCapture.entry(from: record("")))
+    }
+
+    func testNSLogLinesAlreadySeenOnStderrAreSentOnce() {
+        let recent = RecentConsoleLines(capacity: 2)
+        recent.remember("Sepete eklendi: 3 ürün\n", ts: 10_000)
+        XCTAssertTrue(recent.contains("Sepete eklendi: 3 ürün", near: 11_500))
+        XCTAssertFalse(recent.contains("Sepete eklendi: 3 ürün", near: 20_000), "only within a few seconds")
+        XCTAssertFalse(recent.contains("başka satır", near: 10_000))
+        recent.remember("b", ts: 10_000)
+        recent.remember("c", ts: 10_000)
+        XCTAssertFalse(recent.contains("Sepete eklendi: 3 ürün", near: 10_000), "bounded: the oldest is forgotten")
+    }
+
+    private static func isDesktopNote(_ log: [String: Any]) -> Bool {
+        (log["message"] as? String)?.hasPrefix("The desktop cannot read this device's logs") == true
+    }
 }

@@ -14,6 +14,12 @@ internal interface HostLink {
     /** A batch of encoded messages (one JSON object each, no newline), called on the relay thread. */
     fun deliver(lines: List<String>)
 
+    /**
+     * A batch of this app's own logcat lines, encoded like [deliver]'s. The host shows them in its in-app panel
+     * and sends them to the desktop only when the desktop cannot read the device's logs itself.
+     */
+    fun deliverDeviceLogs(lines: List<String>) = deliver(lines)
+
     /** The native action list changed (JSON array of `AppAction` descriptors); the host merges it with its own. */
     fun actionsChanged(descriptorsJson: String)
 }
@@ -52,6 +58,8 @@ internal class HostRelay(
     private val logger: InternalLogger,
     private val onStart: () -> Unit,
     private val batchIntervalMs: Long = 40,
+    private val threadName: String = "durbun-relay",
+    private val deliver: (List<String>) -> Unit = link::deliver,
 ) {
     @Volatile
     private var running = false
@@ -61,7 +69,7 @@ internal class HostRelay(
     fun start() {
         if (running) return
         running = true
-        thread = startDaemonThread("durbun-relay", logger, this::loop)
+        thread = startDaemonThread(threadName, logger, this::loop)
     }
 
     @Synchronized
@@ -90,7 +98,7 @@ internal class HostRelay(
                 chars += next.length
             }
             try {
-                link.deliver(batch)
+                deliver(batch)
             } catch (t: Throwable) {
                 logger.warn("Dürbün could not hand messages to the Flutter side", t)
             }

@@ -3,7 +3,9 @@
 // channel only when it runs (debug/profile, or a release built with --dart-define=DURBUN=true).
 // From then on URLSession traffic, native crashes, stdout/stderr and Swift `Durbun.log` calls are
 // reported through the Dart side's single desktop connection (one app session), and the desktop
-// state (config, mock rules) and native commands (ios.* tools) arrive from Dart.
+// state (config, mock rules) and native commands (ios.* tools) arrive from Dart. The app's own
+// os_log / Logger / NSLog lines (iOS 15+) go to Dart as `deviceLogs` while Dart asks for them: the
+// in-app panel shows them, and Dart sends them on only when the desktop cannot read device logs.
 import Flutter
 import Foundation
 
@@ -109,7 +111,7 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
 
         let actions = core.describeActionsJSON().data(using: .utf8)
             .flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? []
-        return Self.encode([
+        var reply: [String: Any] = [
             "attached": true,
             "platform": "ios",
             "sdk": ["name": "durbun-ios", "version": Durbun.version],
@@ -118,7 +120,10 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
             "commands": [String](),
             "app": core.hostedAppInfo,
             "urlSession": captureNetwork,
-        ])
+        ]
+        // This app's own os_log lines, read while Dart asks for them (`state.deviceLogs.read`; iOS 15+).
+        if options.captureStdout && OSLogCapture.isAvailable { reply["deviceLogs"] = "os_log" }
+        return Self.encode(reply)
     }
 
     private func stopHosted() {
@@ -150,6 +155,12 @@ final class ChannelLink: HostLink {
     func deliver(_ lines: [String]) {
         DispatchQueue.main.async { [weak self] in
             self?.channel?.invokeMethod("events", arguments: lines)
+        }
+    }
+
+    func deliverDeviceLogs(_ lines: [String]) {
+        DispatchQueue.main.async { [weak self] in
+            self?.channel?.invokeMethod("deviceLogs", arguments: lines)
         }
     }
 

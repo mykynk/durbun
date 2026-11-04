@@ -37,7 +37,9 @@ enum Clock {
 /// The SDK's own diagnostics. Never written to stdout/stderr (that would loop through the stdio
 /// capture); debug-level messages are invisible unless explicitly enabled in Console.app.
 enum Diagnostics {
-    private static let log = OSLog(subsystem: "dev.durbun.sdk", category: "Durbun")
+    /// Left out of the app's own os_log lines (`OSLogCapture`).
+    static let subsystem = "dev.durbun.sdk"
+    private static let log = OSLog(subsystem: subsystem, category: "Durbun")
 
     static func debug(_ message: @autoclosure () -> String) {
         os_log("%{public}@", log: log, type: .debug, message())

@@ -39,8 +39,22 @@ internal class DurbunCore(
     private val transport = Transport(this::endpoints, this::helloLine, this, queue, env.logger, timing)
     private val relay: HostRelay? = host?.let { HostRelay(queue, it, env.logger, onStart = ::drainPendingCrashes) }
 
+    /** Hosted mode: this app's logcat lines travel apart from other messages, so the host can route them. */
+    private val deviceLogQueue: OutboundQueue? = host?.let {
+        OutboundQueue(maxMessages = DEVICE_LOG_BUFFER, maxChars = DEVICE_LOG_BUFFER_CHARS)
+    }
+    private val deviceLogRelay: HostRelay? = host?.let { link ->
+        deviceLogQueue?.let { queue ->
+            HostRelay(queue, link, env.logger, onStart = {}, threadName = "durbun-relay-logs", deliver = link::deliverDeviceLogs)
+        }
+    }
+
     @Volatile
     private var hostState = HostState()
+
+    /** Hosted mode: whether the host wants this app's logcat (`deviceLogs.read`) and sends it on to the desktop. */
+    @Volatile
+    private var hostDeviceLogs = HostDeviceLogs()
 
     /** True when another SDK (the Flutter plugin) owns the desktop connection. */
     val isHosted: Boolean get() = host != null
@@ -92,12 +106,18 @@ internal class DurbunCore(
     val maxBodyBytes: Int get() = (options.maxBodyBytes ?: config.maxBodyBytes).coerceIn(0, MAX_BODY_BYTES)
 
     fun start() {
-        if (relay != null) relay.start() else transport.start()
+        if (relay != null) {
+            relay.start()
+            deviceLogRelay?.start()
+        } else {
+            transport.start()
+        }
     }
 
     fun stop() {
         if (!stopped.compareAndSet(false, true)) return
         relay?.stop()
+        deviceLogRelay?.stop()
         transport.stop()
         stopMetrics()
         synchronized(metricsLock) {
@@ -162,13 +182,22 @@ internal class DurbunCore(
         }
     }
 
-    /** A line from this app's own logcat (only while the desktop has no device logs). */
+    /**
+     * A line from this app's own logcat: standalone, only while the desktop has no device logs; hosted, whenever
+     * the host asked for them (it decides what reaches the desktop).
+     */
     fun forwardLogcat(ts: Long, level: Level, tag: String, message: String, tid: Int?) {
         if (stopped.get()) return
         // Hosted by Flutter: Dart's own print capture already sends the `flutter` lines.
         if (host != null && tag == FLUTTER_TAG) return
         if (recentLogs.isDuplicate(level.wireName, message, ts)) return
-        send(Wire.log(ts = ts, level = level.wireName, tag = tag, message = message, kind = "text", tid = tid))
+        val line = Wire.log(ts = ts, level = level.wireName, tag = tag, message = message, kind = "text", tid = tid)
+        val hostedQueue = deviceLogQueue
+        if (hostedQueue != null) {
+            hostedQueue.offer(line)
+        } else {
+            send(line)
+        }
     }
 
     fun addAction(action: DurbunAction) {
@@ -183,8 +212,10 @@ internal class DurbunCore(
     /* ───────────── hosted mode (Flutter plugin) ───────────── */
 
     /**
-     * Desktop state from the host: `{connected, via, appId, config, mocks, hello}` (JSON). Unknown or missing
-     * fields keep their previous value, except the mock rules: they hold only while the host is connected.
+     * Desktop state from the host: `{connected, via, appId, config, mocks, hello, deviceLogs}` (JSON). Unknown or
+     * missing fields keep their previous value, except the mock rules: they hold only while the host is connected.
+     * `deviceLogs: {read, desktop}` says whether the host wants this app's logcat (its in-app panel, or a desktop
+     * that cannot read device logs) — it applies whether or not a desktop is connected.
      */
     fun applyHostState(stateJson: String) {
         if (host == null || stopped.get()) return
@@ -192,6 +223,7 @@ internal class DurbunCore(
             val state = Json.parseObject(stateJson) ?: return
             state.obj("config")?.let { config = SdkConfig.from(it, config) }
             state.str("appId")?.let { serverAppId = it }
+            state.obj("deviceLogs")?.let { hostDeviceLogs = HostDeviceLogs.from(it, hostDeviceLogs) }
             val previous = hostState
             val connected = state.bool("connected") ?: previous.connected
             // The desktop is not authenticated yet (any local peer can answer the hello), so rules pushed by a
@@ -206,7 +238,12 @@ internal class DurbunCore(
                 endpoint = if (state.containsKey("via")) HostState.parseVia(state.str("via")) else previous.endpoint,
                 helloLine = state.obj("hello")?.let { Json.encode(it) } ?: previous.helloLine,
             )
-            if (connected) applyRuntimeConfig() else if (previous.connected) stopMetrics()
+            if (connected) {
+                applyRuntimeConfig()
+            } else {
+                if (previous.connected) stopMetrics()
+                applyLogcat()
+            }
         } catch (t: Throwable) {
             logger.warn("Could not apply the desktop state from Flutter", t)
         }
@@ -465,9 +502,20 @@ internal class DurbunCore(
     private fun applyRuntimeConfig() {
         if (stopped.get()) return
         if (options.captureMetrics) startMetrics(config.metricsIntervalMs)
+        applyLogcat()
+    }
+
+    /**
+     * Standalone: reads this app's logcat while the desktop cannot read device logs. Hosted: reads it while the
+     * host wants it (its in-app panel shows these lines with or without a desktop).
+     */
+    private fun applyLogcat() {
+        if (stopped.get()) return
         val controller = logcat ?: return
-        val forward = options.captureLogcat && !config.deviceLogsAvailable
-        if (forward && logcatAnnounced.compareAndSet(false, true)) {
+        val hosted = hostDeviceLogs
+        val read = options.captureLogcat && if (host != null) hosted.read else !config.deviceLogsAvailable
+        val toDesktop = read && (host == null || hosted.desktop)
+        if (toDesktop && logcatAnnounced.compareAndSet(false, true)) {
             send(
                 Wire.log(
                     ts = env.nowMs(),
@@ -480,7 +528,7 @@ internal class DurbunCore(
             )
         }
         try {
-            controller.setEnabled(forward)
+            controller.setEnabled(read)
         } catch (t: Throwable) {
             logger.warn("Could not switch logcat forwarding", t)
         }
@@ -585,5 +633,24 @@ internal class DurbunCore(
         private const val MAX_METRICS_INTERVAL_MS = 60_000L
         private const val CRASH_CONNECT_WAIT_MS = 1_000L
         private const val CRASH_FLUSH_WAIT_MS = 2_000L
+
+        /** Hosted logcat lines waiting for the host (a burst at start-up replays the whole logcat buffer). */
+        private const val DEVICE_LOG_BUFFER = 5_000
+        private const val DEVICE_LOG_BUFFER_CHARS = 2L * 1024 * 1024
+    }
+}
+
+/** Hosted mode: what the host wants of this app's logcat (`state.deviceLogs`). */
+internal class HostDeviceLogs(
+    /** Read it: the in-app panel shows it, or the desktop gets it. */
+    val read: Boolean = false,
+    /** The host sends these lines on to the desktop (it cannot read the device's logs itself). */
+    val desktop: Boolean = false,
+) {
+    companion object {
+        fun from(map: Map<String, Any?>, previous: HostDeviceLogs): HostDeviceLogs = HostDeviceLogs(
+            read = map.bool("read") ?: previous.read,
+            desktop = map.bool("desktop") ?: previous.desktop,
+        )
     }
 }
