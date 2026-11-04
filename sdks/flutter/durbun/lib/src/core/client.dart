@@ -374,10 +374,19 @@ class DurbunClient implements HttpCaptureHost {
     } catch (_) {}
   }
 
-  /// Sends a metric sample (dropped while disconnected).
+  /// Sends a metric sample. While disconnected only [outgoingTap] (the
+  /// in-app inspector) sees it: nothing waits for the desktop.
   void metric(Map<String, Object?> metricMessage) {
-    if (_disposed || !_connection.connected) return;
-    _send(metricMessage, volatile: true);
+    if (_disposed) return;
+    if (_connection.connected) {
+      _send(metricMessage, volatile: true);
+      return;
+    }
+    final tap = outgoingTap;
+    if (tap == null) return;
+    try {
+      tap(metricMessage);
+    } catch (_) {}
   }
 
   /// `ErrorInfo` for an error object / stack trace (null when both absent).

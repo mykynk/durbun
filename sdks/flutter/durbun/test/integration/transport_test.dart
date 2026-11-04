@@ -285,7 +285,11 @@ void main() {
         for (var i = 1; i <= 5; i++) {
           c.log(DurbunLogLevel.info, 'offline $i');
         }
+        final tapped = <Map<String, Object?>>[];
+        c.outgoingTap = tapped.add;
         c.metric(buildMetric(memoryMB: 1)); // volatile: dropped while offline
+        expect(tapped.where((m) => m['type'] == 'metric'), hasLength(1), reason: 'the in-app panel still gets offline samples');
+        c.outgoingTap = null;
         await Future<void>.delayed(const Duration(milliseconds: 300));
         expect(c.isConnected, isFalse);
         final d = desktop = await FakeDesktop.start(port: port);

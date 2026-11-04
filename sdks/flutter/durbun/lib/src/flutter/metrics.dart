@@ -98,9 +98,14 @@ SchedulerBinding? schedulerBindingOrNull() {
 /// FPS / janky frames / build & raster times (frame timings), memory (RSS),
 /// CPU and thread count.
 class FlutterMetrics {
-  FlutterMetrics(this.client);
+  FlutterMetrics(this.client, {this.local = false});
 
   final DurbunClient client;
+
+  /// The in-app inspector shows the samples: sample without a desktop too.
+  final bool local;
+
+  bool get _wanted => client.isConnected || local;
   final FrameStatsAggregator _frames = FrameStatsAggregator();
   final ProcessSampler _process = ProcessSampler();
   Timer? _timer;
@@ -121,7 +126,7 @@ class FlutterMetrics {
   /// Starts or stops sampling according to the connection state.
   void _update() {
     if (_disposed) return;
-    if (client.isConnected) {
+    if (_wanted) {
       ensureAttached();
       final interval = client.config.metricsIntervalMs;
       if (_timer == null || interval != _intervalMs) {
@@ -142,7 +147,7 @@ class FlutterMetrics {
 
   /// Registers the frame timings callback once the binding exists.
   void ensureAttached() {
-    if (_disposed || _timingsAttached || !client.isConnected) return;
+    if (_disposed || _timingsAttached || !_wanted) return;
     final binding = _binding ?? schedulerBindingOrNull();
     if (binding == null) return;
     _binding = binding;
@@ -168,7 +173,7 @@ class FlutterMetrics {
   }
 
   void _tick() {
-    if (_disposed || !client.isConnected) return;
+    if (_disposed || !_wanted) return;
     if (!_timingsAttached) ensureAttached();
     final frames = _frames.takeSample(refreshRate: _refreshRate());
     final process = _process.sample();

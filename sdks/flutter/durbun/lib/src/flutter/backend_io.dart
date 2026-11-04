@@ -126,7 +126,7 @@ class IoDurbunBackend implements DurbunBackend {
         }
         FlutterCommands(client).register();
         if (options.metrics) {
-          _metrics = FlutterMetrics(client)..start();
+          _metrics = FlutterMetrics(client, local: options.inspector)..start();
         }
         _guardian = client.startPeriodicTimer(
           const Duration(seconds: 2),
