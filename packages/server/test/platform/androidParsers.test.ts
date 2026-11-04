@@ -15,6 +15,7 @@ import {
   parsePs,
   parseVmRssMB,
   parseWmOutput,
+  parseCurrentScreenSize,
 } from '../../src/platform/android/parsers';
 
 describe('adb devices -l', () => {
@@ -116,6 +117,16 @@ describe('device info', () => {
     });
     expect(parseBattery(text.replace('status: 2', 'status: 5'))).toEqual({ level: 85, charging: true });
     expect(parseBattery('nothing')).toBeUndefined();
+  });
+});
+
+describe('screen size for screenrecord', () => {
+  it('prefers the rotated size from dumpsys display, else wm size', () => {
+    // Galaxy A73 (SM-A736B, Android 16): `dumpsys display | grep -o 'real [0-9]* x [0-9]*'; wm size`
+    expect(parseCurrentScreenSize('real 1080 x 2400\nreal 1080 x 2400\nPhysical size: 1080x2400\n')).toEqual({ width: 1080, height: 2400 });
+    expect(parseCurrentScreenSize('real 2400 x 1080\nPhysical size: 1080x2400\n')).toEqual({ width: 2400, height: 1080 });
+    expect(parseCurrentScreenSize('Physical size: 1440x3088\nOverride size: 1080x2316\n')).toEqual({ width: 1080, height: 2316 });
+    expect(parseCurrentScreenSize('')).toBeUndefined();
   });
 });
 

@@ -68,8 +68,8 @@ const server = () => ({
   platform: 'darwin',
 });
 
-const ANDROID_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'logs-clear-buffer', 'logs-restart', 'appearance', 'font-scale', 'animations', 'input-text', 'key-event', 'screen-record'];
-const SIM_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'appearance', 'font-scale', 'push-notification', 'location', 'status-bar', 'logs-restart'];
+const ANDROID_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'logs-clear-buffer', 'logs-restart', 'appearance', 'font-scale', 'animations', 'input-text', 'key-event', 'screen-record', 'screen-record-stop'];
+const SIM_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'appearance', 'font-scale', 'push-notification', 'location', 'status-bar', 'logs-restart', 'screen-record', 'screen-record-stop'];
 
 function baseDevices() {
   return [
@@ -796,6 +796,53 @@ function enableDemo(on) {
   for (const ws of clients) syncClient(ws);
 }
 
+/* ───────────── screen recordings ───────────── */
+/** deviceId → running recording: the replies waiting for its file (screen-record, then screen-record-stop). */
+const recordings = new Map();
+
+function endRecording(deviceId) {
+  const rec = recordings.get(deviceId);
+  if (!rec) return;
+  recordings.delete(deviceId);
+  clearTimeout(rec.timer);
+  const d = devices.find((x) => x.id === deviceId);
+  if (d) {
+    delete d.recording;
+    d.lastSeen = Date.now();
+    queue.devices.push(d);
+  }
+  const durationSec = Math.max(1, Math.round((Date.now() - rec.startedAt) / 1000));
+  for (const reply of rec.replies) reply({ url: '/api/files/recording.mov', file: '/tmp/recording.mov', durationSec, endedBy: rec.endedBy });
+}
+
+/** Like the server: records until screen-record-stop or the platform limit, then "copies" the file for 1.5 s. */
+function screenRecord(command, reply) {
+  const { deviceId } = command;
+  if (command.action === 'screen-record-stop') {
+    const rec = recordings.get(deviceId);
+    if (!rec) return reply(undefined, false, 'No screen recording is running on this device', 'action.recording.notRunning');
+    rec.replies.push(reply);
+    if (rec.endedBy) return;
+    rec.endedBy = 'stop';
+    clearTimeout(rec.timer);
+    rec.timer = setTimeout(() => endRecording(deviceId), 1500);
+    return;
+  }
+  if (recordings.has(deviceId)) return reply(undefined, false, 'A screen recording is already running on this device', 'action.recording.busy');
+  const d = devices.find((x) => x.id === deviceId);
+  const limitSec = d?.platform === 'android' ? 180 : 600;
+  const rec = { startedAt: Date.now(), replies: [reply], endedBy: undefined, timer: undefined };
+  rec.timer = setTimeout(() => {
+    rec.endedBy = 'limit';
+    rec.timer = setTimeout(() => endRecording(deviceId), 1500);
+  }, limitSec * 1000);
+  recordings.set(deviceId, rec);
+  if (d) {
+    d.recording = { startedAt: rec.startedAt, limitSec };
+    queue.devices.push(d);
+  }
+}
+
 /* ───────────── commands ───────────── */
 function handleCommand(ws, { requestId, command }) {
   const reply = (data, ok = true, error, code) => send(ws, { type: 'reply', requestId, ok, data, error, code });
@@ -830,6 +877,7 @@ function handleCommand(ws, { requestId, command }) {
       return;
     case 'device.action':
       if (command.action === 'screenshot') return reply({ url: '/api/files/shot.png', file: '/tmp/shot.png', width: 1080, height: 2400 });
+      if (command.action === 'screen-record' || command.action === 'screen-record-stop') return screenRecord(command, reply);
       if (command.action === 'list-apps') return reply([{ id: 'com.mykynk.pati', name: 'Pati', version: '1.4.2', debuggable: true }, { id: 'com.mykynk.kasa', name: 'Kasa', version: '2.0.1' }]);
       return reply(null);
     case 'app.action':

@@ -415,6 +415,38 @@
 }
 
 /* ───────────── Recordings ───────────── */
+.dv-rec-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.dv-rec-live__clock {
+  font-weight: 600;
+}
+.dv-rec-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: dv-rec-pulse 1.2s ease-in-out infinite;
+}
+.dv-rec-dot.is-done {
+  background: var(--text-muted);
+  animation: none;
+}
+@keyframes dv-rec-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dv-rec-dot {
+    animation: none;
+  }
+}
 .dv-recs {
   display: flex;
   flex-direction: column;

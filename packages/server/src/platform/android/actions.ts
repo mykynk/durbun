@@ -3,11 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { DeviceActionId, DeviceActionResult, InstalledApp } from '@durbun/protocol';
 import type { DriverContext } from '../../types';
-import { failureText } from '../exec';
+import { failureText, killProcess } from '../exec';
 import { bool, done, ensureDir, fail, isPng, num, saveScreenshot, str, tempFileName, validAppId } from '../shared/files';
+import type { RecordingProcess, ScreenRecorder } from '../shared/screenRecord';
 import { shellQuote } from '../shared/text';
+import { sleep } from '../shared/timing';
 import type { Adb } from './adb';
-import { parsePackageDump, parsePackageList } from './parsers';
+import { parseCurrentScreenSize, parsePackageDump, parsePackageList } from './parsers';
 
 export interface AndroidActionTarget {
   adb: Adb;
@@ -19,6 +21,7 @@ export interface AndroidActionTarget {
   apiLevel?: number;
   ctx: DriverContext;
   restartLogs(): Promise<void>;
+  recorder: ScreenRecorder;
 }
 
 export const ANDROID_KEY_CODES: Record<string, number> = {
@@ -54,7 +57,7 @@ export function androidActionsFor(opts: { online: boolean; isEmulator: boolean; 
   if (api === undefined || api >= 29) actions.push('appearance');
   actions.push('font-scale', 'animations', 'input-text', 'key-event');
   if (opts.isEmulator) actions.push('location');
-  if (api === undefined || api >= 19) actions.push('screen-record');
+  if (api === undefined || api >= 19) actions.push('screen-record', 'screen-record-stop');
   return actions;
 }
 
@@ -272,23 +275,11 @@ export async function runAndroidAction(
       return done(`Location set to ${lat}, ${lon}`);
     }
 
-    case 'screen-record': {
-      const secs = Math.round(num(params, 'durationSec') ?? 0);
-      if (secs < 1 || secs > 180) return fail('durationSec must be between 1 and 180', 'action.invalidParams');
-      const remote = `/sdcard/durbun-rec-${Date.now()}.mp4`;
-      const rec = await shell(`screenrecord --time-limit ${secs} ${remote}`, (secs + 20) * 1000);
-      if (!rec.ok) {
-        void shell(`rm -f ${remote}`);
-        return fail(`Screen recording failed: ${failureText(rec)}`);
-      }
-      await ensureDir(t.ctx.tempDir);
-      const name = tempFileName('recording', t.label, 'mp4');
-      const local = path.join(t.ctx.tempDir, name);
-      const pull = await adb.run(['-s', serial, 'pull', remote, local], { timeoutMs: 120_000 });
-      void shell(`rm -f ${remote}`);
-      if (!pull.ok) return fail(`Could not copy the recording: ${failureText(pull)}`);
-      return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file: local });
-    }
+    case 'screen-record':
+      return t.recorder.record(params, ANDROID_RECORD_MAX_SEC, () => startRecording(t));
+
+    case 'screen-record-stop':
+      return t.recorder.stop();
 
     default:
       return fail(`"${action}" is not supported on Android devices`, 'action.unsupported');
@@ -309,4 +300,86 @@ async function launch(t: AndroidActionTarget, appId: string, okMessage?: string)
     return fail(`Could not launch ${appId}: ${reason}`, 'action.launchFailed');
   }
   return done(okMessage ?? `Launched ${appId}`);
+}
+
+/** `screenrecord` stops by itself at 180 s, its largest `--time-limit`. */
+export const ANDROID_RECORD_MAX_SEC = 180;
+
+/**
+ * `screenrecord --size` for a screen whose long side is over 1920 px: hardware encoders refuse much more than
+ * 1080p (a 1080×2400 Galaxy A73 fails at once with "Encoder failed (err=-38)"). Keeps the aspect ratio, sides
+ * are multiples of 16; undefined = record at the screen's own size.
+ */
+export function recordSize(width: number, height: number): string | undefined {
+  const scale = 1920 / Math.max(width, height);
+  if (scale >= 1) return undefined;
+  const fit = (n: number) => Math.max(16, Math.floor((n * scale) / 16) * 16);
+  return `${fit(width)}x${fit(height)}`;
+}
+
+/**
+ * `screenrecord` runs in a long `adb shell`; `exec` keeps the shell's pid, so the `$$` printed first is
+ * screenrecord's. Stopping sends it SIGINT on the device, which finishes the mp4 (closing adb would only hang
+ * it up and leave an unplayable file); then the file is pulled.
+ */
+async function startRecording(t: AndroidActionTarget): Promise<RecordingProcess> {
+  const { adb, serial } = t;
+  const remote = `/sdcard/durbun-rec-${Date.now()}.mp4`;
+  const screen = await adb.shell(serial, "dumpsys display | grep -o 'real [0-9]* x [0-9]*'; wm size", { timeoutMs: 10_000 });
+  const current = parseCurrentScreenSize(screen.stdout);
+  const size = current ? recordSize(current.width, current.height) : undefined;
+  const child = adb.spawnShell(
+    serial,
+    `echo durbun-pid:$$; exec screenrecord ${size ? `--size ${size} ` : ''}--time-limit ${ANDROID_RECORD_MAX_SEC} ${remote}`,
+  );
+  let out = '';
+  let resolvePid: (pid: number | undefined) => void = () => {};
+  const pid = new Promise<number | undefined>((resolve) => (resolvePid = resolve));
+  const collect = (d: string) => {
+    if (out.length < 8000) out += d;
+    const m = /durbun-pid:(\d+)/.exec(out);
+    if (m) resolvePid(Number(m[1]));
+  };
+  child.stdout?.setEncoding('utf8');
+  child.stdout?.on('data', collect);
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', collect);
+  const exited = new Promise<number | null>((resolve) => {
+    child.once('error', () => resolve(-1));
+    child.once('exit', (code) => resolve(code));
+  });
+  void exited.then(() => resolvePid(undefined));
+  const output = () => out.replace(/durbun-pid:\d+\s*/, '').trim();
+  return {
+    stop() {
+      // screenrecord finishes the file within a second or two; an adb that does not return is killed.
+      const hung = setTimeout(() => void killProcess(child), 30_000);
+      hung.unref?.();
+      void exited.then(() => clearTimeout(hung));
+      void Promise.race([pid, sleep(5000).then(() => undefined)])
+        .then((p) => adb.shell(serial, p ? `kill -2 ${p}` : 'kill -2 $(pidof screenrecord)', { timeoutMs: 10_000 }))
+        .catch(() => undefined);
+    },
+    async result(stopped) {
+      const code = await exited;
+      // adb without the shell protocol (old devices) always exits 0; a missing file then fails the pull.
+      if (!stopped() && code !== 0) {
+        await adb.shell(serial, `rm -f ${remote}`);
+        return fail(`Screen recording failed: ${output() || `adb exited with code ${code ?? '?'}`}`);
+      }
+      await ensureDir(t.ctx.tempDir);
+      const name = tempFileName('recording', t.label, 'mp4');
+      const local = path.join(t.ctx.tempDir, name);
+      const pull = await adb.run(['-s', serial, 'pull', remote, local], { timeoutMs: 120_000 });
+      await adb.shell(serial, `rm -f ${remote}`);
+      if (!pull.ok) return fail(`Could not copy the recording: ${output() || failureText(pull)}`);
+      // e.g. "Encoder failed" leaves an empty file behind.
+      const st = await fs.promises.stat(local).catch(() => undefined);
+      if (!st || st.size === 0) {
+        await fs.promises.rm(local, { force: true });
+        return fail(`Screen recording failed: ${output() || 'no video was written'}`);
+      }
+      return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file: local });
+    },
+  };
 }

@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { act, cleanup, render, screen, within } from '@testing-library/react';
-import type { AppSession, DeviceInfo, ProcessUpdate } from '@durbun/protocol';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import type { AppSession, DeviceInfo, ProcessUpdate, UiToServer } from '@durbun/protocol';
 import { hubActions, setScope } from '../../data';
+import { __resetCommandsForTests, handleReply, setCommandTransport } from '../../data/commands';
 import { FeatureContext } from '../../components';
 import { setLanguage } from '../../i18n';
 import DeviceView from './index';
+import { useMedia, useRecorder } from './stores';
 
 const PIXEL: DeviceInfo = {
   id: 'demo:1',
@@ -75,6 +77,10 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  setCommandTransport(null);
+  __resetCommandsForTests();
+  useMedia.setState({ shots: [], recordings: [], openShotId: null });
+  useRecorder.setState({ runs: {}, errors: {} });
   hubActions.reset();
   setScope({ kind: 'all' });
   setLanguage('en');
@@ -113,7 +119,7 @@ describe('DeviceView', () => {
     expect(within(procs).getAllByRole('button', { name: /Performansı izle|için performansı izle/ }).length).toBe(2);
   });
 
-  it('simulator cards: push editor with a valid template, status bar, screen recording durations', () => {
+  it('simulator cards: push editor with a valid template, status bar, screen recording', () => {
     hubActions.upsertDevices([{ ...IPHONE, actions: ['push-notification', 'status-bar', 'screen-record'] }]);
     act(() => setScope({ kind: 'device', deviceId: 'demo:2' }));
     renderView();
@@ -121,10 +127,58 @@ describe('DeviceView', () => {
     expect(screen.getByText(/Geçerli · \d+ \/ 4096 bayt/)).toBeTruthy();
     expect(screen.getByText('Temiz durum çubuğu')).toBeTruthy();
     expect(screen.getByText('Ekran kaydı')).toBeTruthy();
-    for (const label of ['10 sn', '30 sn', '1 dk', '3 dk', '5 dk']) expect(screen.getByRole('radio', { name: label })).toBeTruthy();
+    expect(screen.getByText('En fazla 10 dk')).toBeTruthy();
     expect(screen.getByText('Kaydı başlat')).toBeTruthy();
     // Android-only cards are absent on the simulator.
     expect(screen.queryByText('Girdi')).toBeNull();
+  });
+
+  it('screen recording runs until Stop; the file comes from either reply, once', async () => {
+    const sent: Array<Extract<UiToServer, { type: 'command' }>> = [];
+    setCommandTransport({ isOpen: () => true, send: (m) => (m.type === 'command' && sent.push(m), true) });
+    const sim: DeviceInfo = { ...IPHONE, actions: ['screen-record', 'screen-record-stop'] };
+    hubActions.upsertDevices([sim]);
+    act(() => setScope({ kind: 'device', deviceId: 'demo:2' }));
+    renderView();
+    fireEvent.click(screen.getByRole('button', { name: 'Kaydı başlat' }));
+    expect(sent[0]!.command).toMatchObject({ name: 'device.action', action: 'screen-record', params: {} });
+    expect(screen.getByRole('status').textContent).toBe('Kaydediliyor');
+    // The server reports the running recording (a reload would see only this).
+    act(() => hubActions.upsertDevices([{ ...sim, recording: { startedAt: Date.now(), limitSec: 600 } }]));
+    expect(screen.getByRole('timer').textContent).toMatch(/^0:0\d \/ 10:00$/);
+    expect(screen.queryByRole('button', { name: 'Kaydı başlat' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Durdur' }));
+    expect(sent[1]!.command).toMatchObject({ name: 'device.action', action: 'screen-record-stop' });
+    expect(screen.getByRole('status').textContent).toBe('Kayıt cihazdan aktarılıyor…');
+
+    const data = { url: '/api/files/rec.mov', file: '/tmp/rec.mov', durationSec: 12, endedBy: 'stop' };
+    await act(async () => {
+      handleReply({ type: 'reply', requestId: sent[1]!.requestId, ok: true, data });
+      handleReply({ type: 'reply', requestId: sent[0]!.requestId, ok: true, data });
+    });
+    act(() => hubActions.upsertDevices([sim]));
+    const list = screen.getByRole('list', { name: 'Bu oturumun kayıtları' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(list).getByText('· 0:12')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Kaydı başlat' })).toBeTruthy();
+  });
+
+  it('a recording started elsewhere (before a reload) can be stopped here', async () => {
+    const sent: Array<Extract<UiToServer, { type: 'command' }>> = [];
+    setCommandTransport({ isOpen: () => true, send: (m) => (m.type === 'command' && sent.push(m), true) });
+    const sim: DeviceInfo = { ...IPHONE, actions: ['screen-record', 'screen-record-stop'] };
+    hubActions.upsertDevices([{ ...sim, recording: { startedAt: Date.now() - 65_000, limitSec: 600 } }]);
+    act(() => setScope({ kind: 'device', deviceId: 'demo:2' }));
+    renderView();
+    expect(screen.getByRole('timer').textContent).toMatch(/^1:0\d \/ 10:00$/);
+    fireEvent.click(screen.getByRole('button', { name: 'Durdur' }));
+    await act(async () => {
+      handleReply({ type: 'reply', requestId: sent[0]!.requestId, ok: true, data: { url: '/api/files/old.mov', durationSec: 66 } });
+    });
+    act(() => hubActions.upsertDevices([sim]));
+    expect(within(screen.getByRole('list', { name: 'Bu oturumun kayıtları' })).getByText('· 1:06')).toBeTruthy();
+    expect(useRecorder.getState().runs).toEqual({});
   });
 
   it('a disconnected device is read-only (info only, no actions)', () => {

@@ -23,6 +23,7 @@ import { LogBatcher } from '../shared/batcher';
 import { fail } from '../shared/files';
 import { FlutterErrorGrouper } from '../shared/flutter';
 import { mergeReaders, ReaderReporter, readerDetail } from '../shared/readers';
+import { ScreenRecorder } from '../shared/screenRecord';
 import { Poller } from '../shared/timing';
 import { probeXcodeTools, type XcodeTools } from '../tools';
 import { IosAppTracker, type AppSource } from './appTracker';
@@ -88,6 +89,7 @@ export class SimulatorSession {
   private readonly apps: IosAppTracker;
   private unsubCrashes?: () => void;
   private readonly crashReader = new ReaderReporter((state) => this.patch({ readers: { crashReports: state } }));
+  private readonly recorder = new ScreenRecorder((recording) => this.patch({ recording }));
   /** Crash reports are copied one after another, so their entries keep the report order. */
   private crashQueue: Promise<void> = Promise.resolve();
 
@@ -304,6 +306,7 @@ export class SimulatorSession {
         label: this.info.name,
         ctx: this.deps.ctx,
         restartLogs: () => this.restartLogs(),
+        recorder: this.recorder,
       },
       action,
       params,
@@ -330,6 +333,7 @@ export class SimulatorSession {
   async dispose(reason: 'shutdown' | 'stopped'): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.recorder.dispose();
     for (const m of this.metrics.values()) m.stop();
     this.metrics.clear();
     this.unsubCrashes?.();

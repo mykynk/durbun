@@ -6,9 +6,11 @@ import type { DeviceActionId, DeviceActionResult } from '@durbun/protocol';
 import type { DriverContext } from '../../types';
 import { failureText, run } from '../exec';
 import { bool, done, ensureDir, fail, isPng, num, screenshotResult, str, tempFileName, validAppId } from '../shared/files';
+import { sigintRecording, type RecordingProcess, type ScreenRecorder } from '../shared/screenRecord';
 import type { ResolvedTool } from '../tools';
 import {
   devicectl as xcrunDevicectl,
+  devicectlError,
   parseDevicectlApps,
   parseDevicectlProcesses,
   pidsForApp,
@@ -16,6 +18,7 @@ import {
   type DevicectlCaps,
   type DevicectlRunner,
 } from './devicectl';
+import { XCRUN } from './simctl';
 
 export interface IosDeviceActionTarget {
   udid: string;
@@ -28,6 +31,7 @@ export interface IosDeviceActionTarget {
   restartLogs(): Promise<void>;
   /** Tests: a fake devicectl (default: `xcrun devicectl`). */
   devicectl?: DevicectlRunner;
+  recorder: ScreenRecorder;
 }
 
 /** Actions that work for a trusted physical device with the given tooling. */
@@ -43,7 +47,7 @@ export function iosDeviceActions(opts: {
     a.push('list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-install', 'app-uninstall', 'open-url');
   }
   if (opts.caps.screenshot || opts.screenshotTool) a.push('screenshot');
-  if (opts.caps.screenRecord) a.push('screen-record');
+  if (opts.caps.screenRecord) a.push('screen-record', 'screen-record-stop');
   if (opts.syslog) a.push('logs-restart');
   return a;
 }
@@ -136,21 +140,12 @@ export async function runIosDeviceAction(
     case 'screenshot':
       return screenshot(t);
 
-    case 'screen-record': {
+    case 'screen-record':
       if (!t.caps.screenRecord) return fail('Screen recording needs a newer Xcode (devicectl capture)', 'action.toolMissing');
-      const secs = Math.round(num(params, 'durationSec') ?? 0);
-      if (secs < 1 || secs > 600) return fail('durationSec must be between 1 and 600', 'action.invalidParams');
-      await ensureDir(t.ctx.tempDir);
-      const name = tempFileName('recording', t.label, 'mp4');
-      const file = path.join(t.ctx.tempDir, name);
-      const r = await devicectl(
-        ['device', 'capture', 'screen-record', ...dev, '--duration', String(secs), '--destination', file],
-        (secs + 60) * 1000,
-      );
-      const st = await fs.promises.stat(file).catch(() => undefined);
-      if (!r.ok || !st || st.size === 0) return fail(`Screen recording failed: ${r.error ?? 'no video was written'}`);
-      return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file });
-    }
+      return t.recorder.record(params, DEVICE_RECORD_MAX_SEC, () => startRecording(t));
+
+    case 'screen-record-stop':
+      return t.recorder.stop();
 
     case 'logs-restart':
       if (!t.syslogAvailable) return fail('idevicesyslog is not available', 'logs.idevicesyslogMissing');
@@ -237,4 +232,32 @@ async function screenshot(t: IosDeviceActionTarget): Promise<DeviceActionResult>
     `The device refused the screenshot (Developer Mode / developer disk image may be required): ${errors.join(' · ')}`,
     'action.screenshotRefused',
   );
+}
+
+/** devicectl records until SIGINT without a limit of its own; Dürbün stops a recording after 10 minutes. */
+const DEVICE_RECORD_MAX_SEC = 600;
+
+async function startRecording(t: IosDeviceActionTarget): Promise<RecordingProcess> {
+  await ensureDir(t.ctx.tempDir);
+  const name = tempFileName('recording', t.label, 'mp4');
+  const file = path.join(t.ctx.tempDir, name);
+  const jsonFile = path.join(os.tmpdir(), `durbun-devicectl-rec-${process.pid}-${Date.now()}.json`);
+  // Without --duration devicectl records until it gets SIGINT (Ctrl+C) and then writes the file.
+  const args = ['devicectl', 'device', 'capture', 'screen-record', '--device', t.udid, '--destination', file, '--json-output', jsonFile];
+  return sigintRecording(XCRUN, args, 60_000, async (exit) => {
+    let json: Record<string, unknown> | undefined;
+    try {
+      json = JSON.parse(await fs.promises.readFile(jsonFile, 'utf8')) as Record<string, unknown>;
+    } catch {
+      json = undefined;
+    } finally {
+      await fs.promises.rm(jsonFile, { force: true });
+    }
+    const st = await fs.promises.stat(file).catch(() => undefined);
+    if (st && st.size > 0 && (exit.stopped || exit.code === 0)) {
+      return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file });
+    }
+    const why = exit.stopped && !json && !exit.stderr.trim() ? 'no video was written' : devicectlError(json, exit.stderr);
+    return fail(`Screen recording failed: ${why}`);
+  });
 }

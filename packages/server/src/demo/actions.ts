@@ -113,7 +113,7 @@ export async function runDemoAction(
   const supported = android ? ANDROID_ACTIONS : sim ? IOS_SIM_ACTIONS : IOS_DEVICE_ACTIONS;
   if (!supported.includes(action)) {
     return fail(
-      action === 'screen-record'
+      action === 'screen-record' || action === 'screen-record-stop'
         ? 'Screen recording is not available for demo devices'
         : `"${action}" is not supported on ${android ? 'Android' : sim ? 'the iOS simulator' : 'a physical iPhone'}`,
       'demo.unsupportedAction',

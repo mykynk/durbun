@@ -16,6 +16,7 @@ import type { DeviceLogInput, DriverContext, Logger, PortForward } from '../../t
 import { StreamProcess, type StreamExitInfo, type StreamSpec } from '../exec';
 import { LogBatcher } from '../shared/batcher';
 import { fail } from '../shared/files';
+import { ScreenRecorder } from '../shared/screenRecord';
 import { humanizeModel } from '../shared/text';
 import { every } from '../shared/timing';
 import { androidActionsFor, runAndroidAction } from './actions';
@@ -123,6 +124,7 @@ export class AndroidDeviceSession {
   private unsubLogs?: () => void;
   /** DeviceInfo.readers: crash records (dropbox) and frame stats, changes only. */
   private readonly readers = new DeviceReaders((id, state) => this.patchReader(id, state));
+  private readonly recorder = new ScreenRecorder((recording) => this.patch({ recording }));
 
   constructor(
     private readonly deps: AndroidSessionDeps,
@@ -324,6 +326,7 @@ export class AndroidDeviceSession {
     this.disposed = true;
     const wasOnline = this.online;
     this.gen += 1;
+    this.recorder.dispose();
     this.stopTimers();
     clearTimeout(this.psTimer);
     this.unsubLogs?.();
@@ -659,6 +662,7 @@ export class AndroidDeviceSession {
         apiLevel: this.apiLevel,
         ctx: this.deps.ctx,
         restartLogs: () => this.restartLogs(),
+        recorder: this.recorder,
       },
       action,
       params,

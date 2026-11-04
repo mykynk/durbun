@@ -1,5 +1,6 @@
 /** Thin wrapper around the resolved adb binary (argv only, no shell on the desktop side). */
-import { run, runBuffer, type RunOptions, type RunResult } from '../exec';
+import type { ChildProcess } from 'node:child_process';
+import { run, runBuffer, spawnTracked, type RunOptions, type RunResult } from '../exec';
 import type { ResolvedTool } from '../tools';
 import { parseForwardPort, parsePortMappings, type PortMapping } from './parsers';
 
@@ -25,6 +26,11 @@ export class Adb {
   /** `adb -s S shell '<command>'` — `command` is interpreted by the device's /system/bin/sh. */
   shell(serial: string, command: string, opts?: RunOptions): Promise<RunResult<string>> {
     return this.run(['-s', serial, 'shell', command], { timeoutMs: 20_000, ...opts });
+  }
+
+  /** Long-running `adb -s S shell '<command>'` with stdout + stderr piped; the caller owns its lifetime. */
+  spawnShell(serial: string, command: string): ChildProcess {
+    return spawnTracked(this.tool.path, ['-s', serial, 'shell', command], this.tool.env, { stdout: true });
   }
 
   async version(): Promise<string | undefined> {

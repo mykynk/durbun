@@ -262,7 +262,7 @@ local `command.timeout` / `command.disconnected` / `command.aborted` (show them 
 are queued and sent on connect (within their timeout). `sendCommandDetailed(cmd, opts)` resolves `{ data, code? }` — a
 successful `device.action` forwards `DeviceActionResult.code` (`action.screenshot.saved`, `action.done`, …), localize it
 with `tCode(code, data, fallback)`. Default timeouts: 15 s; `device.action` 30 s
-(`screenshot`/`list-apps`/`app-uninstall` 60 s, `app-install` 300 s, `screen-record` duration + 60 s);
+(`screenshot`/`list-apps`/`app-uninstall` 60 s, `app-install` 300 s, `screen-record` duration (else the 600 s limit) + 120 s, `screen-record-stop` 180 s);
 `net.replay` 40 s.
 
 `api` (REST, same origin; `ApiError { status, message, code? }`):

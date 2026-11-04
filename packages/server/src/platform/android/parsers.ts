@@ -114,6 +114,17 @@ export function parseWmOutput(text: string): ScreenInfo | undefined {
   return info;
 }
 
+/**
+ * The screen in its current orientation: the first `real W x H` of `dumpsys display` (it turns with the
+ * display), else `wm size` (natural orientation).
+ */
+export function parseCurrentScreenSize(text: string): { width: number; height: number } | undefined {
+  const m = /\breal (\d+) x (\d+)/.exec(text);
+  if (m) return { width: Number(m[1]), height: Number(m[2]) };
+  const wm = parseWmOutput(text);
+  return wm ? { width: wm.width, height: wm.height } : undefined;
+}
+
 /** `dumpsys battery`. */
 export function parseBattery(text: string): { level: number; charging: boolean } | undefined {
   const get = (key: string): string | undefined => {

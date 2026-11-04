@@ -326,6 +326,8 @@ export function createHub(opts: CreateHubOptions): Hub {
     // State explanations belong to the state they were sent with.
     if (!('stateDetail' in device)) delete next.stateDetail;
     if (!('stateCode' in device)) delete next.stateCode;
+    // Only the driver session that runs a recording reports it; a fresh upsert without one has none.
+    if (!('recording' in device)) delete next.recording;
     next.firstSeen = prev?.firstSeen ?? finite(device.firstSeen) ?? now;
     next.lastSeen = Math.max(finite(device.lastSeen) ?? now, prev?.lastSeen ?? 0);
     next.actions = Array.isArray(device.actions) ? [...device.actions] : (prev?.actions ?? []);
@@ -357,6 +359,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     if (prev.state === 'disconnected' && prev.stateDetail === detail && prev.stateCode === code) return;
     const next: DeviceInfo = { ...prev, state: 'disconnected', lastSeen: Date.now(), stateDetail: detail, stateCode: code };
     if (prev.logs.status === 'streaming' || prev.logs.status === 'starting') next.logs = { ...prev.logs, status: 'stopped' };
+    delete next.recording;
     storeDevice(prev, next, detail);
     deviceApps.markDeviceStopped(id);
   }

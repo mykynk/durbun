@@ -102,6 +102,8 @@ export interface DeviceInfo {
   };
   /** Device actions that work for this device right now. */
   actions: DeviceActionId[];
+  /** The screen recording running on the device (absent = none). */
+  recording?: DeviceRecording;
   /**
    * Readers that work without an SDK (SPEC §10.3 / §10.4), so the UI can tell "nothing found" from "cannot
    * read". Absent reader = not reported (older server, or not applicable to this device). The hub merges
@@ -110,6 +112,14 @@ export interface DeviceInfo {
   readers?: Partial<Record<DeviceReaderId, DeviceReaderState>>;
   firstSeen: number;
   lastSeen: number;
+}
+
+/** A running `screen-record`: it lasts until `screen-record-stop` or `limitSec`, whichever comes first. */
+export interface DeviceRecording {
+  /** Server clock (ms) when the recording started. */
+  startedAt: number;
+  /** The recording stops by itself after this many seconds (the platform limit or the requested duration). */
+  limitSec: number;
 }
 
 /** SDK-less readers: device crash / ANR records (dropbox, .ips) and Android frame stats. */
@@ -484,7 +494,12 @@ export function findMockRule(rules: MockRule[], method: string, url: string, app
  *  push-notification { appId*, payload*: object }   (iOS simulator)
  *  location { lat*, lon* }                (iOS simulator, Android emulator)
  *  status-bar { mode*: 'clean' | 'reset' }           (iOS simulator)
- *  screen-record { durationSec*: number } → data: { url: string; file: string }
+ *  screen-record { durationSec?: number } → data: ScreenRecordData
+ *      Records until `screen-record-stop`, `durationSec` or the platform limit (Android 180 s, iOS 600 s) and
+ *      replies once the file is ready. One recording per device (`action.recording.busy`); while it runs,
+ *      `DeviceInfo.recording` is set.
+ *  screen-record-stop {}                  → data: ScreenRecordData (the same file the `screen-record` reply gets)
+ *      `action.recording.notRunning` when the device is not recording.
  */
 export type DeviceActionId =
   | 'screenshot'
@@ -506,7 +521,20 @@ export type DeviceActionId =
   | 'push-notification'
   | 'location'
   | 'status-bar'
-  | 'screen-record';
+  | 'screen-record'
+  | 'screen-record-stop';
+
+/** Reply data of `screen-record` / `screen-record-stop`. */
+export interface ScreenRecordData {
+  /** Same-origin URL of the video. */
+  url: string;
+  /** Server-side path. */
+  file: string;
+  /** Recorded length (s). */
+  durationSec?: number;
+  /** 'limit' = it stopped by itself at `DeviceRecording.limitSec`. */
+  endedBy?: 'stop' | 'limit';
+}
 
 export interface InstalledApp {
   id: string;

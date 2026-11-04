@@ -299,7 +299,9 @@ every failure is reported as data (device `logs.status`, `DriverStatus`, `ToolCh
   (`logcat -c`), `logs-restart`, `appearance` (`cmd uimode night yes|no`), `font-scale`
   (`settings put system font_scale`), `animations` (three `*_animation_scale` settings),
   `input-text` (escape for `input text`), `key-event`, `location` (emulator: `emu geo fix lon lat`),
-  `screen-record` (optional: `screenrecord --time-limit`, then pull).
+  `screen-record` (optional: `adb shell 'echo $$; exec screenrecord --time-limit 180 …'` until
+  `screen-record-stop` sends SIGINT to that pid on the device, then pull; a screen whose long side is over
+  1920 px is recorded with `--size` scaled to 1920, since encoders refuse more: "Encoder failed (err=-38)").
 - Metrics (`watchMetrics`): every 2 s `top -b -n 1 -p <pid> -o %CPU,RES` (verify toybox columns) or
   `dumpsys meminfo <pid>` (TOTAL PSS) → `pushMetrics` (`source: 'adb'`).
 
@@ -321,7 +323,7 @@ every failure is reported as data (device `logs.status`, `DriverStatus`, `ToolCh
   `font-scale` (`ui <udid> content_size` mapping), `push-notification` (`push <udid> <bundle> <json file>`),
   `location` (`location <udid> set lat,lon`), `status-bar` (`status_bar override --time 9:41
   --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3` / `clear`), `logs-restart`,
-  `screen-record` (optional).
+  `screen-record` (optional: `io <udid> recordVideo` until SIGINT).
 
 **iOS physical (`ios-device` driver)**
 - usbmux client in Node (`/var/run/usbmuxd`, 16-byte little-endian header + XML plist, message type 8):
@@ -339,7 +341,11 @@ every failure is reported as data (device `logs.status`, `DriverStatus`, `ToolCh
 - Actions via `xcrun devicectl` where possible: `list-apps` (`device info apps`), `app-launch`
   (`device process launch`), `app-stop`, `app-restart`, `app-install` (`device install app`),
   `app-uninstall`, `open-url` (`device process launch --payload-url`), `screenshot` (try
-  `idevicescreenshot`; report a clear error when the device refuses).
+  `idevicescreenshot`; report a clear error when the device refuses), `screen-record` (`device capture
+  screen-record` without `--duration`, until SIGINT; needs a devicectl that has it).
+- Screen recording (all platforms, `platform/shared/screenRecord.ts`): one per device, from `screen-record`
+  until `screen-record-stop`, the optional `durationSec` or the platform limit (Android 180 s, iOS 600 s);
+  both replies carry the file and `DeviceInfo.recording` is set while it runs.
 
 **PlatformServices.forwardToDevice(deviceId, devicePort)** — Android: `adb forward tcp:0 tcp:<port>`
 (parse the allocated port; dispose → `adb forward --remove`). iOS simulator: identity
@@ -711,7 +717,7 @@ ACTUALLY does — trust it over older wording above.
 - Network: REST auth/login/refresh, paging, detail, POST/PUT/PATCH/DELETE, multipart upload, real PNG
   bodies, GraphQL (incl. an `errors` response), 401/404/422/429/500/503, slow requests, timeout/DNS/
   connection failures, cancellation; mock rules apply. Metrics vary believably. Every device action except
-  `screen-record` is simulated (screenshot writes a real PNG).
+  `screen-record` / `screen-record-stop` is simulated (screenshot writes a real PNG).
 
 ### 9.2 System lines (`source:'system'`, tag `durbun`, kind `lifecycle` | `marker`) — code → params
 | code | params |

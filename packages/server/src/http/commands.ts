@@ -103,10 +103,12 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, what: string, co
 
 export function actionTimeoutMs(action: string, params: Record<string, unknown>): number {
   if (action === 'app-install') return 10 * 60_000;
+  // A recording replies when it ends (stop, duration or the 10 min limit) and its file is copied.
   if (action === 'screen-record') {
     const seconds = Number(params.durationSec);
-    return (Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 600) : 180) * 1000 + 2 * 60_000;
+    return (Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 600) : 600) * 1000 + 2 * 60_000;
   }
+  if (action === 'screen-record-stop') return 3 * 60_000;
   return DEFAULT_ACTION_TIMEOUT_MS;
 }
 

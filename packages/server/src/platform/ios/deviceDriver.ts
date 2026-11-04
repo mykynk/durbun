@@ -41,6 +41,7 @@ import { LogBatcher } from '../shared/batcher';
 import { fail } from '../shared/files';
 import { FlutterErrorGrouper } from '../shared/flutter';
 import { mergeReaders, ReaderReporter, readerDetail } from '../shared/readers';
+import { ScreenRecorder } from '../shared/screenRecord';
 import { StallWatchdog, type StallInfo } from '../shared/stallWatchdog';
 import { Backoff, every, Poller, serialize } from '../shared/timing';
 import { probeXcodeTools, resolveIdeviceTool, type ResolvedTool } from '../tools';
@@ -188,6 +189,7 @@ class IosDeviceSession {
   /** From `devicectl list devices` ('enabled' / 'disabled'), once known. */
   private developerMode?: string;
   private readonly crashReader = new ReaderReporter((state) => this.patch({ readers: { crashReports: state } }));
+  private readonly recorder = new ScreenRecorder((recording) => this.patch({ recording }));
   private readonly logFilter: IosDeviceLogFilter;
   /** Crash reports are delivered one after another (each waits for the first app listing). */
   private crashQueue: Promise<void> = Promise.resolve();
@@ -826,6 +828,7 @@ class IosDeviceSession {
         screenshotTool: this.shared.screenshotTool(),
         syslogAvailable: !!this.shared.syslogTool(),
         restartLogs: () => this.restartLogs(),
+        recorder: this.recorder,
         ...(this.shared.actionDevicectl ? { devicectl: this.shared.actionDevicectl } : {}),
       },
       action,
@@ -839,6 +842,7 @@ class IosDeviceSession {
   async dispose(reason: 'disconnected' | 'stopped'): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.recorder.dispose();
     this.watchdog.stop();
     this.stopPairWatch?.();
     clearTimeout(this.pairingRetry);

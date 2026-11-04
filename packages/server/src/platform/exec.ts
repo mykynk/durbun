@@ -68,13 +68,13 @@ export function liveChildCount(): number {
 }
 
 /**
- * Spawn a tracked child (stdin ignored, stdout ignored, stderr piped) for one-off long operations
- * such as screen recordings. The caller owns its lifetime (killProcess).
+ * Spawn a tracked child (stdin ignored, stdout ignored unless `opts.stdout`, stderr piped) for one-off long
+ * operations such as screen recordings. The caller owns its lifetime (killProcess).
  */
-export function spawnTracked(cmd: string, args: readonly string[], env?: ExtraEnv): ChildProcess {
+export function spawnTracked(cmd: string, args: readonly string[], env?: ExtraEnv, opts: { stdout?: boolean } = {}): ChildProcess {
   const child = spawn(cmd, [...args], {
     env: mergedEnv(env),
-    stdio: ['ignore', 'ignore', 'pipe'],
+    stdio: ['ignore', opts.stdout ? 'pipe' : 'ignore', 'pipe'],
     windowsHide: true,
   });
   track(child);

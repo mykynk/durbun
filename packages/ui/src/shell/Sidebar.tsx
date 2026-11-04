@@ -345,6 +345,11 @@ function DeviceNode({
                 {disconnected ? t('code.state.disconnected') : subtitle}
               </span>
               {device.state === 'online' && !desktop ? <LogStatusIcon device={device} /> : null}
+              {device.recording ? (
+                <Tooltip content={t('shell.device.recording')}>
+                  <span className="sb-rec" role="img" aria-label={t('shell.device.recording')} />
+                </Tooltip>
+              ) : null}
             </>
           ) : undefined
         }

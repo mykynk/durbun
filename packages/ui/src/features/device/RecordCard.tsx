@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Circle, Download, ExternalLink, Video } from 'lucide-react';
+import { Circle, Download, ExternalLink, Square, Video } from 'lucide-react';
 import type { DeviceInfo } from '@durbun/protocol';
-import { Button, SegmentedControl, downloadUrl, formatClock, toast, usePersistentState } from '../../components';
+import { Button, downloadUrl, formatClock } from '../../components';
 import { useT } from '../../i18n';
-import { codeText } from './codes';
-import { mediaFileName, mediaResult, recordDurations } from './model';
-import { addRecording, useMedia } from './stores';
-import { ActionErrorCallout, DeviceCard, useDeviceAction } from './useAction';
+import { describeError } from './codes';
+import { mediaFileName, recordClock, recordLimitSec } from './model';
+import { clearRecordingError, startRecording, stopRecording, useMedia, useRecorder } from './stores';
+import { ActionErrorCallout, DeviceCard, type ActionError } from './useAction';
 
 function useClock(enabled: boolean, ms = 250): number {
   const [now, setNow] = useState(() => Date.now());
@@ -19,70 +19,68 @@ function useClock(enabled: boolean, ms = 250): number {
   return now;
 }
 
-function mmss(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-}
-
 /**
- * Screen recording: the protocol records for a fixed `durationSec` (no stop command), so the card shows a
- * countdown and then waits for the file to be copied from the device.
+ * Screen recording: Start runs until Stop or the device's limit (Android 3 min, iOS 10 min), then the file is
+ * copied and shows up here. The state lives in `useRecorder` and `DeviceInfo.recording`, so it survives tab
+ * switches, and a reload still shows (and can stop) a running recording.
  */
 export function RecordCard({ device }: { device: DeviceInfo }) {
   const t = useT();
-  const durations = recordDurations(device);
-  const [stored, setDuration] = usePersistentState<number>('device.recordSec', 30);
-  const duration = durations.includes(stored) ? stored : 30;
-  const { run, isPending, error, clearError } = useDeviceAction(device.id);
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-  const recording = isPending('screen-record');
-  const now = useClock(recording);
+  const run = useRecorder((s) => s.runs[device.id]);
+  const failure = useRecorder((s) => s.errors[device.id]);
+  const server = device.recording;
+  const active = !!run || !!server;
+  const since = run?.startedAt ?? server?.startedAt ?? 0;
+  const limitSec = server?.limitSec ?? recordLimitSec(device);
+  const now = useClock(active && !run?.stopping);
+  const elapsed = Math.min(Math.max(0, now - since), limitSec * 1000);
+  // Stopped (by the user or the limit): the device finishes the file and Dürbün copies it.
+  const finishing = !!run?.stopping || (active && elapsed >= limitSec * 1000);
+  const canRecord = device.actions.includes('screen-record');
   const all = useMedia((s) => s.recordings);
   const recordings = useMemo(() => all.filter((r) => r.deviceId === device.id), [all, device.id]);
 
-  const label = (n: number) => (n < 60 ? t('device.record.seconds', { n }) : t('device.record.minutes', { n: n / 60 }));
-
-  const start = async () => {
-    const began = Date.now();
-    setStartedAt(began);
-    const r = await run({ action: 'screen-record', params: { durationSec: duration }, failure: t('device.record.failed') });
-    setStartedAt(null);
-    if (!r.ok) return;
-    const m = mediaResult(r.data);
-    if (!m) {
-      toast.error(t('device.record.failed'), { description: codeText('action.invalidResult') });
-      return;
-    }
-    const rec = addRecording({ deviceId: device.id, url: m.url, file: m.file, ts: began, durationSec: duration });
-    toast.success(t('device.record.done'), { action: { label: t('device.record.open'), onClick: () => window.open(rec.url, '_blank', 'noopener') } });
-  };
-
-  const left = startedAt !== null ? duration * 1000 - (now - startedAt) : 0;
-  const progress = startedAt !== null ? Math.min(1, (now - startedAt) / (duration * 1000)) : 0;
+  const span = (sec: number) => (sec < 60 ? t('device.record.seconds', { n: sec }) : t('device.record.minutes', { n: Math.round(sec / 60) }));
+  const error: ActionError | null = useMemo(() => {
+    if (!failure) return null;
+    const d = describeError(failure.error);
+    return { title: t(failure.kind === 'start' ? 'device.record.failed' : 'device.record.stopFailed'), text: d.text, detail: d.detail };
+  }, [failure, t]);
 
   return (
     <DeviceCard section="record" title={t('device.record.title')} icon={Video} description={t('device.record.hint')}>
-      <ActionErrorCallout error={error} onDismiss={clearError} />
-      <div className="dv-row wrap">
-        <span className="dv-label">{t('device.record.duration')}</span>
-        <SegmentedControl<string>
-          size="sm"
-          value={String(duration)}
-          onChange={(v) => setDuration(Number(v))}
-          aria-label={t('device.record.duration')}
-          options={durations.map((n) => ({ value: String(n), label: label(n), disabled: recording }))}
-        />
-        <span className="grow" />
-        <Button variant="primary" size="sm" icon={Circle} loading={recording} onClick={() => void start()}>
-          {t('device.record.start')}
-        </Button>
-      </div>
-      {recording && startedAt !== null ? (
-        <div className="dv-progress" role="status" aria-live="polite">
-          <div className="dv-progress__bar" aria-hidden>
-            <span className={left > 0 ? 'dv-progress__fill' : 'dv-progress__fill is-indeterminate'} style={left > 0 ? { width: `${progress * 100}%` } : undefined} />
-          </div>
-          <span className="dv-progress__text">{left > 0 ? t('device.record.recording', { left: mmss(left) }) : t('device.record.finishing')}</span>
+      <ActionErrorCallout error={error} onDismiss={() => clearRecordingError(device.id)} />
+      {active || canRecord ? (
+        <div className="dv-row wrap">
+          {active ? (
+            <span className="dv-rec-live">
+              <span className={finishing ? 'dv-rec-dot is-done' : 'dv-rec-dot'} aria-hidden />
+              <span role="status">{finishing ? t('device.record.finishing') : t('device.record.recording')}</span>
+              {finishing ? null : (
+                <span className="dv-rec-live__clock tnum" role="timer">
+                  {recordClock(elapsed)}
+                  <span className="subtle"> / {recordClock(limitSec * 1000)}</span>
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="dv-label">{t('device.record.limit', { limit: span(limitSec) })}</span>
+          )}
+          <span className="grow" />
+          {active ? (
+            <Button variant="danger" size="sm" icon={Square} loading={finishing} onClick={() => void stopRecording(device.id, server?.startedAt)}>
+              {t('device.record.stop')}
+            </Button>
+          ) : (
+            <Button variant="primary" size="sm" icon={Circle} onClick={() => void startRecording(device.id, recordLimitSec(device))}>
+              {t('device.record.start')}
+            </Button>
+          )}
+        </div>
+      ) : null}
+      {finishing ? (
+        <div className="dv-progress__bar" aria-hidden>
+          <span className="dv-progress__fill is-indeterminate" />
         </div>
       ) : null}
       {recordings.length > 0 ? (
@@ -92,7 +90,7 @@ export function RecordCard({ device }: { device: DeviceInfo }) {
               <video className="dv-rec__video" src={r.url} controls preload="metadata" />
               <div className="dv-rec__meta">
                 <span className="tnum">{formatClock(r.ts, { ms: false })}</span>
-                <span className="subtle">· {label(r.durationSec)}</span>
+                <span className="subtle tnum">· {recordClock(r.durationSec * 1000)}</span>
                 <span className="grow" />
                 <a className="btn btn--ghost btn--sm" href={r.url} target="_blank" rel="noopener noreferrer">
                   <ExternalLink size={14} aria-hidden />

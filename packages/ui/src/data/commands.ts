@@ -72,7 +72,9 @@ export function defaultCommandTimeout(cmd: UiCommand): number {
   switch (cmd.name) {
     case 'device.action': {
       if (cmd.action === 'app-install') return 300_000;
-      if (cmd.action === 'screen-record') return ((Number(cmd.params?.durationSec) || 30) + 60) * 1000;
+      // A recording replies when it ends: its duration, else the 10 min limit, plus copying the file.
+      if (cmd.action === 'screen-record') return ((Number(cmd.params?.durationSec) || 600) + 120) * 1000;
+      if (cmd.action === 'screen-record-stop') return 180_000;
       if (cmd.action === 'list-apps' || cmd.action === 'screenshot' || cmd.action === 'app-uninstall') return 60_000;
       return 30_000;
     }

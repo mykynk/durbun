@@ -36,7 +36,9 @@ import {
   parseInstalledApps,
   processRows,
   pushHistory,
-  recordDurations,
+  recordClock,
+  recordLimitSec,
+  recordResult,
   recordingExtension,
   templateText,
   urlProblem,
@@ -156,9 +158,13 @@ describe('push notification', () => {
 });
 
 describe('screen recording & media', () => {
-  it('durations and file extensions per platform', () => {
-    expect(recordDurations({ platform: 'android', kind: 'physical' })).toEqual([10, 30, 60, 180]);
-    expect(Math.max(...recordDurations({ platform: 'ios', kind: 'simulator' }))).toBe(300);
+  it('limits, stopwatch text and file extensions per platform', () => {
+    expect(recordLimitSec({ platform: 'android' })).toBe(180);
+    expect(recordLimitSec({ platform: 'ios' })).toBe(600);
+    expect(recordClock(0)).toBe('0:00');
+    expect(recordClock(7_900)).toBe('0:07');
+    expect(recordClock(161_000)).toBe('2:41');
+    expect(recordClock(600_000)).toBe('10:00');
     expect(recordingExtension({ kind: 'simulator' })).toBe('mov');
     expect(recordingExtension({ kind: 'physical' })).toBe('mp4');
     expect(recordingExtension({ kind: 'emulator' })).toBe('mp4');
@@ -173,6 +179,14 @@ describe('screen recording & media', () => {
     expect(mediaResult({ url: '/api/files/b.mp4' })).toEqual({ url: '/api/files/b.mp4' });
     expect(mediaResult({ file: 'x' })).toBeNull();
     expect(mediaResult(null)).toBeNull();
+    expect(recordResult({ url: '/api/files/r.mov', file: '/tmp/r.mov', durationSec: 42, endedBy: 'limit' })).toEqual({
+      url: '/api/files/r.mov',
+      file: '/tmp/r.mov',
+      durationSec: 42,
+      endedBy: 'limit',
+    });
+    expect(recordResult({ url: '/api/files/r.mov', durationSec: 'x', endedBy: 'bogus' })).toEqual({ url: '/api/files/r.mov' });
+    expect(recordResult({})).toBeNull();
   });
 });
 

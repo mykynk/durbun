@@ -110,6 +110,27 @@ describe('hub logs', () => {
   });
 });
 
+describe('hub device recording state', () => {
+  it('keeps DeviceInfo.recording only while its session reports it', () => {
+    hub = makeHub();
+    const recording = { startedAt: 1_000, limitSec: 600 };
+    hub.upsertDevice(device('ios-sim:A'));
+    hub.patchDevice('ios-sim:A', { recording });
+    expect(hub.getDevice('ios-sim:A')!.recording).toEqual(recording);
+    hub.patchDevice('ios-sim:A', { battery: { level: 50, charging: false } });
+    expect(hub.getDevice('ios-sim:A')!.recording).toEqual(recording);
+    hub.patchDevice('ios-sim:A', { recording: undefined });
+    expect('recording' in hub.getDevice('ios-sim:A')!).toBe(false);
+    // A new session's upsert without one, and a disconnect, end it.
+    hub.patchDevice('ios-sim:A', { recording });
+    hub.upsertDevice(device('ios-sim:A'));
+    expect(hub.getDevice('ios-sim:A')!.recording).toBeUndefined();
+    hub.patchDevice('ios-sim:A', { recording });
+    hub.markDeviceDisconnected('ios-sim:A', 'Simulator shut down');
+    expect(hub.getDevice('ios-sim:A')!.recording).toBeUndefined();
+  });
+});
+
 describe('hub lifecycle lines', () => {
   it('announces device connect/disconnect with i18n codes', () => {
     hub = makeHub();

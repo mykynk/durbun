@@ -244,10 +244,30 @@ export function validatePush(text: string): PushValidation {
 
 /* ───────────── Screen recording ───────────── */
 
-/** Duration presets (s): Android `screenrecord` stops at 180 s; simulators allow longer recordings. */
-export function recordDurations(d: Pick<DeviceInfo, 'platform' | 'kind'>): number[] {
-  if (d.platform === 'android') return [10, 30, 60, 180];
-  return [10, 30, 60, 180, 300];
+/**
+ * How long a recording may run before it stops by itself (s): Android's `screenrecord` stops at 180 s, the
+ * server stops iOS recordings at 600 s. A running recording reports its own `DeviceInfo.recording.limitSec`.
+ */
+export function recordLimitSec(d: Pick<DeviceInfo, 'platform'>): number {
+  return d.platform === 'android' ? 180 : 600;
+}
+
+/** Stopwatch text: 0:07, 2:41, 10:00. */
+export function recordClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** Validate the `screen-record` / `screen-record-stop` reply data. */
+export function recordResult(data: unknown): { url: string; file?: string; durationSec?: number; endedBy?: 'stop' | 'limit' } | null {
+  const m = mediaResult(data);
+  if (!m) return null;
+  const r = data as Record<string, unknown>;
+  const out: { url: string; file?: string; durationSec?: number; endedBy?: 'stop' | 'limit' } = { url: m.url };
+  if (m.file) out.file = m.file;
+  if (typeof r.durationSec === 'number' && r.durationSec > 0) out.durationSec = r.durationSec;
+  if (r.endedBy === 'stop' || r.endedBy === 'limit') out.endedBy = r.endedBy;
+  return out;
 }
 
 /** Simulator recordings are QuickTime (.mov); Android and iOS devices produce .mp4. */

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { DeviceActionId, DeviceActionResult } from '@durbun/protocol';
 import type { DriverContext } from '../../types';
-import { failureText, killProcess, run, spawnTracked } from '../exec';
+import { failureText, run } from '../exec';
 import {
   bool,
   done,
@@ -17,8 +17,8 @@ import {
   tempFileName,
   validAppId,
 } from '../shared/files';
+import { sigintRecording, type RecordingProcess, type ScreenRecorder } from '../shared/screenRecord';
 import { tailLines } from '../shared/text';
-import { sleep } from '../shared/timing';
 import { contentSizeForScale, CONTENT_SIZES, parseListApps, simctl, XCRUN } from './simctl';
 
 export const SIM_ACTIONS: DeviceActionId[] = [
@@ -38,6 +38,7 @@ export const SIM_ACTIONS: DeviceActionId[] = [
   'status-bar',
   'logs-restart',
   'screen-record',
+  'screen-record-stop',
 ];
 
 export interface SimActionTarget {
@@ -46,6 +47,7 @@ export interface SimActionTarget {
   label: string;
   ctx: DriverContext;
   restartLogs(): Promise<void>;
+  recorder: ScreenRecorder;
 }
 
 function simError(r: { stdout: string; stderr: string; error?: string; code: number | null }): string {
@@ -229,11 +231,11 @@ export async function runSimAction(
       await t.restartLogs();
       return done('Log stream restarted');
 
-    case 'screen-record': {
-      const secs = Math.round(num(params, 'durationSec') ?? 0);
-      if (secs < 1 || secs > 600) return fail('durationSec must be between 1 and 600', 'action.invalidParams');
-      return recordVideo(t, secs);
-    }
+    case 'screen-record':
+      return t.recorder.record(params, SIM_RECORD_MAX_SEC, () => startRecording(t));
+
+    case 'screen-record-stop':
+      return t.recorder.stop();
 
     default:
       return fail(`"${action}" is not supported on iOS simulators`, 'action.unsupported');
@@ -313,29 +315,18 @@ async function installApp(t: SimActionTarget, file: string | undefined): Promise
   }
 }
 
-async function recordVideo(t: SimActionTarget, secs: number): Promise<DeviceActionResult> {
+/** simctl has no limit of its own; Dürbün stops a recording after 10 minutes. */
+const SIM_RECORD_MAX_SEC = 600;
+
+async function startRecording(t: SimActionTarget): Promise<RecordingProcess> {
   await ensureDir(t.ctx.tempDir);
-  // simctl writes a QuickTime movie (H.264 when --codec=h264).
+  // simctl writes a QuickTime movie (H.264 when --codec=h264) and finishes it on SIGINT.
   const name = tempFileName('recording', t.label, 'mov');
   const file = path.join(t.ctx.tempDir, name);
-  const child = spawnTracked(XCRUN, ['simctl', 'io', t.udid, 'recordVideo', '--codec=h264', '--force', file]);
-  let stderr = '';
-  child.stderr?.setEncoding('utf8');
-  child.stderr?.on('data', (d: string) => {
-    if (stderr.length < 8000) stderr += d;
+  return sigintRecording(XCRUN, ['simctl', 'io', t.udid, 'recordVideo', '--codec=h264', '--force', file], 20_000, async (exit) => {
+    if (!exit.stopped) return fail(`Screen recording failed: ${tailLines(exit.stderr) || `simctl exited with code ${exit.code ?? '?'}`}`);
+    const st = await fs.promises.stat(file).catch(() => undefined);
+    if (!st || st.size === 0) return fail(`Screen recording failed: ${tailLines(exit.stderr) || 'no video was written'}`);
+    return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file });
   });
-  const exited = new Promise<number | null>((resolve) => {
-    child.once('error', () => resolve(-1));
-    child.once('exit', (code) => resolve(code));
-  });
-  const early = await Promise.race([exited, sleep(secs * 1000).then(() => 'time' as const)]);
-  if (early !== 'time') {
-    return fail(`Screen recording failed: ${tailLines(stderr) || `simctl exited with code ${early ?? '?'}`}`);
-  }
-  child.kill('SIGINT');
-  const code = await Promise.race([exited, sleep(20_000).then(() => 'timeout' as const)]);
-  if (code === 'timeout') await killProcess(child);
-  const st = await fs.promises.stat(file).catch(() => undefined);
-  if (!st || st.size === 0) return fail(`Screen recording failed: ${tailLines(stderr) || 'no video was written'}`);
-  return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file });
 }

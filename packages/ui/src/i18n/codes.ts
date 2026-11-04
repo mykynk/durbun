@@ -182,6 +182,8 @@ export const SERVER_CODES = {
     'action.launchFailed',
     'action.uninstallFailed',
     'action.openUrlFailed',
+    'action.recording.busy',
+    'action.recording.notRunning',
   ],
   /** `DeviceInfo.readers.<id>.code`: why an SDK-less reader (crash records, frame stats) does not work. */
   readers: [
@@ -384,6 +386,8 @@ registerMessages('code', {
     'action.screenshot.saved': ['Ekran görüntüsü kaydedildi ({size})', 'Ekran görüntüsü kaydedildi'],
     'action.recording.saved': 'Ekran kaydı kaydedildi',
     'action.invalidParams': ['Geçersiz parametre: {detail}', 'Geçersiz parametre'],
+    'action.recording.busy': 'Bu cihazda zaten bir ekran kaydı sürüyor',
+    'action.recording.notRunning': 'Bu cihazda süren bir ekran kaydı yok',
     'action.unsupported': 'Bu cihaz bu işlemi desteklemiyor',
     'action.deviceOffline': 'Cihaz çevrimdışı ya da kapalı',
     'action.deviceNotFound': 'Cihaz bulunamadı',
@@ -669,6 +673,8 @@ registerMessages('code', {
     'action.screenshot.saved': ['Screenshot saved ({size})', 'Screenshot saved'],
     'action.recording.saved': 'Screen recording saved',
     'action.invalidParams': ['Invalid parameter: {detail}', 'Invalid parameter'],
+    'action.recording.busy': 'A screen recording is already running on this device',
+    'action.recording.notRunning': 'No screen recording is running on this device',
     'action.unsupported': 'This device does not support this action',
     'action.deviceOffline': 'The device is offline or not booted',
     'action.deviceNotFound': 'Device not found',
