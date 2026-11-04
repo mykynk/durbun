@@ -616,8 +616,6 @@ class LogDetailPage extends StatefulWidget {
 }
 
 class _LogDetailPageState extends State<LogDetailPage> {
-  int _tab = 0;
-
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
@@ -628,7 +626,6 @@ class _LogDetailPageState extends State<LogDetailPage> {
     final head = e == null ? '' : errorHead(e);
     final hasData = l.data != null;
     final tabs = <String>[t.message, if (hasData) t.data, if (stack.isNotEmpty) t.stack];
-    final tab = _tab.clamp(0, tabs.length - 1);
     final pad = EdgeInsets.fromLTRB(14, 12, 14, 20 + MediaQuery.paddingOf(context).bottom);
     return Scaffold(
       backgroundColor: c.bgPanel,
@@ -676,8 +673,17 @@ class _LogDetailPageState extends State<LogDetailPage> {
               style: DurbunType.monoStyle(size: 11.5, color: c.textMeta),
             ),
           ),
-          if (tabs.length > 1) DTabs(labels: tabs, index: tab, onChanged: (i) => setState(() => _tab = i)) else Divider(height: 1, color: c.border),
-          Expanded(child: _body(tabs[tab], l, head, stack, hasData, pad, c, t)),
+          if (tabs.length > 1)
+            Expanded(
+              child: SwipeTabs(
+                tabs: <DTab>[for (final name in tabs) DTab(name)],
+                pages: <Widget>[for (final name in tabs) _body(name, l, head, stack, hasData, pad, c, t)],
+              ),
+            )
+          else ...<Widget>[
+            Divider(height: 1, color: c.border),
+            Expanded(child: _body(tabs.first, l, head, stack, hasData, pad, c, t)),
+          ],
         ],
       ),
     );
@@ -685,37 +691,41 @@ class _LogDetailPageState extends State<LogDetailPage> {
   Widget _body(String name, InspectorLog l, String head, String stack, bool hasData, EdgeInsets pad, DurbunColors c, InspectorStrings t) {
     if (name == t.data) {
       if (l.data is Map || l.data is List) return JsonTreeView(value: l.data, padding: pad.copyWith(top: 4, left: 8));
-      return ListView(padding: pad, children: <Widget>[SelectableText(prettyValue(l.data), style: DurbunType.monoStyle(color: c.text))]);
+      return swipeSafeSelection(ListView(padding: pad, children: <Widget>[Text(prettyValue(l.data), style: DurbunType.monoStyle(color: c.text))]));
     }
-    if (name == t.stack) return ListView(padding: pad, children: <Widget>[StackTraceView(stack: stack)]);
+    if (name == t.stack) return swipeSafeSelection(ListView(padding: pad, children: <Widget>[StackTraceView(stack: stack)]));
     final msgStyle = DurbunType.monoStyle(size: 13, color: c.text, weight: l.isEvent ? FontWeight.w700 : null);
-    return ListView(
-      padding: pad,
-      children: <Widget>[
+    // Plain text: a SelectableText takes horizontal drags and the tabs would
+    // not swipe.
+    return swipeSafeSelection(
+      ListView(
+        padding: pad,
+        children: <Widget>[
         // Said first: the end of a long message is far down the page.
-        if (l.cutChars > 0)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Callout(title: t.messageCut(l.cutChars)),
-          ),
-        for (final part in textChunks(l.message)) SelectableText(part.endsWith('\n') ? part.substring(0, part.length - 1) : part, style: msgStyle),
-        if (head.isNotEmpty && head != l.message) ...<Widget>[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: c.dangerSoft, borderRadius: BorderRadius.circular(DurbunRadius.md)),
-            child: SelectableText(head, style: DurbunType.monoStyle(size: 12.5, color: c.lvError)),
-          ),
+          if (l.cutChars > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Callout(title: t.messageCut(l.cutChars)),
+            ),
+          for (final part in textChunks(l.message)) Text(part.endsWith('\n') ? part.substring(0, part.length - 1) : part, style: msgStyle),
+          if (head.isNotEmpty && head != l.message) ...<Widget>[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: c.dangerSoft, borderRadius: BorderRadius.circular(DurbunRadius.md)),
+              child: Text(head, style: DurbunType.monoStyle(size: 12.5, color: c.lvError)),
+            ),
+          ],
+          if (stack.isNotEmpty) ...<Widget>[
+            SectionTitle(t.stack),
+            StackTraceView(stack: stack, maxFrames: 6),
+          ],
+          if (hasData) ...<Widget>[
+            SectionTitle(t.data),
+            Text(dataPreview(l.data, max: 600), style: DurbunType.monoStyle(size: 12, color: c.textMuted)),
+          ],
         ],
-        if (stack.isNotEmpty) ...<Widget>[
-          SectionTitle(t.stack),
-          StackTraceView(stack: stack, maxFrames: 6),
-        ],
-        if (hasData) ...<Widget>[
-          SectionTitle(t.data),
-          SelectableText(dataPreview(l.data, max: 600), style: DurbunType.monoStyle(size: 12, color: c.textMuted)),
-        ],
-      ],
+      ),
     );
   }
 }
@@ -751,7 +761,7 @@ class StackTraceView extends StatelessWidget {
         for (final line in lines)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 1.5),
-            child: SelectableText(
+            child: Text(
               line.trim(),
               style: DurbunType.monoStyle(size: 11.5, color: isFrameworkFrame(line) ? c.textSubtle : c.text, height: 1.35),
             ),

@@ -69,8 +69,8 @@ class _InspectorHomeState extends State<InspectorHome> with SingleTickerProvider
               child: TabBarView(
                 controller: _tabs,
                 children: <Widget>[
-                  _TabPage(tabs: _tabs, index: 0, child: NetworkView(store: store)),
-                  _TabPage(tabs: _tabs, index: 1, child: LogsView(store: store)),
+                  SwipePage(tabs: _tabs, index: 0, child: NetworkView(store: store)),
+                  SwipePage(tabs: _tabs, index: 1, child: LogsView(store: store)),
                 ],
               ),
             ),
@@ -78,54 +78,6 @@ class _InspectorHomeState extends State<InspectorHome> with SingleTickerProvider
         ],
       ),
     );
-  }
-}
-
-/// Keeps a tab's state (search, filters, scroll) while the other is shown,
-/// and tells it whether it is on screen ([PageActive]).
-class _TabPage extends StatefulWidget {
-  const _TabPage({required this.tabs, required this.index, required this.child});
-
-  final TabController tabs;
-  final int index;
-  final Widget child;
-
-  @override
-  State<_TabPage> createState() => _TabPageState();
-}
-
-class _TabPageState extends State<_TabPage> with AutomaticKeepAliveClientMixin {
-  late bool _active = _visible();
-
-  bool _visible() {
-    final at = widget.tabs.animation?.value ?? widget.tabs.index.toDouble();
-    return (at - widget.index).abs() < 0.999;
-  }
-
-  void _tick() {
-    final v = _visible();
-    if (v != _active) setState(() => _active = v);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    widget.tabs.animation?.addListener(_tick);
-  }
-
-  @override
-  void dispose() {
-    widget.tabs.animation?.removeListener(_tick);
-    super.dispose();
-  }
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    return PageActive(active: _active, child: widget.child);
   }
 }
 
@@ -160,13 +112,13 @@ class _Header extends StatelessWidget {
                 final failures = store.defaultHosts.isEmpty
                     ? store.failureCount
                     : listed.where((x) => x.isFailure).length;
-                return _PanelTabs(
+                return DTabBar(
                   controller: tabs,
-                  tabs: <_TabSpec>[
-                    _TabSpec(Icons.swap_vert_rounded, t.network,
-                        failures > 0 ? failures : listed.length, failures > 0),
-                    _TabSpec(Icons.notes_rounded, t.logs,
-                        store.errorCount > 0 ? store.errorCount : store.logs.length, store.errorCount > 0),
+                  tabs: <DTab>[
+                    DTab(t.network, icon: Icons.swap_vert_rounded,
+                        count: failures > 0 ? failures : listed.length, alert: failures > 0),
+                    DTab(t.logs, icon: Icons.notes_rounded,
+                        count: store.errorCount > 0 ? store.errorCount : store.logs.length, alert: store.errorCount > 0),
                   ],
                 );
               },
@@ -225,111 +177,6 @@ class _BrandMark extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _TabSpec {
-  const _TabSpec(this.icon, this.label, this.count, this.alert);
-
-  final IconData icon;
-  final String label;
-
-  /// Shown when above zero.
-  final int count;
-
-  /// Red count: errors / failed requests.
-  final bool alert;
-}
-
-/// Network / Logs as a segmented control driven by the tab view, so the
-/// raised segment follows a swipe.
-class _PanelTabs extends StatelessWidget {
-  const _PanelTabs({required this.controller, required this.tabs});
-
-  final TabController controller;
-  final List<_TabSpec> tabs;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = DurbunColors.of(context);
-    return Container(
-      height: 38,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: c.trackBg,
-        borderRadius: BorderRadius.circular(DurbunRadius.lg - 1),
-        border: c.isDark ? Border.all(color: c.border.withValues(alpha: 0.6)) : null,
-      ),
-      child: TabBar(
-        controller: controller,
-        indicator: BoxDecoration(
-          color: c.thumbBg,
-          borderRadius: BorderRadius.circular(DurbunRadius.md),
-          boxShadow: c.raised,
-        ),
-        indicatorSize: TabBarIndicatorSize.tab,
-        dividerHeight: 0,
-        labelPadding: EdgeInsets.zero,
-        splashFactory: NoSplash.splashFactory,
-        overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
-        labelColor: c.text,
-        unselectedLabelColor: c.textMuted,
-        labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, height: 1.2),
-        unselectedLabelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, height: 1.2),
-        tabs: <Widget>[
-          for (final tab in tabs)
-            Tooltip(
-              message: tab.label,
-              child: Tab(
-                height: 32,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Icon(tab.icon, size: 16),
-                        const SizedBox(width: 6),
-                        Text(tab.label),
-                        if (tab.count > 0) ...<Widget>[
-                          const SizedBox(width: 6),
-                          _CountBadge(count: tab.count, alert: tab.alert),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CountBadge extends StatelessWidget {
-  const _CountBadge({required this.count, required this.alert});
-
-  final int count;
-  final bool alert;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = DurbunColors.of(context);
-    return Container(
-      height: 18,
-      constraints: const BoxConstraints(minWidth: 18),
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-          color: alert ? c.danger : c.bgActive, borderRadius: BorderRadius.circular(DurbunRadius.pill)),
-      child: Text(
-        count > 999 ? '999+' : '$count',
-        style: DurbunType.monoStyle(
-            size: 10.5, color: alert ? Colors.white : c.textMuted, weight: FontWeight.w700, height: 1.1),
-      ),
     );
   }
 }

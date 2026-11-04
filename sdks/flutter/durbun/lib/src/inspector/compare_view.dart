@@ -220,7 +220,6 @@ class CompareCallsPage extends StatefulWidget {
 }
 
 class _CompareCallsPageState extends State<CompareCallsPage> {
-  late int _tab = widget.initialTab;
   bool _swapped = false;
   bool _onlyChanges = true;
   bool _sortKeys = true;
@@ -251,32 +250,34 @@ class _CompareCallsPageState extends State<CompareCallsPage> {
             padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
             child: Column(children: <Widget>[_SideSummary('A', _a), _SideSummary('B', _b)]),
           ),
-          Container(
-            color: c.bgPanel,
-            child: DTabs(
-              labels: <String>[t.general, t.headers, t.responseBody, t.requestBody],
-              index: _tab,
-              onChanged: (i) => setState(() => _tab = i),
-            ),
-          ),
           Expanded(
-            child: MediaQuery.removePadding(
-              context: context,
-              removeTop: true,
-              child: switch (_tab) {
-                0 => _GeneralDiff(a: _a, b: _b),
-                1 => _HeadersDiff(a: _a, b: _b, onlyChanges: _onlyChanges, onOnlyChanges: (v) => setState(() => _onlyChanges = v)),
-                _ => _BodyDiff(
-                    key: ValueKey<String>('$_tab$_swapped$_sortKeys'),
-                    a: _a,
-                    b: _b,
-                    request: _tab == 3,
-                    onlyChanges: _onlyChanges,
-                    sortKeys: _sortKeys,
-                    onOnlyChanges: (v) => setState(() => _onlyChanges = v),
-                    onSortKeys: (v) => setState(() => _sortKeys = v),
-                  ),
-              },
+            child: ColoredBox(
+              color: c.bgPanel,
+              child: MediaQuery.removePadding(
+                context: context,
+                removeTop: true,
+                child: SwipeTabs(
+                  initialIndex: widget.initialTab,
+                  tabs: <DTab>[DTab(t.general), DTab(t.headers), DTab(t.responseBody), DTab(t.requestBody)],
+                  // Plain text: a SelectableText takes horizontal drags and
+                  // the tabs would not swipe.
+                  pages: <Widget>[
+                    swipeSafeSelection(_GeneralDiff(a: _a, b: _b)),
+                    swipeSafeSelection(_HeadersDiff(a: _a, b: _b, onlyChanges: _onlyChanges, onOnlyChanges: (v) => setState(() => _onlyChanges = v))),
+                    for (final request in <bool>[false, true])
+                      _BodyDiff(
+                        key: ValueKey<String>('$request$_swapped$_sortKeys'),
+                        a: _a,
+                        b: _b,
+                        request: request,
+                        onlyChanges: _onlyChanges,
+                        sortKeys: _sortKeys,
+                        onOnlyChanges: (v) => setState(() => _onlyChanges = v),
+                        onSortKeys: (v) => setState(() => _sortKeys = v),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
@@ -310,7 +311,7 @@ class _FieldBlock extends StatelessWidget {
               Expanded(
                 child: v == null
                     ? Text(t.missing, style: TextStyle(fontSize: 12.5, color: c.textSubtle, fontStyle: FontStyle.italic))
-                    : SelectableText(v, style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.35)),
+                    : Text(v, style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.35)),
               ),
             ],
           ),
@@ -336,7 +337,7 @@ class _FieldBlock extends StatelessWidget {
           else
             Padding(
                 padding: const EdgeInsets.only(top: 3),
-                child: SelectableText(a ?? '—', style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.35))),
+                child: Text(a ?? '—', style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.35))),
         ],
       ),
     );

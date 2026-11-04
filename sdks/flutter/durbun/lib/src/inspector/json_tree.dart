@@ -1,6 +1,8 @@
 /// Collapsible, searchable JSON tree (the desktop's body "Preview").
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import 'body_search.dart';
@@ -263,7 +265,17 @@ class _JsonTreeViewState extends State<JsonTreeView> {
       rowBuilder: (context, i, first, spans) {
         final l = _lines[i];
         final text = Text.rich(spans, maxLines: 1, softWrap: false, overflow: TextOverflow.clip);
-        if (!first || !l.container) return Row(children: <Widget>[const SizedBox(width: 14), Expanded(child: text)]);
+        final row = Row(children: <Widget>[const SizedBox(width: 14), Expanded(child: text)]);
+        if (l.container && !first) return row;
+        // A tap on a value copies it (a string without its quotes).
+        if (!l.container) {
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => copyText(context, l.value is String ? l.value! as String : jsonEncode(l.value),
+                note: l.key ?? (l.index == null ? null : '[${l.index}]')),
+            child: row,
+          );
+        }
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => _toggle(l),

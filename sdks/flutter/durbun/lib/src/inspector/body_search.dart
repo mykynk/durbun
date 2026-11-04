@@ -392,9 +392,10 @@ class FindableLinesState extends State<FindableLines> {
             builder: (context, box) {
               _ensureRows(box.maxWidth, scaler);
               // One selection area for the list: rows are plain Text.rich
-              // (a SelectableText per row is heavy).
-              return SelectionArea(
-                child: ListView.builder(
+              // (a SelectableText per row is heavy). Not where it would take
+              // the tabs' swipe ([swipeSafeSelection]).
+              return swipeSafeSelection(
+                ListView.builder(
                   controller: _scroll,
                   padding: widget.padding,
                   itemExtent: _rowHeight,

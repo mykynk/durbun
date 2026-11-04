@@ -8,6 +8,8 @@
 // in-app panel shows them, and Dart sends them on only when the desktop cannot read device logs.
 import Flutter
 import Foundation
+import LinkPresentation
+import UIKit
 
 public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
     static let channelName = "dev.durbun/native"
@@ -52,9 +54,39 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
         case "stop":
             stopHosted()
             result(nil)
+        case "share":
+            // The in-app panel's "Share…": the system share sheet with the report text.
+            let args = call.arguments as? [String: Any]
+            result(share(text: args?["text"] as? String, subject: args?["subject"] as? String))
         default:
             result(FlutterMethodNotImplemented)
         }
+    }
+
+    /// Presents the system share sheet; false when there is no screen to present it from.
+    private func share(text: String?, subject: String?) -> Bool {
+        guard let text, !text.isEmpty, let top = Self.topViewController() else { return false }
+        let sheet = UIActivityViewController(activityItems: [ShareText(text: text, subject: subject ?? "")],
+                                             applicationActivities: nil)
+        if let popover = sheet.popoverPresentationController {
+            // iPad shows the sheet as a popover: anchor it at the bottom centre, without an arrow.
+            popover.sourceView = top.view
+            popover.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.maxY - 1, width: 1, height: 1)
+            popover.permittedArrowDirections = []
+        }
+        top.present(sheet, animated: true)
+        return true
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let active = scenes.filter { $0.activationState == .foregroundActive }
+        let windows = (active.isEmpty ? scenes : active).flatMap(\.windows)
+        var top = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed {
+            top = presented
+        }
+        return top
     }
 
     private var isOwner: Bool {
@@ -204,5 +236,38 @@ private final class FlushOutcome {
         lock.lock()
         defer { lock.unlock() }
         return ok
+    }
+}
+
+/// The share sheet's text, with a subject for Mail and similar targets.
+private final class ShareText: NSObject, UIActivityItemSource {
+    private let text: String
+    private let subject: String
+
+    init(text: String, subject: String) {
+        self.text = text
+        self.subject = subject
+    }
+
+    func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any {
+        text
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController,
+                                itemForActivityType activityType: UIActivity.ActivityType?) -> Any? {
+        text
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController,
+                                subjectForActivityType activityType: UIActivity.ActivityType?) -> String {
+        subject
+    }
+
+    /// The sheet's header: "POST /v1/login → 401" instead of a blank icon.
+    func activityViewControllerLinkMetadata(_ activityViewController: UIActivityViewController) -> LPLinkMetadata? {
+        guard !subject.isEmpty else { return nil }
+        let metadata = LPLinkMetadata()
+        metadata.title = subject
+        return metadata
     }
 }

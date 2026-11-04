@@ -1,6 +1,8 @@
 package dev.durbun.flutter
 
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -16,6 +18,8 @@ import dev.durbun.internal.num
 import dev.durbun.internal.obj
 import dev.durbun.internal.str
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
@@ -31,8 +35,10 @@ import io.flutter.plugin.common.MethodChannel
  *  - the desktop state (config, mock rules) and native commands (`android.dumpThreads`, `android.gc`, the
  *    app's own `Durbun.addAction` tools) arrive from Dart.
  */
-class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
+class DurbunFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler {
     private var channel: MethodChannel? = null
+    /** The share sheet opens in the app's own task when an activity is attached. */
+    private var activity: Activity? = null
     private var shakeChannel: MethodChannel? = null
     private var shake: ShakeDetector? = null
     private var context: Context? = null
@@ -80,6 +86,22 @@ class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         context = null
     }
 
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activity = null
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivity() {
+        activity = null
+    }
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         try {
             when (call.method) {
@@ -96,6 +118,8 @@ class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     stopHosted()
                     result.success(null)
                 }
+                // The in-app panel's "Share…": the system share sheet with the report text.
+                "share" -> result.success(share(call.argument<String>("text"), call.argument<String>("subject")))
                 else -> result.notImplemented()
             }
         } catch (t: Throwable) {
@@ -106,6 +130,25 @@ class DurbunFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             } catch (_: Throwable) {
             }
         }
+    }
+
+    /** Opens the system share sheet; false when there is no context to open it from. */
+    private fun share(text: String?, subject: String?): Boolean {
+        if (text.isNullOrEmpty()) return false
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            if (!subject.isNullOrEmpty()) putExtra(Intent.EXTRA_SUBJECT, subject)
+        }
+        val chooser = Intent.createChooser(send, null)
+        val host = activity
+        if (host != null) {
+            host.startActivity(chooser)
+        } else {
+            val ctx = context ?: return false
+            ctx.startActivity(chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+        return true
     }
 
     private fun ownCore(): DurbunCore? = synchronized(lock) { if (owner === this) hosted else null }

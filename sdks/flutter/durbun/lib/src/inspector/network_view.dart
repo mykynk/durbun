@@ -2,6 +2,7 @@
 /// toolbars and detail panel, laid out for a phone.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -11,9 +12,11 @@ import 'compare_view.dart';
 import 'filter_ui.dart';
 import 'format.dart';
 import 'json_tree.dart';
+import 'jwt.dart';
 import 'live_list.dart';
 import 'network_model.dart';
 import 'replay.dart';
+import 'share_sheet.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'text_match.dart';
@@ -219,7 +222,8 @@ class _NetworkViewState extends State<NetworkView> {
                           call: call,
                           store: widget.store,
                           terms: terms,
-                          bodyQuery: _filters.searchBodies && terms.isNotEmpty ? terms.first : null),
+                          bodyQuery: _filters.searchBodies && terms.isNotEmpty ? terms.first : null,
+                          siblings: () => widget.store.calls.where(_matches).toList()),
                     ),
             ),
             if (widget.store.droppedCalls > 0)
@@ -337,10 +341,14 @@ class CallRow extends StatelessWidget {
       required this.store,
       this.terms = const <String>[],
       this.onTap,
-      this.bodyQuery});
+      this.bodyQuery,
+      this.siblings});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
+
+  /// The list this row is in, as filtered now (the detail's up / down).
+  final List<InspectorCall> Function()? siblings;
 
   /// Folded free words of the search, marked in the path.
   final List<String> terms;
@@ -399,7 +407,7 @@ class CallRow extends StatelessWidget {
               builder: (routeContext) => DurbunTheme.wrap(
                   routeContext,
                   CallDetailPage(
-                      call: call, store: store, bodyQuery: bodyQuery))));
+                      call: call, store: store, bodyQuery: bodyQuery, siblings: siblings))));
         },
         child: Container(
           padding: const EdgeInsets.fromLTRB(11, 9, 14, 9),
@@ -537,9 +545,23 @@ class _SourceBadge extends StatelessWidget {
 
 /* ───────────────────────────── detail ───────────────────────────── */
 
+/// What the detail page remembers for one store (one app run): the tab, the
+/// part of Request / Response and the body view, so the next request opens
+/// where the last one was read.
+class _DetailMemory {
+  int tab = 0;
+  String requestPart = 'body';
+  String responsePart = 'body';
+  int bodyMode = 0;
+}
+
+final Expando<_DetailMemory> _memories = Expando<_DetailMemory>('durbun.detail');
+
+_DetailMemory _memoryOf(DurbunInspectorStore store) => _memories[store] ??= _DetailMemory();
+
 class CallDetailPage extends StatefulWidget {
   const CallDetailPage(
-      {super.key, required this.call, required this.store, this.bodyQuery});
+      {super.key, required this.call, required this.store, this.bodyQuery, this.siblings});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
@@ -547,30 +569,62 @@ class CallDetailPage extends StatefulWidget {
   /// Opens on the body that contains this text, with it found.
   final String? bodyQuery;
 
+  /// The list the page was opened from, as filtered now: the arrows in the
+  /// title bar move to the request above / below without going back.
+  final List<InspectorCall> Function()? siblings;
+
   @override
   State<CallDetailPage> createState() => _CallDetailPageState();
 }
 
 class _CallDetailPageState extends State<CallDetailPage> {
-  late int _tab = _firstTab();
+  late InspectorCall _call = widget.call;
+  late CallWatch _watch = CallWatch(widget.store, _call);
+  late final _DetailMemory _memory = _memoryOf(widget.store);
+  late final int _initialTab = _firstTab();
+  late String? _bodyQuery = widget.bodyQuery;
+  bool _replaying = false;
+
+  /// The summary card is folded away while the user reads down a page.
+  bool _folded = false;
+
+  InspectorCall get call => _call;
 
   int _firstTab() {
     final q = widget.bodyQuery;
-    if (q == null || q.isEmpty) return 0;
+    if (q == null || q.isEmpty) return _memory.tab;
     bool has(InspectorBody? b) => b != null && b.isText && foldText(b.data).contains(q);
     if (has(widget.call.responseBody)) return 2;
     if (has(widget.call.requestBody)) return 1;
-    return 0;
+    return _memory.tab;
   }
-  bool _replaying = false;
-
-  InspectorCall get call => widget.call;
-  late final CallWatch _watch = CallWatch(widget.store, widget.call);
 
   @override
   void dispose() {
     _watch.dispose();
     super.dispose();
+  }
+
+  (InspectorCall?, InspectorCall?) _neighbours() {
+    final list = widget.siblings?.call();
+    if (list == null) return (null, null);
+    final i = list.indexWhere((x) => x.key == _call.key);
+    if (i < 0) return (null, null);
+    return (i > 0 ? list[i - 1] : null, i + 1 < list.length ? list[i + 1] : null);
+  }
+
+  void _show(InspectorCall next) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final old = _watch;
+    setState(() {
+      _call = next;
+      _watch = CallWatch(widget.store, next);
+      _bodyQuery = null;
+      _replaying = false;
+      _folded = false;
+    });
+    // The builder lets go of the old watch in this frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
   }
 
   Future<void> _replay() async {
@@ -586,11 +640,20 @@ class _CallDetailPageState extends State<CallDetailPage> {
     );
   }
 
+  void _compare() => Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (routeContext) => DurbunTheme.wrap(routeContext, ComparePickerPage(base: call, store: widget.store))));
+
+  void _menu(String action) {
+    if (action == 'replay') return unawaited(_replay());
+    if (action == 'compare') return _compare();
+    _copyAs(action);
+  }
+
   void _copyAs(String format) {
     final t = InspectorStrings.of(context);
     final text = switch (format) {
       'url' => call.url,
-      'all' => callAsText(call),
+      'all' => shareReportFor(context, call, widget.store),
       'response' =>
         call.responseBody?.displayText ?? call.responseBody?.data ?? '',
       _ => copyAs(format, call),
@@ -600,6 +663,20 @@ class _CallDetailPageState extends State<CallDetailPage> {
         : copyNotes(call);
     copyText(context, text,
         note: notes.isEmpty ? null : notes.map(t.copyNote).join(' · '));
+  }
+
+  /// Folds the summary when a page is dragged down, opens it again when one
+  /// is pulled at its top. Jumps (find) carry no drag and change nothing.
+  bool _onScroll(ScrollNotification n) {
+    if (n.metrics.axis != Axis.vertical) return false;
+    if (n is ScrollUpdateNotification && n.dragDetails != null) {
+      final d = n.scrollDelta ?? 0;
+      if (d > 0 && n.metrics.pixels > 16 && !_folded) setState(() => _folded = true);
+      if (d < 0 && n.metrics.pixels <= 0 && _folded) setState(() => _folded = false);
+    } else if (n is OverscrollNotification && n.dragDetails != null && n.overscroll < 0 && _folded) {
+      setState(() => _folded = false);
+    }
+    return false;
   }
 
   @override
@@ -624,193 +701,241 @@ class _CallDetailPageState extends State<CallDetailPage> {
             : call.status != null
                 ? reason
                 : t.pending;
+        final (prev, next) = _neighbours();
+        // The summary needs the height: not with the keyboard up, in
+        // landscape or with very large text.
+        final mq = MediaQuery.of(context);
+        final roomy = mq.size.height >= 600 * mq.textScaler.scale(1).clamp(1.0, 3.0) && mq.viewInsets.bottom == 0;
+        final summary = roomy && !_folded;
+        final uri = call.uri;
+        final pathLabel = decodeUrl(uri == null
+            ? call.url
+            : '${uri.path.isEmpty ? '/' : uri.path}${uri.hasQuery ? '?${uri.query}' : ''}');
+        final k = call.key;
+        // Narrow phones: Replay goes into the menu so the title keeps room.
+        // Share stays in the bar; on phones Replay moves into the menu.
+        final replayInMenu = canReplay && mq.size.width < 420;
         return Scaffold(
           backgroundColor: c.bgPanel,
           appBar: AppBar(
             titleSpacing: 0,
-            title: Row(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Text('${call.method} ',
-                    style: DurbunType.monoStyle(size: 14.5, color: c.method(call.method), weight: FontWeight.w700, height: 1.2)),
-                StatusPill(text: statusText, color: statusColor, width: null),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(statusWord,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: call.error != null && !call.cancelled ? c.danger : c.text)),
+                LayoutBuilder(
+                  builder: (context, box) => Row(
+                    children: <Widget>[
+                      // At most 60 % of the title; shrinks rather than
+                      // overflows on a narrow phone.
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: box.maxWidth * 0.6),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Row(
+                            children: <Widget>[
+                              Text('${call.method} ',
+                                  style: DurbunType.monoStyle(size: 14.5, color: c.method(call.method), weight: FontWeight.w700, height: 1.2)),
+                              StatusPill(text: statusText, color: statusColor, width: null),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(statusWord,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: failed ? c.danger : c.text)),
+                      ),
+                    ],
+                  ),
                 ),
+                // With the summary away, the path stays in sight here.
+                if (!summary)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(pathLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.2)),
+                  ),
               ],
             ),
             actions: <Widget>[
+              if (widget.siblings != null) ...<Widget>[
+                DIconButton(
+                    icon: Icons.keyboard_arrow_up_rounded,
+                    tooltip: t.prevRequest,
+                    size: 36,
+                    onTap: prev == null ? null : () => _show(prev)),
+                DIconButton(
+                    icon: Icons.keyboard_arrow_down_rounded,
+                    tooltip: t.nextRequest,
+                    size: 36,
+                    onTap: next == null ? null : () => _show(next)),
+              ],
+              DIconButton(
+                  icon: Theme.of(context).platform == TargetPlatform.iOS ? Icons.ios_share_rounded : Icons.share_rounded,
+                  tooltip: t.share,
+                  size: 36,
+                  onTap: () => unawaited(showShareSheet(context, call, widget.store))),
+              if (canReplay && !replayInMenu)
+                _replaying
+                    ? const SizedBox(
+                        width: 36,
+                        child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))))
+                    : DIconButton(icon: Icons.replay_rounded, tooltip: t.replay, size: 36, onTap: _replay),
               PopupMenuButton<String>(
-                tooltip: t.copy,
-                icon: Icon(Icons.ios_share_rounded, size: 20, color: c.textMuted),
-                onSelected: _copyAs,
+                tooltip: t.moreActions,
+                icon: Icon(Icons.more_horiz_rounded, size: 22, color: c.textMuted),
+                onSelected: _menu,
                 itemBuilder: (_) => <PopupMenuEntry<String>>[
-                  PopupMenuItem<String>(value: 'url', child: Text(t.copyUrl)),
-                  const PopupMenuDivider(),
-                  for (final f in kCopyFormats)
+                  if (replayInMenu)
                     PopupMenuItem<String>(
-                        value: f, child: Text(t.copyAsFormat(f))),
+                        value: 'replay',
+                        enabled: !_replaying,
+                        child: MenuRow(Icons.replay_rounded, _replaying ? t.replaying : t.replay)),
+                  PopupMenuItem<String>(value: 'compare', child: MenuRow(Icons.compare_arrows_rounded, t.compareEllipsis)),
+                  const PopupMenuDivider(),
+                  PopupMenuItem<String>(value: 'url', child: MenuRow(Icons.link_rounded, t.copyUrl)),
+                  for (final f in kCopyFormats)
+                    PopupMenuItem<String>(value: f, child: MenuRow(Icons.code_rounded, '${t.copyAs}: ${t.copyAsFormat(f)}')),
                   const PopupMenuDivider(),
                   if (call.responseBody?.isText == true)
-                    PopupMenuItem<String>(
-                        value: 'response', child: Text(t.copyResponseBody)),
-                  PopupMenuItem<String>(value: 'all', child: Text(t.copyAll)),
+                    PopupMenuItem<String>(value: 'response', child: MenuRow(Icons.south_rounded, t.copyResponseBody)),
+                  PopupMenuItem<String>(value: 'all', child: MenuRow(Icons.notes_rounded, t.copyReport)),
                 ],
               ),
               const SizedBox(width: 4),
             ],
           ),
-          // On short screens (landscape) the URL and actions scroll away and
-          // the tab content keeps the room.
-          body: NestedScrollView(
-            headerSliverBuilder: (context, _) => <Widget>[
-              SliverToBoxAdapter(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    // The URL in a card, the numbers under it as chips.
-                    Container(
-                      margin: const EdgeInsets.fromLTRB(12, 2, 12, 0),
-                      padding: const EdgeInsets.fromLTRB(12, 9, 4, 9),
-                      decoration: BoxDecoration(
-                          color: c.fieldBg,
-                          borderRadius: BorderRadius.circular(DurbunRadius.lg),
-                          border: c.isDark ? Border.all(color: c.border) : null),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Expanded(
-                              child: Padding(
-                            padding: const EdgeInsets.only(top: 3),
-                            // The whole URL is on General and in Copy.
-                            child: SelectableText(call.url,
-                                minLines: 1,
-                                maxLines: 4,
-                                style: DurbunType.monoStyle(
-                                    size: 12.5, color: c.text, height: 1.4)),
-                          )),
-                          DIconButton(
-                              icon: Icons.copy_rounded,
-                              tooltip: t.copyUrl,
-                              size: 30,
-                              onTap: () => _copyAs('url')),
-                        ],
-                      ),
-                    ),
-                    // One row that scrolls: wrapped chips pushed the tabs
-                    // off short screens.
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-                      child: Row(
-                        spacing: 6,
-                        children: <Widget>[
-                          if (call.state != InspectorCallState.pending)
-                            _Stat(icon: Icons.timer_outlined, text: formatDuration(call.duration),
-                                color: (call.duration?.inMilliseconds ?? 0) >= kSlowMs ? c.warning : null),
-                          if (call.responseBody != null)
-                            _Stat(icon: Icons.south_rounded, text: formatBytes(call.responseBody!.size)),
-                          if (call.requestBody != null && call.requestBody!.size > 0)
-                            _Stat(icon: Icons.north_rounded, text: formatBytes(call.requestBody!.size)),
-                          _Stat(icon: Icons.hub_outlined, text: call.source),
-                          _Stat(icon: Icons.schedule_rounded, text: formatClock(call.ts)),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                      child: Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: <Widget>[
-                          if (canReplay)
-                            DButton(
-                              label: _replaying ? t.replaying : t.replay,
-                              icon: Icons.replay,
-                              onTap: _replaying ? null : _replay,
-                            ),
-                          DButton(
-                            label: t.compareEllipsis,
-                            icon: Icons.compare_arrows,
-                            onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                    builder: (routeContext) => DurbunTheme.wrap(
-                                        routeContext,
-                                        ComparePickerPage(
-                                            base: call,
-                                            store: widget.store)))),
-                          ),
-                          PopupMenuButton<String>(
-                            tooltip: t.copyAs,
-                            onSelected: _copyAs,
-                            itemBuilder: (_) => <PopupMenuEntry<String>>[
-                              for (final f in kCopyFormats)
-                                PopupMenuItem<String>(
-                                    value: f, child: Text(t.copyAsFormat(f))),
-                            ],
-                            child: IgnorePointer(
-                                child: DButton(
-                                    label: t.copyAs,
-                                    icon: Icons.code,
-                                    trailingIcon: Icons.expand_more,
-                                    onTap: () {})),
-                          ),
-                          if (call.mocked)
-                            DBadge(
-                                call.mockRuleId == null
-                                    ? t.mock
-                                    : '${t.mock} · ${call.mockRuleId}',
-                                tone: BadgeTone.accent,
-                                icon: Icons.theater_comedy_outlined),
-                          if (failed)
-                            DBadge(t.shortError(shortErrorKey(call.error)),
-                                tone: BadgeTone.danger),
-                        ],
-                      ),
-                    ),
-                  ],
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              AnimatedSize(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                alignment: Alignment.topCenter,
+                child: summary
+                    ? _Summary(call: call, onCopyUrl: () => _copyAs('url'))
+                    : const SizedBox(width: double.infinity),
+              ),
+              Expanded(
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: _onScroll,
+                  child: SwipeTabs(
+                    initialIndex: _initialTab,
+                    onChanged: (i) => _memory.tab = i,
+                    tabs: <DTab>[
+                      DTab(t.general),
+                      DTab(t.request),
+                      DTab(t.response, alert: failed),
+                      DTab(t.timing),
+                    ],
+                    pages: <Widget>[
+                      _GeneralTab(key: ValueKey<String>('g$k'), call: call, store: widget.store),
+                      _HttpTab(key: ValueKey<String>('q$k'), call: call, request: true, memory: _memory, bodyQuery: _bodyQuery),
+                      call.state == InspectorCallState.pending
+                          ? EmptyState(icon: Icons.hourglass_empty, title: t.pending, body: t.waitingResponse)
+                          : call.error != null
+                              ? _ErrorTab(key: ValueKey<String>('e$k'), call: call)
+                              : _HttpTab(key: ValueKey<String>('r$k'), call: call, request: false, memory: _memory, bodyQuery: _bodyQuery),
+                      _TimingTab(key: ValueKey<String>('t$k'), call: call),
+                    ],
+                  ),
                 ),
               ),
             ],
-            body: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                DTabs(
-                  labels: <String>[t.general, t.request, t.response, t.timing],
-                  counts: <int?>[
-                    null,
-                    call.requestHeaders.length,
-                    call.state == InspectorCallState.done
-                        ? call.responseHeaders.length
-                        : null,
-                    null
-                  ],
-                  index: _tab,
-                  onChanged: (i) => setState(() => _tab = i),
-                ),
-                Expanded(
-                  child: switch (_tab) {
-                    0 => _GeneralTab(call: call, store: widget.store),
-                    1 => _HttpTab(call: call, request: true, bodyQuery: widget.bodyQuery),
-                    2 => call.state == InspectorCallState.pending
-                        ? EmptyState(
-                            icon: Icons.hourglass_empty,
-                            title: t.pending,
-                            body: t.waitingResponse)
-                        : call.error != null
-                            ? _ErrorTab(call: call)
-                            : _HttpTab(call: call, request: false, bodyQuery: widget.bodyQuery),
-                    _ => _TimingTab(call: call),
-                  },
-                ),
-              ],
-            ),
           ),
         );
       },
+    );
+  }
+}
+
+/// Host, path and the numbers of the request in one card over the tabs.
+class _Summary extends StatelessWidget {
+  const _Summary({required this.call, required this.onCopyUrl});
+
+  final InspectorCall call;
+  final VoidCallback onCopyUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    final uri = call.uri;
+    final host = uri == null ? '' : '${uri.scheme}://${uri.host}${uri.hasPort && uri.port != 443 && uri.port != 80 ? ':${uri.port}' : ''}';
+    final path = uri == null ? call.url : decodeUrl(uri.path.isEmpty ? '/' : uri.path);
+    final query = uri != null && uri.hasQuery ? decodeUrl('?${uri.query}') : '';
+    final ms = call.duration?.inMilliseconds ?? 0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 9, 4, 10),
+        decoration: BoxDecoration(
+            color: c.cardBg,
+            borderRadius: BorderRadius.circular(DurbunRadius.lg),
+            border: Border.all(color: c.border)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      if (host.isNotEmpty)
+                        Text(host,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: DurbunType.monoStyle(size: 11.5, color: c.textMeta, height: 1.3)),
+                      const SizedBox(height: 2),
+                      // The whole URL is on General and in the menu.
+                      Text.rich(
+                        TextSpan(children: <InlineSpan>[
+                          TextSpan(text: path),
+                          if (query.isNotEmpty) TextSpan(text: query, style: TextStyle(color: c.textMuted, fontWeight: FontWeight.w400)),
+                        ]),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: DurbunType.monoStyle(size: 13.5, color: c.text, weight: FontWeight.w500, height: 1.35),
+                      ),
+                    ],
+                  ),
+                ),
+                DIconButton(icon: Icons.copy_rounded, tooltip: t.copyUrl, size: 30, onTap: onCopyUrl),
+              ],
+            ),
+            const SizedBox(height: 9),
+            // One row that scrolls: wrapped chips pushed the tabs off short
+            // screens.
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(right: 8),
+              child: Row(
+                spacing: 6,
+                children: <Widget>[
+                  if (call.state != InspectorCallState.pending)
+                    _Stat(icon: Icons.timer_outlined, text: formatDuration(call.duration),
+                        color: ms >= 3000 ? c.danger : ms >= kSlowMs ? c.warning : null),
+                  if (call.responseBody != null)
+                    _Stat(icon: Icons.south_rounded, text: formatBytes(call.responseBody!.size)),
+                  if (call.requestBody != null && call.requestBody!.size > 0)
+                    _Stat(icon: Icons.north_rounded, text: formatBytes(call.requestBody!.size)),
+                  if (call.mocked)
+                    _Stat(icon: Icons.theater_comedy_outlined, text: t.mock, color: c.badgeAccent),
+                  _Stat(icon: Icons.hub_outlined, text: call.source),
+                  _Stat(icon: Icons.schedule_rounded, text: formatClock(call.ts)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -852,8 +977,24 @@ class _Stat extends StatelessWidget {
 EdgeInsets _pagePadding(BuildContext context) =>
     EdgeInsets.fromLTRB(14, 12, 14, 20 + MediaQuery.paddingOf(context).bottom);
 
+/// The row over a Request / Response part: the part switch on the left,
+/// the body's view and copy on the right. One height for every part, so
+/// nothing jumps when the part changes.
+Widget _partsRow(Widget leading, [List<Widget> trailing = const <Widget>[]]) => Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 8, 4),
+      child: SizedBox(
+        height: 34,
+        child: Row(
+          children: <Widget>[
+            Flexible(child: Align(alignment: Alignment.centerLeft, child: leading)),
+            ...trailing,
+          ],
+        ),
+      ),
+    );
+
 class _GeneralTab extends StatelessWidget {
-  const _GeneralTab({required this.call, required this.store});
+  const _GeneralTab({super.key, required this.call, required this.store});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
@@ -868,17 +1009,24 @@ class _GeneralTab extends StatelessWidget {
     final reason = call.statusText?.isNotEmpty == true
         ? call.statusText!
         : (reasonPhrase(call.status) ?? '');
+    // The full error is in the callout above; the row keeps the short kind.
     final status = call.error != null
-        ? (call.cancelled ? t.cancelled : call.error!)
+        ? (call.cancelled ? t.cancelled : t.shortError(shortErrorKey(call.error)))
         : call.status == null
             ? t.pending
             : '${call.status} $reason';
     final started =
         DateTime.fromMicrosecondsSinceEpoch((call.ts * 1000).round());
     final gql = graphqlLabel(call);
-    final rows = <(String, String, Color?)>[
+    final ms = call.duration?.inMilliseconds ?? 0;
+    final requestRows = <(String, String, Color?)>[
       ('URL', call.url, null),
       (t.method, call.method, c.method(call.method)),
+      if (gql != null) ('GraphQL', gql, null),
+      if (call.requestContentType != null) (t.contentType, call.requestContentType!, null),
+      if (call.requestBody != null) (t.requestSize, formatBytes(call.requestBody!.size), null),
+    ];
+    final responseRows = <(String, String, Color?)>[
       (
         t.status,
         status,
@@ -886,10 +1034,25 @@ class _GeneralTab extends StatelessWidget {
             ? c.textMuted
             : c.status(call.status, failed: call.error != null)
       ),
-      if (gql != null) ('GraphQL', gql, null),
+      if (call.responseContentType != null) (t.contentType, call.responseContentType!, null),
+      if (call.responseBody != null) (t.responseSize, formatBytes(call.responseBody!.size), null),
       if (call.protocol != null) (t.protocol, call.protocol!, null),
-      if (call.remoteAddress != null)
-        (t.remoteAddress, call.remoteAddress!, null),
+      if (call.remoteAddress != null) (t.remoteAddress, call.remoteAddress!, null),
+      if (call.mocked) (t.mock, call.mockRuleId ?? '✓', c.badgeAccent),
+    ];
+    final timingRows = <(String, String, Color?)>[
+      (
+        t.started,
+        '${started.year}-${_two(started.month)}-${_two(started.day)} ${formatClock(call.ts)}',
+        null
+      ),
+      (
+        t.duration,
+        call.state == InspectorCallState.pending ? t.pending : formatDuration(call.duration),
+        ms >= 3000 ? c.danger : ms >= kSlowMs ? c.warning : null
+      ),
+    ];
+    final clientRows = <(String, String, Color?)>[
       (
         t.source,
         call.native ? '${call.source} · ${t.nativeLayer}' : call.source,
@@ -905,50 +1068,42 @@ class _GeneralTab extends StatelessWidget {
       if (device != null)
         (
           t.device,
-          '${device['model'] ?? device['name'] ?? ''} · ${device['platform'] == 'ios' ? 'iOS ' : device['platform'] == 'android' ? 'Android ' : ''}${device['osVersion'] ?? ''}',
+          deviceLabel(device),
           null
         ),
-      (
-        t.started,
-        '${started.year}-${_two(started.month)}-${_two(started.day)} ${formatClock(call.ts)}',
-        null
-      ),
-      (
-        t.duration,
-        call.state == InspectorCallState.pending
-            ? t.pending
-            : formatDuration(call.duration),
-        null
-      ),
-      if (call.requestBody != null)
-        (t.requestSize, formatBytes(call.requestBody!.size), null),
-      if (call.responseBody != null)
-        (t.responseSize, formatBytes(call.responseBody!.size), null),
-      if (call.responseContentType != null)
-        (t.contentType, call.responseContentType!, null),
-      if (call.mocked) (t.mock, call.mockRuleId ?? '✓', c.badgeAccent),
       ('ID', '${call.native ? 'native' : 'dart'}:${call.id}', null),
     ];
-    return ListView(
-      padding: _pagePadding(context),
-      children: <Widget>[
-        if (call.error != null && !call.cancelled) ...<Widget>[
-          Callout(
-              tone: CalloutTone.danger,
-              title: t.shortError(shortErrorKey(call.error)),
-              body: call.error),
-          const SizedBox(height: 10),
+    // Plain text (a SelectableText takes horizontal drags and the tabs would
+    // not swipe); rows copy on tap.
+    return swipeSafeSelection(
+      ListView(
+        padding: _pagePadding(context).copyWith(top: 2),
+        children: <Widget>[
+          if (call.error != null && !call.cancelled) ...<Widget>[
+            Callout(
+                tone: CalloutTone.danger,
+                title: t.shortError(shortErrorKey(call.error)),
+                body: call.error),
+            const SizedBox(height: 4),
+          ],
+          if (call.mocked) ...<Widget>[
+            Callout(title: t.mockedTitle, body: t.mockedBody),
+            const SizedBox(height: 4),
+          ],
+          if (call.bodiesDropped) ...<Widget>[
+            Callout(tone: CalloutTone.warning, title: t.bodiesDropped),
+            const SizedBox(height: 4),
+          ],
+          SectionTitle(t.request),
+          KeyValueTable(rows: requestRows),
+          SectionTitle(t.response),
+          KeyValueTable(rows: responseRows),
+          SectionTitle(t.timing),
+          KeyValueTable(rows: timingRows),
+          SectionTitle(t.client),
+          KeyValueTable(rows: clientRows),
         ],
-        if (call.mocked) ...<Widget>[
-          Callout(title: t.mockedTitle, body: t.mockedBody),
-          const SizedBox(height: 10),
-        ],
-        if (call.bodiesDropped) ...<Widget>[
-          Callout(tone: CalloutTone.warning, title: t.bodiesDropped),
-          const SizedBox(height: 10),
-        ],
-        KeyValueTable(rows: rows),
-      ],
+      ),
     );
   }
 
@@ -956,7 +1111,7 @@ class _GeneralTab extends StatelessWidget {
 }
 
 class _ErrorTab extends StatelessWidget {
-  const _ErrorTab({required this.call});
+  const _ErrorTab({super.key, required this.call});
 
   final InspectorCall call;
 
@@ -966,7 +1121,7 @@ class _ErrorTab extends StatelessWidget {
     final t = InspectorStrings.of(context);
     final (type, message) = splitError(call.error);
     return ListView(
-      padding: _pagePadding(context),
+      padding: _pagePadding(context).copyWith(top: 2),
       children: <Widget>[
         Callout(
           tone: call.cancelled ? CalloutTone.info : CalloutTone.danger,
@@ -976,22 +1131,49 @@ class _ErrorTab extends StatelessWidget {
           body: t.noResponseBody,
         ),
         const SizedBox(height: 12),
-        if (type != null)
-          Text(type,
-              style: DurbunType.monoStyle(
-                  size: 12.5, color: c.danger, weight: FontWeight.w600)),
-        SelectableText(message,
-            style: DurbunType.monoStyle(size: 12.5, color: c.text)),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+              color: c.cardBg,
+              border: Border.all(color: c.border),
+              borderRadius: BorderRadius.circular(DurbunRadius.lg)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              if (type != null) ...<Widget>[
+                Text(type,
+                    style: DurbunType.monoStyle(
+                        size: 12.5, color: c.danger, weight: FontWeight.w600)),
+                const SizedBox(height: 4),
+              ],
+              swipeSafeSelection(
+                Text(message,
+                    style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.4)),
+              ),
+            ],
+          ),
+        ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => copyText(context, call.error ?? ''),
+            icon: Icon(Icons.copy_rounded, size: 15, color: c.textMuted),
+            label: Text(t.copy, style: TextStyle(color: c.textMuted, fontSize: 12.5)),
+          ),
+        ),
       ],
     );
   }
 }
 
+/// Request or Response: Body, Headers, and Cookies / Query when there are
+/// any. The part last read opens first.
 class _HttpTab extends StatefulWidget {
-  const _HttpTab({required this.call, required this.request, this.bodyQuery});
+  const _HttpTab({super.key, required this.call, required this.request, required this.memory, this.bodyQuery});
 
   final InspectorCall call;
   final bool request;
+  final _DetailMemory memory;
   final String? bodyQuery;
 
   @override
@@ -999,7 +1181,18 @@ class _HttpTab extends StatefulWidget {
 }
 
 class _HttpTabState extends State<_HttpTab> {
-  int _part = 0;
+  late String _part = widget.bodyQuery?.isNotEmpty == true
+      ? 'body'
+      : (widget.request ? widget.memory.requestPart : widget.memory.responsePart);
+
+  void _set(String part) {
+    setState(() => _part = part);
+    if (widget.request) {
+      widget.memory.requestPart = part;
+    } else {
+      widget.memory.responsePart = part;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1008,53 +1201,51 @@ class _HttpTabState extends State<_HttpTab> {
     final headers = widget.request ? call.requestHeaders : call.responseHeaders;
     final cookies =
         widget.request ? requestCookies(headers) : responseCookies(headers);
-    final query = widget.request
-        ? (call.uri?.queryParametersAll ?? const <String, List<String>>{})
-        : const <String, List<String>>{};
-    final labels = <String>[
-      t.body,
-      t.headers,
-      t.cookies,
-      if (widget.request) t.query
+    final query = <List<String>>[
+      if (widget.request)
+        for (final e in (call.uri?.queryParametersAll ?? const <String, List<String>>{}).entries)
+          for (final v in e.value) <String>[e.key, v],
     ];
-    final counts = <int?>[
-      null,
-      headers.length,
-      cookies.length,
-      if (widget.request) query.values.fold<int>(0, (s, v) => s + v.length)
+    final body = widget.request ? call.requestBody : call.responseBody;
+    final parts = <(String, String, Object?)>[
+      ('body', t.body, body == null || body.size == 0 ? null : formatBytes(body.size)),
+      ('headers', t.headers, headers.length),
+      if (cookies.isNotEmpty) ('cookies', t.cookies, cookies.length),
+      if (query.isNotEmpty) ('query', t.query, query.length),
     ];
-    final part = _part.clamp(0, labels.length - 1);
+    final at = parts.indexWhere((p) => p.$1 == _part);
+    final index = at < 0 ? 0 : at;
+    final switcher = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DSegmented(
+        labels: <String>[for (final p in parts) p.$2],
+        counts: <Object?>[for (final p in parts) p.$3],
+        index: index,
+        onChanged: (i) => _set(parts[i].$1),
+      ),
+    );
+    final part = parts[index].$1;
+    if (part == 'body') {
+      return BodyPane(
+        leading: switcher,
+        body: body,
+        hasBody: widget.request ? call.hasRequestBody : call.hasResponseBody,
+        contentType: widget.request ? call.requestContentType : call.responseContentType,
+        dropped: call.bodiesDropped,
+        initialQuery: widget.bodyQuery ?? '',
+        initialMode: widget.memory.bodyMode,
+        onModeChanged: (m) => widget.memory.bodyMode = m,
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-          child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DSegmented(
-                  labels: labels,
-                  counts: counts,
-                  index: part,
-                  onChanged: (i) => setState(() => _part = i))),
-        ),
+        _partsRow(switcher),
         Expanded(
           child: switch (part) {
-            0 => BodyPane(
-                body: widget.request ? call.requestBody : call.responseBody,
-                hasBody:
-                    widget.request ? call.hasRequestBody : call.hasResponseBody,
-                contentType: widget.request
-                    ? call.requestContentType
-                    : call.responseContentType,
-                dropped: call.bodiesDropped,
-                initialQuery: widget.bodyQuery ?? '',
-              ),
-            1 => _PairsList(pairs: headers, empty: t.noHeaders),
-            2 => _PairsList(pairs: cookies, empty: t.noCookies),
-            _ => _PairsList(pairs: <List<String>>[
-                for (final e in query.entries)
-                  for (final v in e.value) <String>[e.key, v]
-              ], empty: t.noQuery),
+            'headers' => _PairsList(pairs: headers, empty: t.noHeaders),
+            'cookies' => _PairsList(pairs: cookies, empty: t.noCookies),
+            _ => _PairsList(pairs: query, empty: t.noQuery),
           },
         ),
       ],
@@ -1083,6 +1274,8 @@ List<List<String>> responseCookies(List<List<String>> headers) =>
           ],
     ];
 
+/// Name / value pairs (headers, cookies, query) in one card, the name over
+/// its value. A tap offers copy, the full value and, for a token, its JWT.
 class _PairsList extends StatelessWidget {
   const _PairsList({required this.pairs, required this.empty});
 
@@ -1092,21 +1285,37 @@ class _PairsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
     if (pairs.isEmpty) return EmptyState(icon: Icons.list_alt, title: empty);
     return ListView(
-      padding: _pagePadding(context),
+      padding: _pagePadding(context).copyWith(top: 2),
       children: <Widget>[
-        KeyValueTable(rows: <(String, String, Color?)>[
-          for (final p in pairs) (p[0], p[1], null)
-        ]),
-        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+              color: c.cardBg,
+              border: Border.all(color: c.border),
+              borderRadius: BorderRadius.circular(DurbunRadius.lg)),
+          clipBehavior: Clip.antiAlias,
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                for (var i = 0; i < pairs.length; i++) ...<Widget>[
+                  if (i > 0) Divider(height: 1, color: c.hairline),
+                  _PairRow(name: pairs[i][0], value: pairs[i][1]),
+                ],
+              ],
+            ),
+          ),
+        ),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
             onPressed: () => copyText(
                 context, pairs.map((p) => '${p[0]}: ${p[1]}').join('\n')),
-            icon: Icon(Icons.copy, size: 15, color: c.textMuted),
-            label: Text(InspectorStrings.of(context).copy,
+            icon: Icon(Icons.copy_rounded, size: 15, color: c.textMuted),
+            label: Text(t.copyAllShort,
                 style: TextStyle(color: c.textMuted, fontSize: 12.5)),
           ),
         ),
@@ -1115,7 +1324,130 @@ class _PairsList extends StatelessWidget {
   }
 }
 
-/// A body with Preview (JSON tree, image, form), Code and Hex modes.
+class _PairRow extends StatefulWidget {
+  const _PairRow({required this.name, required this.value});
+
+  final String name;
+  final String value;
+
+  @override
+  State<_PairRow> createState() => _PairRowState();
+}
+
+class _PairRowState extends State<_PairRow> {
+  static const int _maxLines = 8;
+  late final DecodedJwt? _jwt = decodeJwt(widget.value);
+  Offset _tapAt = Offset.zero;
+
+  bool get _long => widget.value.length > 480 || '\n'.allMatches(widget.value).length >= _maxLines;
+
+  Future<void> _menu() async {
+    final t = InspectorStrings.of(context);
+    final choice = await showCopyMenu(context, _tapAt, <(String, IconData, String)>[
+      if (_jwt != null) ('jwt', Icons.key_rounded, t.decodeJwt),
+      ('value', Icons.copy_rounded, t.copyValue),
+      ('line', Icons.notes_rounded, t.copyNameValue),
+      if (_long) ('full', Icons.open_in_full_rounded, t.showFullValue),
+    ]);
+    if (!mounted) return;
+    switch (choice) {
+      case 'jwt':
+        unawaited(showJwtSheet(context, _jwt!));
+      case 'value':
+        copyText(context, widget.value);
+      case 'line':
+        copyText(context, '${widget.name}: ${widget.value}');
+      case 'full':
+        unawaited(_showValue(context, widget.name, widget.value));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    return InkWell(
+      onTapDown: (d) => _tapAt = d.globalPosition,
+      onTap: _menu,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Flexible(
+                  child: Text(widget.name,
+                      style: DurbunType.monoStyle(size: 11.5, color: c.jsonKey, weight: FontWeight.w600, height: 1.3)),
+                ),
+                if (_jwt != null) ...<Widget>[
+                  const SizedBox(width: 6),
+                  DBadge('JWT', tone: BadgeTone.accent),
+                ],
+              ],
+            ),
+            const SizedBox(height: 3),
+            Text(widget.value,
+                maxLines: _maxLines,
+                overflow: TextOverflow.ellipsis,
+                style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.4)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A long header / cookie value on its own page (JSON values pretty).
+Future<void> _showValue(BuildContext context, String name, String value) {
+  var text = value;
+  final s = value.trimLeft();
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try {
+      text = const JsonEncoder.withIndent('  ').convert(jsonDecode(value));
+    } catch (_) {}
+  }
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    showDragHandle: true,
+    backgroundColor: DurbunColors.of(context).bgPanel,
+    builder: (routeContext) => DurbunTheme.wrap(
+      routeContext,
+      Builder(builder: (sheet) {
+        final c = DurbunColors.of(sheet);
+        final t = InspectorStrings.of(sheet);
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.85),
+          child: ListView(
+            shrinkWrap: true,
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 20 + MediaQuery.paddingOf(sheet).bottom),
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(name,
+                        style: DurbunType.monoStyle(size: 14, color: c.jsonKey, weight: FontWeight.w700)),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => copyText(sheet, value),
+                    icon: Icon(Icons.copy_rounded, size: 15, color: c.textMuted),
+                    label: Text(t.copy, style: TextStyle(color: c.textMuted, fontSize: 12.5)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              SelectableText(text, style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.45)),
+            ],
+          ),
+        );
+      }),
+    ),
+  );
+}
+
+/// A body with Preview (JSON tree, image, form), Code and Hex views; the
+/// view is picked from a menu next to the part switch ([leading]).
 class BodyPane extends StatefulWidget {
   const BodyPane(
       {super.key,
@@ -1123,7 +1455,10 @@ class BodyPane extends StatefulWidget {
       required this.hasBody,
       this.contentType,
       this.dropped = false,
-      this.initialQuery = ''});
+      this.initialQuery = '',
+      this.leading,
+      this.initialMode = 0,
+      this.onModeChanged});
 
   final InspectorBody? body;
   final bool hasBody;
@@ -1133,12 +1468,19 @@ class BodyPane extends StatefulWidget {
   /// Find text to open with (the list's body search).
   final String initialQuery;
 
+  /// Drawn at the left of the view row (the Request / Response part switch).
+  final Widget? leading;
+
+  /// 0 Preview, 1 Code, 2 Hex.
+  final int initialMode;
+  final ValueChanged<int>? onModeChanged;
+
   @override
   State<BodyPane> createState() => _BodyPaneState();
 }
 
 class _BodyPaneState extends State<BodyPane> {
-  int _mode = 0;
+  late int _mode = widget.initialMode;
   Object? _json;
   bool _jsonParsed = false;
 
@@ -1179,66 +1521,98 @@ class _BodyPaneState extends State<BodyPane> {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
+    final leading = widget.leading ?? const SizedBox.shrink();
     final b = widget.body;
-    if (b == null) {
-      return EmptyState(
-        icon: Icons.inbox_outlined,
-        title: widget.dropped
-            ? t.bodiesDropped
-            : (widget.hasBody ? t.bodyNotCaptured : t.noBody),
-        body: widget.dropped || widget.hasBody ? null : t.noBodyHint,
-      );
-    }
-    if (b.data.isEmpty) {
-      return EmptyState(
+    if (b == null || b.data.isEmpty) {
+      final Widget empty;
+      if (b == null) {
+        empty = EmptyState(
           icon: Icons.inbox_outlined,
-          title: b.size > 0 ? t.bodyNotCaptured : t.noBody,
-          body: b.size > 0 ? t.bodyNotCapturedHint : null);
+          title: widget.dropped
+              ? t.bodiesDropped
+              : (widget.hasBody ? t.bodyNotCaptured : t.noBody),
+          body: widget.dropped || widget.hasBody ? null : t.noBodyHint,
+        );
+      } else {
+        empty = EmptyState(
+            icon: Icons.inbox_outlined,
+            title: b.size > 0 ? t.bodyNotCaptured : t.noBody,
+            body: b.size > 0 ? t.bodyNotCapturedHint : null);
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[_partsRow(leading), Expanded(child: empty)],
+      );
     }
     final kind = bodyKindLabel(widget.contentType, b);
     final json = _parsedJson(b);
     final isImage =
         (widget.contentType ?? '').toLowerCase().startsWith('image/') &&
             !b.isText;
-    final modes = <String>[t.preview, t.code, if (!b.isText || isImage) t.hex];
+    final modes = <(String, IconData)>[
+      (t.preview, json != null ? Icons.account_tree_outlined : (isImage ? Icons.image_outlined : Icons.visibility_outlined)),
+      (t.code, Icons.code_rounded),
+      if (!b.isText || isImage) (t.hex, Icons.memory_rounded),
+    ];
     final mode = _mode.clamp(0, modes.length - 1);
-    final header = Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 8, 0),
-      child: Row(
-        children: <Widget>[
-          Flexible(
-            flex: 0,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DSegmented(
-                  labels: modes,
-                  index: mode,
-                  onChanged: (i) => setState(() => _mode = i)),
+    final meta = <String>[
+      kind,
+      formatBytes(b.size),
+      if (widget.contentType != null) widget.contentType!.split(';').first,
+    ].join(' · ');
+    final viewMenu = PopupMenuButton<int>(
+      tooltip: t.view,
+      onSelected: (i) {
+        setState(() => _mode = i);
+        widget.onModeChanged?.call(i);
+      },
+      itemBuilder: (_) => <PopupMenuEntry<int>>[
+        PopupMenuItem<int>(
+          enabled: false,
+          height: 32,
+          child: Text(meta, style: DurbunType.monoStyle(size: 11.5, color: c.textMeta)),
+        ),
+        const PopupMenuDivider(),
+        for (var i = 0; i < modes.length; i++)
+          PopupMenuItem<int>(
+            value: i,
+            child: Row(
+              children: <Widget>[
+                Icon(modes[i].$2, size: 17, color: i == mode ? c.badgeAccent : c.textMuted),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: Text(modes[i].$1,
+                        style: TextStyle(fontSize: 14, color: c.text, fontWeight: i == mode ? FontWeight.w600 : FontWeight.w400))),
+                if (i == mode) Icon(Icons.check_rounded, size: 17, color: c.badgeAccent),
+              ],
             ),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              <String>[
-                kind,
-                formatBytes(b.size),
-                if (widget.contentType != null)
-                  widget.contentType!.split(';').first
-              ].join(' · '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: DurbunType.monoStyle(size: 11, color: c.textMeta),
-            ),
-          ),
-          if (b.isText)
-            DIconButton(
-                icon: Icons.copy,
-                tooltip: t.copy,
-                size: 28,
-                onTap: () => copyText(context, b.displayText ?? b.data)),
-        ],
+      ],
+      child: Container(
+        height: 30,
+        padding: const EdgeInsets.only(left: 9, right: 6),
+        decoration: ShapeDecoration(color: c.cardBg, shape: StadiumBorder(side: BorderSide(color: c.border))),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(modes[mode].$2, size: 15, color: c.text),
+            const SizedBox(width: 5),
+            Text(modes[mode].$1, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.text, height: 1.2)),
+            Icon(Icons.expand_more_rounded, size: 16, color: c.textMuted),
+          ],
+        ),
       ),
     );
+    final header = _partsRow(leading, <Widget>[
+      const SizedBox(width: 6),
+      viewMenu,
+      if (b.isText)
+        DIconButton(
+            icon: Icons.copy_rounded,
+            tooltip: t.copy,
+            size: 32,
+            onTap: () => copyText(context, b.displayText ?? b.data)),
+    ]);
     final Widget content;
     if (mode == 0 && json != null) {
       content = JsonTreeView(
@@ -1278,8 +1652,10 @@ class _BodyPaneState extends State<BodyPane> {
       content = ListView(
         padding: _pagePadding(context),
         children: <Widget>[
-          SelectableText(hexDump(b.bytes),
-              style: DurbunType.monoStyle(size: 11.5, color: c.textMuted))
+          swipeSafeSelection(
+            Text(hexDump(b.bytes),
+                style: DurbunType.monoStyle(size: 11.5, color: c.textMuted)),
+          )
         ],
       );
     } else {
@@ -1353,7 +1729,7 @@ String hexDump(List<int> bytes, {int limit = 8192}) {
 }
 
 class _TimingTab extends StatelessWidget {
-  const _TimingTab({required this.call});
+  const _TimingTab({super.key, required this.call});
 
   final InspectorCall call;
 
@@ -1363,6 +1739,7 @@ class _TimingTab extends StatelessWidget {
     final t = InspectorStrings.of(context);
     final b = timingBreakdown(call);
     final total = b.total;
+    final ms = call.duration?.inMilliseconds ?? 0;
     Color phaseColor(String p) => switch (p) {
           'queue' => c.textSubtle.withValues(alpha: 0.55),
           'dns' => c.st3xx,
@@ -1372,80 +1749,125 @@ class _TimingTab extends StatelessWidget {
           'wait' => c.pickGreen,
           _ => c.pickBlue,
         };
+    final phases = b.known && total != null && total > 0;
     return ListView(
-      padding: _pagePadding(context),
+      padding: _pagePadding(context).copyWith(top: 2),
       children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: Text(t.totalTime,
-                  style: TextStyle(color: c.textMuted, fontSize: 12.5)),
-            ),
-            Text(total == null ? t.pending : formatDuration(call.duration),
-                style: DurbunType.monoStyle(
-                    size: 15, color: c.text, weight: FontWeight.w600)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (b.known && total != null && total > 0)
-          for (final s in b.spans)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 5),
-              child: Row(
-                children: <Widget>[
-                  Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                          color: phaseColor(s.phase),
-                          borderRadius: BorderRadius.circular(2))),
-                  const SizedBox(width: 6),
-                  SizedBox(
-                      width: 112,
-                      child: Text(t.phase(s.phase),
-                          style: TextStyle(fontSize: 12, color: c.textMuted))),
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, box) => Container(
-                        height: 10,
-                        decoration: BoxDecoration(
-                            color: c.bgSunken,
-                            borderRadius: BorderRadius.circular(2)),
-                        child: Stack(
-                          children: <Widget>[
-                            Positioned(
-                              left: box.maxWidth * (s.start / total),
-                              width: (box.maxWidth * (s.ms / total))
-                                  .clamp(2.0, box.maxWidth),
-                              top: 0,
-                              bottom: 0,
-                              child: Container(
-                                  decoration: BoxDecoration(
-                                      color: phaseColor(s.phase),
-                                      borderRadius: BorderRadius.circular(2))),
-                            ),
-                          ],
-                        ),
-                      ),
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+          decoration: BoxDecoration(
+              color: c.cardBg,
+              border: Border.all(color: c.border),
+              borderRadius: BorderRadius.circular(DurbunRadius.lg)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(t.totalTime, style: TextStyle(color: c.textMeta, fontSize: 12, fontWeight: FontWeight.w500)),
+              const SizedBox(height: 2),
+              Text(total == null ? t.pending : formatDuration(call.duration),
+                  style: DurbunType.monoStyle(
+                      size: 24,
+                      color: ms >= 3000 ? c.danger : ms >= kSlowMs ? c.warning : c.text,
+                      weight: FontWeight.w700,
+                      height: 1.2)),
+              if (phases) ...<Widget>[
+                const SizedBox(height: 12),
+                // Every phase in one bar, in order.
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(DurbunRadius.sm),
+                  child: SizedBox(
+                    height: 10,
+                    child: Row(
+                      children: <Widget>[
+                        for (final s in b.spans)
+                          Expanded(
+                            flex: (s.ms / total * 1000).round().clamp(1, 1000),
+                            child: Container(color: phaseColor(s.phase)),
+                          ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 58,
-                    child: Text(
-                        '${s.ms < 10 ? s.ms.toStringAsFixed(1) : s.ms.round()} ms',
-                        textAlign: TextAlign.right,
-                        style: DurbunType.monoStyle(size: 11.5, color: c.text)),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (phases)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+                color: c.cardBg,
+                border: Border.all(color: c.border),
+                borderRadius: BorderRadius.circular(DurbunRadius.lg)),
+            child: Column(
+              children: <Widget>[
+                // Label and time on one line, the waterfall under them at
+                // full width: long (TR) labels and large text never squeeze it.
+                for (final s in b.spans)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                    color: phaseColor(s.phase),
+                                    borderRadius: BorderRadius.circular(2))),
+                            const SizedBox(width: 8),
+                            Expanded(
+                                child: Text(t.phase(s.phase),
+                                    style: TextStyle(fontSize: 12.5, color: c.text))),
+                            const SizedBox(width: 8),
+                            Text(
+                                s.ms < 0.1 ? '<0.1 ms' : '${s.ms < 10 ? s.ms.toStringAsFixed(1) : s.ms.round()} ms',
+                                style: DurbunType.monoStyle(size: 11.5, color: c.text)),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        LayoutBuilder(
+                          builder: (context, box) {
+                            final width = (box.maxWidth * (s.ms / total)).clamp(3.0, box.maxWidth);
+                            return Container(
+                              height: 6,
+                              decoration: BoxDecoration(
+                                  color: c.trackBg,
+                                  borderRadius: BorderRadius.circular(3)),
+                              child: Stack(
+                                children: <Widget>[
+                                  Positioned(
+                                    left: (box.maxWidth * (s.start / total)).clamp(0.0, box.maxWidth - width),
+                                    width: width,
+                                    top: 0,
+                                    bottom: 0,
+                                    child: Container(
+                                        decoration: BoxDecoration(
+                                            color: phaseColor(s.phase),
+                                            borderRadius: BorderRadius.circular(3))),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
-            )
+              ],
+            ),
+          )
         else
           Callout(
             title: t.noPhasesTitle,
-            body: call.state == InspectorCallState.pending
-                ? t.noPhasesPending
-                : t.noPhasesBody(call.source),
+            body: switch (call.state) {
+              InspectorCallState.pending => t.noPhasesPending,
+              InspectorCallState.failed => t.noPhasesFailed,
+              InspectorCallState.done => t.noPhasesBody(call.source),
+            },
           ),
       ],
     );

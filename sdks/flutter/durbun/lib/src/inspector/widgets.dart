@@ -2,6 +2,7 @@
 /// (`packages/ui/src/components`, `styles/components.css`).
 library;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -477,7 +478,7 @@ class Segment extends StatelessWidget {
 }
 
 /// Label with an optional count, as a segment shows it ("Request 7").
-Widget _segmentLabel(DurbunColors c, String label, int? count, bool selected, double size) => Text.rich(
+Widget _segmentLabel(DurbunColors c, String label, Object? count, bool selected, double size) => Text.rich(
       TextSpan(
         children: <InlineSpan>[
           TextSpan(text: label),
@@ -497,46 +498,6 @@ Widget _segmentLabel(DurbunColors c, String label, int? count, bool selected, do
       ),
     );
 
-/// The detail pages' tabs (General / Request / Response / Timing): a
-/// full-width segmented control, optional counts.
-class DTabs extends StatelessWidget {
-  const DTabs(
-      {super.key,
-      required this.labels,
-      required this.index,
-      required this.onChanged,
-      this.counts});
-
-  final List<String> labels;
-  final List<int?>? counts;
-  final int index;
-  final ValueChanged<int> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = DurbunColors.of(context);
-    // Tabs share the width (no tab slides off a narrow phone); long labels shrink.
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
-      child: SegmentTrack(
-        children: <Widget>[
-          for (var i = 0; i < labels.length; i++)
-            Expanded(
-              child: Segment(
-                selected: i == index,
-                onTap: () => onChanged(i),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: _segmentLabel(c, labels[i], counts?[i], i == index, 13),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Small segmented control (Body / Headers / Cookies, Preview / Code / Hex).
 class DSegmented extends StatelessWidget {
   const DSegmented(
@@ -547,7 +508,9 @@ class DSegmented extends StatelessWidget {
       this.counts});
 
   final List<String> labels;
-  final List<int?>? counts;
+
+  /// Shown after a label, dimmed: a count or a size ("Body 2 KB").
+  final List<Object?>? counts;
   final int index;
   final ValueChanged<int> onChanged;
 
@@ -598,7 +561,8 @@ class StatusPill extends StatelessWidget {
       );
 }
 
-/// Key / value rows in a rounded card (the "General" tab, headers).
+/// Key / value rows in a rounded card (General, the JWT claims). A tap on a
+/// row offers to copy its value.
 class KeyValueTable extends StatelessWidget {
   const KeyValueTable({super.key, required this.rows});
 
@@ -613,38 +577,115 @@ class KeyValueTable extends StatelessWidget {
           border: Border.all(color: c.border),
           borderRadius: BorderRadius.circular(DurbunRadius.lg)),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: <Widget>[
-          for (var i = 0; i < rows.length; i++)
-            Container(
-              decoration: BoxDecoration(
-                border: i == 0 ? null : Border(top: BorderSide(color: c.hairline)),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  SizedBox(
-                    width: 112,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 1),
-                      child: Text(rows[i].$1,
-                          style: TextStyle(fontSize: 12, color: c.textMeta, fontWeight: FontWeight.w500)),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: SelectableText(rows[i].$2,
-                        style: DurbunType.monoStyle(size: 12.5, color: rows[i].$3 ?? c.text, height: 1.4)),
-                  ),
-                ],
-              ),
-            ),
-        ],
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          children: <Widget>[
+            for (var i = 0; i < rows.length; i++) ...<Widget>[
+              if (i > 0) Divider(height: 1, color: c.hairline),
+              _KeyValueRow(row: rows[i]),
+            ],
+          ],
+        ),
       ),
     );
   }
 }
+
+class _KeyValueRow extends StatefulWidget {
+  const _KeyValueRow({required this.row});
+
+  final (String, String, Color?) row;
+
+  @override
+  State<_KeyValueRow> createState() => _KeyValueRowState();
+}
+
+class _KeyValueRowState extends State<_KeyValueRow> {
+  Offset _tapAt = Offset.zero;
+
+  Future<void> _menu() async {
+    final t = InspectorStrings.of(context);
+    final (name, value, _) = widget.row;
+    final choice = await showCopyMenu(context, _tapAt, <(String, IconData, String)>[
+      ('value', Icons.copy_rounded, t.copyValue),
+      ('line', Icons.notes_rounded, t.copyNameValue),
+    ]);
+    if (!mounted) return;
+    if (choice == 'value') copyText(context, value);
+    if (choice == 'line') copyText(context, '$name: $value');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final (name, value, color) = widget.row;
+    return InkWell(
+      onTapDown: (d) => _tapAt = d.globalPosition,
+      onTap: _menu,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            SizedBox(
+              width: 112,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Text(name, style: TextStyle(fontSize: 12, color: c.textMeta, fontWeight: FontWeight.w500)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(value, style: DurbunType.monoStyle(size: 12.5, color: color ?? c.text, height: 1.4)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A small menu at [at] (a tap's global position); returns the chosen id.
+Future<String?> showCopyMenu(BuildContext context, Offset at, List<(String, IconData, String)> items) {
+  final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+  return showMenu<String>(
+    context: context,
+    position: RelativeRect.fromRect(at & const Size(1, 1), Offset.zero & overlay.size),
+    items: <PopupMenuEntry<String>>[
+      for (final (id, icon, label) in items) PopupMenuItem<String>(value: id, child: MenuRow(icon, label)),
+    ],
+  );
+}
+
+/// Icon and label of a menu item.
+class MenuRow extends StatelessWidget {
+  const MenuRow(this.icon, this.label, {super.key});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    return Row(
+      children: <Widget>[
+        Icon(icon, size: 17, color: c.textMuted),
+        const SizedBox(width: 10),
+        Flexible(child: Text(label, style: TextStyle(fontSize: 14, color: c.text))),
+      ],
+    );
+  }
+}
+
+/// Text selection on a page of a swipe tab view. On iOS and macOS a
+/// [SelectionArea] lets the swipe win; elsewhere its drag-to-select takes
+/// horizontal drags and the tabs would not move, so there the page relies
+/// on its copy actions (row menus, copy buttons) instead.
+Widget swipeSafeSelection(Widget child) => switch (defaultTargetPlatform) {
+      TargetPlatform.iOS || TargetPlatform.macOS => SelectionArea(child: child),
+      _ => child,
+    };
 
 enum CalloutTone { info, warning, danger }
 
@@ -924,5 +965,259 @@ class _ActiveListenableBuilderState extends State<ActiveListenableBuilder> {
     // Depends on PageActive: coming back on screen rebuilds with what was missed.
     PageActive.of(context);
     return widget.builder(context);
+  }
+}
+
+/// One tab of a [DTabBar].
+class DTab {
+  const DTab(this.label, {this.icon, this.count, this.alert = false});
+
+  final String label;
+  final IconData? icon;
+
+  /// Shown as a pill when above zero.
+  final int? count;
+
+  /// Red count: errors / failed requests.
+  final bool alert;
+}
+
+/// Segmented tabs driven by a [TabController]: the raised segment follows a
+/// swipe of the [TabBarView] under it (the panel, the detail pages).
+class DTabBar extends StatelessWidget {
+  const DTabBar({super.key, required this.controller, required this.tabs, this.height = 38});
+
+  final TabController controller;
+  final List<DTab> tabs;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    return Container(
+      height: height,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: c.trackBg,
+        borderRadius: BorderRadius.circular(DurbunRadius.lg - 1),
+        border: c.isDark ? Border.all(color: c.border.withValues(alpha: 0.6)) : null,
+      ),
+      child: TabBar(
+        controller: controller,
+        indicator: BoxDecoration(
+          color: c.thumbBg,
+          borderRadius: BorderRadius.circular(DurbunRadius.md),
+          boxShadow: c.raised,
+        ),
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerHeight: 0,
+        labelPadding: EdgeInsets.zero,
+        splashFactory: NoSplash.splashFactory,
+        overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+        labelColor: c.text,
+        unselectedLabelColor: c.textMuted,
+        labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, height: 1.2),
+        unselectedLabelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, height: 1.2),
+        tabs: <Widget>[
+          for (final tab in tabs)
+            Tooltip(
+              message: tab.label,
+              child: Tab(
+                height: height - 6,
+                // Tabs share the width; a long label shrinks instead of
+                // pushing the others off a narrow phone.
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        if (tab.icon != null) ...<Widget>[
+                          Icon(tab.icon, size: 16),
+                          const SizedBox(width: 6),
+                        ],
+                        Text(tab.label),
+                        if ((tab.count ?? 0) > 0) ...<Widget>[
+                          const SizedBox(width: 6),
+                          _TabCount(count: tab.count!, alert: tab.alert),
+                        ] else if (tab.alert) ...<Widget>[
+                          const SizedBox(width: 5),
+                          Container(width: 7, height: 7, decoration: BoxDecoration(color: c.danger, shape: BoxShape.circle)),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TabCount extends StatelessWidget {
+  const _TabCount({required this.count, required this.alert});
+
+  final int count;
+  final bool alert;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    return Container(
+      height: 18,
+      constraints: const BoxConstraints(minWidth: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+          color: alert ? c.danger : c.bgActive, borderRadius: BorderRadius.circular(DurbunRadius.pill)),
+      child: Text(
+        count > 999 ? '999+' : '$count',
+        style: DurbunType.monoStyle(
+            size: 10.5, color: alert ? Colors.white : c.textMuted, weight: FontWeight.w700, height: 1.1),
+      ),
+    );
+  }
+}
+
+/// A page of a swipeable tab view: keeps its state (search, scroll, open
+/// JSON nodes) while another page is shown, and tells its content whether it
+/// is on screen ([PageActive]).
+class SwipePage extends StatefulWidget {
+  const SwipePage({super.key, required this.tabs, required this.index, required this.child});
+
+  final TabController tabs;
+  final int index;
+  final Widget child;
+
+  @override
+  State<SwipePage> createState() => _SwipePageState();
+}
+
+class _SwipePageState extends State<SwipePage> with AutomaticKeepAliveClientMixin {
+  late bool _active = _visible();
+
+  bool _visible() {
+    final at = widget.tabs.animation?.value ?? widget.tabs.index.toDouble();
+    return (at - widget.index).abs() < 0.999;
+  }
+
+  void _tick() {
+    final v = _visible();
+    if (v != _active) setState(() => _active = v);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.tabs.animation?.addListener(_tick);
+  }
+
+  @override
+  void didUpdateWidget(SwipePage old) {
+    super.didUpdateWidget(old);
+    if (old.tabs != widget.tabs) {
+      old.tabs.animation?.removeListener(_tick);
+      widget.tabs.animation?.addListener(_tick);
+      _active = _visible();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.tabs.animation?.removeListener(_tick);
+    super.dispose();
+  }
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return PageActive(active: _active, child: widget.child);
+  }
+}
+
+/// [DTabBar] over pages that a swipe moves between; each page keeps its
+/// state. Changing tabs drops the keyboard (a find field on the other page
+/// would keep it up).
+class SwipeTabs extends StatefulWidget {
+  const SwipeTabs({
+    super.key,
+    required this.tabs,
+    required this.pages,
+    this.initialIndex = 0,
+    this.onChanged,
+    this.barPadding = const EdgeInsets.fromLTRB(12, 2, 12, 8),
+  }) : assert(tabs.length == pages.length);
+
+  final List<DTab> tabs;
+  final List<Widget> pages;
+  final int initialIndex;
+  final ValueChanged<int>? onChanged;
+  final EdgeInsets barPadding;
+
+  @override
+  State<SwipeTabs> createState() => _SwipeTabsState();
+}
+
+class _SwipeTabsState extends State<SwipeTabs> with TickerProviderStateMixin {
+  late TabController _tabs;
+  late int _index;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = _make(widget.initialIndex);
+    _index = _tabs.index;
+  }
+
+  TabController _make(int index) =>
+      TabController(length: widget.tabs.length, vsync: this, initialIndex: index.clamp(0, widget.tabs.length - 1))
+        ..addListener(_changed);
+
+  void _changed() {
+    if (_tabs.index == _index) return;
+    _index = _tabs.index;
+    FocusManager.instance.primaryFocus?.unfocus();
+    widget.onChanged?.call(_index);
+  }
+
+  @override
+  void didUpdateWidget(SwipeTabs old) {
+    super.didUpdateWidget(old);
+    if (old.tabs.length != widget.tabs.length) {
+      final previous = _tabs;
+      _tabs = _make(previous.index);
+      _index = _tabs.index;
+      WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Padding(padding: widget.barPadding, child: DTabBar(controller: _tabs, tabs: widget.tabs)),
+        Expanded(
+          child: TabBarView(
+            controller: _tabs,
+            children: <Widget>[
+              for (var i = 0; i < widget.pages.length; i++) SwipePage(tabs: _tabs, index: i, child: widget.pages[i]),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }

@@ -419,13 +419,14 @@ class _Prepared {
   final int size;
 }
 
-_Prepared _prepare(InspectorCall c) {
-  final method = c.method.isEmpty || c.method == '?' ? 'GET' : c.method.toUpperCase();
+_Prepared _prepare(InspectorCall c) => _prepareParts(c.method, c.requestHeaders, c.requestBody);
+
+_Prepared _prepareParts(String rawMethod, List<List<String>> requestHeaders, InspectorBody? b) {
+  final method = rawMethod.isEmpty || rawMethod == '?' ? 'GET' : rawMethod.toUpperCase();
   final headers = <List<String>>[
-    for (final h in c.requestHeaders)
+    for (final h in requestHeaders)
       if (!_dropHeader(h[0])) h,
   ];
-  final b = c.requestBody;
   if (b != null && b.data.isNotEmpty) {
     if (b.isText) return _Prepared(method, headers, 'text', b.data, null, utf8.encode(b.data).length);
     final clean = b.data.replaceAll(RegExp(r'\s+'), '');
@@ -458,9 +459,12 @@ String? _contentType(List<List<String>> headers) {
   return null;
 }
 
-String toCurl(InspectorCall c) {
-  final p = _prepare(c);
-  final parts = <String>['curl ${_shell(c.url)}'];
+String toCurl(InspectorCall c) => curlCommand(c.method, c.url, c.requestHeaders, c.requestBody);
+
+/// cURL from parts (the share report passes masked headers and body).
+String curlCommand(String method, String url, List<List<String>> headers, InspectorBody? body) {
+  final p = _prepareParts(method, headers, body);
+  final parts = <String>['curl ${_shell(url)}'];
   final hasData = p.kind != 'none';
   if (p.method == 'HEAD') {
     parts.add('--head');

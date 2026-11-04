@@ -75,48 +75,6 @@ String prettyValue(Object? value) {
   }
 }
 
-/// Everything about [call] as plain text (for the clipboard).
-String callAsText(InspectorCall call) {
-  final b = StringBuffer()
-    ..writeln('${call.method} ${call.url}')
-    ..writeln(
-      call.error != null
-          ? 'Error: ${call.error}'
-          : 'Status: ${call.status ?? '…'} ${call.statusText ?? ''}'
-              .trimRight(),
-    )
-    ..writeln('Duration: ${formatDuration(call.duration)}')
-    ..writeln('Source: ${call.source}');
-  if (call.mocked) b.writeln('Mocked: ${call.mockRuleId ?? 'yes'}');
-  b
-    ..writeln()
-    ..writeln('Request headers:');
-  for (final h in call.requestHeaders) {
-    b.writeln('  ${h[0]}: ${h[1]}');
-  }
-  final req = call.requestBody;
-  if (req != null && req.isText && req.data.isNotEmpty) {
-    b
-      ..writeln()
-      ..writeln('Request body:')
-      ..writeln(prettyJsonText(req.data) ?? req.data);
-  }
-  b
-    ..writeln()
-    ..writeln('Response headers:');
-  for (final h in call.responseHeaders) {
-    b.writeln('  ${h[0]}: ${h[1]}');
-  }
-  final res = call.responseBody;
-  if (res != null && res.isText && res.data.isNotEmpty) {
-    b
-      ..writeln()
-      ..writeln('Response body:')
-      ..writeln(prettyJsonText(res.data) ?? res.data);
-  }
-  return b.toString();
-}
-
 /// One log line with its data and stack as plain text.
 String logAsText(InspectorLog log) {
   final b = StringBuffer(

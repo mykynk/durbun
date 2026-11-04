@@ -17,6 +17,9 @@ class InspectorStrings {
     return InspectorStrings._(locale.languageCode == 'tr');
   }
 
+  /// Texts in a fixed language (`tr` or anything else for English).
+  factory InspectorStrings.forLanguage(String languageCode) => InspectorStrings._(languageCode == 'tr');
+
   String _(String tr, String en) => this.tr ? tr : en;
 
   /* shell */
@@ -258,6 +261,71 @@ class InspectorStrings {
   String truncated(String size) => _('Gövde kısaltıldı (toplam $size).', 'Body truncated (total $size).');
   String get imageUnreadable => _('Görsel açılamadı', 'The image could not be decoded');
   String get noResponseBody => _('Yanıt gelmedi; gösterilecek başlık ya da gövde yok.', 'No response arrived; there are no headers or body to show.');
+
+  /* share (the report labels match the desktop's network.share.report.*) */
+  String get share => _('Paylaş', 'Share');
+  String get shareTitle => _('İsteği paylaş', 'Share request');
+  String get shareDescription => _(
+    'Ekibinizin Dürbün olmadan okuyabileceği bir rapor: URL, durum, başlıklar, gövdeler ve cURL.',
+    'A report your team can read without Dürbün: URL, status, headers, bodies and cURL.',
+  );
+  String get shareMask => _('Gizli değerleri maskele', 'Mask secret values');
+  String get shareMaskHint => _('Authorization, çerezler, token ve parola alanları •••• olur', 'Authorization, cookies, token and password fields become ••••');
+  String get shareBodies => _('Gövdeleri ekle', 'Include bodies');
+  String get shareCurl => _('cURL ekle', 'Include cURL');
+  String get shareSend => _('Paylaş…', 'Share…');
+  String get shareCopied => _('Rapor kopyalandı', 'Report copied');
+  String get shareFallback => _('Paylaşım açılamadı; rapor panoya kopyalandı', 'Sharing did not open; the report was copied');
+  String get copyReport => _('Paylaşım raporunu kopyala', 'Copy share report');
+  String get reportPending => _('Bekliyor: henüz yanıt yok', 'Pending: no response yet');
+  String get reportFailed => _('Başarısız', 'Failed');
+  String get reportCancelled => _('İptal edildi', 'Cancelled');
+  String get reportTime => _('Zaman', 'Time');
+  String get reportApp => _('Uygulama', 'App');
+  String get reportDevice => _('Cihaz', 'Device');
+  String get reportClient => _('İstemci', 'Client');
+  String get reportTrace => _('İz kimlikleri', 'Trace IDs');
+  String reportMocked(String? rule) => rule == null
+      ? _('Mock: yanıt sunucudan değil, bir Dürbün mock kuralından geldi', 'Mocked: the response came from a Dürbün mock rule, not from the server')
+      : _('Mock: yanıt sunucudan değil, Dürbün mock kuralından (“$rule”) geldi', 'Mocked: the response came from the Dürbün mock rule “$rule”, not from the server');
+  String get reportError => _('Hata', 'Error');
+  String get reportRequestHeaders => _('İstek başlıkları', 'Request headers');
+  String get reportResponseHeaders => _('Yanıt başlıkları', 'Response headers');
+  String get reportRequestBody => _('İstek gövdesi', 'Request body');
+  String get reportResponseBody => _('Yanıt gövdesi', 'Response body');
+  String get reportNotCaptured => _('kaydedilmedi', 'not captured');
+  String get reportBinary => _('ikili veri, eklenmedi', 'binary, not included');
+  String reportCaptured(String captured, String total) => _('$total içinden $captured kaydedildi', '$captured of $total captured');
+  String reportMore(int count) => _('… $count karakter daha gösterilmedi', '… $count more characters not shown');
+  String get reportCurlNoBody => _('İstek gövdesi çok uzun olduğu için cURL’e eklenmedi.', 'The request body is too long and is left out of cURL.');
+  String get reportMasked => _('Gizli değerler (token, çerez, parola) •••• ile maskelendi.', 'Secret values (tokens, cookies, passwords) are masked as ••••.');
+  String get prevRequest => _('Önceki istek', 'Previous request');
+  String get nextRequest => _('Sonraki istek', 'Next request');
+  String get moreActions => _('Diğer işlemler', 'More actions');
+  String get view => _('Görünüm', 'View');
+  String get client => _('İstemci', 'Client');
+  String get copyAllShort => _('Tümünü kopyala', 'Copy all');
+  String get copyValue => _('Değeri kopyala', 'Copy value');
+  String get copyNameValue => _('Adı ve değeri kopyala', 'Copy name and value');
+  String get showFullValue => _('Tam değeri göster', 'Show full value');
+  String get decodeJwt => _('JWT’yi çöz', 'Decode JWT');
+  String get jwtClaims => _('İçerik (claims)', 'Claims');
+  String get jwtHeader => _('JWT başlığı', 'JWT header');
+  String get jwtNotVerified => _('İmza doğrulanmaz; yalnızca içerik çözülür.', 'The signature is not verified; only the content is decoded.');
+  String get copyJson => _('JSON olarak kopyala', 'Copy as JSON');
+  String expiresIn(String span) => _('$span sonra bitiyor', 'Expires in $span');
+  String expiredAgo(String span) => _('$span önce bitti', 'Expired $span ago');
+  String inSpan(String span) => _('$span sonra', 'in $span');
+  String spanAgo(String span) => _('$span önce', '$span ago');
+
+  /// "45 sn", "12 dk", "3 sa", "2 gün" (rounded down).
+  String spanShort(Duration d) {
+    final s = d.inSeconds.abs();
+    if (s < 60) return _('$s sn', '$s s');
+    if (s < 3600) return _('${s ~/ 60} dk', '${s ~/ 60} min');
+    if (s < 86400) return _('${s ~/ 3600} sa', '${s ~/ 3600} h');
+    return _('${s ~/ 86400} gün', '${s ~/ 86400} d');
+  }
   String get method => _('Metot', 'Method');
   String get status => _('Durum', 'Status');
   String get protocol => _('Protokol', 'Protocol');
@@ -285,7 +353,6 @@ class InspectorStrings {
     _ => f,
   };
   String get copyUrl => _('URL’yi kopyala', 'Copy URL');
-  String get copyAll => _('Tümünü metin olarak kopyala', 'Copy all as text');
   String get copyResponseBody => _('Yanıt gövdesini kopyala', 'Copy response body');
   String copyNote(Object note) => switch ('$note'.split('.').last) {
     'bodyNotCaptured' => _('gövde kaydedilmemişti', 'body was not captured'),
@@ -304,6 +371,10 @@ class InspectorStrings {
   };
   String get noPhasesTitle => _('Aşama süreleri yok', 'No phase timings');
   String get noPhasesPending => _('İstek bitince zamanlama görünür.', 'Timing shows once the request finishes.');
+  String get noPhasesFailed => _(
+    'İstek yanıt gelmeden bitti; aşama süreleri yalnızca yanıtı gelen isteklerde ölçülür. Toplam süre, hataya kadar geçen süredir.',
+    'The request ended without a response; phase times are measured only when a response arrives. The total is the time until the error.',
+  );
   String noPhasesBody(String source) => _(
     '“$source” kaynağı DNS, bağlantı ve bekleme sürelerini ayrı bildirmiyor; yalnızca toplam süre biliniyor.',
     'The “$source” source does not report DNS, connection and waiting times separately; only the total is known.',

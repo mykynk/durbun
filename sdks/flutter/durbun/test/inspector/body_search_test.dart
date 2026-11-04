@@ -169,6 +169,8 @@ void main() {
       await _phone(tester);
       await _openResponse(tester, _store(const JsonEncoder.withIndent('  ').convert(jsonDecode(_bigJson()))));
       await _find(tester, 'urfa');
+      await tester.tap(find.byTooltip('View'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Code'));
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(find.byType(TextField).last).controller!.text, 'urfa');

@@ -103,7 +103,11 @@ renkleri, açık/koyu tema) ve sekmelerini taşır:
   Ayrıntıda Genel / İstek / Yanıt / Zamanlama sekmeleri; gövde için aranabilir
   JSON ağacı, Kod ve Hex görünümü, görsel önizleme; başlıklar, çerezler ve sorgu
   parametreleri; DNS, bağlantı, TLS, TTFB çubukları; **Tekrar gönder** ve
-  **Farklı kopyala** (cURL, fetch, Dart dio, Swift, Kotlin).
+  **Farklı kopyala** (cURL, fetch, Dart dio, Swift, Kotlin). **Paylaş** isteği
+  ekibin Dürbün olmadan okuyabileceği bir rapora çevirir (URL, durum, iz
+  kimlikleri, başlıklar, gövdeler, cURL; gizli değerler varsayılan olarak
+  `••••`) ve sistem paylaşım sayfasını açar ya da panoya kopyalar. Masaüstü
+  aynı raporu üretir.
 - **Mock'lar:** masaüstünden gelen kurallar ve kaç kez uygulandıkları.
 - **Performans:** FPS, takılan kare, build/raster, bellek, heap, CPU kutucukları;
   FPS, kare süresi ve bellek grafikleri.
@@ -460,7 +464,11 @@ MaterialApp(builder: DurbunInspector.builder, home: const HomePage());
   status chips, slow / mocked / failed filters, host picker, query and body
   search. Detail tabs General / Request / Response / Timing: searchable JSON
   tree, code and hex views, image preview, headers, cookies, query, phase bars,
-  Replay and Copy as cURL / fetch / dio / Swift / Kotlin.
+  Replay and Copy as cURL / fetch / dio / Swift / Kotlin. **Share** turns a
+  request into a report the team can read without Dürbün (URL, status, trace
+  IDs, headers, bodies, cURL; secret values masked as `••••` by default) and
+  opens the system share sheet or copies it. The desktop builds the same
+  report.
 - **Mocks** from the desktop, **Performance** tiles and charts, **Device** with
   the captured layers and what each data source needs.
 

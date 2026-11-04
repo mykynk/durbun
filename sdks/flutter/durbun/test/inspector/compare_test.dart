@@ -197,6 +197,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('/v1/orders?page=2'));
       await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('More actions'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Compare…'));
       await tester.pumpAndSettle();
 
