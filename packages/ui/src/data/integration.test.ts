@@ -106,6 +106,42 @@ describe('device removal (batch.removedDevices)', () => {
     handleServerMessage({ type: 'cleared', target: 'logs', deviceId: PIXEL });
     expect(logStore.entries.map((e) => e.deviceId)).toEqual([IMPORTED, '']);
   });
+
+  // Same lines and expectations as the hub's (packages/server/test/hub/hub.scopedClear.test.ts).
+  const PATI = 'com.mykynk.pati';
+  const crashRecord = (message: string) =>
+    log({ message, level: 'fatal', kind: 'crash', origin: 'dropbox', process: PATI, data: { origin: 'dropbox', package: PATI, previousLaunch: true, pid: 7001 } });
+
+  it('an app’s clear (device + bundle id) removes the device lines its scope shows, not other apps’ or global markers', () => {
+    connect([device(PIXEL), device(IMPORTED, { state: 'disconnected' })], [app('app:1', PIXEL)]);
+    handleServerMessage({
+      type: 'batch',
+      logs: [
+        log({ message: 'startup', pid: 4242, process: PATI }),
+        crashRecord('crashed earlier'),
+        log({ message: 'sdk', appId: 'app:1' }),
+        log({ message: 'push', pid: 9100, process: `${PATI}:push` }),
+        log({ message: 'kumbara', pid: 5000, process: 'com.mykynk.kumbara' }),
+        log({ message: 'restarted', source: 'system', code: 'logs.restarted' }),
+        log({ message: 'pixel marker', source: 'system', kind: 'marker' }),
+        log({ message: 'global marker', source: 'system', kind: 'marker', deviceId: '' }),
+        log({ message: 'imported marker', source: 'system', kind: 'marker', deviceId: IMPORTED }),
+        log({ message: 'imported', deviceId: IMPORTED, pid: 4242, process: PATI }),
+      ],
+    });
+    handleServerMessage({ type: 'cleared', target: 'logs', deviceId: PIXEL, bundleId: PATI });
+    expect(logStore.entries.map((e) => e.message)).toEqual(['kumbara', 'global marker', 'imported marker', 'imported']);
+  });
+
+  it('a session’s clear (exact scope) removes the lines of its own process, not an earlier run’s', () => {
+    connect([device(PIXEL)], [app('app:1', PIXEL)]);
+    handleServerMessage({
+      type: 'batch',
+      logs: [log({ message: 'earlier run', pid: 7001, process: PATI }), crashRecord('crashed earlier'), log({ message: 'this run', pid: 4242, process: PATI }), log({ message: 'sdk', appId: 'app:1' })],
+    });
+    handleServerMessage({ type: 'cleared', target: 'logs', deviceId: PIXEL, appId: 'app:1' });
+    expect(logStore.entries.map((e) => e.message)).toEqual(['earlier run', 'crashed earlier']);
+  });
 });
 
 describe('sendCommandDetailed', () => {

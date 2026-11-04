@@ -658,7 +658,7 @@ export type ServerToUi =
       /** DeviceApp keys that are gone (device removed, app uninstalled). */
       removedDeviceApps?: string[];
     }
-  | { type: 'cleared'; target: ClearTarget; deviceId?: string; appId?: string }
+  | { type: 'cleared'; target: ClearTarget; deviceId?: string; appId?: string; bundleId?: string }
   | { type: 'mocks'; rules: MockRule[] }
   | { type: 'settings'; settings: ServerSettings }
   | { type: 'drivers'; drivers: DriverStatus[] }
@@ -679,9 +679,13 @@ export interface ReplayOverrides {
  *  app.action → DeviceActionResult.data · mocks.set → MockRule[] · settings.update → ServerSettings
  *  vm.attach → { appId } · vm.detach → null · metrics.watch → null · net.replay → NetworkEntry
  *  demo.set → { enabled } · doctor.run → ToolCheck[]
+ *
+ * `clear` removes what the UI scope shows: no ids = everything · deviceId = one device · deviceId + bundleId =
+ * one app of the device (its sessions, its processes' device lines, its crash records) · appId = one session
+ * and the device lines of its process. Global markers stay in a scoped clear.
  */
 export type UiCommand =
-  | { name: 'clear'; target: ClearTarget; deviceId?: string; appId?: string }
+  | { name: 'clear'; target: ClearTarget; deviceId?: string; appId?: string; bundleId?: string }
   | { name: 'marker.add'; label?: string; deviceId?: string }
   | { name: 'device.action'; deviceId: string; action: DeviceActionId; params?: Record<string, unknown> }
   | { name: 'app.action'; appId: string; action: string; params?: Record<string, unknown> }

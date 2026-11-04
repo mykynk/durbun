@@ -1,5 +1,6 @@
-import { PROTOCOL_VERSION, type ClearTarget, type ServerSettings, type ServerToUi } from '@durbun/protocol';
+import { PROTOCOL_VERSION, type ServerSettings, type ServerToUi } from '@durbun/protocol';
 import { logStore } from './logStore';
+import { compileScope } from './scope';
 import { networkStore } from './networkStore';
 import { metricsStore } from './metricsStore';
 import { hubActions, useHub, appGroupKey, deviceAppKey } from './stores/hub';
@@ -53,20 +54,37 @@ export function validateScope(): void {
   else setScope(ALL_SCOPE);
 }
 
-function clearStores(target: ClearTarget, deviceId?: string, appId?: string): void {
+/**
+ * The hub's clear, applied to the stores (packages/server/src/hub/index.ts): an app scope removes what the scope
+ * shows — one app of the device (`bundleId`) or one session with its process (`appId`, the exact scope) — except
+ * markers of other devices and global ones (every scope shows them; the hub keeps them).
+ */
+function clearStores(msg: Extract<ServerToUi, { type: 'cleared' }>): void {
+  const { target, deviceId, appId } = msg;
+  const bundleId = deviceId && !appId ? msg.bundleId : undefined;
   const all = !deviceId && !appId;
   const matches = (d: string, a?: string) => (!deviceId || d === deviceId) && (!appId || a === appId);
+  const hub = useHub.getState();
+  const session = appId ? hub.apps[appId] : undefined;
+  const owned =
+    deviceId && bundleId
+      ? compileScope({ kind: 'deviceApp', deviceId, bundleId }, hub)
+      : session && (!deviceId || session.deviceId === deviceId)
+        ? compileScope({ kind: 'app', appId: session.id, exact: true }, hub)
+        : undefined;
   if (target === 'logs' || target === 'all') {
     if (all) logStore.reset();
+    else if (owned) logStore.removeWhere((e) => (e.kind === 'marker' && e.appId === undefined ? e.deviceId === owned.deviceId : owned.logs(e)));
     else logStore.removeWhere((e) => matches(e.deviceId, e.appId));
   }
   if (target === 'network' || target === 'all') {
+    const ids = owned?.appIds;
     if (all) networkStore.reset();
-    else networkStore.removeWhere((e) => matches(e.deviceId, e.appId));
+    else networkStore.removeWhere((e) => (ids ? e.appId !== undefined && ids.has(e.appId) : matches(e.deviceId, e.appId)));
   }
   if (target === 'metrics' || target === 'all') {
     if (all) metricsStore.reset();
-    else metricsStore.removeWhere((s) => matches(s.deviceId, s.appId));
+    else metricsStore.removeWhere((s) => (owned ? owned.metrics(s) : matches(s.deviceId, s.appId)));
   }
 }
 
@@ -148,7 +166,7 @@ export function handleServerMessage(msg: ServerToUi): void {
     case 'cleared':
       // Hub semantics: `cleared` comes first; with target 'all' (no appId) the server also drops devices that
       // are gone / imported / desktop — those arrive afterwards as `batch.removedDevices`.
-      clearStores(msg.target, msg.deviceId, msg.appId);
+      clearStores(msg);
       break;
     case 'mocks':
       setMocksFromServer(msg.rules ?? []);

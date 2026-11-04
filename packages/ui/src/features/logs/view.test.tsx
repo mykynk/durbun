@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { DEFAULT_SETTINGS, type DeviceApp, type DeviceInfo, type LogEntry } from '@durbun/protocol';
+import { DEFAULT_SETTINGS, type AppSession, type DeviceApp, type DeviceInfo, type LogEntry, type UiCommand } from '@durbun/protocol';
 import '../../i18n';
 import { setLanguage } from '../../i18n/core';
 import { hubActions, logStore, setScope, usePrefs, useServerSettings } from '../../data';
+import { __resetCommandsForTests, setCommandTransport } from '../../data/commands';
 import { toast } from '../../components';
 import { getAllCommands } from '../../lib/commands';
 import LogsView from './index';
@@ -215,5 +216,50 @@ describe('go to the latest crash', () => {
     } finally {
       act(() => logStore.setMaxEntries(max));
     }
+  });
+});
+
+describe('clear', () => {
+  const KUMBARA = 'com.mykynk.kumbara';
+  const session = (id: string): AppSession => ({
+    id,
+    sessionKey: `s-${id}`,
+    deviceId: PIXEL,
+    sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter' },
+    app: { name: 'Kumbara', id: KUMBARA, pid: 12873 },
+    transport: 'adb-reverse',
+    connected: true,
+    connectedAt: 1,
+    capabilities: [],
+    actions: [],
+    stats: { logs: 0, requests: 0, errors: 0 },
+  });
+
+  /** Shift+click on the toolbar's clear button (no confirmation); returns the commands it sent. */
+  function clearWithShift(): UiCommand[] {
+    const sent: UiCommand[] = [];
+    setCommandTransport({ isOpen: () => true, send: (m) => (m.type === 'command' && sent.push(m.command), true) });
+    render(<LogsView />);
+    fireEvent.click(screen.getByRole('button', { name: /Clear the logs in this scope/ }), { shiftKey: true });
+    return sent;
+  }
+
+  afterEach(() => __resetCommandsForTests());
+
+  it('an app scope clears the app’s device lines too (device + bundle id), with or without an SDK session', () => {
+    setLanguage('en');
+    act(() => hubActions.replaceAll({ devices: [device(PIXEL)], apps: [session('app:1'), session('app:2')], drivers: [], processes: [], deviceApps: [kumbara({ running: true, pids: [12873] })] }));
+    act(() => setScope({ kind: 'app', appId: 'app:2' }));
+    expect(clearWithShift()).toEqual([{ name: 'clear', target: 'logs', deviceId: PIXEL, bundleId: KUMBARA }]);
+    cleanup();
+    act(() => setScope({ kind: 'deviceApp', deviceId: PIXEL, bundleId: KUMBARA }));
+    expect(clearWithShift()).toEqual([{ name: 'clear', target: 'logs', deviceId: PIXEL, bundleId: KUMBARA }]);
+  });
+
+  it('one session (exact scope) clears that session and its process', () => {
+    setLanguage('en');
+    act(() => hubActions.replaceAll({ devices: [device(PIXEL)], apps: [session('app:1'), session('app:2')], drivers: [], processes: [], deviceApps: [] }));
+    act(() => setScope({ kind: 'app', appId: 'app:1', exact: true }));
+    expect(clearWithShift()).toEqual([{ name: 'clear', target: 'logs', deviceId: PIXEL, appId: 'app:1' }]);
   });
 });

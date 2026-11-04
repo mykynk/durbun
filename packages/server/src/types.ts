@@ -122,6 +122,7 @@ export interface ClearEvent {
   target: ClearTarget;
   deviceId?: string;
   appId?: string;
+  bundleId?: string;
 }
 
 export interface Hub extends HubSink {
@@ -158,7 +159,11 @@ export interface Hub extends HubSink {
   getProcesses(): ProcessUpdate[];
 
   /* mutations from the UI */
-  clear(target: ClearTarget, scope?: { deviceId?: string; appId?: string }): void;
+  /**
+   * Removes what the UI scope shows (hub/appScope.ts): `bundleId` (with `deviceId`, without `appId`) one app of
+   * the device; `appId` one session and the device lines of its process. Global markers stay.
+   */
+  clear(target: ClearTarget, scope?: { deviceId?: string; appId?: string; bundleId?: string }): void;
   addMarker(label?: string, deviceId?: string): LogEntry;
   /**
    * `bundleId` (with `deviceId`, without `appId`): one app of the device — its sessions, the device lines of

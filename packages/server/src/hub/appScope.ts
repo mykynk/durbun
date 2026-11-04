@@ -1,8 +1,8 @@
 /**
  * What belongs to one app on one device (deviceId + bundle id): its SDK / VM sessions, the device log lines
  * of its processes, its crash records, its requests and metrics. Used by the app-scoped export of a device
- * app (audit-seams #10) and mirrors the UI's device-app scope (packages/ui/src/data/scope.ts), so the file
- * holds what the scope shows:
+ * app (audit-seams #10) and by app-scoped clears, and mirrors the UI's app / device-app scope
+ * (packages/ui/src/data/scope.ts), so the file holds — and a clear removes — what the scope shows:
  *  - lines of the app's sessions (appId);
  *  - device lines whose pid is one of the app's (session pids, DeviceApp.pids, pids the process table names
  *    after the package or "package:sub"), or whose process is the bundle id / "bundleId:sub" / a process name
@@ -20,6 +20,11 @@ export interface AppScopeInput {
   apps: Iterable<AppSession>;
   deviceApps: Iterable<DeviceApp>;
   processes: Iterable<ProcessUpdate>;
+  /**
+   * Session id: that session only (the UI's exact app scope). The device's report of the app and earlier runs'
+   * pids do not count, and a session with a pid matches its process by pid only (other runs share the name).
+   */
+  exact?: string;
 }
 
 export interface AppScope {
@@ -54,19 +59,19 @@ function crashPackage(e: LogEntry): string | undefined {
 }
 
 export function appScope(input: AppScopeInput): AppScope {
-  const { deviceId, bundleId } = input;
+  const { deviceId, bundleId, exact } = input;
   const sessions: AppSession[] = [];
   const others: { id: string; processName?: string }[] = [];
   for (const a of input.apps) {
     if (a.deviceId !== deviceId) continue;
-    if (a.app.id === bundleId) sessions.push(a);
-    else others.push({ id: a.app.id, processName: a.app.processName });
+    if (a.app.id !== bundleId) others.push({ id: a.app.id, processName: a.app.processName });
+    else if (!exact || a.id === exact) sessions.push(a);
   }
   let deviceApp: DeviceApp | undefined;
   for (const d of input.deviceApps) {
     if (d.deviceId !== deviceId) continue;
-    if (d.id === bundleId) deviceApp = d;
-    else others.push({ id: d.id, processName: d.processName });
+    if (d.id !== bundleId) others.push({ id: d.id, processName: d.processName });
+    else if (!exact) deviceApp = d;
   }
 
   const sessionIds = new Set(sessions.map((s) => s.id));
@@ -74,7 +79,10 @@ export function appScope(input: AppScopeInput): AppScope {
   for (const s of sessions) if (typeof s.app.pid === 'number') pids.add(s.app.pid);
   for (const p of deviceApp?.pids ?? []) pids.add(p);
   const sub = `${bundleId}:`;
-  for (const p of input.processes) if (p.deviceId === deviceId && (p.name === bundleId || p.name.startsWith(sub))) pids.add(p.pid);
+  if (!exact) {
+    for (const p of input.processes) if (p.deviceId === deviceId && (p.name === bundleId || p.name.startsWith(sub))) pids.add(p.pid);
+  }
+  const nameFallback = !exact || typeof sessions[0]?.app.pid !== 'number';
 
   const rawNames = new Set<string>([bundleId]);
   for (const s of sessions) if (s.app.processName) rawNames.add(s.app.processName);
@@ -107,10 +115,10 @@ export function appScope(input: AppScopeInput): AppScope {
     if (e.source === 'device') {
       const pidOk = e.pid !== undefined && pids.has(e.pid);
       const pkg = crashPackage(e);
-      if (pkg !== undefined) return basePackage(pkg) === bundleId;
+      if (pkg !== undefined) return basePackage(pkg) === bundleId && (nameFallback || pidOk);
       const p = e.process;
       if (p) {
-        if (processMatches(p)) return true;
+        if (processMatches(p)) return nameFallback || pidOk;
         if (shared.has(p)) return pidOk;
         return ownProcessByPid(p, e.pid);
       }
@@ -123,7 +131,7 @@ export function appScope(input: AppScopeInput): AppScope {
         const pid = typeof e.params?.pid === 'number' ? e.params.pid : e.pid;
         const name = typeof e.params?.process === 'string' ? e.params.process : typeof e.params?.name === 'string' ? e.params.name : e.process;
         if (pid !== undefined && pids.has(pid)) return true;
-        return name !== undefined && processMatches(name);
+        return name !== undefined && nameFallback && processMatches(name);
       }
     }
     return false;

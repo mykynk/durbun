@@ -1018,6 +1018,10 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
 - Crash/ANR entries (kind crash | anr, or origin dropbox | crash-report) survive log-ring eviction in a small
   protected store (≤ 5 000) on the server and in the UI (`logStore.kept`, a plain head trim that never rebuilds
   the list); a scoped clear subtracts only the crash records it removed from `DeviceApp.crashReports`.
+- Clearing an app's logs removes what its scope shows, device lines of its processes included (hub/appScope.ts,
+  mirrored by the UI on `cleared`): an app scope sends `clear {deviceId, bundleId}` (also for apps without an
+  SDK, which no longer wipes the whole device), one session (exact scope) `clear {deviceId, appId}`. Global
+  markers stay.
 - `/sdk` WebSocket: refused when `Sec-Fetch-Site` is cross-site or the `Origin` is not loopback / one of this Mac's
   own addresses; the raw SDK TCP port closes a connection whose first line is not JSON (a browser's no-cors POST).
   Mock rules a peer pushed are cleared when it disconnects, in every SDK layer.

@@ -750,24 +750,39 @@ export function createHub(opts: CreateHubOptions): Hub {
     clear(target: ClearTarget, scope = {}) {
       const deviceId = scope.deviceId || undefined;
       const appId = scope.appId || undefined;
+      // One app of the device: with a device, without a session (as in exportSession).
+      const bundleId = deviceId && !appId ? scope.bundleId || undefined : undefined;
       // Queued changes go out first so the `cleared` event never precedes data it should remove.
       batcher.flush();
       const unscoped = !deviceId && !appId;
       const inScope = (e: { deviceId: string; appId?: string }) =>
         (!deviceId || e.deviceId === deviceId) && (!appId || e.appId === appId);
-      const appInScope = (a: AppSession) => (!deviceId || a.deviceId === deviceId) && (!appId || a.id === appId);
+      // App scopes remove what the UI's scope shows (hub/appScope.ts), so the device lines of the app's processes
+      // go too: one app of the device (bundleId) or one session with its process (appId, the exact scope).
+      // Markers of the app's device go with it; global markers stay, as in a device's clear.
+      const session = appId ? apps.get(appId) : undefined;
+      const ownedBy = (device: string, bundle: string, exact?: string) =>
+        appScope({ deviceId: device, bundleId: bundle, exact, apps: apps.values(), deviceApps: deviceApps.values(device), processes: processes.get(device)?.values() ?? [] });
+      const owned =
+        deviceId && bundleId
+          ? ownedBy(deviceId, bundleId)
+          : session && (!deviceId || session.deviceId === deviceId)
+            ? ownedBy(session.deviceId, session.app.id, session.id)
+            : undefined;
+      const logInScope = owned ? owned.logs : inScope;
+      const appInScope = (a: AppSession) =>
+        owned ? owned.sessionIds.has(a.id) : (!deviceId || a.deviceId === deviceId) && (!appId || a.id === appId);
 
       if (target === 'logs' || target === 'all') {
         // Device apps' crash counts go with their records (SPEC §10.2). A device / unscoped clear removes all
-        // of them. A session's clear removes only rows of that session: the device's crash records mostly
-        // have no appId (a previous launch's pid is in data only, a dead process has no session left) and
-        // stay, so only the records it does remove come off the count.
-        const removedRecords = appId ? new Map<string, number>() : undefined;
+        // of them. An app's or a session's clear removes only the records its scope shows (a session's: not
+        // an earlier launch's record, whose pid is in data only), so only those come off the count.
+        const removedRecords = appId || bundleId ? new Map<string, number>() : undefined;
         if (removedRecords) {
           const countedFor = crashRecordCounter();
           const visit = (e: LogEntry) => {
             const key = countedFor(e);
-            if (key !== undefined && inScope(e)) removedRecords.set(key, (removedRecords.get(key) ?? 0) + 1);
+            if (key !== undefined && logInScope(e)) removedRecords.set(key, (removedRecords.get(key) ?? 0) + 1);
           };
           keptCrashes.forEach(visit);
           logs.forEach(visit);
@@ -776,8 +791,8 @@ export function createHub(opts: CreateHubOptions): Hub {
           logs.clear();
           keptCrashes.clear();
         } else {
-          logs.retain((e) => !inScope(e));
-          keptCrashes.retain((e) => !inScope(e));
+          logs.retain((e) => !logInScope(e));
+          keptCrashes.retain((e) => !logInScope(e));
         }
         for (const app of apps.values()) {
           if (!appInScope(app) || (app.stats.logs === 0 && app.stats.errors === 0)) continue;
@@ -790,7 +805,7 @@ export function createHub(opts: CreateHubOptions): Hub {
       }
       if (target === 'network' || target === 'all') {
         if (unscoped) network.clear();
-        else network.removeWhere(inScope);
+        else network.removeWhere(owned ? owned.network : inScope);
         for (const app of apps.values()) {
           if (!appInScope(app) || app.stats.requests === 0) continue;
           app.stats.requests = 0;
@@ -799,9 +814,9 @@ export function createHub(opts: CreateHubOptions): Hub {
       }
       if (target === 'metrics' || target === 'all') {
         if (unscoped) metrics.clear();
-        else metrics.removeWhere(inScope);
+        else metrics.removeWhere(owned ? owned.metrics : inScope);
       }
-      if (target === 'all' && !appId) {
+      if (target === 'all' && !appId && !bundleId) {
         // Devices that are gone (or only hold imported/replayed data) disappear with their data.
         for (const device of [...devices.values()]) {
           if (deviceId && device.id !== deviceId) continue;
@@ -814,6 +829,7 @@ export function createHub(opts: CreateHubOptions): Hub {
       const event: ClearEvent = { target };
       if (deviceId) event.deviceId = deviceId;
       if (appId) event.appId = appId;
+      if (bundleId) event.bundleId = bundleId;
       callAll(clearedListeners, event, 'onCleared');
     },
 

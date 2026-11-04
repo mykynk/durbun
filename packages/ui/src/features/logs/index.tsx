@@ -704,23 +704,18 @@ export default function LogsView() {
             ? t('logs.clear.all')
             : scope.kind === 'device'
               ? t('logs.clear.device', { name: deviceDisplayName(useHub.getState().devices[scope.deviceId], scope.deviceId) })
-              : scope.kind === 'deviceApp' && !(cs.appIds && cs.appIds.size)
-                ? t('logs.clear.deviceApp', {
-                    name: cs.deviceApp?.name || scope.bundleId,
-                    device: deviceDisplayName(useHub.getState().devices[scope.deviceId], scope.deviceId),
-                  })
-                : t('logs.clear.app', { name: cs.app?.app.name ?? (scope.kind === 'app' ? scope.appId : scope.bundleId) });
+              : t('logs.clear.app', { name: cs.app?.app.name || cs.deviceApp?.name || (scope.kind === 'app' ? scope.appId : scope.bundleId) });
         const ok = await confirm({ title: t('logs.clear.title'), message, confirmLabel: t('logs.clear.confirm'), danger: true, icon: Trash2 });
         if (!ok) return;
       }
       try {
+        // App scopes clear what the view shows: the server matches the device lines of the app's processes the
+        // way the scope does (one app of the device, or one session and its process when exact).
         if (scope.kind === 'all') await sendCommand({ name: 'clear', target: 'logs' });
         else if (scope.kind === 'device') await sendCommand({ name: 'clear', target: 'logs', deviceId: scope.deviceId });
-        else if (scope.kind === 'deviceApp' && !(cs.appIds && cs.appIds.size)) await sendCommand({ name: 'clear', target: 'logs', deviceId: scope.deviceId });
-        else {
-          const ids = cs.appIds && cs.appIds.size ? [...cs.appIds] : scope.kind === 'app' ? [scope.appId] : [];
-          await Promise.all(ids.map((appId) => sendCommand({ name: 'clear', target: 'logs', deviceId: cs.deviceId, appId })));
-        }
+        else if (scope.kind === 'app' && scope.exact) await sendCommand({ name: 'clear', target: 'logs', deviceId: cs.deviceId, appId: scope.appId });
+        else if (cs.deviceId && cs.bundleId) await sendCommand({ name: 'clear', target: 'logs', deviceId: cs.deviceId, bundleId: cs.bundleId });
+        else if (scope.kind === 'app') await sendCommand({ name: 'clear', target: 'logs', appId: scope.appId });
         setPaused(false);
         setSel(null);
         setDetailOpen(false);

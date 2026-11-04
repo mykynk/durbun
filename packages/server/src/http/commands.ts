@@ -299,11 +299,13 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
         case 'clear': {
           const target = cmd.target as ClearTarget;
           if (!CLEAR_TARGETS.includes(target)) throw invalid(`target must be one of ${CLEAR_TARGETS.join(', ')}`);
-          const scope: { deviceId?: string; appId?: string } = {};
+          const scope: { deviceId?: string; appId?: string; bundleId?: string } = {};
           const deviceId = optString(cmd.deviceId, 'deviceId');
           const appId = optString(cmd.appId, 'appId');
+          const bundleId = optString(cmd.bundleId, 'bundleId');
           if (deviceId) scope.deviceId = deviceId;
           if (appId) scope.appId = appId;
+          if (bundleId) scope.bundleId = bundleId;
           deps.hub.clear(target, scope);
           return ok(null);
         }
