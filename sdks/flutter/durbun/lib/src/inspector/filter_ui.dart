@@ -22,27 +22,26 @@ class FilterButton extends StatelessWidget {
     final t = InspectorStrings.of(context);
     final on = count > 0;
     return Material(
-      color: on ? c.accentSoft : c.bgElevated,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(DurbunRadius.md),
-        side: BorderSide(color: on ? c.accent : c.border),
+      color: on ? c.accentSoft : c.cardBg,
+      shape: StadiumBorder(
+        side: BorderSide(color: on ? c.accent.withValues(alpha: 0.7) : c.border),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(DurbunRadius.md),
+        customBorder: const StadiumBorder(),
         onTap: onTap,
         child: Container(
           height: 30,
           padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Row(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(Icons.tune_rounded, size: 15, color: on ? c.accent : c.text),
+              Icon(Icons.tune_rounded, size: 15, color: on ? c.badgeAccent : c.text),
               const SizedBox(width: 5),
               Text(t.filters,
                   style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
-                      color: on ? c.accent : c.text,
+                      color: on ? c.badgeAccent : c.text,
                       height: 1.2)),
               if (on) ...<Widget>[
                 const SizedBox(width: 6),
@@ -87,23 +86,22 @@ class ActiveChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
-    final fg = color ?? c.text;
+    final fg = color ?? c.badgeAccent;
     return Semantics(
       button: true,
       label: '${t.remove}: $label',
       child: Material(
-        color: c.bgActive,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(DurbunRadius.md),
-          side: BorderSide(color: c.borderStrong),
+        color: (color ?? c.accent).withValues(alpha: 0.14),
+        shape: StadiumBorder(
+          side: BorderSide(color: (color ?? c.accent).withValues(alpha: 0.5)),
         ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(DurbunRadius.md),
+          customBorder: const StadiumBorder(),
           onTap: onRemove,
           child: Container(
             height: 30,
-            padding: const EdgeInsets.only(left: 9, right: 5),
-                        child: Row(
+            padding: const EdgeInsets.only(left: 10, right: 6),
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Text(label,
@@ -119,7 +117,7 @@ class ActiveChip extends StatelessWidget {
                             fontWeight: FontWeight.w600,
                             height: 1.2)),
                 const SizedBox(width: 3),
-                Icon(Icons.close_rounded, size: 14, color: c.textMuted),
+                Icon(Icons.close_rounded, size: 14, color: fg.withValues(alpha: 0.8)),
               ],
             ),
           ),
@@ -140,10 +138,10 @@ class FilterRow extends StatelessWidget {
     final c = DurbunColors.of(context);
     return Container(
       color: c.bgPanel,
-      height: 46,
+      height: 44,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
         itemCount: children.length,
         separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (_, i) => children[i],
@@ -171,10 +169,10 @@ class SheetSection extends StatelessWidget {
         children: <Widget>[
           Text(title,
               style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: c.textMuted,
-                  letterSpacing: 0.2)),
+                  color: c.text,
+                  letterSpacing: -0.1)),
           if (hint != null) ...<Widget>[
             const SizedBox(height: 2),
             Text(hint!, style: TextStyle(fontSize: 11.5, color: c.textMeta)),
@@ -213,14 +211,21 @@ class SheetSwitch extends StatelessWidget {
         child: Row(
           children: <Widget>[
             if (icon != null) ...<Widget>[
-              Icon(icon, size: 18, color: c.textMuted),
-              const SizedBox(width: 10),
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                    color: c.trackBg,
+                    borderRadius: BorderRadius.circular(DurbunRadius.md)),
+                child: Icon(icon, size: 17, color: c.textMuted),
+              ),
+              const SizedBox(width: 12),
             ],
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(label, style: TextStyle(fontSize: 14, color: c.text)),
+                  Text(label, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500, color: c.text)),
                   if (hint != null)
                     Text(hint!,
                         style: TextStyle(fontSize: 11.5, color: c.textMeta)),
@@ -275,8 +280,9 @@ Future<void> showFilterSheet(
                       Expanded(
                         child: Text(title,
                             style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.3,
                                 color: c.text)),
                       ),
                       if (onReset != null)
@@ -355,8 +361,9 @@ Future<void> showQueryHelp(BuildContext context,
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
                 child: Text(t.queryHelp,
                     style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.3,
                         color: c.text)),
               ),
               Padding(
@@ -383,12 +390,22 @@ Future<void> showQueryHelp(BuildContext context,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         ConstrainedBox(
-                          constraints: const BoxConstraints(minWidth: 128),
-                          child: Text(h.token,
-                              style: DurbunType.monoStyle(
-                                  size: 12.5,
-                                  color: c.accent,
-                                  weight: FontWeight.w600)),
+                          constraints: const BoxConstraints(minWidth: 132),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            widthFactor: 1,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                  color: c.accentSoft,
+                                  borderRadius: BorderRadius.circular(DurbunRadius.sm)),
+                              child: Text(h.token,
+                                  style: DurbunType.monoStyle(
+                                      size: 12.5,
+                                      color: c.badgeAccent,
+                                      weight: FontWeight.w600)),
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(

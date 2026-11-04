@@ -1,243 +1,303 @@
-/// The panel shell: the desktop's top bar (Logs, Network, Mocks,
-/// Performance, Device) and status bar, on the phone.
+/// The panel shell: one compact header (logo, Network / Logs tabs, tools,
+/// close) over a swipeable tab view. Mocks, Performance and Device open
+/// from the tools sheet, so the header stays one row and the keyboard
+/// leaves room for the list.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../flutter/durbun.dart' show Durbun;
-import 'info_view.dart';
 import 'logs_view.dart';
 import 'network_view.dart';
-import 'perf_view.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
+import 'tools.dart';
 import 'widgets.dart';
 
 class InspectorHome extends StatefulWidget {
   const InspectorHome({super.key, required this.store, this.initialTab = 0});
 
   final DurbunInspectorStore store;
+
+  /// 0: Network, 1: Logs.
   final int initialTab;
 
   @override
   State<InspectorHome> createState() => _InspectorHomeState();
 }
 
-class _InspectorHomeState extends State<InspectorHome> {
-  late int _tab = widget.initialTab;
+class _InspectorHomeState extends State<InspectorHome> with SingleTickerProviderStateMixin {
+  late final TabController _tabs = TabController(
+      length: 2, vsync: this, initialIndex: widget.initialTab.clamp(0, 1))
+    ..addListener(_onTab);
+
+  /// A search field on the other page would keep the keyboard up.
+  void _onTab() => FocusManager.instance.primaryFocus?.unfocus();
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final store = widget.store;
+    return Scaffold(
+      backgroundColor: c.bgApp,
+      body: Column(
+        children: <Widget>[
+          // The status bar area takes the header's color.
+          ColoredBox(
+            color: c.bgPanel,
+            child: SafeArea(
+              bottom: false,
+              child: _Header(
+                store: store,
+                tabs: _tabs,
+                onTools: () => showToolsSheet(context, store),
+                onClose: () => Navigator.of(context).maybePop(),
+              ),
+            ),
+          ),
+          Expanded(
+            child: SafeArea(
+              top: false,
+              bottom: false,
+              child: TabBarView(
+                controller: _tabs,
+                children: <Widget>[
+                  _TabPage(tabs: _tabs, index: 0, child: NetworkView(store: store)),
+                  _TabPage(tabs: _tabs, index: 1, child: LogsView(store: store)),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Keeps a tab's state (search, filters, scroll) while the other is shown,
+/// and tells it whether it is on screen ([PageActive]).
+class _TabPage extends StatefulWidget {
+  const _TabPage({required this.tabs, required this.index, required this.child});
+
+  final TabController tabs;
+  final int index;
+  final Widget child;
+
+  @override
+  State<_TabPage> createState() => _TabPageState();
+}
+
+class _TabPageState extends State<_TabPage> with AutomaticKeepAliveClientMixin {
+  late bool _active = _visible();
+
+  bool _visible() {
+    final at = widget.tabs.animation?.value ?? widget.tabs.index.toDouble();
+    return (at - widget.index).abs() < 0.999;
+  }
+
+  void _tick() {
+    final v = _visible();
+    if (v != _active) setState(() => _active = v);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.tabs.animation?.addListener(_tick);
+  }
+
+  @override
+  void dispose() {
+    widget.tabs.animation?.removeListener(_tick);
+    super.dispose();
+  }
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return PageActive(active: _active, child: widget.child);
+  }
+}
+
+class _Header extends StatelessWidget {
+  const _Header({required this.store, required this.tabs, required this.onTools, required this.onClose});
+
+  final DurbunInspectorStore store;
+  final TabController tabs;
+  final VoidCallback onTools;
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
-    final store = widget.store;
-    return Scaffold(
-      backgroundColor: c.bgApp,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: <Widget>[
-            Container(
-              color: c.bgPanel,
-              padding: const EdgeInsets.fromLTRB(12, 6, 4, 0),
-              child: Row(
-                children: <Widget>[
-                  const DurbunLogo(size: 24),
-                  const SizedBox(width: 8),
-                  Text(t.title,
-                      style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: c.text)),
-                  const SizedBox(width: 8),
-                  Expanded(child: _AppLine(store: store)),
-                  DIconButton(
-                      icon: Icons.cleaning_services_outlined,
-                      tooltip: t.clear,
-                      onTap: store.clear),
-                  DIconButton(
-                      icon: Icons.close,
-                      tooltip: t.close,
-                      onTap: () => Navigator.of(context).maybePop()),
-                ],
-              ),
-            ),
-            ListenableBuilder(
+    return Container(
+      decoration: BoxDecoration(color: c.bgPanel, border: Border(bottom: BorderSide(color: c.border))),
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 8),
+      child: Row(
+        children: <Widget>[
+          _BrandMark(onTap: onTools),
+          const SizedBox(width: 10),
+          Expanded(
+            child: ListenableBuilder(
               listenable: store,
               builder: (context, _) {
                 // Requests to hosts outside the default list do not count
                 // on the badge (they are not listed).
                 final listed = store.defaultHosts.isEmpty
                     ? store.calls
-                    : store.calls
-                        .where((x) => store.isDefaultHost(x.uri?.host ?? ''))
-                        .toList();
-                return _TopTabs(
-                  index: _tab,
-                  onChanged: (i) => setState(() => _tab = i),
-                  errors: store.errorCount,
-                  failures: store.defaultHosts.isEmpty
-                      ? store.failureCount
-                      : listed.where((x) => x.isFailure).length,
-                  calls: listed.length,
+                    : store.calls.where((x) => store.isDefaultHost(x.uri?.host ?? '')).toList();
+                final failures = store.defaultHosts.isEmpty
+                    ? store.failureCount
+                    : listed.where((x) => x.isFailure).length;
+                return _PanelTabs(
+                  controller: tabs,
+                  tabs: <_TabSpec>[
+                    _TabSpec(Icons.swap_vert_rounded, t.network,
+                        failures > 0 ? failures : listed.length, failures > 0),
+                    _TabSpec(Icons.notes_rounded, t.logs,
+                        store.errorCount > 0 ? store.errorCount : store.logs.length, store.errorCount > 0),
+                  ],
                 );
               },
             ),
-            // The status bar below takes the bottom inset.
-            Expanded(
-              child: MediaQuery.removePadding(
-                context: context,
-                removeBottom: true,
-                child: IndexedStack(
-                  index: _tab,
-                  children: <Widget>[
-                    LogsView(store: store),
-                    NetworkView(store: store),
-                    MocksView(store: store),
-                    PerformanceView(store: store),
-                    InfoView(store: store),
-                  ],
-                ),
-              ),
-            ),
-            _StatusBar(store: store),
-          ],
-        ),
+          ),
+          const SizedBox(width: 4),
+          DIconButton(icon: Icons.grid_view_rounded, tooltip: t.tools, size: 38, onTap: onTools),
+          DIconButton(icon: Icons.close_rounded, tooltip: t.close, size: 38, onTap: onClose),
+        ],
       ),
     );
   }
 }
 
-class _AppLine extends StatelessWidget {
-  const _AppLine({required this.store});
+/// The logo with a dot for the desktop connection (green: connected).
+class _BrandMark extends StatelessWidget {
+  const _BrandMark({required this.onTap});
 
-  final DurbunInspectorStore store;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    return ListenableBuilder(
-      listenable: store,
+    final t = InspectorStrings.of(context);
+    return StreamBuilder<Object?>(
+      stream: Durbun.connection,
       builder: (context, _) {
-        final app = store.hello?['app'] as Map?;
-        if (app == null) return const SizedBox.shrink();
-        return Text(
-          '${app['name'] ?? ''} ${app['version'] ?? ''}'.trim(),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: DurbunType.monoStyle(size: 11.5, color: c.textMeta),
+        final connected = Durbun.isConnected;
+        return Tooltip(
+          message: connected ? t.desktopConnected : t.onPhoneOnly,
+          child: GestureDetector(
+            onTap: onTap,
+            child: SizedBox(
+              width: 32,
+              height: 32,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: <Widget>[
+                  const Positioned(left: 1, top: 1, child: DurbunLogo(size: 30)),
+                  Positioned(
+                    right: -2,
+                    bottom: -2,
+                    child: Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: connected ? c.success : c.textSubtle,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: c.bgPanel, width: 2.5),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         );
       },
     );
   }
 }
 
-class _TopTabs extends StatelessWidget {
-  const _TopTabs(
-      {required this.index,
-      required this.onChanged,
-      required this.errors,
-      required this.failures,
-      required this.calls});
+class _TabSpec {
+  const _TabSpec(this.icon, this.label, this.count, this.alert);
 
-  final int index;
-  final ValueChanged<int> onChanged;
-  final int errors;
-  final int failures;
-  final int calls;
+  final IconData icon;
+  final String label;
+
+  /// Shown when above zero.
+  final int count;
+
+  /// Red count: errors / failed requests.
+  final bool alert;
+}
+
+/// Network / Logs as a segmented control driven by the tab view, so the
+/// raised segment follows a swipe.
+class _PanelTabs extends StatelessWidget {
+  const _PanelTabs({required this.controller, required this.tabs});
+
+  final TabController controller;
+  final List<_TabSpec> tabs;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    final t = InspectorStrings.of(context);
-    final tabs = <(IconData, String, int?, bool)>[
-      (Icons.notes, t.logs, errors > 0 ? errors : null, true),
-      (
-        Icons.swap_horiz,
-        t.network,
-        failures > 0 ? failures : (calls > 0 ? calls : null),
-        failures > 0
-      ),
-      (Icons.theater_comedy_outlined, t.mocks, null, false),
-      (Icons.speed, t.performance, null, false),
-      (Icons.smartphone, t.device, null, false),
-    ];
     return Container(
+      height: 38,
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-          color: c.bgPanel,
-          border: Border(bottom: BorderSide(color: c.border))),
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-      // Every tab stays on screen: the open one shows its name (as on the
-      // desktop's top bar), the others their icon and count.
-      child: Row(
-        children: <Widget>[
-          for (var i = 0; i < tabs.length; i++)
-            Expanded(
-              flex: i == index ? 2 : 1,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 1),
-                child: Material(
-                  color: i == index ? c.bgActive : Colors.transparent,
-                  borderRadius: BorderRadius.circular(DurbunRadius.md),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(DurbunRadius.md),
-                    onTap: () => onChanged(i),
-                    child: Tooltip(
-                      message: tabs[i].$2,
-                      child: Center(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                Icon(tabs[i].$1,
-                                    size: 17,
-                                    color: i == index ? c.text : c.textMuted),
-                                if (i == index) ...<Widget>[
-                                  const SizedBox(width: 6),
-                                  Text(tabs[i].$2,
-                                      style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                          color: c.text)),
-                                ],
-                                if (tabs[i].$3 != null) ...<Widget>[
-                                  const SizedBox(width: 5),
-                                  Container(
-                                    height: 17,
-                                    constraints:
-                                        const BoxConstraints(minWidth: 17),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 5),
-                                    alignment: Alignment.center,
-                                    decoration: BoxDecoration(
-                                        color:
-                                            tabs[i].$4 ? c.danger : c.bgActive,
-                                        borderRadius:
-                                            BorderRadius.circular(999)),
-                                    child: Text(
-                                      tabs[i].$3! > 999
-                                          ? '999+'
-                                          : '${tabs[i].$3}',
-                                      style: DurbunType.monoStyle(
-                                          size: 10.5,
-                                          color: tabs[i].$4
-                                              ? Colors.white
-                                              : c.textMuted,
-                                          weight: FontWeight.w700,
-                                          height: 1.1),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
+        color: c.trackBg,
+        borderRadius: BorderRadius.circular(DurbunRadius.lg - 1),
+        border: c.isDark ? Border.all(color: c.border.withValues(alpha: 0.6)) : null,
+      ),
+      child: TabBar(
+        controller: controller,
+        indicator: BoxDecoration(
+          color: c.thumbBg,
+          borderRadius: BorderRadius.circular(DurbunRadius.md),
+          boxShadow: c.raised,
+        ),
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerHeight: 0,
+        labelPadding: EdgeInsets.zero,
+        splashFactory: NoSplash.splashFactory,
+        overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+        labelColor: c.text,
+        unselectedLabelColor: c.textMuted,
+        labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, height: 1.2),
+        unselectedLabelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, height: 1.2),
+        tabs: <Widget>[
+          for (final tab in tabs)
+            Tooltip(
+              message: tab.label,
+              child: Tab(
+                height: 32,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Icon(tab.icon, size: 16),
+                        const SizedBox(width: 6),
+                        Text(tab.label),
+                        if (tab.count > 0) ...<Widget>[
+                          const SizedBox(width: 6),
+                          _CountBadge(count: tab.count, alert: tab.alert),
+                        ],
+                      ],
                     ),
                   ),
                 ),
@@ -249,73 +309,26 @@ class _TopTabs extends StatelessWidget {
   }
 }
 
-class _StatusBar extends StatelessWidget {
-  const _StatusBar({required this.store});
+class _CountBadge extends StatelessWidget {
+  const _CountBadge({required this.count, required this.alert});
 
-  final DurbunInspectorStore store;
+  final int count;
+  final bool alert;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    final t = InspectorStrings.of(context);
-    return StreamBuilder<Object?>(
-      stream: Durbun.connection,
-      builder: (context, _) => ListenableBuilder(
-        listenable: store,
-        builder: (context, _) {
-          final connected = Durbun.isConnected;
-          final num = DurbunType.monoStyle(
-              size: 11, color: c.text, weight: FontWeight.w600, height: 1.2);
-          final label = TextStyle(fontSize: 11, color: c.textMeta, height: 1.2);
-          return Container(
-            decoration: BoxDecoration(
-                color: c.bgPanel,
-                border: Border(top: BorderSide(color: c.border))),
-            padding: EdgeInsets.fromLTRB(
-                12, 6, 12, 6 + MediaQuery.paddingOf(context).bottom),
-            child: Row(
-              children: <Widget>[
-                Container(
-                    width: 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                        color: connected ? c.success : c.textSubtle,
-                        shape: BoxShape.circle)),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(connected ? t.desktopConnected : t.onPhoneOnly,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: label.copyWith(color: c.textMuted)),
-                ),
-                const SizedBox(width: 8),
-                // Counts shrink instead of overflowing with large text.
-                Flexible(
-                  flex: 2,
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Row(children: <Widget>[
-                        Text('${t.logs} ', style: label),
-                        Text('${store.logs.length}', style: num),
-                        const SizedBox(width: 10),
-                        Text('${t.errors} ', style: label),
-                        Text('${store.errorCount}',
-                            style: num.copyWith(
-                                color:
-                                    store.errorCount > 0 ? c.danger : c.text)),
-                        const SizedBox(width: 10),
-                        Text('${t.requests} ', style: label),
-                        Text('${store.calls.length}', style: num),
-                      ]),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+    return Container(
+      height: 18,
+      constraints: const BoxConstraints(minWidth: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+          color: alert ? c.danger : c.bgActive, borderRadius: BorderRadius.circular(DurbunRadius.pill)),
+      child: Text(
+        count > 999 ? '999+' : '$count',
+        style: DurbunType.monoStyle(
+            size: 10.5, color: alert ? Colors.white : c.textMuted, weight: FontWeight.w700, height: 1.1),
       ),
     );
   }

@@ -167,6 +167,8 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
       await navigator.push<void>(
         MaterialPageRoute<void>(
           settings: const RouteSettings(name: '/durbun'),
+          // Rises over the app like a sheet; no edge swipe fighting the tabs.
+          fullscreenDialog: true,
           builder: (routeContext) => DurbunTheme.wrap(routeContext, InspectorHome(store: _store)),
         ),
       );

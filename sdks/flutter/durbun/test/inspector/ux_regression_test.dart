@@ -357,7 +357,8 @@ void main() {
       expect(tester.getTopLeft(find.widgetWithText(ActiveChip, 'Requests hidden')).dx,
           lessThan(tester.getTopRight(find.text('Level ▾')).dx + 30),
           reason: 'active chips come right after the Filters button and the level menu, before the quick toggles');
-      await tester.tap(find.widgetWithText(ActiveChip, 'Requests hidden'));
+      // Its start is on screen (checked above); the test font is wide.
+      await tester.tapAt(tester.getTopLeft(find.widgetWithText(ActiveChip, 'Requests hidden')) + const Offset(12, 15));
       await tester.pumpAndSettle();
       expect(find.textContaining('a.io/ping'), findsOneWidget);
     });

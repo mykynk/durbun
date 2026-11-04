@@ -32,6 +32,16 @@ class StreamItem {
   int repeats = 1;
 }
 
+/// "Type: message", without the type twice when the message already starts
+/// with it (Dart's `toString()` of most exceptions does).
+String errorHead(Map<String, Object?> error) {
+  final type = error['type'] is String ? error['type'] as String : null;
+  final message = error['message'] is String ? error['message'] as String : null;
+  if (type == null || type.isEmpty) return message ?? '';
+  if (message == null || message.isEmpty) return type;
+  return message.startsWith(type) ? message : '$type: $message';
+}
+
 const List<String> kLevels = <String>['verbose', 'debug', 'info', 'warn', 'error', 'fatal'];
 
 class LogFilters {
@@ -334,9 +344,9 @@ class _LogsViewState extends State<LogsView> {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
-    return ListenableBuilder(
+    return ActiveListenableBuilder(
       listenable: widget.store,
-      builder: (context, _) {
+      builder: (context) {
         final items = buildStream(widget.store, _f, _q);
         final terms = freeTerms(_q);
         final nothing = widget.store.logs.isEmpty && widget.store.calls.isEmpty;
@@ -344,7 +354,7 @@ class _LogsViewState extends State<LogsView> {
           children: <Widget>[
             Container(
               color: c.bgPanel,
-              padding: const EdgeInsets.fromLTRB(10, 8, 6, 0),
+              padding: const EdgeInsets.fromLTRB(12, 8, 8, 0),
               child: Row(
                 children: <Widget>[
                   Expanded(
@@ -356,6 +366,7 @@ class _LogsViewState extends State<LogsView> {
                           hints: <QueryHint>[for (final (k, v) in t.logQueryHints) QueryHint(k, v)], controller: _search, onChanged: _setQuery),
                     ),
                   ),
+                  const SizedBox(width: 4),
                   DIconButton(
                     icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
                     tooltip: _paused ? t.resume : t.pause,
@@ -470,7 +481,7 @@ class LogRow extends StatelessWidget {
     final l = item.log!;
     final tint = l.isCrash ? c.lvFatalBg : c.levelBg(l.level);
     final mono = DurbunType.monoStyle(size: DurbunType.logFs, color: l.isError ? c.text : c.text, height: 1.4);
-    final errorLine = l.error == null ? null : <String?>[l.error!['type'] as String?, l.error!['message'] as String?].whereType<String>().join(': ');
+    final errorLine = l.error == null ? null : errorHead(l.error!);
     return Material(
       color: tint ?? Colors.transparent,
       child: InkWell(
@@ -483,11 +494,11 @@ class LogRow extends StatelessWidget {
           if (action != null) onTagAction?.call(action.$1, action.$2);
         },
         child: Container(
-          padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
+          padding: const EdgeInsets.fromLTRB(11, 7, 12, 7),
           decoration: BoxDecoration(
             border: Border(
-              left: BorderSide(color: l.isCrash ? c.lvFatal : (tint != null ? c.level(l.level) : Colors.transparent), width: 2),
-              bottom: BorderSide(color: c.border.withValues(alpha: 0.45)),
+              left: BorderSide(color: l.isCrash ? c.lvFatal : (tint != null ? c.level(l.level) : Colors.transparent), width: 3),
+              bottom: BorderSide(color: c.hairline),
             ),
           ),
           child: Column(
@@ -510,7 +521,7 @@ class LogRow extends StatelessWidget {
                   if (item.repeats > 1) DBadge('×${item.repeats}', tone: BadgeTone.info, mono: true),
                 ],
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 4),
               Text.rich(
                 TextSpan(
                   children: <InlineSpan>[
@@ -561,8 +572,8 @@ class _NetLogRow extends StatelessWidget {
                   routeContext, CallDetailPage(call: call, store: store))));
         },
         child: Container(
-          padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.border.withValues(alpha: 0.45)))),
+          padding: const EdgeInsets.fromLTRB(14, 7, 12, 7),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.hairline))),
           // Wraps instead of overflowing on narrow phones and large text.
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -572,9 +583,9 @@ class _NetLogRow extends StatelessWidget {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
                   Text(formatClock(call.ts), style: DurbunType.monoStyle(size: 11, color: c.textSubtle, height: 1.2)),
-                  Icon(Icons.swap_horiz, size: 15, color: c.textSubtle),
-                  Text(call.method, style: DurbunType.monoStyle(size: 12, color: c.method(call.method), weight: FontWeight.w600, height: 1.3)),
-                  Text(status, style: DurbunType.monoStyle(size: 12, color: call.cancelled ? c.textSubtle : c.status(call.status, failed: failed), weight: FontWeight.w700, height: 1.3)),
+                  Icon(Icons.swap_vert_rounded, size: 15, color: c.textSubtle),
+                  Text(call.method, style: DurbunType.monoStyle(size: 12, color: c.method(call.method), weight: FontWeight.w700, height: 1.3)),
+                  StatusPill(text: status, color: call.cancelled ? c.textSubtle : c.status(call.status, failed: failed), width: null),
                   if (call.state != InspectorCallState.pending)
                     Text(formatDuration(call.duration), style: DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.3)),
                 ],
@@ -614,7 +625,7 @@ class _LogDetailPageState extends State<LogDetailPage> {
     final l = widget.log;
     final e = l.error;
     final stack = e?['stack'] is String ? e!['stack'] as String : '';
-    final head = e == null ? '' : <String?>[e['type'] as String?, e['message'] as String?].whereType<String>().join(': ');
+    final head = e == null ? '' : errorHead(e);
     final hasData = l.data != null;
     final tabs = <String>[t.message, if (hasData) t.data, if (stack.isNotEmpty) t.stack];
     final tab = _tab.clamp(0, tabs.length - 1);

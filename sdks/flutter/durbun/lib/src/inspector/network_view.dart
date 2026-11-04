@@ -166,9 +166,9 @@ class _NetworkViewState extends State<NetworkView> {
   Widget build(BuildContext context) {
     final t = InspectorStrings.of(context);
     final c = DurbunColors.of(context);
-    return ListenableBuilder(
+    return ActiveListenableBuilder(
       listenable: widget.store,
-      builder: (context, _) {
+      builder: (context) {
         final all = widget.store.calls;
         final shown = all.where(_matches).toList();
         final hosts = (<String>{for (final x in all) hostOf(x)}..remove('')).toList()..sort();
@@ -178,7 +178,7 @@ class _NetworkViewState extends State<NetworkView> {
           children: <Widget>[
             Container(
               color: c.bgPanel,
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
               child: Row(
                 children: <Widget>[
                   Expanded(
@@ -190,9 +190,11 @@ class _NetworkViewState extends State<NetworkView> {
                           hints: <QueryHint>[for (final (k, v) in t.netQueryHints) QueryHint(k, v)], controller: _search, onChanged: _setQuery),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Text(filtered ? '${shown.length}/${all.length}' : '${all.length}',
-                      style: DurbunType.monoStyle(size: 12, color: c.textSubtle)),
+                  if (filtered) ...<Widget>[
+                    const SizedBox(width: 10),
+                    Text('${shown.length}/${all.length}',
+                        style: DurbunType.monoStyle(size: 12, color: c.textMeta, weight: FontWeight.w600)),
+                  ],
                 ],
               ),
             ),
@@ -380,7 +382,13 @@ class CallRow extends StatelessWidget {
                 : c.textMuted;
     final gql = graphqlLabel(call);
     final size = call.responseBody?.size;
-    final mono = DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.3);
+    final mono = DurbunType.monoStyle(size: 13, color: c.text, height: 1.35, weight: FontWeight.w500);
+    final meta = DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.3);
+    final edge = switch (cls) {
+      '4xx' => c.st4xx,
+      '5xx' || 'fail' => c.st5xx,
+      _ => Colors.transparent,
+    };
     return Material(
       color: tint ?? Colors.transparent,
       child: InkWell(
@@ -394,106 +402,104 @@ class CallRow extends StatelessWidget {
                       call: call, store: store, bodyQuery: bodyQuery))));
         },
         child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
+          padding: const EdgeInsets.fromLTRB(11, 9, 14, 9),
           decoration: BoxDecoration(
               border: Border(
-                  bottom: BorderSide(color: c.border.withValues(alpha: 0.6)))),
-          child: Column(
+                  left: BorderSide(color: edge, width: 3),
+                  bottom: BorderSide(color: c.hairline))),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Row(
-                children: <Widget>[
-                  SizedBox(
-                    width: 38,
-                    child: Text(statusText,
-                        style: DurbunType.monoStyle(
-                            size: 12,
-                            color: statusColor,
-                            weight: FontWeight.w700,
-                            height: 1.3)),
-                  ),
-                  SizedBox(
-                    width: 52,
-                    child: Text(call.method,
-                        style: DurbunType.monoStyle(
-                            size: 12,
-                            color: c.method(call.method),
-                            weight: FontWeight.w600,
-                            height: 1.3)),
-                  ),
-                  Expanded(
-                    child: Text.rich(
+              // Status over method: the path gets the width.
+              SizedBox(
+                width: 46,
+                child: Column(
+                  children: <Widget>[
+                    StatusPill(text: statusText, color: statusColor, width: 46),
+                    const SizedBox(height: 4),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(call.method,
+                          maxLines: 1,
+                          style: DurbunType.monoStyle(
+                              size: 10.5,
+                              color: c.method(call.method),
+                              weight: FontWeight.w700,
+                              height: 1.2)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text.rich(
                       TextSpan(
                         children: <InlineSpan>[
                           highlightTerms(path, terms, mono, c.hlMark),
                           if (q.isNotEmpty)
                             highlightTerms(q, terms,
-                                mono.copyWith(color: c.textSubtle), c.hlMark),
+                                mono.copyWith(color: c.textSubtle, fontWeight: FontWeight.w400), c.hlMark),
                         ],
                       ),
                       // Two lines, so a match deep in a long path is seen.
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 3),
-              Row(
-                children: <Widget>[
-                  const SizedBox(width: 90),
-                  Expanded(
-                    child: Wrap(
-                      spacing: 5,
-                      runSpacing: 3,
-                      crossAxisAlignment: WrapCrossAlignment.center,
+                    const SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        // One line: a host broken mid-word is hard to read.
-                        Text.rich(
-                            highlightTerms(
-                                uri?.host ?? '',
-                                terms,
-                                DurbunType.monoStyle(
-                                    size: 11, color: c.textMeta, height: 1.3),
-                                c.hlMark),
-                            maxLines: 1,
-                            softWrap: false,
-                            overflow: TextOverflow.ellipsis),
-                        _SourceBadge(call),
-                        if (gql != null)
-                          DBadge(gql, tone: BadgeTone.warning, mono: true),
-                        if (call.mocked)
-                          DBadge(t.mock,
-                              tone: BadgeTone.accent,
-                              icon: Icons.theater_comedy_outlined),
-                        if (failed)
-                          DBadge(t.shortError(shortErrorKey(call.error)),
-                              tone: BadgeTone.danger),
+                        Expanded(
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: <Widget>[
+                              // One line: a host broken mid-word is hard to read.
+                              Text.rich(highlightTerms(uri?.host ?? '', terms, meta, c.hlMark),
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  overflow: TextOverflow.ellipsis),
+                              // dart:io is most requests: only the others are marked.
+                              if (call.source != 'dart:io') _SourceBadge(call),
+                              if (gql != null)
+                                DBadge(gql, tone: BadgeTone.warning, mono: true),
+                              if (call.mocked)
+                                DBadge(t.mock,
+                                    tone: BadgeTone.accent,
+                                    icon: Icons.theater_comedy_outlined),
+                              if (failed)
+                                DBadge(t.shortError(shortErrorKey(call.error)),
+                                    tone: BadgeTone.danger),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(size == null ? '' : formatBytes(size), style: meta),
+                        const SizedBox(width: 8),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(minWidth: 48),
+                          child: Text(
+                            call.state == InspectorCallState.pending
+                                ? '···'
+                                : formatDuration(call.duration),
+                            textAlign: TextAlign.right,
+                            style: DurbunType.monoStyle(
+                                size: 11.5,
+                                color: timeColor,
+                                height: 1.3,
+                                weight: ms != null && ms >= kSlowMs
+                                    ? FontWeight.w700
+                                    : FontWeight.w500),
+                          ),
+                        ),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(size == null ? '—' : formatBytes(size),
-                      style: DurbunType.monoStyle(
-                          size: 11, color: c.textMeta, height: 1.3)),
-                  const SizedBox(width: 10),
-                  SizedBox(
-                    width: 56,
-                    child: Text(
-                      call.state == InspectorCallState.pending
-                          ? '···'
-                          : formatDuration(call.duration),
-                      textAlign: TextAlign.right,
-                      style: DurbunType.monoStyle(
-                          size: 11.5,
-                          color: timeColor,
-                          height: 1.3,
-                          weight: ms != null && ms >= kSlowMs
-                              ? FontWeight.w600
-                              : null),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
@@ -518,13 +524,13 @@ class _SourceBadge extends StatelessWidget {
             ? c.sdkIos
             : c.sdkDart;
     return Container(
-      height: 16,
+      height: 17,
       padding: const EdgeInsets.symmetric(horizontal: 5),
       decoration: BoxDecoration(
-          border: Border.all(color: color.withValues(alpha: 0.45)),
+          color: color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(DurbunRadius.sm)),
       child: Text(call.source,
-          style: DurbunType.monoStyle(size: 10, color: color, height: 1.4)),
+          style: DurbunType.monoStyle(size: 10, color: color, weight: FontWeight.w600, height: 1.55)),
     );
   }
 }
@@ -609,48 +615,37 @@ class _CallDetailPageState extends State<CallDetailPage> {
         final reason = call.statusText?.isNotEmpty == true
             ? call.statusText!
             : (reasonPhrase(call.status) ?? '');
-        final meta = <String>[
-          if (call.state != InspectorCallState.pending)
-            formatDuration(call.duration),
-          if (call.responseBody != null) formatBytes(call.responseBody!.size),
-          call.source,
-          formatClock(call.ts),
-        ].join(' · ');
+        final statusText = call.error != null
+            ? (call.cancelled ? t.cancelledShort : 'FAIL')
+            : (call.status?.toString() ?? '···');
+        final statusColor = call.cancelled ? c.textSubtle : c.status(call.status, failed: failed);
+        final statusWord = call.error != null
+            ? (call.cancelled ? t.cancelled : t.shortError(shortErrorKey(call.error)))
+            : call.status != null
+                ? reason
+                : t.pending;
         return Scaffold(
           backgroundColor: c.bgPanel,
           appBar: AppBar(
-            backgroundColor: c.bgPanel,
-            surfaceTintColor: Colors.transparent,
-            foregroundColor: c.text,
             titleSpacing: 0,
-            title: Text.rich(
-              TextSpan(
-                children: <InlineSpan>[
-                  TextSpan(
-                      text: '${call.method} ',
-                      style: TextStyle(color: c.method(call.method))),
-                  if (call.error != null)
-                    TextSpan(
-                        text: call.cancelled
-                            ? t.cancelled
-                            : t.shortError(shortErrorKey(call.error)),
-                        style: TextStyle(
-                            color: call.cancelled ? c.textMuted : c.danger))
-                  else if (call.status != null)
-                    TextSpan(
-                        text: '${call.status} $reason',
-                        style: TextStyle(color: c.status(call.status)))
-                  else
-                    TextSpan(
-                        text: t.pending, style: TextStyle(color: c.stPending)),
-                ],
-              ),
-              style: DurbunType.monoStyle(size: 14, weight: FontWeight.w700),
+            title: Row(
+              children: <Widget>[
+                Text('${call.method} ',
+                    style: DurbunType.monoStyle(size: 14.5, color: c.method(call.method), weight: FontWeight.w700, height: 1.2)),
+                StatusPill(text: statusText, color: statusColor, width: null),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(statusWord,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: call.error != null && !call.cancelled ? c.danger : c.text)),
+                ),
+              ],
             ),
             actions: <Widget>[
               PopupMenuButton<String>(
                 tooltip: t.copy,
-                icon: Icon(Icons.copy_rounded, size: 19, color: c.textMuted),
+                icon: Icon(Icons.ios_share_rounded, size: 20, color: c.textMuted),
                 onSelected: _copyAs,
                 itemBuilder: (_) => <PopupMenuEntry<String>>[
                   PopupMenuItem<String>(value: 'url', child: Text(t.copyUrl)),
@@ -676,31 +671,57 @@ class _CallDetailPageState extends State<CallDetailPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
+                    // The URL in a card, the numbers under it as chips.
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(12, 2, 12, 0),
+                      padding: const EdgeInsets.fromLTRB(12, 9, 4, 9),
+                      decoration: BoxDecoration(
+                          color: c.fieldBg,
+                          borderRadius: BorderRadius.circular(DurbunRadius.lg),
+                          border: c.isDark ? Border.all(color: c.border) : null),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Expanded(
-                              child: SelectableText(call.url,
-                                  style: DurbunType.monoStyle(
-                                      size: 12.5, color: c.text))),
+                              child: Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            // The whole URL is on General and in Copy.
+                            child: SelectableText(call.url,
+                                minLines: 1,
+                                maxLines: 4,
+                                style: DurbunType.monoStyle(
+                                    size: 12.5, color: c.text, height: 1.4)),
+                          )),
                           DIconButton(
-                              icon: Icons.copy,
+                              icon: Icons.copy_rounded,
                               tooltip: t.copyUrl,
-                              size: 28,
+                              size: 30,
                               onTap: () => _copyAs('url')),
                         ],
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
-                      child: Text(meta,
-                          style: DurbunType.monoStyle(
-                              size: 11.5, color: c.textMeta)),
+                    // One row that scrolls: wrapped chips pushed the tabs
+                    // off short screens.
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                      child: Row(
+                        spacing: 6,
+                        children: <Widget>[
+                          if (call.state != InspectorCallState.pending)
+                            _Stat(icon: Icons.timer_outlined, text: formatDuration(call.duration),
+                                color: (call.duration?.inMilliseconds ?? 0) >= kSlowMs ? c.warning : null),
+                          if (call.responseBody != null)
+                            _Stat(icon: Icons.south_rounded, text: formatBytes(call.responseBody!.size)),
+                          if (call.requestBody != null && call.requestBody!.size > 0)
+                            _Stat(icon: Icons.north_rounded, text: formatBytes(call.requestBody!.size)),
+                          _Stat(icon: Icons.hub_outlined, text: call.source),
+                          _Stat(icon: Icons.schedule_rounded, text: formatClock(call.ts)),
+                        ],
+                      ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                       child: Wrap(
                         spacing: 6,
                         runSpacing: 6,
@@ -790,6 +811,40 @@ class _CallDetailPageState extends State<CallDetailPage> {
           ),
         );
       },
+    );
+  }
+}
+
+/// A number of the request (time, size, source) as a small chip.
+class _Stat extends StatelessWidget {
+  const _Stat({required this.icon, required this.text, this.color});
+
+  final IconData icon;
+  final String text;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final fg = color ?? c.textMuted;
+    return Container(
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+          color: c.trackBg, borderRadius: BorderRadius.circular(DurbunRadius.pill)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 13, color: fg),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: DurbunType.monoStyle(size: 11.5, color: color ?? c.text, weight: FontWeight.w500, height: 1.2)),
+          ),
+        ],
+      ),
     );
   }
 }

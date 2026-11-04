@@ -44,12 +44,12 @@ class LevelBadge extends StatelessWidget {
     final c = DurbunColors.of(context);
     final color = c.level(level);
     return Container(
-      width: 16,
-      height: 16,
+      width: 17,
+      height: 17,
       alignment: Alignment.center,
       decoration: BoxDecoration(
           color: color.withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(3)),
+          borderRadius: BorderRadius.circular(DurbunRadius.sm)),
       child: Text(letter(level),
           style: DurbunType.monoStyle(
               size: 10, color: color, weight: FontWeight.w700, height: 1)),
@@ -158,29 +158,29 @@ class DToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
+    final tone = color ?? c.accent;
     final fg = selected ? (color ?? c.text) : (color ?? c.textMuted);
     final style = mono
         ? DurbunType.monoStyle(
             size: 11.5, color: fg, weight: FontWeight.w600, height: 1.2)
         : TextStyle(
-            fontSize: 12,
+            fontSize: 12.5,
             color: fg,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             height: 1.2);
     return Material(
-      color: selected ? c.bgActive : Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(DurbunRadius.md),
-        side: BorderSide(color: selected ? c.borderStrong : c.border),
+      color: selected ? tone.withValues(alpha: 0.14) : Colors.transparent,
+      shape: StadiumBorder(
+        side: BorderSide(color: selected ? tone.withValues(alpha: 0.5) : c.border),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(DurbunRadius.md),
+        customBorder: const StadiumBorder(),
         onTap: onTap,
         // No alignment: an aligned Container would stretch to the full width
         // inside a Wrap (the filter sheet).
         child: Container(
-          height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: 9),
+          height: 30,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -247,14 +247,14 @@ class _DSearchFieldState extends State<DSearchField> {
     return Container(
       height: 38,
       decoration: BoxDecoration(
-        color: c.inputBg,
-        borderRadius: BorderRadius.circular(DurbunRadius.md),
-        border: Border.all(color: c.border),
+        color: c.fieldBg,
+        borderRadius: BorderRadius.circular(DurbunRadius.md + 1),
+        border: c.isDark ? Border.all(color: c.border) : null,
       ),
       child: Row(
         children: <Widget>[
-          const SizedBox(width: 9),
-          Icon(Icons.search, size: 16, color: c.textSubtle),
+          const SizedBox(width: 10),
+          Icon(Icons.search_rounded, size: 18, color: c.textSubtle),
           const SizedBox(width: 6),
           Expanded(
             child: TextField(
@@ -265,15 +265,18 @@ class _DSearchFieldState extends State<DSearchField> {
               enableSuggestions: false,
               textInputAction: TextInputAction.search,
               style:
-                  DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.2),
+                  DurbunType.monoStyle(size: 13, color: c.text, height: 1.2),
               cursorColor: c.accent,
               decoration: InputDecoration(
                 isDense: true,
                 border: InputBorder.none,
-                hintText: widget.hint,
-                hintMaxLines: 1,
-                hintStyle: TextStyle(
-                    fontSize: 13, color: c.textSubtle, height: 1.2),
+                // In the phone's UI font: a hint text would take the
+                // field's mono style.
+                hint: Text(widget.hint,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: DefaultTextStyle.of(context).style.copyWith(
+                        inherit: false, fontSize: 14, color: c.textSubtle, height: 1.2)),
               ),
             ),
           ),
@@ -337,7 +340,7 @@ class DIconButton extends StatelessWidget {
             width: size,
             height: size,
             child: Icon(icon,
-                size: 17,
+                size: size >= 36 ? 20 : 18,
                 color: onTap == null
                     ? c.textSubtle
                     : (active ? c.accent : (color ?? c.textMuted))),
@@ -372,30 +375,30 @@ class DButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    final fg = primary ? Colors.white : c.text;
+    final fg = primary ? Colors.white : (onTap == null ? c.textSubtle : c.text);
     return Material(
-      color: primary ? c.accent : c.bgElevated,
+      color: primary ? c.accent : c.cardBg,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(DurbunRadius.md),
+        borderRadius: BorderRadius.circular(large ? DurbunRadius.lg : DurbunRadius.md),
         side: primary ? BorderSide.none : BorderSide(color: c.border),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(DurbunRadius.md),
+        borderRadius: BorderRadius.circular(large ? DurbunRadius.lg : DurbunRadius.md),
         onTap: onTap,
         child: Container(
-          height: large ? 44 : 30,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          height: large ? 48 : 34,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             mainAxisSize: large ? MainAxisSize.max : MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
               if (icon != null) ...<Widget>[
-                Icon(icon, size: 15, color: fg),
+                Icon(icon, size: 16, color: primary ? fg : c.textMuted),
                 const SizedBox(width: 6)
               ],
               Text(label,
                   style: TextStyle(
-                      fontSize: large ? 14.5 : 12.5,
+                      fontSize: large ? 15 : 13,
                       color: fg,
                       fontWeight: large ? FontWeight.w600 : FontWeight.w500)),
               if (trailingIcon != null) ...<Widget>[
@@ -410,7 +413,92 @@ class DButton extends StatelessWidget {
   }
 }
 
-/// Underlined tabs with optional counts ("Request 7").
+/// A segmented control's rounded track; [children] are its segments.
+class SegmentTrack extends StatelessWidget {
+  const SegmentTrack({super.key, required this.children, this.height = 34});
+
+  final List<Widget> children;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    return Container(
+      height: height,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+          color: c.trackBg,
+          borderRadius: BorderRadius.circular(DurbunRadius.md + 1),
+          border: c.isDark ? Border.all(color: c.border.withValues(alpha: 0.6)) : null),
+      child: Row(mainAxisSize: MainAxisSize.min, children: children),
+    );
+  }
+}
+
+/// One segment of a [SegmentTrack]: the selected one is raised.
+class Segment extends StatelessWidget {
+  const Segment(
+      {super.key,
+      required this.selected,
+      required this.onTap,
+      required this.child,
+      this.semanticLabel});
+
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget child;
+  final String? semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: semanticLabel,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? c.thumbBg : Colors.transparent,
+            borderRadius: BorderRadius.circular(DurbunRadius.md - 2),
+            boxShadow: selected ? c.raised : null,
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Label with an optional count, as a segment shows it ("Request 7").
+Widget _segmentLabel(DurbunColors c, String label, int? count, bool selected, double size) => Text.rich(
+      TextSpan(
+        children: <InlineSpan>[
+          TextSpan(text: label),
+          if (count != null)
+            TextSpan(
+                text: ' $count',
+                style: DurbunType.monoStyle(
+                    size: size - 1.5, color: c.textSubtle, weight: FontWeight.w500, height: 1.2)),
+        ],
+      ),
+      maxLines: 1,
+      style: TextStyle(
+        fontSize: size,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        color: selected ? c.text : c.textMuted,
+        height: 1.2,
+      ),
+    );
+
+/// The detail pages' tabs (General / Request / Response / Timing): a
+/// full-width segmented control, optional counts.
 class DTabs extends StatelessWidget {
   const DTabs(
       {super.key,
@@ -428,49 +516,18 @@ class DTabs extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     // Tabs share the width (no tab slides off a narrow phone); long labels shrink.
-    return Container(
-      decoration:
-          BoxDecoration(border: Border(bottom: BorderSide(color: c.border))),
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: Row(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+      child: SegmentTrack(
         children: <Widget>[
           for (var i = 0; i < labels.length; i++)
             Expanded(
-              child: InkWell(
+              child: Segment(
+                selected: i == index,
                 onTap: () => onChanged(i),
-                child: Container(
-                  height: 38,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  decoration: BoxDecoration(
-                    border: Border(
-                        bottom: BorderSide(
-                            color: i == index ? c.accent : Colors.transparent,
-                            width: 2)),
-                  ),
-                  alignment: Alignment.center,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text.rich(
-                      TextSpan(
-                        children: <InlineSpan>[
-                          TextSpan(text: labels[i]),
-                          if (counts != null && counts![i] != null)
-                            TextSpan(
-                                text: ' ${counts![i]}',
-                                style: TextStyle(
-                                    color: c.textSubtle,
-                                    fontWeight: FontWeight.w400)),
-                        ],
-                      ),
-                      maxLines: 1,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight:
-                            i == index ? FontWeight.w600 : FontWeight.w500,
-                        color: i == index ? c.text : c.textMuted,
-                      ),
-                    ),
-                  ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: _segmentLabel(c, labels[i], counts?[i], i == index, 13),
                 ),
               ),
             ),
@@ -497,50 +554,51 @@ class DSegmented extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    return Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(
-          color: c.bgSunken,
-          borderRadius: BorderRadius.circular(DurbunRadius.md),
-          border: Border.all(color: c.border)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          for (var i = 0; i < labels.length; i++)
-            GestureDetector(
-              onTap: () => onChanged(i),
-              child: Container(
-                height: 24,
-                padding: const EdgeInsets.symmetric(horizontal: 9),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: i == index ? c.bgActive : Colors.transparent,
-                  borderRadius: BorderRadius.circular(DurbunRadius.sm),
-                ),
-                child: Text.rich(
-                  TextSpan(
-                    children: <InlineSpan>[
-                      TextSpan(text: labels[i]),
-                      if (counts != null && counts![i] != null)
-                        TextSpan(
-                            text: ' ${counts![i]}',
-                            style: TextStyle(color: c.textSubtle)),
-                    ],
-                  ),
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: i == index ? c.text : c.textMuted,
-                      fontWeight: FontWeight.w500),
-                ),
-              ),
-            ),
-        ],
-      ),
+    return SegmentTrack(
+      height: 30,
+      children: <Widget>[
+        for (var i = 0; i < labels.length; i++)
+          Segment(
+            selected: i == index,
+            onTap: () => onChanged(i),
+            child: _segmentLabel(c, labels[i], counts?[i], i == index, 12),
+          ),
+      ],
     );
   }
 }
 
-/// Key / value table with borders (the "General" tab).
+/// Status of a request as a tinted pill: `200`, `404`, `FAIL`, `···`.
+class StatusPill extends StatelessWidget {
+  const StatusPill({super.key, required this.text, required this.color, this.width = 42});
+
+  final String text;
+  final Color color;
+  final double? width;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: width,
+        height: 20,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(DurbunRadius.sm + 1)),
+        // widthFactor 1: without a width the pill hugs its text (a Wrap
+        // would stretch an aligned box to the full row).
+        child: Center(
+          widthFactor: width == null ? 1 : null,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(text,
+                maxLines: 1,
+                style: DurbunType.monoStyle(size: 11.5, color: color, weight: FontWeight.w700, height: 1.1)),
+          ),
+        ),
+      );
+}
+
+/// Key / value rows in a rounded card (the "General" tab, headers).
 class KeyValueTable extends StatelessWidget {
   const KeyValueTable({super.key, required this.rows});
 
@@ -551,43 +609,35 @@ class KeyValueTable extends StatelessWidget {
     final c = DurbunColors.of(context);
     return Container(
       decoration: BoxDecoration(
+          color: c.cardBg,
           border: Border.all(color: c.border),
-          borderRadius: BorderRadius.circular(DurbunRadius.md)),
+          borderRadius: BorderRadius.circular(DurbunRadius.lg)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: <Widget>[
           for (var i = 0; i < rows.length; i++)
             Container(
               decoration: BoxDecoration(
-                color: c.bgPanel,
-                border:
-                    i == 0 ? null : Border(top: BorderSide(color: c.border)),
+                border: i == 0 ? null : Border(top: BorderSide(color: c.hairline)),
               ),
-              child: IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    Container(
-                      width: 118,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 7),
-                      decoration: BoxDecoration(
-                          color: c.bgSunken,
-                          border: Border(right: BorderSide(color: c.border))),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  SizedBox(
+                    width: 112,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 1),
                       child: Text(rows[i].$1,
-                          style: TextStyle(fontSize: 12, color: c.textMuted)),
+                          style: TextStyle(fontSize: 12, color: c.textMeta, fontWeight: FontWeight.w500)),
                     ),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 7),
-                        child: SelectableText(rows[i].$2,
-                            style: DurbunType.monoStyle(
-                                size: 12, color: rows[i].$3 ?? c.text)),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: SelectableText(rows[i].$2,
+                        style: DurbunType.monoStyle(size: 12.5, color: rows[i].$3 ?? c.text, height: 1.4)),
+                  ),
+                ],
               ),
             ),
         ],
@@ -623,16 +673,16 @@ class Callout extends StatelessWidget {
       CalloutTone.danger => (c.danger, c.dangerSoft, Icons.error_outline),
     };
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
       decoration: BoxDecoration(
           color: bg,
-          borderRadius: BorderRadius.circular(DurbunRadius.md),
-          border: Border.all(color: fg.withValues(alpha: 0.25))),
+          borderRadius: BorderRadius.circular(DurbunRadius.lg),
+          border: Border.all(color: fg.withValues(alpha: 0.22))),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(icon, size: 16, color: fg),
-          const SizedBox(width: 8),
+          Icon(icon, size: 17, color: fg),
+          const SizedBox(width: 9),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -689,27 +739,44 @@ class EmptyState extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
+                  // The icon on a soft accent disc, in a faint halo.
                   Container(
-                    width: 44,
-                    height: 44,
+                    width: 76,
+                    height: 76,
                     decoration: BoxDecoration(
-                        color: c.bgElevated,
-                        borderRadius: BorderRadius.circular(DurbunRadius.lg),
-                        border: Border.all(color: c.border)),
-                    child: Icon(icon, size: 22, color: c.textMuted),
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(colors: <Color>[
+                        c.accent.withValues(alpha: c.isDark ? 0.16 : 0.10),
+                        c.accent.withValues(alpha: 0),
+                      ]),
+                    ),
+                    alignment: Alignment.center,
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                          color: c.accentSoft,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: c.accent.withValues(alpha: 0.25))),
+                      child: Icon(icon, size: 23, color: c.badgeAccent),
+                    ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Text(title,
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                          fontSize: 14,
+                          fontSize: 16,
                           fontWeight: FontWeight.w600,
+                          letterSpacing: -0.2,
                           color: c.text)),
                   if (body != null) ...<Widget>[
-                    const SizedBox(height: 4),
-                    Text(body!,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12.5, color: c.textMuted)),
+                    const SizedBox(height: 6),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 300),
+                      child: Text(body!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 13, height: 1.45, color: c.textMuted)),
+                    ),
                   ],
                   if (actionLabel != null && onAction != null) ...<Widget>[
                     const SizedBox(height: 14),
@@ -740,13 +807,14 @@ class NewItemsPill extends StatelessWidget {
     final c = DurbunColors.of(context);
     return Material(
       color: c.accent,
-      borderRadius: BorderRadius.circular(999),
-      elevation: 4,
+      borderRadius: BorderRadius.circular(DurbunRadius.pill),
+      elevation: 6,
+      shadowColor: c.accent.withValues(alpha: 0.6),
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(DurbunRadius.pill),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -796,3 +864,65 @@ class SectionTitle extends StatelessWidget {
 /// Text with every case-insensitive occurrence of [query] highlighted.
 TextSpan highlightSpan(String text, String query, TextStyle style, Color mark) =>
     highlightTerms(text, query.isEmpty ? const <String>[] : <String>[foldText(query)], style, mark);
+
+/// Says whether a page of the panel's tab view is on screen. Pages kept
+/// alive off screen skip the store's updates until they are shown again.
+class PageActive extends InheritedWidget {
+  const PageActive({super.key, required this.active, required super.child});
+
+  final bool active;
+
+  /// True outside a tab view (detail pages, tests).
+  static bool of(BuildContext context, {bool listen = true}) => listen
+      ? context.dependOnInheritedWidgetOfExactType<PageActive>()?.active ?? true
+      : context.getInheritedWidgetOfExactType<PageActive>()?.active ?? true;
+
+  @override
+  bool updateShouldNotify(PageActive old) => old.active != active;
+}
+
+/// [ListenableBuilder] that rebuilds only while its page is [PageActive];
+/// an update that arrives off screen is applied when the page comes back.
+class ActiveListenableBuilder extends StatefulWidget {
+  const ActiveListenableBuilder({super.key, required this.listenable, required this.builder});
+
+  final Listenable listenable;
+  final WidgetBuilder builder;
+
+  @override
+  State<ActiveListenableBuilder> createState() => _ActiveListenableBuilderState();
+}
+
+class _ActiveListenableBuilderState extends State<ActiveListenableBuilder> {
+  @override
+  void initState() {
+    super.initState();
+    widget.listenable.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(ActiveListenableBuilder old) {
+    super.didUpdateWidget(old);
+    if (old.listenable != widget.listenable) {
+      old.listenable.removeListener(_changed);
+      widget.listenable.addListener(_changed);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.listenable.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted && PageActive.of(context, listen: false)) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Depends on PageActive: coming back on screen rebuilds with what was missed.
+    PageActive.of(context);
+    return widget.builder(context);
+  }
+}

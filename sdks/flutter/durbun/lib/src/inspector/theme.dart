@@ -95,6 +95,31 @@ class DurbunColors {
 
   bool get isDark => brightness == Brightness.dark;
 
+  /* Phone-only surfaces, derived from the desktop tokens above. */
+
+  /// Search fields and other inputs on a panel.
+  Color get fieldBg => isDark ? bgElevated : bgSunken;
+
+  /// Track of a segmented control (the panel's tabs, detail tabs).
+  Color get trackBg => bgSunken;
+
+  /// The selected segment, raised from its track.
+  Color get thumbBg => isDark ? bgActive : bgPanel;
+
+  /// Grouped cards on the page background.
+  Color get cardBg => isDark ? bgElevated : bgPanel;
+
+  /// Hairline between rows of a list.
+  Color get hairline => border.withValues(alpha: isDark ? 0.7 : 0.9);
+
+  /// Soft shadow under raised segments, pills and sheets.
+  List<BoxShadow> get raised => <BoxShadow>[
+        BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 1)),
+      ];
+
   static const DurbunColors dark = DurbunColors(
     brightness: Brightness.dark,
     bgApp: Color(0xFF0B0D12),
@@ -347,11 +372,14 @@ abstract final class DurbunType {
       );
 }
 
-/// Radii from the tokens.
+/// Radii. Rounder than the desktop's (4 / 6 / 10): on a phone the panel
+/// sits among the system's own rounded controls.
 abstract final class DurbunRadius {
-  static const double sm = 4;
-  static const double md = 6;
-  static const double lg = 10;
+  static const double sm = 5;
+  static const double md = 9;
+  static const double lg = 13;
+  static const double xl = 20;
+  static const double pill = 999;
 }
 
 /// Puts the tokens (and a matching Material theme) under the panel.
@@ -383,6 +411,10 @@ class DurbunTheme extends InheritedWidget {
       outlineVariant: c.border,
       surfaceContainerHighest: c.bgElevated,
     );
+    final rounded = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(DurbunRadius.lg),
+      side: BorderSide(color: c.border),
+    );
     return DurbunTheme(
       colors: c,
       child: Theme(
@@ -393,23 +425,84 @@ class DurbunTheme extends InheritedWidget {
           canvasColor: c.bgPanel,
           dividerColor: c.border,
           visualDensity: VisualDensity.compact,
-          splashFactory: InkRipple.splashFactory,
+          // A press darkens the row instead of a Material ink ripple.
+          splashFactory: NoSplash.splashFactory,
+          splashColor: Colors.transparent,
+          highlightColor: c.bgHover,
+          hoverColor: c.bgHover,
           textSelectionTheme: TextSelectionThemeData(
             cursorColor: c.accent,
             selectionColor: c.accent.withValues(alpha: 0.3),
             selectionHandleColor: c.accent,
           ),
-          snackBarTheme: SnackBarThemeData(
-            backgroundColor: c.bgElevated,
-            contentTextStyle: TextStyle(color: c.text, fontSize: DurbunType.md),
-            behavior: SnackBarBehavior.floating,
+          appBarTheme: AppBarTheme(
+            backgroundColor: c.bgPanel,
+            surfaceTintColor: Colors.transparent,
+            foregroundColor: c.text,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            toolbarHeight: 50,
+            titleTextStyle: TextStyle(color: c.text, fontSize: 15.5, fontWeight: FontWeight.w600),
+            iconTheme: IconThemeData(color: c.text, size: 20),
+            actionsIconTheme: IconThemeData(color: c.textMuted, size: 20),
           ),
-          bottomSheetTheme: BottomSheetThemeData(backgroundColor: c.bgPanel, surfaceTintColor: Colors.transparent),
+          actionIconTheme: ActionIconThemeData(
+            backButtonIconBuilder: (_) => const Icon(Icons.arrow_back_ios_new_rounded, size: 19),
+            closeButtonIconBuilder: (_) => const Icon(Icons.close_rounded, size: 22),
+          ),
+          snackBarTheme: SnackBarThemeData(
+            backgroundColor: c.isDark ? c.bgActive : c.text,
+            contentTextStyle: TextStyle(color: c.isDark ? c.text : c.bgPanel, fontSize: DurbunType.md, fontWeight: FontWeight.w500),
+            behavior: SnackBarBehavior.floating,
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.lg)),
+          ),
+          bottomSheetTheme: BottomSheetThemeData(
+            backgroundColor: c.bgPanel,
+            surfaceTintColor: Colors.transparent,
+            dragHandleColor: c.borderStrong,
+            dragHandleSize: const Size(36, 4),
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(DurbunRadius.xl))),
+          ),
           popupMenuTheme: PopupMenuThemeData(
             color: c.bgElevated,
             surfaceTintColor: Colors.transparent,
-            textStyle: TextStyle(color: c.text, fontSize: DurbunType.md),
+            elevation: 10,
+            shadowColor: Colors.black.withValues(alpha: 0.4),
+            shape: rounded,
+            textStyle: TextStyle(color: c.text, fontSize: 14),
           ),
+          tooltipTheme: TooltipThemeData(
+            decoration: BoxDecoration(
+                color: c.isDark ? c.bgActive : c.text,
+                borderRadius: BorderRadius.circular(DurbunRadius.md)),
+            textStyle: TextStyle(color: c.isDark ? c.text : c.bgPanel, fontSize: 12),
+            waitDuration: const Duration(milliseconds: 500),
+          ),
+          switchTheme: SwitchThemeData(
+            thumbColor: WidgetStateProperty.resolveWith(
+                (s) => s.contains(WidgetState.selected) ? Colors.white : c.textMuted),
+            trackColor: WidgetStateProperty.resolveWith(
+                (s) => s.contains(WidgetState.selected) ? c.accent : c.bgActive),
+            trackOutlineColor: WidgetStateProperty.resolveWith(
+                (s) => s.contains(WidgetState.selected) ? c.accent : c.borderStrong),
+          ),
+          checkboxTheme: CheckboxThemeData(
+            fillColor: WidgetStateProperty.resolveWith(
+                (s) => s.contains(WidgetState.selected) ? c.accent : Colors.transparent),
+            checkColor: const WidgetStatePropertyAll<Color>(Colors.white),
+            side: BorderSide(color: c.borderStrong, width: 1.5),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.sm)),
+          ),
+          textButtonTheme: TextButtonThemeData(
+            style: TextButton.styleFrom(
+              foregroundColor: c.accent,
+              textStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.md)),
+            ),
+          ),
+          dividerTheme: DividerThemeData(color: c.border, thickness: 1, space: 1),
         ),
         child: DefaultTextStyle.merge(
           style: TextStyle(color: c.text, fontSize: DurbunType.md, height: 1.45),

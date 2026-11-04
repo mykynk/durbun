@@ -32,6 +32,17 @@ class InspectorStrings {
   String get close => _('Kapat', 'Close');
   String get desktopConnected => _('Masaüstü bağlı', 'Desktop connected');
   String get onPhoneOnly => _('Yalnızca telefonda', 'On the phone only');
+  String get tools => _('Araçlar', 'Tools');
+  String get deviceAndSdk => _('Cihaz ve SDK', 'Device & SDK');
+  String ruleCount(int n) => n == 0 ? _('Kural yok', 'No rules') : _('$n kural', n == 1 ? '1 rule' : '$n rules');
+  String get noSamplesShort => _('Ölçüm yok', 'No samples');
+  String get clearAll => _('Kayıtları temizle', 'Clear captured data');
+  String get clearAllHint => _('Loglar, istekler ve ölçümler silinir.', 'Removes logs, requests and samples.');
+  String get cleared => _('Temizlendi', 'Cleared');
+  String get shakeHint => _(
+    'Paneli açmak için telefonu sallayın ya da Durbun.showInspector() çağırın.',
+    'Shake the phone or call Durbun.showInspector() to open this panel.',
+  );
   String newItems(int n) => _('$n yeni', '$n new');
   String dropped(int n) => _('Yer açmak için en eski $n kayıt silindi.', 'The oldest $n entries were removed to make room.');
   String get pause => _('Duraklat', 'Pause');

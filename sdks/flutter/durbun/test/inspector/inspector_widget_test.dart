@@ -79,9 +79,9 @@ void main() {
     expect(listenCalls, [true], reason: 'the plugin is asked to listen while the app is in front');
     expect(find.byType(InspectorBubble), findsNothing, reason: 'no bubble by default');
     await shake(tester);
-    expect(find.text('Sepet açıldı'), findsOneWidget, reason: 'the panel is open');
+    expect(find.text('/v1/orders'), findsOneWidget, reason: 'the panel opens on Network');
     await shake(tester);
-    expect(find.text('Sepet açıldı'), findsOneWidget, reason: 'a second shake does not stack another panel');
+    expect(find.text('/v1/orders'), findsOneWidget, reason: 'a second shake does not stack another panel');
 
     for (final st in [AppLifecycleState.inactive, AppLifecycleState.hidden, AppLifecycleState.paused]) {
       tester.binding.handleAppLifecycleStateChanged(st);
@@ -113,6 +113,8 @@ void main() {
     await tester.pumpWidget(app(store, bubble: true));
     expect(find.byKey(const ValueKey<String>('durbun-bubble-badge')), findsOneWidget, reason: 'a 500 and a crash are unseen');
     await tester.tap(find.byType(InspectorBubble));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Logs').first);
     await tester.pumpAndSettle();
 
     expect(find.text('Sepet açıldı'), findsOneWidget, reason: 'two identical lines are one row');
@@ -176,6 +178,29 @@ void main() {
     expect(find.text('Waiting (TTFB)'), findsOneWidget);
   });
 
+  testWidgets('Network first; a swipe goes to Logs and back, each keeps its search', (tester) async {
+    await phone(tester);
+    final store = filledStore();
+    await tester.pumpWidget(app(store));
+    Durbun.showInspector();
+    await tester.pumpAndSettle();
+    expect(find.text('/v1/orders'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'orders');
+    await tester.pumpAndSettle();
+
+    await tester.fling(find.byType(TabBarView), const Offset(-500, 0), 1500);
+    await tester.pumpAndSettle();
+    expect(find.text('Sepet açıldı'), findsOneWidget, reason: 'swiped to Logs');
+    expect(find.text('/charge'), findsNothing);
+
+    store.ingest(buildLog(level: 'info', message: 'while away', tag: 'cart', ts: 1400));
+    await tester.fling(find.byType(TabBarView), const Offset(500, 0), 1500);
+    await tester.pumpAndSettle();
+    expect(find.text('/v1/orders'), findsOneWidget);
+    expect(find.text('/charge'), findsNothing, reason: 'Network kept its search');
+    expect(find.widgetWithText(TextField, 'orders'), findsOneWidget);
+  });
+
   testWidgets('Turkish texts and the device tab', (tester) async {
     await phone(tester);
     final store = filledStore()
@@ -184,8 +209,11 @@ void main() {
     Durbun.showInspector();
     await tester.pumpAndSettle();
     expect(find.text('Sadece hatalar'), findsOneWidget);
+    await tester.tap(find.byTooltip('Araçlar').first);
+    await tester.pumpAndSettle();
     expect(find.text('Yalnızca telefonda'), findsOneWidget);
-    await tester.tap(find.byTooltip('Cihaz').first);
+    expect(find.text('Kural yok'), findsOneWidget);
+    await tester.tap(find.text('Cihaz ve SDK'));
     await tester.pumpAndSettle();
     expect(find.text('Örnek'), findsOneWidget);
     expect(find.text('Kotlin'), findsOneWidget);

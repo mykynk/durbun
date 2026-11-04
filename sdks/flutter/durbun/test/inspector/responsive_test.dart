@@ -55,8 +55,15 @@ void main() {
       }
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      for (final tab in ['Logs', 'Mocks', 'Performance', 'Device']) {
-        await tester.tap(find.byTooltip(tab).first);
+      for (final tool in ['Mocks', 'Performance', 'Device & SDK']) {
+        await tester.tap(find.byTooltip('Tools').first);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text(tool));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(tool));
+        await tester.pumpAndSettle();
+        expect(find.text(tool), findsOneWidget, reason: 'the page is open, titled $tool');
+        await tester.binding.handlePopRoute();
         await tester.pumpAndSettle();
       }
       await tester.tap(find.byTooltip('Logs').first);

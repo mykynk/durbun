@@ -43,6 +43,8 @@ void main() {
   testWidgets('only the default hosts are listed; the rest are counted and can be ticked in', (tester) async {
     final store = _store();
     await _open(tester, store, const ['*.example.com']);
+    await tester.tap(find.byTooltip('Logs').first);
+    await tester.pumpAndSettle();
     // Logs: the Firebase calls are not rows of the stream either.
     expect(find.textContaining('api.example.com/v1/accounts'), findsOneWidget);
     expect(find.textContaining('firebasestorage'), findsNothing);
