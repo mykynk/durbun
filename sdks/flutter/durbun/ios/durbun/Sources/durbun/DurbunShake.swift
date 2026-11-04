@@ -50,25 +50,28 @@ extension UIWindow {
     private static var durbunHookInstalled = false
 
     /// Adds the shake hook to `motionEnded(_:with:)` once; the original behaviour is kept.
+    ///
+    /// The original implementation is called with its own selector: UIResponder's version
+    /// forwards the event to the next responder with the selector it was called with, and a
+    /// swapped `durbun_…` selector made the window scene raise "unrecognized selector".
     static func durbunInstallShakeHook() {
         guard !durbunHookInstalled else { return }
         durbunHookInstalled = true
-        let original = #selector(UIResponder.motionEnded(_:with:))
-        let replacement = #selector(UIWindow.durbun_motionEnded(_:with:))
-        guard let originalMethod = class_getInstanceMethod(UIWindow.self, original),
-              let replacementMethod = class_getInstanceMethod(UIWindow.self, replacement) else { return }
-        if class_addMethod(UIWindow.self, original, method_getImplementation(replacementMethod), method_getTypeEncoding(replacementMethod)) {
-            class_replaceMethod(UIWindow.self, replacement, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod))
-        } else {
-            method_exchangeImplementations(originalMethod, replacementMethod)
+        let selector = #selector(UIResponder.motionEnded(_:with:))
+        guard let method = class_getInstanceMethod(UIWindow.self, selector) else { return }
+        typealias MotionEnded = @convention(c) (UIWindow, Selector, UIEvent.EventSubtype, UIEvent?) -> Void
+        let original = unsafeBitCast(method_getImplementation(method), to: MotionEnded.self)
+        let hook: @convention(block) (UIWindow, UIEvent.EventSubtype, UIEvent?) -> Void = { window, motion, event in
+            if motion == .motionShake {
+                NotificationCenter.default.post(name: DurbunShake.notification, object: nil)
+            }
+            original(window, selector, motion, event)
         }
-    }
-
-    @objc func durbun_motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
-        if motion == .motionShake {
-            NotificationCenter.default.post(name: DurbunShake.notification, object: nil)
+        let imp = imp_implementationWithBlock(hook)
+        // UIWindow usually inherits motionEnded: override it on UIWindow only; if UIWindow
+        // has its own, replace that (its old implementation is `original`).
+        if !class_addMethod(UIWindow.self, selector, imp, method_getTypeEncoding(method)) {
+            method_setImplementation(method, imp)
         }
-        // After the swap this calls the original implementation.
-        durbun_motionEnded(motion, with: event)
     }
 }
