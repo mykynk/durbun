@@ -31,14 +31,33 @@ uygulamasına gönderir.
 | Olaylar | `Durbun.event("purchase", ["amount": 49.9])` |
 | Uygulama araçları | Masaüstündeki Cihaz panelinden: açık/koyu görünüm, yavaş animasyonlar, view hiyerarşisi dökümü, UserDefaults dökümü + `registerAction` ile kendi düğmeleriniz |
 
-### Kurulum (yerel Swift paketi)
+### Kurulum
 
-1. Xcode → **File → Add Package Dependencies… → Add Local…** → bu depodaki `sdks/ios` klasörünü seçin.
-2. Uygulama hedefinize **Durbun** ürününü ekleyin.
+**Swift Package Manager:** Xcode → **File → Add Package Dependencies…** → `https://github.com/mykynk/durbun`
+→ uygulama hedefinize **Durbun** ürününü ekleyin. `Package.swift` içinden:
 
-Başka bir Swift paketinden: `.package(path: "../durbun/sdks/ios")` ve hedefe `.product(name: "Durbun", package: "ios")`
-(yerel yol bağımlılığında paket kimliği klasörün adıdır: `ios`; `package: "Durbun"` yazılırsa SwiftPM
-"unknown package 'Durbun'" hatası verir).
+```swift
+.package(url: "https://github.com/mykynk/durbun", from: "0.1.0"),
+// hedefte:
+.product(name: "Durbun", package: "durbun"),
+```
+
+**CocoaPods:**
+
+```ruby
+pod 'Durbun'
+# İsteğe bağlı: yalnızca Debug yapılandırmasına bağlar; Release derlemesinde Dürbün kodu hiç bulunmaz.
+# O durumda `import Durbun` ve çağrılar `#if DEBUG` içinde olmalıdır, aksi halde Release derlenmez.
+# pod 'Durbun', :configurations => ['Debug']
+```
+
+SwiftPM'de paket tüm yapılandırmalara bağlanır; SDK DEBUG olmadan derlendiğinde kendiliğinden hiçbir şey yapmaz
+(bkz. Release güvenliği). Paket bir gizlilik manifesti (`PrivacyInfo.xcprivacy`, UserDefaults dökümü için
+`CA92.1`) içerir.
+
+**Yerel klasörden (SDK geliştirirken):** Xcode → **Add Local…** → bu depodaki `sdks/ios` klasörü. Başka bir
+Swift paketinden: `.package(path: "../durbun/sdks/ios")` ve `.product(name: "Durbun", package: "ios")` (yerel
+yol bağımlılığında paket kimliği klasörün adıdır: `ios`).
 
 ### Başlatma
 
@@ -109,6 +128,7 @@ yoldan önce el sıkışma (`hello` → `welcome`) tamamlanırsa o kullanılır,
 | `collectMetrics` | `true` | CPU / bellek / FPS örnekleri (yalnızca bağlıyken) |
 | `interceptUploadTasks` | `true` | Upload görevleri; `false` → `didSendBodyData` ilerleme bildirimleri korunur |
 | `ignoredHosts` | `[]` | Hiç yakalanmayacak alan adları (alt alan adları dahil) |
+| `redactHeaders` | `[]` | Değeri `••••` gösterilecek başlıklar (büyük/küçük harf duyarsız), ör. `["Authorization", "Cookie"]`; gerçek istek değişmez |
 | `maxBufferedMessages` | `5000` | Bağlantı yokken tutulan mesaj sayısı |
 | `allowInReleaseBuilds` | `false` | DEBUG olmayan derlemelerde çalışmaya zorla |
 
@@ -146,8 +166,15 @@ doğrular). Mock'lanan istekler masaüstünde `mocked` olarak işaretlenir.
 - **Arka plan URLSession**'ları (`.background(withIdentifier:)`) süreç dışında çalıştığı için yakalanamaz.
 - URLProtocol **yükleme ilerlemesini** bildiremez: upload görevlerinde `didSendBodyData` çağrılmaz
   (gerekirse `interceptUploadTasks: false`).
-- Yakalanan istekler paylaşılan `HTTPCookieStorage` / `URLCache` ile iletilir (ephemeral oturumların
-  ayrı çerez deposu yerine).
+- Yakalanan istek, onu başlatan oturumun yapılandırmasının bir kopyasıyla iletilir: aynı `URLCache` (ya da
+  önbelleksiz), çerez ve kimlik deposu, proxy, TLS sınırları, `waitsForConnectivity`, hücresel/pahalı/kısıtlı ağ
+  kuralları ve bağlantı sınırları. Bu, `start()`'tan sonra oluşturulan oturumlar için geçerlidir; `URLSession.shared`
+  varsayılan yapılandırmayı kullanır. 32'den fazla farklı oturum yapılandırması oluşturan uygulamalarda sonrakiler
+  yakalanmaz (Dürbün yokmuş gibi çalışır).
+- Akış (`httpBodyStream`) ya da dosya/veri upload gövdeleri en fazla yakalama sınırı + 256 KB (en az 1,25 MB) kadar
+  bellekte tutulur; daha büyükleri akıtılarak iletilir. Akıtılan gövde geri sarılamaz: o istekte gövdeyi yeniden
+  göndermesi gereken bir 307/308 yönlendirmesi ya da kimlik doğrulama yeniden denemesi başarısız olur. Daha küçük
+  gövdeler ve `httpBody` normal şekilde yeniden gönderilir.
 - WKWebView ve AVPlayer trafiği URLSession protokollerinden geçmez.
 - `os_log` / `Logger` / `NSLog` mesajlarını masaüstü cihaz loglarından okur (simülatör, USB). Okuyamadığında
   (Wi-Fi, `idevicesyslog` yok) SDK iOS 15+'ta uygulamanın kendi log deposundan saniyede bir okuyup
@@ -190,14 +217,33 @@ node scripts/generate-mock-vectors.mjs   # mock eşleştirme test vakalarını T
 | Events | `Durbun.event("purchase", ["amount": 49.9])` |
 | App tools | From the desktop's Device panel: light/dark appearance, slow animations, view hierarchy dump, UserDefaults dump + your own buttons via `registerAction` |
 
-### Installation (local Swift package)
+### Installation
 
-1. Xcode → **File → Add Package Dependencies… → Add Local…** → choose `sdks/ios` in this repository.
-2. Add the **Durbun** product to your app target.
+**Swift Package Manager:** Xcode → **File → Add Package Dependencies…** → `https://github.com/mykynk/durbun`
+→ add the **Durbun** product to your app target. In a `Package.swift`:
 
-From another Swift package: `.package(path: "../durbun/sdks/ios")` and `.product(name: "Durbun", package: "ios")`
-(a local path dependency is identified by its folder name, `ios`; `package: "Durbun"` fails with
-"unknown package 'Durbun'").
+```swift
+.package(url: "https://github.com/mykynk/durbun", from: "0.1.0"),
+// in the target:
+.product(name: "Durbun", package: "durbun"),
+```
+
+**CocoaPods:**
+
+```ruby
+pod 'Durbun'
+# Optional: links it into the Debug configuration only, so Release builds contain no Dürbün code.
+# Then `import Durbun` and every call must be inside `#if DEBUG`, or the Release build does not compile.
+# pod 'Durbun', :configurations => ['Debug']
+```
+
+With SwiftPM the package is linked into every configuration; compiled without `DEBUG` the SDK does nothing by
+itself (see Release safety). The package ships a privacy manifest (`PrivacyInfo.xcprivacy`, `CA92.1` for the
+UserDefaults dump).
+
+**From a local path (developing the SDK):** Xcode → **Add Local…** → `sdks/ios` in this repository. From another
+Swift package: `.package(path: "../durbun/sdks/ios")` and `.product(name: "Durbun", package: "ios")` (a local path
+dependency is identified by its folder name, `ios`).
 
 ### Start
 
@@ -228,6 +274,14 @@ The SDK reconnects forever with a 0.5 s → 3 s backoff, keeps the last 5,000 me
 disconnected and flushes them in order (with one warning line if some had to be dropped). Whichever
 path completes the `hello` → `welcome` handshake first wins; the others are closed.
 
+### Options (`DurbunOptions`)
+
+`host` (Wi-Fi IP, or `DURBUN_HOST`), `port` (9751), `devicePorts` (9752…9755), `enabled`, `captureStdout`,
+`captureNetwork`, `captureCrashes`, `collectMetrics`, `interceptUploadTasks`, `ignoredHosts`,
+`redactHeaders` (header names, case-insensitive, whose values show as `••••`, e.g.
+`["Authorization", "Cookie"]`; the real request is unchanged), `maxBufferedMessages` (5000),
+`allowInReleaseBuilds`.
+
 ### Release safety
 
 - With `Durbun.start()` inside `#if DEBUG`, release builds never start the SDK.
@@ -249,8 +303,15 @@ path completes the `hello` → `welcome` handshake first wins; the others are cl
 - **Background URLSessions** run out of process and cannot be intercepted.
 - URLProtocol cannot report **upload progress**: `didSendBodyData` is not called for intercepted
   upload tasks (use `interceptUploadTasks: false` if your UI depends on it).
-- Intercepted requests use the shared `HTTPCookieStorage` / `URLCache` (instead of an ephemeral
-  session's private cookie store).
+- An intercepted request is performed with a copy of its own session's configuration: the same `URLCache`
+  (or none), cookie and credential storage, proxy, TLS limits, `waitsForConnectivity`, cellular / expensive /
+  constrained rules and connection limits. This holds for sessions created after `start()`; `URLSession.shared`
+  uses the default configuration. In an app that creates more than 32 distinct session configurations, later
+  ones are not captured (they run as without Dürbün).
+- Stream (`httpBodyStream`) and file/data upload bodies are held in memory only up to the capture limit +
+  256 KB (at least 1.25 MB); larger ones are streamed through. A streamed body cannot be rewound: a 307/308
+  redirect or an authentication retry that has to resend it fails for that request. Smaller bodies and
+  `httpBody` are resent as usual.
 - WKWebView and AVPlayer traffic does not go through URLSession protocols.
 - The desktop reads `os_log` / `Logger` / `NSLog` messages from device logs (simulator, USB). When it
   cannot (Wi-Fi, no `idevicesyslog`), the SDK reads the app's own log store once a second on iOS 15+ and

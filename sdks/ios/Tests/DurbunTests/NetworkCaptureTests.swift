@@ -29,6 +29,21 @@ final class NetworkCaptureTests: SDKTestCase {
                                                body: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D]))
             case "/missing":
                 return .json(#"{"error":"not found"}"#, status: 404)
+            case let path where path.hasPrefix("/cacheable"):
+                return TestHTTPServer.Response(
+                    status: 200,
+                    headers: [("Content-Type", "application/json"), ("Cache-Control", "max-age=600")],
+                    body: Data(#"{"cached":false}"#.utf8)
+                )
+            case let path where path.hasPrefix("/no-store"):
+                return TestHTTPServer.Response(
+                    status: 200,
+                    headers: [("Content-Type", "application/json"), ("Cache-Control", "no-store")],
+                    body: Data(#"{"secret":true}"#.utf8)
+                )
+            case let path where path.hasPrefix("/set-cookie/"):
+                let name = String(path.dropFirst("/set-cookie/".count))
+                return TestHTTPServer.Response(status: 200, headers: [("Set-Cookie", "\(name)=1; Path=/")])
             default:
                 return TestHTTPServer.Response(status: 200)
             }
@@ -385,5 +400,140 @@ final class NetworkCaptureTests: SDKTestCase {
         ]
         startConnected(options(network: true))
         XCTAssertEqual(perform(URLRequest(url: url("/json"))).response?.statusCode, 200)
+    }
+
+    // MARK: Forwarding keeps each session's configuration
+
+    func testSessionsAreBoundToTheirOwnConfiguration() throws {
+        startConnected(options(network: true))
+        let first = URLSession(configuration: .default)
+        let second = URLSession(configuration: .default)
+        let uncached = URLSessionConfiguration.default
+        uncached.urlCache = nil
+        let third = URLSession(configuration: uncached)
+        defer { [first, second, third].forEach { $0.invalidateAndCancel() } }
+        let bound: AnyClass = try XCTUnwrap(first.configuration.protocolClasses?.first)
+        XCTAssertTrue(SessionBinding.isDurbun(bound))
+        XCTAssertNotEqual(ObjectIdentifier(bound), ObjectIdentifier(DurbunURLProtocol.self), "a subclass bound to the settings")
+        XCTAssertEqual(second.configuration.protocolClasses?.first.map { ObjectIdentifier($0) }, ObjectIdentifier(bound),
+                       "sessions with the same settings share one binding")
+        XCTAssertNotEqual(third.configuration.protocolClasses?.first.map { ObjectIdentifier($0) }, ObjectIdentifier(bound))
+        XCTAssertEqual(third.configuration.protocolClasses?.filter { SessionBinding.isDurbun($0) }.count, 1)
+    }
+
+    func testASessionWithoutACacheIsNeverServedFromOne() throws {
+        startConnected(options(network: true))
+        let configuration = URLSessionConfiguration.default
+        configuration.urlCache = nil
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let path = "/cacheable/\(UUID().uuidString)"
+        XCTAssertEqual(perform(URLRequest(url: url(path)), session: session).response?.statusCode, 200)
+        XCTAssertEqual(perform(URLRequest(url: url(path)), session: session).response?.statusCode, 200)
+        XCTAssertEqual(server.requests.filter { $0.path == path }.count, 2, "no cache the app did not configure")
+        XCTAssertEqual(desktop.waitForCount(2) { $0.type == "net.response" }.count, 2)
+    }
+
+    func testTheSessionsOwnCacheIsTheOneUsed() throws {
+        startConnected(options(network: true))
+        let cache = URLCache(memoryCapacity: 4 * 1024 * 1024, diskCapacity: 0, diskPath: nil)
+        let configuration = URLSessionConfiguration.default
+        configuration.urlCache = cache
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let request = URLRequest(url: url("/cacheable/\(UUID().uuidString)"))
+        XCTAssertEqual(perform(request, session: session).response?.statusCode, 200)
+        XCTAssertTrue(waitUntil { cache.cachedResponse(for: request) != nil }, "the response went into the session's own cache")
+        XCTAssertEqual(perform(request, session: session).response?.statusCode, 200)
+        XCTAssertEqual(server.requests.filter { $0.path == request.url?.path }.count, 1, "the second request is served from it")
+
+        let noStore = URLRequest(url: url("/no-store/\(UUID().uuidString)"))
+        XCTAssertEqual(perform(noStore, session: session).response?.statusCode, 200)
+        XCTAssertEqual(desktop.waitForCount(3) { $0.type == "net.response" }.count, 3)
+        XCTAssertNil(cache.cachedResponse(for: noStore), "Cache-Control: no-store is honoured")
+    }
+
+    func testCacheStoragePolicyFollowsStatusAndNoStore() {
+        let request = URLRequest(url: URL(string: "https://api.example.com/a")!)
+        func policy(_ status: Int, _ headers: [String: String] = [:], request: URLRequest = request) -> URLCache.StoragePolicy {
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+            return DurbunURLProtocol.cacheStoragePolicy(for: request, response: response)
+        }
+        XCTAssertEqual(policy(200), .allowed)
+        XCTAssertEqual(policy(404), .allowed)
+        XCTAssertEqual(policy(500), .notAllowed)
+        XCTAssertEqual(policy(201), .notAllowed)
+        XCTAssertEqual(policy(200, ["Cache-Control": "private, No-Store"]), .notAllowed)
+        var noStore = request
+        noStore.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        XCTAssertEqual(policy(200, request: noStore), .notAllowed)
+    }
+
+    func testEphemeralSessionsKeepTheirCookiesToThemselves() throws {
+        startConnected(options(network: true))
+        let name = "durbun_\(UUID().uuidString.prefix(8))"
+        let session = URLSession(configuration: .ephemeral)
+        defer {
+            session.invalidateAndCancel()
+            for cookie in HTTPCookieStorage.shared.cookies ?? [] where cookie.name == name {
+                HTTPCookieStorage.shared.deleteCookie(cookie)
+            }
+        }
+        XCTAssertEqual(perform(URLRequest(url: url("/set-cookie/\(name)")), session: session).response?.statusCode, 200)
+        XCTAssertFalse((HTTPCookieStorage.shared.cookies ?? []).contains { $0.name == name },
+                       "the forwarded request used the ephemeral session's cookie storage, not the shared one")
+    }
+
+    func testLargeStreamedBodiesAreStreamedNotBuffered() throws {
+        let payload = Data((0..<3_000_000).map { UInt8($0 % 251) })
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:1/upload")!)
+        request.httpBodyStream = InputStream(data: payload)
+        let large = RequestBody.read(request, captureLimit: 1000)
+        guard case let .stream(stream) = large.forward else { return XCTFail("a large body is streamed") }
+        XCTAssertEqual(large.captured.count, 1000)
+        stream.open()
+        var replayed = Data()
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let n = stream.read(&buffer, maxLength: buffer.count)
+            if n <= 0 { break }
+            replayed.append(buffer, count: n)
+        }
+        stream.close()
+        XCTAssertEqual(replayed, payload, "every byte is replayed")
+
+        request.httpBodyStream = InputStream(data: Data(count: 500_000))
+        guard case .data = RequestBody.read(request, captureLimit: 1000).forward else {
+            return XCTFail("small bodies stay in memory (rewindable for redirects and auth retries)")
+        }
+        XCTAssertEqual(RequestBody.inMemoryLimit(captureLimit: 4_000_000), 4_000_000 + RequestBody.margin)
+    }
+
+    func testStreamedUploadsLargerThanTheBufferReachTheServer() throws {
+        startConnected(options(network: true))
+        let payload = Data((0..<2_000_000).map { UInt8($0 % 241) })
+        var request = URLRequest(url: url("/echo"))
+        request.httpMethod = "PUT"
+        request.httpBodyStream = InputStream(data: payload)
+        let outcome = perform(request, timeout: 20)
+        XCTAssertEqual(outcome.response?.statusCode, 201)
+        XCTAssertEqual(server.requests.last?.body, payload)
+        let (captured, _) = try XCTUnwrap(capture(for: "/echo"))
+        XCTAssertEqual((captured["body"] as? [String: Any])?["truncated"] as? Bool, true)
+    }
+
+    func testRedactHeadersOptionMasksValuesButSendsThem() throws {
+        var options = options(network: true)
+        options.redactHeaders = ["authorization", "X-App-Version"]
+        startConnected(options)
+        var request = URLRequest(url: url("/json"))
+        request.setValue("Bearer secret", forHTTPHeaderField: "Authorization")
+        request.setValue("2.4.0", forHTTPHeaderField: "X-App-Version")
+        XCTAssertEqual(perform(request).response?.statusCode, 200)
+        let (sent, _) = try XCTUnwrap(capture(for: "/json"))
+        let headers = sent["headers"] as? [[String]] ?? []
+        XCTAssertTrue(headers.contains(["Authorization", "••••"]))
+        XCTAssertTrue(headers.contains(["X-App-Version", "••••"]))
+        XCTAssertEqual(server.requests.last?.headers["authorization"], "Bearer secret")
     }
 }

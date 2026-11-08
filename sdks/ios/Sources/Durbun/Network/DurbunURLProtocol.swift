@@ -9,8 +9,10 @@ import Foundation
 final class DurbunURLProtocol: URLProtocol {
     static let handledKey = "dev.durbun.handled"
 
-    private static let bodyQueue = DispatchQueue(label: "dev.durbun.request-body", qos: .utility, attributes: .concurrent)
-    private static let timerQueue = DispatchQueue(label: "dev.durbun.mock-timers", qos: .utility)
+    // The app waits on these (its request cannot start or finish without them): a low QoS here would
+    // let a busy device starve a user-initiated request behind background work.
+    private static let bodyQueue = DispatchQueue(label: "dev.durbun.request-body", qos: .userInitiated, attributes: .concurrent)
+    private static let timerQueue = DispatchQueue(label: "dev.durbun.mock-timers", qos: .userInitiated)
 
     // MARK: Registration decisions
 
@@ -183,7 +185,7 @@ final class DurbunURLProtocol: URLProtocol {
         case .failed:
             return
         }
-        let session = ForwardingSession.shared
+        let session = ForwardingSession.serving(object_getClass(self))
         let task = session.makeTask(with: forwarded as URLRequest, owner: self)
         let alreadyStopped: Bool = state.withLock {
             if stopped { return true }
@@ -275,7 +277,10 @@ final class DurbunURLProtocol: URLProtocol {
         state.withLock { self.response = response }
         onClientThread {
             guard !self.isClientDone else { return }
-            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            // `.notAllowed` here would also keep the response out of the session's cache (CFNetwork
+            // then drops the inner task's copy too), unlike the same request without Dürbün.
+            let policy = (response as? HTTPURLResponse).map { Self.cacheStoragePolicy(for: self.request, response: $0) }
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: policy ?? .notAllowed)
         }
     }
 
@@ -343,6 +348,23 @@ final class DurbunURLProtocol: URLProtocol {
             self.state.withLock { self.challengeSenders.append(sender) }
             client.urlProtocol(self, didReceive: URLAuthenticationChallenge(authenticationChallenge: challenge, sender: sender))
         }
+    }
+
+    /// Whether the app's session may store a forwarded response, by the rules Apple's own
+    /// URLProtocol sample uses: a cacheable status and no `no-store` on either side. The session
+    /// still applies its cache, its request policy and its delegate's `willCacheResponse`.
+    static func cacheStoragePolicy(for request: URLRequest, response: HTTPURLResponse) -> URLCache.StoragePolicy {
+        switch response.statusCode {
+        case 200, 203, 206, 301, 304, 404, 410:
+            break
+        default:
+            return .notAllowed
+        }
+        let noStore = { (value: String?) in value?.lowercased().contains("no-store") == true }
+        if noStore(response.value(forHTTPHeaderField: "Cache-Control")) || noStore(request.value(forHTTPHeaderField: "Cache-Control")) {
+            return .notAllowed
+        }
+        return .allowed
     }
 
     // MARK: Reporting
