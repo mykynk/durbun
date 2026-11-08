@@ -1,7 +1,7 @@
 /** Global error capture (RN ErrorUtils, browser events, Node monitor) and metric samples. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Durbun } from '../src/index.js';
-import { installErrorHandlers, type ErrorReport } from '../src/errors.js';
+import { installErrorHandlers, isRejectionWarning, type ErrorReport } from '../src/errors.js';
 import { MetricsSampler, readHeapMB } from '../src/metrics.js';
 import { FakeDesktop, waitFor } from './helpers/fakeDesktop.js';
 
@@ -71,6 +71,35 @@ describe('React Native ErrorUtils', () => {
 });
 
 describe('error hooks per runtime', () => {
+  it('react-native: reports the unhandled rejections React Native warns about, and still warns', () => {
+    const warn = vi.fn();
+    const error = vi.fn();
+    const target: Record<string, unknown> = { console: { warn, error } };
+    const reports: Array<[unknown, ErrorReport]> = [];
+    const patches = installErrorHandlers({ reportError: (e, r) => reports.push([e, r]) }, 'react-native', target);
+    const console = target.console as { warn: (...a: unknown[]) => void; error: (...a: unknown[]) => void };
+    const hermes = "Possible unhandled promise rejection (id: 0):\nTypeError: undefined is not a function\nTypeError: undefined is not a function\n    at load (http://localhost:8081/index.bundle:10:5)\n";
+    console.warn(hermes);
+    console.warn('Possible Unhandled Promise Rejection (id: 1):\n"plain string"\n');
+    console.warn('Promise rejection handled (id: 1)');
+    console.warn('unrelated warning', 42);
+    expect(warn).toHaveBeenCalledTimes(4);
+    expect(warn).toHaveBeenNthCalledWith(1, hermes);
+    expect(reports).toHaveLength(2);
+    expect(reports[0][1]).toEqual({ fatal: false, origin: 'unhandled-rejection' });
+    expect(reports[0][0]).toEqual({
+      name: 'TypeError',
+      message: 'undefined is not a function',
+      stack: 'TypeError: undefined is not a function\n    at load (http://localhost:8081/index.bundle:10:5)',
+    });
+    expect(reports[1][0]).toEqual({ name: 'Error', message: '"plain string"' });
+    expect(isRejectionWarning([hermes])).toBe(true);
+    expect(isRejectionWarning(['unrelated'])).toBe(false);
+    patches.forEach((p) => p.restore());
+    expect(console.warn).toBe(warn);
+    expect(console.error).toBe(error);
+  });
+
   it('browser: listens to error + unhandledrejection without touching other listeners', () => {
     const target = new EventTarget() as EventTarget & Record<string, unknown>;
     const reports: Array<[unknown, ErrorReport]> = [];

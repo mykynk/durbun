@@ -25,7 +25,11 @@ export interface DurbunOptions {
   captureConsole?: boolean | 'auto';
   /** Capture XMLHttpRequest / fetch traffic and apply mock rules (default true). */
   captureNetwork?: boolean;
-  /** Report uncaught errors and unhandled promise rejections (default true). */
+  /**
+   * Report uncaught errors and unhandled promise rejections (default true). In React Native, rejections are
+   * picked up from the dev-mode warning React Native's own rejection tracker prints (it does not track them
+   * in release builds); browsers use `unhandledrejection`, Node the uncaught-exception monitor.
+   */
   captureErrors?: boolean;
   /** Send JS heap / FPS samples (default true). */
   captureMetrics?: boolean;
@@ -40,6 +44,11 @@ export interface DurbunOptions {
   device?: Partial<DeviceHints>;
   /** Requests never captured or mocked (substring or RegExp). The desktop and the Metro dev server are always ignored. */
   ignoreUrls?: Array<string | RegExp>;
+  /**
+   * Header names (case-insensitive) whose values are shown as `••••` in captured requests and responses,
+   * e.g. `['Authorization', 'Cookie']`. The real request is unchanged. Default none.
+   */
+  redactHeaders?: string[];
   /** WebSocket implementation for runtimes without a global one (e.g. Node < 22: `import WebSocket from 'ws'`). */
   WebSocket?: unknown;
   /** Print SDK diagnostics to the console (default false). */
@@ -58,6 +67,8 @@ export interface ResolvedOptions {
   appVersion?: string;
   device?: Partial<DeviceHints>;
   ignoreUrls: Array<string | RegExp>;
+  /** Lower-cased. */
+  redactHeaders: string[];
   WebSocket?: WebSocketConstructor;
   debug: boolean;
 }
@@ -116,6 +127,9 @@ export function resolveOptions(options: DurbunOptions, runtime: Runtime): Resolv
     appVersion: typeof options.appVersion === 'string' && options.appVersion ? options.appVersion : undefined,
     device: options.device && typeof options.device === 'object' ? options.device : undefined,
     ignoreUrls: ignore,
+    redactHeaders: Array.isArray(options.redactHeaders)
+      ? options.redactHeaders.filter((h): h is string => typeof h === 'string' && h.length > 0).map((h) => h.toLowerCase())
+      : [],
     WebSocket: typeof options.WebSocket === 'function' ? (options.WebSocket as WebSocketConstructor) : undefined,
     debug: options.debug === true,
   };

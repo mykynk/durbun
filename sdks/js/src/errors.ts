@@ -1,12 +1,15 @@
 /**
  * Uncaught error capture without changing the app's behavior:
  *  - React Native: `ErrorUtils.setGlobalHandler`, chained to the previous handler (RedBox/LogBox/crash);
+ *    unhandled promise rejections through the warning React Native's own rejection tracker prints in dev
+ *    ("Possible unhandled promise rejection (id: N): …", JSC and Hermes) — the tracker is left untouched,
+ *    so LogBox keeps showing it;
  *  - browsers: `error` + `unhandledrejection` listeners on the global object;
  *  - Node: `uncaughtExceptionMonitor` (observes, never swallows — covers unhandled rejections in the
  *    default `throw` mode too).
  */
 import type { Runtime } from './env.js';
-import type { Patch } from './patch.js';
+import { patchMethod, type Patch } from './patch.js';
 import type { AnyRecord } from './util.js';
 
 export type ErrorOrigin = 'uncaught' | 'unhandled-rejection';
@@ -30,8 +33,54 @@ function guard(fn: () => void): void {
   }
 }
 
+/** React Native's rejection tracker warning (`promiseRejectionTrackingOptions`; older versions capitalize it). */
+const RN_REJECTION = /^Possible unhandled promise rejection \(id: (\d+)\):\r?\n?/i;
+
+/** True for the console line React Native prints for an unhandled rejection (reported as an error instead). */
+export function isRejectionWarning(args: unknown[]): boolean {
+  return typeof args[0] === 'string' && RN_REJECTION.test(args[0]);
+}
+
+/**
+ * The rejection as an error-like value, rebuilt from React Native's warning text:
+ * `Possible unhandled promise rejection (id: 0):\n<String(reason) or pretty value>\n<stack>`.
+ */
+export function rejectionFromWarning(text: string): { name: string; message: string; stack?: string } | undefined {
+  const head = RN_REJECTION.exec(text);
+  if (!head) return undefined;
+  const body = text.slice(head[0].length).replace(/\s+$/, '');
+  const newline = body.indexOf('\n');
+  const first = newline < 0 ? body : body.slice(0, newline);
+  const rest = newline < 0 ? '' : body.slice(newline + 1);
+  const typed = /^([A-Za-z_$][\w$]*): ([\s\S]*)$/.exec(first);
+  if (typed && /(Error|Exception)$/.test(typed[1])) {
+    // An Error: `rest` is its stack (Hermes and JSC stacks start with the "Name: message" line or a frame).
+    const stack = rest ? (rest.indexOf(first) === 0 ? rest : `${first}\n${rest}`) : undefined;
+    return { name: typed[1], message: typed[2], ...(stack ? { stack } : {}) };
+  }
+  // Not an Error (a string, an object…): no stack, the whole value is the message.
+  return { name: 'Error', message: body };
+}
+
 export function installErrorHandlers(host: ErrorHost, runtime: Runtime, target: AnyRecord): Patch[] {
   const patches: Patch[] = [];
+
+  if (runtime === 'react-native' && target.console && typeof target.console === 'object') {
+    for (const method of ['warn', 'error'] as const) {
+      const patch = patchMethod<(...args: unknown[]) => unknown>(target.console as AnyRecord, method, (original, isActive) =>
+        function durbunRejectionWatch(this: unknown, ...args: unknown[]) {
+          if (isActive() && isRejectionWarning(args)) {
+            guard(() => {
+              const rejection = rejectionFromWarning(args[0] as string);
+              if (rejection) host.reportError(rejection, { fatal: false, origin: 'unhandled-rejection' });
+            });
+          }
+          return original.apply(this, args);
+        },
+      );
+      if (patch) patches.push(patch);
+    }
+  }
 
   const errorUtils = target.ErrorUtils as AnyRecord | undefined;
   if (errorUtils && typeof errorUtils.setGlobalHandler === 'function' && typeof errorUtils.getGlobalHandler === 'function') {

@@ -4,8 +4,10 @@
  * captured by the XHR patch. Even if a non-flagged polyfill on XHR slips through, `fetchGuard` makes the
  * XHR patch ignore the XHR created inside our fetch call, so nothing is reported twice.
  *
- * Bodies are read from `response.clone()` (a tee), never from the app's own stream; reading stops at the
- * body limit so a large download is not pulled further than the app itself would.
+ * Bodies are read from `response.clone()` / `request.clone()` (a tee), never from the app's own stream;
+ * reading stops at the body limit so a large body is not pulled further than the app itself would.
+ * Streams that never end on their own (SSE, NDJSON, gRPC, media) are reported as soon as the headers
+ * arrive, with their size only.
  */
 import { bodyFromBytes, captureRequestBody, inferContentType, utf8Encode, base64Decode, type BodyConfig } from './body.js';
 import { findHeader, headersFromInit } from './headers.js';
@@ -225,12 +227,30 @@ async function readStreamPrefix(stream: AnyRecord, max: number): Promise<{ bytes
   return { bytes, total, complete };
 }
 
+/** Content types of responses that stay open (same list as the Android SDK). */
+const STREAMING_TYPES = ['text/event-stream', 'application/x-ndjson', 'application/stream+json', 'application/grpc', 'multipart/x-mixed-replace', 'video/', 'audio/'];
+
+export function isStreamingContentType(contentType: string | undefined): boolean {
+  if (!contentType) return false;
+  const ct = contentType.trim().toLowerCase();
+  return STREAMING_TYPES.some((t) => ct.startsWith(t));
+}
+
+function declaredLength(headers: Header[]): number | undefined {
+  const lengthHeader = Number(findHeader(headers, 'content-length'));
+  return isFinite(lengthHeader) && lengthHeader >= 0 ? lengthHeader : undefined;
+}
+
+/** Size-only body (`data` empty, `truncated`) when the length is known. */
+function sizeOnly(declared: number | undefined): WireBody | undefined {
+  return declared ? { encoding: 'utf8', data: '', size: declared, truncated: true } : undefined;
+}
+
 /** Response body from a clone; resolves when fully read (or the limit was reached). */
 async function captureResponseBody(response: AnyRecord, headers: Header[], cfg: BodyConfig): Promise<WireBody | undefined> {
   const contentType = findHeader(headers, 'content-type');
-  const lengthHeader = Number(findHeader(headers, 'content-length'));
-  const declared = isFinite(lengthHeader) && lengthHeader >= 0 ? lengthHeader : undefined;
-  if (!cfg.captureBodies) return declared ? { encoding: 'utf8', data: '', size: declared, truncated: true } : undefined;
+  const declared = declaredLength(headers);
+  if (!cfg.captureBodies || isStreamingContentType(contentType)) return sizeOnly(declared);
   let clone: AnyRecord;
   try {
     clone = response.clone();
@@ -257,10 +277,24 @@ async function captureResponseBody(response: AnyRecord, headers: Header[], cfg: 
 async function requestBodyFrom(info: RequestInfo, cfg: BodyConfig): Promise<WireBody | undefined> {
   const contentType = findHeader(info.headers, 'content-type') || inferContentType(info.body);
   if (info.bodyFromRequest) {
-    if (!cfg.captureBodies) return undefined;
+    const declared = declaredLength(info.headers);
+    if (!cfg.captureBodies) return sizeOnly(declared);
     try {
-      const ab: ArrayBuffer = await info.bodyFromRequest.clone().arrayBuffer();
-      return ab.byteLength ? bodyFromBytes(new Uint8Array(ab), contentType, cfg) : undefined;
+      const clone = info.bodyFromRequest.clone();
+      if (clone.body && typeof clone.body.getReader === 'function') {
+        // Only a prefix of the clone: a large (or streaming) upload is never read whole for the capture.
+        const { bytes, total, complete } = await readStreamPrefix(clone.body, Math.max(0, cfg.maxBodyBytes));
+        if (total === 0 && complete) return undefined;
+        const body = bodyFromBytes(bytes, contentType, cfg, complete ? total : Math.max(declared || 0, total));
+        if (!complete) body.truncated = true;
+        return body;
+      }
+      // No stream API on this Request: its body is in-memory data (streamed uploads need streams).
+      if (typeof clone.arrayBuffer === 'function') {
+        const ab: ArrayBuffer = await clone.arrayBuffer();
+        return ab.byteLength ? bodyFromBytes(new Uint8Array(ab), contentType, cfg) : undefined;
+      }
+      return sizeOnly(declared);
     } catch {
       return undefined;
     }

@@ -101,7 +101,7 @@ Durbun.addAction({ id: 'app.mockLocation', label: 'Sahte konum', kind: 'toggle',
 | **SDK logları** | `Durbun.log/debug/info/warn/error`, `Durbun.event` |
 | **Ağ** | `XMLHttpRequest` üzerinden giden her şey: RN `fetch`, axios, diğerleri. Yöntem, URL, başlıklar, istek/yanıt gövdeleri (metin/JSON düz, ikili veri base64, FormData alan özeti, Blob), durum kodu, süre (bekleme / indirme), hatalar, zaman aşımları, iptaller. Tarayıcı/Node'da yerel `fetch` de ayrıca yakalanır; her istek **bir kez** raporlanır. Gövde sınırı Dürbün ayarlarından gelir (varsayılan 1 MB). Metro ve Dürbün'ün kendi trafiği yakalanmaz. |
 | **Mock'lar** | Dürbün'ün Mock'lar sekmesindeki kurallar: *sahte yanıt* (ağa hiç çıkmadan), *gecikme* (sonra gerçek istek; uygulamanın kendi zaman aşımı geçerlidir), *hata* (platformun doğal hatası: RN'de `Network request failed`). |
-| **Hatalar** | Yakalanmamış hatalar (`ErrorUtils`, önceki işleyici zinciri korunur): ölümcül olanlar **çökme** satırı olarak; web'de `error` + `unhandledrejection`, Node'da `uncaughtExceptionMonitor`. |
+| **Hatalar** | Yakalanmamış hatalar (`ErrorUtils`, önceki işleyici zinciri korunur): ölümcül olanlar **çökme** satırı olarak; React Native'de yakalanmamış promise reddi (RN'in geliştirme modunda bastığı uyarıdan, LogBox aynen gösterir); web'de `error` + `unhandledrejection`, Node'da `uncaughtExceptionMonitor`. |
 | **Performans** | JS heap (Hermes), JS iş parçacığı FPS'i ve takılan kare sayısı (RN perf monitor'deki "JS FPS"). |
 | **Eylemler** | Geliştirme modunda "Reload JS" ve "Open dev menu" butonları + `Durbun.addAction` ile sizinkiler. |
 
@@ -122,6 +122,7 @@ yakalanmaz. Uygulamanın stdout'u ve sistem logları ise SDK olmadan da Dürbün
 | `appId` / `appName` / `appVersion` | otomatik | Paket adı / görünen ad. RN'de Metro paket adresinden ve `AppRegistry`'den, Expo'da `expo-application`'dan okunur. Mock kuralları uygulama kimliğine göre filtrelenir. |
 | `device` | otomatik | Örn. `{ name: "Yusuf'un iPhone'u" }` |
 | `ignoreUrls` | `[]` | Hiç yakalanmayacak/mocklanmayacak URL'ler (metin parçası veya RegExp). |
+| `redactHeaders` | `[]` | Değeri Dürbün'de `••••` olarak görünecek başlıklar (büyük/küçük harf duyarsız), ör. `['Authorization', 'Cookie']`. Sunucuya giden istek değişmez. |
 | `WebSocket` | global | Global WebSocket olmayan ortamlar için uygulama. |
 | `debug` | `false` | SDK tanılama mesajlarını konsola yazar. |
 
@@ -220,7 +221,7 @@ the row's tag chip.
 | **SDK logs** | `Durbun.log/debug/info/warn/error`, `Durbun.event`. |
 | **Network** | Everything on `XMLHttpRequest` — RN `fetch`, axios, …: method, URL, headers, request/response bodies (text/JSON as text, binary as base64, FormData field summary, Blobs), status, timings (wait / receive), errors, timeouts and cancellations. Native `fetch` in browsers/Node is captured too; each request is reported **once**. Body limits come from Dürbün's settings (default 1 MB). Metro's and Dürbün's own traffic is ignored. |
 | **Mocks** | Rules from Dürbün's Mocks tab: *respond* (never hits the network), *delay* (then the real request; the app's own XHR timeout still applies), *fail* (the platform's natural error — `Network request failed` on RN). |
-| **Errors** | Uncaught errors via `ErrorUtils` (previous handler kept) — fatal ones become **crash** rows; `error` + `unhandledrejection` on the web; `uncaughtExceptionMonitor` in Node. |
+| **Errors** | Uncaught errors via `ErrorUtils` (previous handler kept) — fatal ones become **crash** rows; unhandled promise rejections in React Native (from the warning RN prints in dev; LogBox still shows it); `error` + `unhandledrejection` on the web; `uncaughtExceptionMonitor` in Node. |
 | **Performance** | JS heap (Hermes), JS-thread FPS and janky frames (RN perf monitor's "JS FPS"). |
 | **Actions** | "Reload JS" and "Open dev menu" in dev builds, plus your own via `Durbun.addAction`. |
 
@@ -241,6 +242,7 @@ stdout and system logs still show up in Dürbün's device logs without any SDK.
 | `appId` / `appName` / `appVersion` | auto | RN: from Metro's bundle URL and `AppRegistry`; Expo: `expo-application`. Mock rules are scoped by app id. |
 | `device` | auto | e.g. `{ name: "Yusuf's iPhone" }` |
 | `ignoreUrls` | `[]` | Never captured or mocked (substring or RegExp). |
+| `redactHeaders` | `[]` | Header names (case-insensitive) shown as `••••` in Dürbün, e.g. `['Authorization', 'Cookie']`. The request sent to the server is unchanged. |
 | `WebSocket` | global | Implementation for runtimes without a global WebSocket. |
 | `debug` | `false` | Print SDK diagnostics to the console. |
 

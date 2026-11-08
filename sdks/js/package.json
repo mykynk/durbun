@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "description": "Dürbün SDK for React Native and JavaScript apps — streams logs, network and errors to the Dürbün desktop app",
   "license": "MIT",
+  "author": "Muhammed Yusuf Kaynak (https://github.com/mykynk)",
+  "homepage": "https://github.com/mykynk/durbun/tree/HEAD/sdks/js#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mykynk/durbun.git",
+    "directory": "sdks/js"
+  },
+  "bugs": {
+    "url": "https://github.com/mykynk/durbun/issues"
+  },
   "type": "module",
   "main": "./dist/cjs/index.js",
   "module": "./dist/index.js",
@@ -23,8 +33,19 @@
     "./package.json": "./package.json"
   },
   "sideEffects": false,
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "LICENSE"],
   "keywords": ["react-native", "logging", "network", "debugger", "inspector", "durbun"],
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "react-native": "*"
+  },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    }
+  },
   "scripts": {
     "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && tsc -p tsconfig.build.cjs.json && node scripts/postbuild.mjs",
     "prepack": "npm run build",

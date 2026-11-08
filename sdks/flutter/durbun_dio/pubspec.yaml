@@ -4,7 +4,7 @@ description: >-
   bypass dart:io (NativeAdapter, cronet_http) and applies the desktop's mocks.
 version: 0.1.0
 homepage: https://github.com/mykynk/durbun
-repository: https://github.com/mykynk/durbun/tree/main/sdks/flutter/durbun_dio
+repository: https://github.com/mykynk/durbun/tree/HEAD/sdks/flutter/durbun_dio
 issue_tracker: https://github.com/mykynk/durbun/issues
 topics:
   - dio

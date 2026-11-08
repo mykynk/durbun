@@ -45,6 +45,12 @@ export function startHttpServer(): Promise<TestServer> {
         const n = Number(url.searchParams.get('n') || '1000');
         res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': String(n) });
         res.end('a'.repeat(n));
+      } else if (route === '/sse') {
+        // An event stream that stays open (the client closes it).
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+        res.write('data: merhaba\n\n');
+        const timer = setInterval(() => res.write(': ping\n\n'), 200);
+        res.on('close', () => clearInterval(timer));
       } else if (route === '/nocontent') {
         res.writeHead(204);
         res.end();

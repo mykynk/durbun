@@ -62,6 +62,17 @@ describe('fetch capture', () => {
     expect(done.mocked).toBeUndefined();
   });
 
+  it('redactHeaders masks the values sent to the desktop, not the ones sent to the server', async () => {
+    const d = await start({}, { redactHeaders: ['Authorization', 'set-cookie'] });
+    const res = await fetch(`${server.url}/users`, { headers: { Authorization: 'Bearer secret', 'X-Trace': 't-1' } });
+    await res.text();
+    const { req, done } = await exchange(d, '/users');
+    expect(req.headers).toContainEqual(['Authorization', '••••']);
+    expect(req.headers).toContainEqual(['X-Trace', 't-1']);
+    expect(server.hits[server.hits.length - 1]!.headers.authorization).toBe('Bearer secret');
+    expect(done.type).toBe('net.response');
+  });
+
   it('captures request bodies: JSON string, URLSearchParams, Blob, ArrayBuffer, Request objects', async () => {
     const d = await start();
     const json = JSON.stringify({ name: 'Ayşe', items: [1, 2] });
@@ -80,6 +91,30 @@ describe('fetch capture', () => {
     const fromRequest = await exchange(d, 'k=request');
     expect(fromRequest.req).toMatchObject({ method: 'POST', body: { encoding: 'utf8', data: 'from request' } });
     expect(server.hits.find((h) => h.path.includes('k=request'))?.body.toString()).toBe('from request');
+  });
+
+  it('reads only a capped prefix of a Request object body', async () => {
+    const d = await start({ config: { maxBodyBytes: 100 } });
+    const payload = 'x'.repeat(5000);
+    await (await fetch(new Request(`${server.url}/echo?k=large-request`, { method: 'POST', body: payload, headers: { 'content-type': 'text/plain' } }))).text();
+    const { req } = await exchange(d, 'k=large-request');
+    expect(req.body).toMatchObject({ encoding: 'utf8', data: 'x'.repeat(100), truncated: true });
+    expect(req.body.size).toBeGreaterThanOrEqual(100);
+    expect(server.hits.find((h) => h.path.includes('k=large-request'))?.body.toString()).toBe(payload);
+  });
+
+  it('reports event streams when the headers arrive, without waiting for the stream to end', async () => {
+    const d = await start();
+    const controller = new AbortController();
+    const res = await fetch(`${server.url}/sse`, { signal: controller.signal });
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    const first = await reader.read();
+    expect(new TextDecoder().decode(first.value)).toContain('data: merhaba');
+    const { done } = await exchange(d, '/sse');
+    expect(done).toMatchObject({ type: 'net.response', status: 200 });
+    expect(done.body).toBeUndefined();
+    controller.abort();
+    await reader.cancel().catch(() => undefined);
   });
 
   it('captures binary responses as base64 and HTTP errors as responses', async () => {

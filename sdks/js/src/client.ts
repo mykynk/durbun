@@ -8,7 +8,7 @@ import { utf8Length, type BodyConfig } from './body.js';
 import { Connection, DEFAULT_TIMING, type ConnectionTiming, type WebSocketConstructor } from './connection.js';
 import { installConsolePatch, quietly, type ConsoleMethod } from './console.js';
 import { describeEnvironment, detectRuntime, devServerOrigin, type EnvironmentInfo, type Runtime } from './env.js';
-import { installErrorHandlers, type ErrorReport } from './errors.js';
+import { installErrorHandlers, isRejectionWarning, type ErrorReport } from './errors.js';
 import { installFetchPatch } from './fetch.js';
 import { formatArgs } from './format.js';
 import { errorInfo, isErrorLike, previewValue, toJsonSafe } from './jsonSafe.js';
@@ -56,6 +56,8 @@ interface Buffered {
 const FLUSH_CHUNK = 250;
 /** Pause sending while the socket has this much unsent data. */
 const HIGH_WATER_BYTES = 4 * 1024 * 1024;
+/** Shown instead of a `redactHeaders` value (the Android, iOS and Flutter SDKs use the same marker). */
+const REDACTED = '••••';
 /** Total size of buffered messages kept while disconnected. */
 const MAX_BUFFERED_CHARS = 32 * 1024 * 1024;
 
@@ -261,6 +263,8 @@ export class DurbunClient implements NetworkHost {
 
   onConsole(method: ConsoleMethod, level: LogLevel, args: unknown[]): void {
     if (!this.started) return;
+    // React Native's unhandled-rejection warning is reported once, as an error (see errors.ts).
+    if (this.opts.captureErrors && this.runtime === 'react-native' && (method === 'warn' || method === 'error') && isRejectionWarning(args)) return;
     let rest = args;
     if (method === 'assert') {
       if (args[0]) return;
@@ -348,6 +352,7 @@ export class DurbunClient implements NetworkHost {
   emit(message: SdkToServer, consoleLevel?: LogLevel): void {
     if (!this.started) return;
     quietly(() => {
+      message = this.redacted(message);
       let text: string;
       try {
         text = JSON.stringify(message);
@@ -368,6 +373,15 @@ export class DurbunClient implements NetworkHost {
       this.buffer.push({ text, consoleLevel }, text.length);
       if (conn && conn.isActive) this.scheduleFlush(conn.bufferedAmount >= HIGH_WATER_BYTES ? 50 : 0);
     });
+  }
+
+  /** `redactHeaders` applied to a captured request / response (same marker as the native SDKs). */
+  private redacted(message: SdkToServer): SdkToServer {
+    const names = this.opts.redactHeaders;
+    if (names.length === 0 || (message.type !== 'net.request' && message.type !== 'net.response')) return message;
+    const headers = message.headers;
+    if (!headers || !headers.some(([name]) => names.indexOf(String(name).toLowerCase()) >= 0)) return message;
+    return { ...message, headers: headers.map(([name, value]) => [name, names.indexOf(String(name).toLowerCase()) >= 0 ? REDACTED : value]) };
   }
 
   /** Oversized frame (huge body limit configured): keep the metadata, drop the payload. */
