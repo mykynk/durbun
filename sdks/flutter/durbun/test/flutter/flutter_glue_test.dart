@@ -233,5 +233,8 @@ void main() {
       await desktop.close();
     });
     expect(FlutterError.onError, isNot(same(handler)), reason: 'previous handler restored');
+    // The panel store batches its listeners behind a short timer; whether the
+    // error above started it in the fake zone depends on timing. Drain it.
+    await tester.pump(const Duration(milliseconds: 250));
   });
 }
