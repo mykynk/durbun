@@ -308,7 +308,8 @@ class ChartCard extends StatelessWidget {
                   marks: marks,
                   markColor: markColor,
                   grid: c.border,
-                  text: c.textSubtle),
+                  text: c.textSubtle,
+                  scaler: MediaQuery.textScalerOf(context)),
             ),
           ),
         ],
@@ -327,7 +328,8 @@ class _ChartPainter extends CustomPainter {
       required this.marks,
       required this.markColor,
       required this.grid,
-      required this.text});
+      required this.text,
+      this.scaler = TextScaler.noScaling});
 
   final TextStyle label;
   final List<ChartSeries> series;
@@ -339,6 +341,9 @@ class _ChartPainter extends CustomPainter {
   final Color grid;
   final Color text;
 
+  /// The phone's text size: the axis labels follow it like other text.
+  final TextScaler scaler;
+
   @override
   void paint(Canvas canvas, Size size) {
     var top = minTop;
@@ -348,7 +353,16 @@ class _ChartPainter extends CustomPainter {
       }
     }
     top = top * 1.1;
-    const left = 30.0;
+    final labels = <TextPainter>[
+      for (var i = 0; i <= 2; i++)
+        TextPainter(
+          text: TextSpan(text: (top * (1 - i / 2)).toStringAsFixed(0), style: label),
+          textDirection: TextDirection.ltr,
+          textScaler: scaler,
+        )..layout(),
+    ];
+    // The gutter grows with the labels (large text, four-digit values).
+    final left = math.max(30.0, labels.map((tp) => tp.width).reduce(math.max) + 6);
     final w = size.width - left;
     final h = size.height - 2;
     final gridPaint = Paint()
@@ -357,13 +371,10 @@ class _ChartPainter extends CustomPainter {
     for (var i = 0; i <= 2; i++) {
       final y = h * i / 2;
       canvas.drawLine(Offset(left, y), Offset(size.width, y), gridPaint);
-      final tp = TextPainter(
-        text: TextSpan(
-            text: (top * (1 - i / 2)).toStringAsFixed(0), style: label),
-        textDirection: TextDirection.ltr,
-      )..layout();
+      final tp = labels[i];
       tp.paint(canvas,
-          Offset(0, (y - tp.height / 2).clamp(0, size.height - tp.height)));
+          Offset(0, (y - tp.height / 2).clamp(0, math.max(0.0, size.height - tp.height))));
+      tp.dispose();
     }
     final g = guide;
     if (g != null && g <= top) {

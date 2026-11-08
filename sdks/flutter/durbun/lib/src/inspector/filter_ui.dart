@@ -98,13 +98,19 @@ class ActiveChip extends StatelessWidget {
         child: InkWell(
           customBorder: const StadiumBorder(),
           onTap: onRemove,
+          // A long tag shrinks with an ellipsis instead of overflowing
+          // (the filter sheet's Wrap, large text).
           child: Container(
             height: 30,
+            constraints: const BoxConstraints(maxWidth: 260),
             padding: const EdgeInsets.only(left: 10, right: 6),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Text(label,
+                Flexible(
+                  child: Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: mono
                         ? DurbunType.monoStyle(
                             size: 11.5,
@@ -116,6 +122,7 @@ class ActiveChip extends StatelessWidget {
                             color: fg,
                             fontWeight: FontWeight.w600,
                             height: 1.2)),
+                ),
                 const SizedBox(width: 3),
                 Icon(Icons.close_rounded, size: 14, color: fg.withValues(alpha: 0.8)),
               ],

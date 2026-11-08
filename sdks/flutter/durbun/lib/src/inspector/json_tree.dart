@@ -11,9 +11,17 @@ import 'text_match.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
+/// Containers nested deeper than this are shown closed and cannot open
+/// (and are not searched): the walks below recurse once per level, and a
+/// hostile or broken body nested thousands deep would overflow the stack.
+const int kMaxJsonDepth = 200;
+
 /// One visible line of the tree.
 class JsonLine {
   const JsonLine({required this.depth, required this.path, this.key, this.index, required this.value, required this.container, required this.expanded});
+
+  /// A container past [kMaxJsonDepth]: summarised, never opened.
+  bool get tooDeep => container && depth >= kMaxJsonDepth;
 
   final int depth;
   final String path;
@@ -36,7 +44,10 @@ List<JsonLine> flattenJson(
   final out = <JsonLine>[];
   void walk(Object? v, int depth, String path, String? key, int? index) {
     final container = v is Map || v is List;
-    final open = container && !collapsed.contains(path) && (depth < autoDepth || opened.contains(path));
+    final open = container &&
+        depth < kMaxJsonDepth &&
+        !collapsed.contains(path) &&
+        (depth < autoDepth || opened.contains(path));
     out.add(JsonLine(depth: depth, path: path, key: key, index: index, value: v, container: container, expanded: open));
     if (!open) return;
     if (v is Map) {
@@ -59,7 +70,7 @@ List<JsonLine> flattenJson(
 /// fold every value again.
 class JsonSearchIndex {
   JsonSearchIndex(Object? root) {
-    void walk(Object? v, String path, String? key, int parent) {
+    void walk(Object? v, String path, String? key, int parent, int depth) {
       final me = _paths.length;
       final container = v is Map || v is List;
       _paths.add(path);
@@ -67,18 +78,19 @@ class JsonSearchIndex {
       _container.add(container);
       _key.add(key == null ? null : foldText(key));
       _leaf.add(container ? null : foldText('$v'));
+      if (depth >= kMaxJsonDepth) return;
       if (v is Map) {
         for (final e in v.entries) {
-          walk(e.value, '$path.${e.key}', '${e.key}', me);
+          walk(e.value, '$path.${e.key}', '${e.key}', me, depth + 1);
         }
       } else if (v is List) {
         for (var i = 0; i < v.length; i++) {
-          walk(v[i], '$path[$i]', null, me);
+          walk(v[i], '$path[$i]', null, me, depth + 1);
         }
       }
     }
 
-    walk(root, r'$', null, -1);
+    walk(root, r'$', null, -1, 0);
   }
 
   final List<String> _paths = <String>[];
@@ -113,21 +125,22 @@ Set<String> pathsToMatches(Object? root, String q) => JsonSearchIndex(root).path
 /// Every container path (for "expand all").
 Set<String> allContainerPaths(Object? root) {
   final out = <String>{};
-  void walk(Object? v, String path) {
+  void walk(Object? v, String path, int depth) {
+    if (v is! Map && v is! List) return;
+    out.add(path);
+    if (depth >= kMaxJsonDepth) return;
     if (v is Map) {
-      out.add(path);
       for (final e in v.entries) {
-        walk(e.value, '$path.${e.key}');
+        walk(e.value, '$path.${e.key}', depth + 1);
       }
     } else if (v is List) {
-      out.add(path);
       for (var i = 0; i < v.length; i++) {
-        walk(v[i], '$path[$i]');
+        walk(v[i], '$path[$i]', depth + 1);
       }
     }
   }
 
-  walk(root, r'$');
+  walk(root, r'$', 0);
   return out;
 }
 
@@ -212,7 +225,7 @@ class _JsonTreeViewState extends State<JsonTreeView> {
       final n = v is Map ? v.length : (v as List).length;
       final open = v is Map ? '{' : '[';
       final close = v is Map ? '}' : ']';
-      out.add((l.expanded ? open : '$open $n $close', base.copyWith(color: c.textMuted)));
+      out.add((l.expanded ? open : (l.tooDeep ? '$open $n … $close' : '$open $n $close'), base.copyWith(color: c.textMuted)));
     } else {
       final (text, color) = switch (v) {
         null => ('null', c.jsonNull),
@@ -266,7 +279,7 @@ class _JsonTreeViewState extends State<JsonTreeView> {
         final l = _lines[i];
         final text = Text.rich(spans, maxLines: 1, softWrap: false, overflow: TextOverflow.clip);
         final row = Row(children: <Widget>[const SizedBox(width: 14), Expanded(child: text)]);
-        if (l.container && !first) return row;
+        if ((l.container && !first) || l.tooDeep) return row;
         // A tap on a value copies it (a string without its quotes).
         if (!l.container) {
           return GestureDetector(

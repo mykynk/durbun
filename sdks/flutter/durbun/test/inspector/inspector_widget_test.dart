@@ -80,8 +80,13 @@ void main() {
     expect(find.byType(InspectorBubble), findsNothing, reason: 'no bubble by default');
     await shake(tester);
     expect(find.text('/v1/orders'), findsOneWidget, reason: 'the panel opens on Network');
+    expect(listenCalls.last, false, reason: 'no sensor while the panel is open');
     await shake(tester);
     expect(find.text('/v1/orders'), findsOneWidget, reason: 'a second shake does not stack another panel');
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+    expect(find.text('/v1/orders'), findsNothing);
+    expect(listenCalls.last, true, reason: 'listening again once the panel is closed');
 
     for (final st in [AppLifecycleState.inactive, AppLifecycleState.hidden, AppLifecycleState.paused]) {
       tester.binding.handleAppLifecycleStateChanged(st);

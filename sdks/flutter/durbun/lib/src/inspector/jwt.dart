@@ -19,10 +19,7 @@ class DecodedJwt {
   /// The token without a `Bearer ` prefix.
   final String token;
 
-  DateTime? time(String claim) {
-    final v = claims[claim];
-    return v is num ? DateTime.fromMillisecondsSinceEpoch((v * 1000).round()) : null;
-  }
+  DateTime? time(String claim) => jwtTime(claims[claim]);
 
   DateTime? get expires => time('exp');
 }
@@ -48,6 +45,22 @@ DecodedJwt? decodeJwt(String value) {
     return null;
   }
 }
+
+/// A NumericDate claim (seconds) as a time, or null when it is not a
+/// number or outside what [DateTime] holds (a token can carry anything).
+DateTime? jwtTime(Object? seconds) {
+  if (seconds is! num || !seconds.isFinite) return null;
+  final ms = seconds * 1000;
+  if (ms.abs() > 8.64e15) return null;
+  return DateTime.fromMillisecondsSinceEpoch(ms.round());
+}
+
+/// JSON that never throws: `1e400` decodes to infinity, which JSON cannot
+/// encode; such values are written as text.
+const JsonEncoder _json = JsonEncoder(_asText);
+const JsonEncoder _jsonPretty = JsonEncoder.withIndent('  ', _asText);
+
+Object? _asText(Object? v) => '$v';
 
 const Set<String> _timeClaims = <String>{'exp', 'iat', 'nbf', 'auth_time'};
 
@@ -81,12 +94,12 @@ class _JwtSheet extends StatelessWidget {
     final exp = jwt.expires;
     final expired = exp != null && exp.isBefore(now);
     String value(String key, Object? v) {
-      if (_timeClaims.contains(key) && v is num) {
-        final at = DateTime.fromMillisecondsSinceEpoch((v * 1000).round());
+      final at = _timeClaims.contains(key) ? jwtTime(v) : null;
+      if (at != null) {
         final span = t.spanShort(at.difference(now));
-        return '${_date(at)}\n${v.round()} · ${at.isAfter(now) ? t.inSpan(span) : t.spanAgo(span)}';
+        return '${_date(at)}\n${(v! as num).round()} · ${at.isAfter(now) ? t.inSpan(span) : t.spanAgo(span)}';
       }
-      return v is String ? v : jsonEncode(v);
+      return v is String ? v : _json.convert(v);
     }
 
     List<(String, String, Color?)> rows(Map<String, Object?> m) => <(String, String, Color?)>[
@@ -113,7 +126,7 @@ class _JwtSheet extends StatelessWidget {
                   ),
                 const Spacer(),
                 TextButton.icon(
-                  onPressed: () => copyText(context, const JsonEncoder.withIndent('  ').convert(<String, Object?>{'header': jwt.header, 'claims': jwt.claims})),
+                  onPressed: () => copyText(context, _jsonPretty.convert(<String, Object?>{'header': jwt.header, 'claims': jwt.claims})),
                   icon: Icon(Icons.copy_rounded, size: 15, color: c.textMuted),
                   label: Text(t.copyJson, style: TextStyle(color: c.textMuted, fontSize: 12.5)),
                 ),

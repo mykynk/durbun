@@ -84,23 +84,61 @@ TextSpan markLine(SearchLine line, List<(int, int)> ranges, (int, int)? current,
 /// A screen row: a piece [from]..[to] of logical line [line].
 typedef VisualRow = (int line, int from, int to);
 
-/// Cuts [lines] into rows of at most [charsFor] characters (monospace), one
-/// row for an empty line.
+/// Cuts [lines] into rows of at most [charsFor] columns (monospace), one
+/// row for an empty line. CJK, Hangul, full-width forms and emoji take two
+/// columns (the fallback font draws them about twice as wide), and a
+/// surrogate pair is never split, so no row is cut off on screen.
 List<VisualRow> wrapRows(List<SearchLine> lines, int Function(SearchLine line) charsFor) {
   final out = <VisualRow>[];
   for (var i = 0; i < lines.length; i++) {
-    final n = lines[i].text.length;
+    final text = lines[i].text;
+    final n = text.length;
     final w = charsFor(lines[i]);
-    if (n <= w) {
-      out.add((i, 0, n));
+    if (!_hasWide(text)) {
+      if (n <= w) {
+        out.add((i, 0, n));
+        continue;
+      }
+      for (var at = 0; at < n; at += w) {
+        out.add((i, at, at + w > n ? n : at + w));
+      }
       continue;
     }
-    for (var at = 0; at < n; at += w) {
-      out.add((i, at, at + w > n ? n : at + w));
+    var start = 0, cols = 0, at = 0;
+    while (at < n) {
+      final u = text.codeUnitAt(at);
+      final pair = u >= 0xD800 && u <= 0xDBFF && at + 1 < n;
+      final width = pair || _isWide(u) ? 2 : 1;
+      if (cols + width > w && at > start) {
+        out.add((i, start, at));
+        start = at;
+        cols = 0;
+      }
+      cols += width;
+      at += pair ? 2 : 1;
     }
+    out.add((i, start, n));
   }
   return out;
 }
+
+bool _hasWide(String text) {
+  for (var i = 0; i < text.length; i++) {
+    final u = text.codeUnitAt(i);
+    if (u >= 0x1100 && (_isWide(u) || (u >= 0xD800 && u <= 0xDBFF))) return true;
+  }
+  return false;
+}
+
+/// East Asian wide and full-width ranges of the Basic Multilingual Plane.
+bool _isWide(int u) =>
+    (u >= 0x1100 && u <= 0x115F) ||
+    (u >= 0x2E80 && u <= 0xA4CF) ||
+    (u >= 0xAC00 && u <= 0xD7A3) ||
+    (u >= 0xF900 && u <= 0xFAFF) ||
+    (u >= 0xFE30 && u <= 0xFE4F) ||
+    (u >= 0xFF00 && u <= 0xFF60) ||
+    (u >= 0xFFE0 && u <= 0xFFE6);
 
 /// The find bar: field, "3 / 12" (or "No match"), previous, next.
 class FindBar extends StatelessWidget {
@@ -204,6 +242,7 @@ class FindableLines extends StatefulWidget {
       this.padding = EdgeInsets.zero,
       this.actions = const <Widget>[],
       this.hint,
+      this.note,
       this.minChars = 2,
       this.debounce = const Duration(milliseconds: 200)});
 
@@ -219,6 +258,10 @@ class FindableLines extends StatefulWidget {
   final EdgeInsets padding;
   final List<Widget> actions;
   final String? hint;
+
+  /// A line under the find bar for the applied (folded) query and its
+  /// match count, or null (the code view: "only past the shown part").
+  final String? Function(String foldedQuery, int matches)? note;
 
   /// Shorter queries do not search (one letter matches almost everything).
   final int minChars;
@@ -253,6 +296,12 @@ class FindableLinesState extends State<FindableLines> {
   Object? _rowsKey;
   List<VisualRow> _rows = const <VisualRow>[];
   double _rowHeight = 18;
+
+  /// The deepest indent a row gets: JSON nested deeper than the screen is
+  /// wide keeps 20 characters of room instead of overflowing.
+  double _maxIndent = double.infinity;
+
+  double _indentOf(SearchLine l) => l.indent < _maxIndent ? l.indent : _maxIndent;
 
   /// The line of the selected match (tests).
   int? get currentLine => _occ.isEmpty ? null : _occ[_current].$1;
@@ -355,8 +404,9 @@ class FindableLinesState extends State<FindableLines> {
     _rowHeight = (tp.height + 2).ceilToDouble();
     tp.dispose();
     final avail = width - widget.padding.horizontal - widget.prefixWidth - 6;
+    _maxIndent = avail - 20 * charW > 0 ? avail - 20 * charW : 0;
     _rows = wrapRows(_lines, (l) {
-      final n = ((avail - l.indent) / charW).floor();
+      final n = ((avail - _indentOf(l)) / charW).floor();
       return n < 8 ? 8 : n;
     });
   }
@@ -387,6 +437,11 @@ class FindableLinesState extends State<FindableLines> {
           onNext: () => _step(1),
           trailing: widget.actions,
         ),
+        if (widget.note?.call(_applied, _occ.length) case final String note)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+            child: Callout(tone: CalloutTone.warning, title: note),
+          ),
         Expanded(
           child: LayoutBuilder(
             builder: (context, box) {
@@ -417,7 +472,7 @@ class FindableLinesState extends State<FindableLines> {
                                 width: 3)),
                       ),
                       child: Padding(
-                        padding: EdgeInsets.only(left: _lines[line].indent),
+                        padding: EdgeInsets.only(left: _indentOf(_lines[line])),
                         child: widget.rowBuilder(context, line, from == 0, spans),
                       ),
                     );

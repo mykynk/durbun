@@ -133,7 +133,10 @@ class DurbunColors {
     borderStrong: Color(0xFF2F3647),
     text: Color(0xFFE6E9F0),
     textMuted: Color(0xFF9AA3B5),
-    textSubtle: Color(0xFF6B7488),
+    // Darker / lighter than the desktop's token (6B7488 dark, 8A93A6
+    // light): small text on the phone needs 4.5:1 on every surface it
+    // sits on (bgApp, bgPanel, bgElevated / bgSunken).
+    textSubtle: Color(0xFF7D879B),
     textMeta: Color(0xFF858EA2),
     accent: Color(0xFF7C6CF2),
     accentSoft: Color(0x2E7C6CF2),
@@ -200,7 +203,7 @@ class DurbunColors {
     borderStrong: Color(0xFFCDD2DE),
     text: Color(0xFF161A23),
     textMuted: Color(0xFF5B6476),
-    textSubtle: Color(0xFF8A93A6),
+    textSubtle: Color(0xFF646D82),
     textMeta: Color(0xFF5D667A),
     accent: Color(0xFF5B4BE0),
     accentSoft: Color(0x1A5B4BE0),

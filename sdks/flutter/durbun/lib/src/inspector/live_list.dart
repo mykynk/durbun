@@ -4,7 +4,9 @@
 ///
 /// Freezing keeps a cut point (the newest arrival seq at that moment), not a
 /// copy of the list, so a filter or search changed while frozen still
-/// applies to what is shown.
+/// applies to what is shown. Rows the store's ring drops from the top while
+/// the list is frozen stay until it follows again, so the row being read
+/// does not slide away.
 library;
 
 import 'package:flutter/material.dart';
@@ -21,7 +23,8 @@ class LiveList<T> extends StatefulWidget {
       required this.itemBuilder,
       required this.newText,
       this.paused = false,
-      this.filterKey});
+      this.filterKey,
+      this.epoch});
 
   /// Oldest first.
   final List<T> items;
@@ -39,6 +42,9 @@ class LiveList<T> extends StatefulWidget {
   /// the newest line (unless paused), so the results are in view.
   final Object? filterKey;
 
+  /// Changes when the source is cleared: rows kept from before are let go.
+  final Object? epoch;
+
   @override
   State<LiveList<T>> createState() => _LiveListState<T>();
 }
@@ -49,6 +55,12 @@ class _LiveListState<T> extends State<LiveList<T>> {
   /// Items with a larger seq arrived after the freeze and are held back.
   int? _cutoff;
   bool _jumpScheduled = false;
+
+  /// Rows that left the top of [LiveList.items] while frozen (the ring was
+  /// full), still shown above the others so nothing moves.
+  List<T> _retained = <T>[];
+  List<T> _lastShown = <T>[];
+  static const int _maxRetained = 5000;
 
   bool get _following => _cutoff == null && !widget.paused;
 
@@ -74,7 +86,24 @@ class _LiveListState<T> extends State<LiveList<T>> {
     if (widget.paused && _cutoff == null) _cutoff = _newest(old.items);
     if (!widget.paused && old.paused && _atEnd()) _cutoff = null;
     if (widget.filterKey != old.filterKey && !widget.paused) _cutoff = null;
+    _retainEvicted(old);
     if (_following) _scheduleJump();
+  }
+
+  /// Keeps the rows shown last that are gone from the top of the new items.
+  void _retainEvicted(LiveList<T> old) {
+    if (_following || widget.filterKey != old.filterKey || widget.epoch != old.epoch) {
+      _retained = <T>[];
+      return;
+    }
+    if (identical(widget.items, old.items) || _lastShown.isEmpty) return;
+    final present = <Object>{for (final x in widget.items) widget.keyOf(x)};
+    final kept = <T>[];
+    for (final x in _lastShown) {
+      if (present.contains(widget.keyOf(x))) break;
+      kept.add(x);
+    }
+    _retained = kept.length > _maxRetained ? kept.sublist(kept.length - _maxRetained) : kept;
   }
 
   @override
@@ -119,13 +148,16 @@ class _LiveListState<T> extends State<LiveList<T>> {
   @override
   Widget build(BuildContext context) {
     final cut = _cutoff;
-    final shown = cut == null
+    if (_following) _retained = <T>[];
+    final live = cut == null
         ? widget.items
         : <T>[
             for (final x in widget.items)
               if (widget.seqOf(x) <= cut) x
           ];
-    final fresh = widget.items.length - shown.length;
+    final shown = _retained.isEmpty ? live : <T>[..._retained, ...live];
+    _lastShown = shown;
+    final fresh = widget.items.length - live.length;
     return Stack(
       children: <Widget>[
         ListView.builder(

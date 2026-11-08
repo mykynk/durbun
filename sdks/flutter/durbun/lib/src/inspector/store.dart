@@ -134,6 +134,12 @@ class InspectorBody {
 
   bool get isText => encoding == 'utf8';
 
+  /// [data] folded for search ([foldText]), computed on the first body
+  /// search and kept with the body (a list search runs again on every store
+  /// update; folding a large body each time froze the panel).
+  String get folded => _folded ??= foldText(data);
+  String? _folded;
+
   /// The text to show: pretty JSON when it is JSON. Computed once (the
   /// detail page rebuilds while other traffic arrives).
   String? get displayText =>
@@ -212,12 +218,25 @@ class InspectorCall {
   /// Bodies dropped to stay inside the store's byte budget.
   bool bodiesDropped = false;
 
+  /// The bodies as they arrived (a pending marker map with the captured
+  /// bytes, or a wire map), until they are resolved; then the resolved
+  /// [InspectorBody] alone is kept.
   Object? _rawRequestBody;
   Object? _rawResponseBody;
   InspectorBody? _requestBody;
   InspectorBody? _responseBody;
+  bool _requestResolved = false;
+  bool _responseResolved = false;
   InspectorBodyResolver? _resolver;
-  int _bodyCost = 0;
+
+  /// What each body counts against the store's budget: the captured bytes
+  /// until it is resolved, then the resolved text.
+  int _requestCost = 0;
+  int _responseCost = 0;
+  int get _bodyCost => _requestCost + _responseCost;
+
+  /// Tells the store a resolved body costs a different amount.
+  void Function(InspectorCall call, int delta)? _onCost;
 
   InspectorCallState get state => error != null
       ? InspectorCallState.failed
@@ -233,15 +252,44 @@ class InspectorCall {
       ? null
       : Duration(microseconds: ((endTs! - ts) * 1000).round());
 
-  Uri? get uri => Uri.tryParse(url);
+  /// Parsed once (rows, filters and the header badge read it on every
+  /// store update).
+  late final Uri? uri = Uri.tryParse(url);
 
-  InspectorBody? get requestBody => _requestBody ??= _resolve(_rawRequestBody);
+  /// The request body, decoded on first use (then the captured bytes are
+  /// let go).
+  InspectorBody? get requestBody {
+    if (!_requestResolved) {
+      _requestResolved = true;
+      _requestBody = _resolve(_rawRequestBody, request: true);
+    }
+    return _requestBody;
+  }
 
-  InspectorBody? get responseBody =>
-      _responseBody ??= _resolve(_rawResponseBody);
+  /// The response body, decoded on first use (then the captured bytes are
+  /// let go).
+  InspectorBody? get responseBody {
+    if (!_responseResolved) {
+      _responseResolved = true;
+      _responseBody = _resolve(_rawResponseBody, request: false);
+    }
+    return _responseBody;
+  }
 
   bool get hasRequestBody => _rawRequestBody != null || _requestBody != null;
   bool get hasResponseBody => _rawResponseBody != null || _responseBody != null;
+
+  /// The response body's size without decoding it (list rows): the
+  /// resolved body's, else the size the capture reported (for a body still
+  /// compressed, the compressed size).
+  int? get responseSize {
+    final b = _responseBody;
+    if (b != null) return b.size;
+    final raw = _rawResponseBody;
+    if (raw is! Map) return null;
+    final size = raw['size'];
+    return size is num ? size.toInt() : null;
+  }
 
   String? header(List<List<String>> headers, String name) {
     final lower = name.toLowerCase();
@@ -254,18 +302,35 @@ class InspectorCall {
   String? get requestContentType => header(requestHeaders, 'content-type');
   String? get responseContentType => header(responseHeaders, 'content-type');
 
-  InspectorBody? _resolve(Object? raw) {
+  InspectorBody? _resolve(Object? raw, {required bool request}) {
     if (raw is! Map) return null;
+    InspectorBody? body;
     if (raw[kPendingBodyMarker] == true) {
       final resolver = _resolver;
       if (resolver == null) return null;
       try {
-        return InspectorBody.fromWire(resolver(raw));
+        body = InspectorBody.fromWire(resolver(raw));
       } catch (_) {
         return null;
       }
+    } else {
+      body = InspectorBody.fromWire(raw);
     }
-    return InspectorBody.fromWire(raw);
+    if (body == null) return null;
+    // Only the resolved copy stays; the budget counts what is kept.
+    final cost = body.data.length;
+    final int delta;
+    if (request) {
+      _rawRequestBody = null;
+      delta = cost - _requestCost;
+      _requestCost = cost;
+    } else {
+      _rawResponseBody = null;
+      delta = cost - _responseCost;
+      _responseCost = cost;
+    }
+    if (delta != 0) _onCost?.call(this, delta);
+    return body;
   }
 
   void _dropBodies() {
@@ -273,7 +338,10 @@ class InspectorCall {
     _rawResponseBody = null;
     _requestBody = null;
     _responseBody = null;
-    _bodyCost = 0;
+    _requestResolved = true;
+    _responseResolved = true;
+    _requestCost = 0;
+    _responseCost = 0;
     bodiesDropped = true;
     revision++;
   }
@@ -331,12 +399,19 @@ class InspectorMetric {
 /// The on-device store behind the in-app inspector.
 class DurbunInspectorStore extends ChangeNotifier {
   DurbunInspectorStore({
-    this.maxLogs = 2000,
-    this.maxCalls = 300,
+    int maxLogs = kDefaultMaxLogs,
+    int maxCalls = kDefaultMaxCalls,
     this.maxMetrics = 120,
-    this.maxBodyBytes = 24 * 1024 * 1024,
+    int maxBodyBytes = kDefaultMaxBodyBytes,
     this.notifyDelay = const Duration(milliseconds: 200),
-  });
+  })  : _maxLogs = maxLogs < 1 ? 1 : maxLogs,
+        _maxCalls = maxCalls < 1 ? 1 : maxCalls,
+        _maxBodyBytes = maxBodyBytes < 0 ? 0 : maxBodyBytes;
+
+  /// Default sizes of the rings ([DurbunInspector] can change them).
+  static const int kDefaultMaxLogs = 2000;
+  static const int kDefaultMaxCalls = 1000;
+  static const int kDefaultMaxBodyBytes = 24 * 1024 * 1024;
 
   /// The store the SDK feeds (created on first use).
   static DurbunInspectorStore get instance =>
@@ -349,10 +424,42 @@ class DurbunInspectorStore extends ChangeNotifier {
   @visibleForTesting
   static set instance(DurbunInspectorStore store) => _instance = store;
 
-  final int maxLogs;
-  final int maxCalls;
+  /// Log lines kept; the oldest go first.
+  int get maxLogs => _maxLogs;
+  int _maxLogs;
+  set maxLogs(int value) {
+    final v = value < 1 ? 1 : value;
+    if (v == _maxLogs) return;
+    _maxLogs = v;
+    _trimLogs();
+    _scheduleNotify();
+  }
+
+  /// Requests kept. Requests to hosts outside [defaultHosts] (hidden in the
+  /// panel) go first, then the oldest.
+  int get maxCalls => _maxCalls;
+  int _maxCalls;
+  set maxCalls(int value) {
+    final v = value < 1 ? 1 : value;
+    if (v == _maxCalls) return;
+    _maxCalls = v;
+    _trimCalls();
+    _scheduleNotify();
+  }
+
+  /// Bytes of bodies kept (as text); past it the oldest bodies are dropped
+  /// (other hosts' first), their requests stay.
+  int get maxBodyBytes => _maxBodyBytes;
+  int _maxBodyBytes;
+  set maxBodyBytes(int value) {
+    final v = value < 0 ? 0 : value;
+    if (v == _maxBodyBytes) return;
+    _maxBodyBytes = v;
+    _enforceBodyBudget();
+    _scheduleNotify();
+  }
+
   final int maxMetrics;
-  final int maxBodyBytes;
 
   /// Listeners hear about changes at most this often (logs can arrive by the
   /// thousand per second; the UI must not rebuild per line).
@@ -361,7 +468,12 @@ class DurbunInspectorStore extends ChangeNotifier {
   InspectorBodyResolver? bodyResolver;
 
   /// Whether the SDK feeds this store (false: off, or a release build).
-  bool attached = false;
+  /// [attachedListenable] says when it changes: `Durbun.init()` may run
+  /// after `runApp`, and the inspector then starts listening for shakes.
+  bool get attached => _attached.value;
+  set attached(bool value) => _attached.value = value;
+  final ValueNotifier<bool> _attached = ValueNotifier<bool>(false);
+  ValueListenable<bool> get attachedListenable => _attached;
 
   final ListQueue<InspectorLog> _logs = ListQueue<InspectorLog>();
   final ListQueue<InspectorCall> _calls = ListQueue<InspectorCall>();
@@ -371,6 +483,7 @@ class DurbunInspectorStore extends ChangeNotifier {
   int _bodyBytes = 0;
   int _droppedLogs = 0;
   int _droppedCalls = 0;
+  int _droppedOtherHostCalls = 0;
   int _errorsTotal = 0;
   int _seenErrors = 0;
   int _seenFailures = 0;
@@ -437,9 +550,15 @@ class DurbunInspectorStore extends ChangeNotifier {
     }
   }
 
-  /// Lines / calls evicted since the last [clear] (the ring is full).
+  /// Lines evicted since the last [clear] (the ring is full).
   int get droppedLogs => _droppedLogs;
+
+  /// Requests to listed hosts ([defaultHosts]) evicted since the last
+  /// [clear] (the panel says so under the list).
   int get droppedCalls => _droppedCalls;
+
+  /// Requests to other hosts evicted since the last [clear]; they go first.
+  int get droppedOtherHostCalls => _droppedOtherHostCalls;
 
   /// Error and crash lines since the last [clear].
   int get errorCount => _errorsTotal;
@@ -463,7 +582,12 @@ class DurbunInspectorStore extends ChangeNotifier {
 
   InspectorCall? callByKey(String key) => _callsByKey[key];
 
+  /// Grows with every [clear] (lists let go of rows kept from before).
+  int get clears => _clears;
+  int _clears = 0;
+
   void clear() {
+    _clears++;
     _logs.clear();
     _calls.clear();
     _callsByKey.clear();
@@ -471,6 +595,7 @@ class DurbunInspectorStore extends ChangeNotifier {
     _bodyBytes = 0;
     _droppedLogs = 0;
     _droppedCalls = 0;
+    _droppedOtherHostCalls = 0;
     _errorsTotal = 0;
     _seenErrors = 0;
     _failuresTotal = 0;
@@ -602,12 +727,57 @@ class DurbunInspectorStore extends ChangeNotifier {
   void _addLog(InspectorLog log) {
     _logs.addLast(log);
     if (log.isError) _errorsTotal++;
-    // Evicted lines still count in the totals (the badge says what happened).
-    while (_logs.length > maxLogs) {
+    _trimLogs();
+    _scheduleNotify();
+  }
+
+  // Evicted lines still count in the totals (the badge says what happened).
+  void _trimLogs() {
+    while (_logs.length > _maxLogs) {
       _logs.removeFirst();
       _droppedLogs++;
     }
-    _scheduleNotify();
+  }
+
+  bool _listed(InspectorCall call) => isDefaultHost(call.uri?.host ?? '');
+
+  /// Evicts requests over [maxCalls]: the oldest to a host outside
+  /// [defaultHosts] first (the panel does not list them), then the oldest.
+  void _trimCalls() {
+    while (_calls.length > _maxCalls) {
+      InspectorCall? gone;
+      if (defaultHosts.isNotEmpty) {
+        for (final c in _calls) {
+          if (!_listed(c)) {
+            gone = c;
+            break;
+          }
+        }
+      }
+      gone ??= _calls.first;
+      _calls.remove(gone);
+      _callsByKey.remove(gone.key);
+      _bodyBytes -= gone._bodyCost;
+      gone._onCost = null;
+      if (_listed(gone)) {
+        _droppedCalls++;
+      } else {
+        _droppedOtherHostCalls++;
+      }
+    }
+  }
+
+  void _costChanged(InspectorCall call, int delta) {
+    if (_disposed || !identical(_callsByKey[call.key], call)) return;
+    _bodyBytes += delta;
+    // Resolved while a page builds: dropping bodies (and notifying) waits.
+    if (_bodyBytes > _maxBodyBytes) {
+      scheduleMicrotask(() {
+        if (_disposed || _bodyBytes <= _maxBodyBytes) return;
+        _enforceBodyBudget();
+        _scheduleNotify();
+      });
+    }
   }
 
   // Dart ids are a counter, native ids carry a prefix (`okhttp-…`); the
@@ -629,18 +799,19 @@ class DurbunInspectorStore extends ChangeNotifier {
           ? m['source'] as String
           : (native ? 'native' : 'dart:io'),
       native: native,
-    ).._resolver = bodyResolver;
+    )
+      .._resolver = bodyResolver
+      .._onCost = _costChanged;
     _setBody(call, m['body'], request: true);
     final previous = _callsByKey.remove(key);
-    if (previous != null) _calls.remove(previous);
+    if (previous != null) {
+      _calls.remove(previous);
+      _bodyBytes -= previous._bodyCost;
+      previous._onCost = null;
+    }
     _calls.addLast(call);
     _callsByKey[key] = call;
-    while (_calls.length > maxCalls) {
-      final gone = _calls.removeFirst();
-      _callsByKey.remove(gone.key);
-      _bodyBytes -= gone._bodyCost;
-      _droppedCalls++;
-    }
+    _trimCalls();
     _enforceBodyBudget();
     _scheduleNotify();
   }
@@ -685,11 +856,20 @@ class DurbunInspectorStore extends ChangeNotifier {
     if (body is! Map) return;
     final cost = _bodyCostOf(body);
     if (request) {
-      call._rawRequestBody = body;
+      _bodyBytes -= call._requestCost;
+      call
+        .._rawRequestBody = body
+        .._requestBody = null
+        .._requestResolved = false
+        .._requestCost = cost;
     } else {
-      call._rawResponseBody = body;
+      _bodyBytes -= call._responseCost;
+      call
+        .._rawResponseBody = body
+        .._responseBody = null
+        .._responseResolved = false
+        .._responseCost = cost;
     }
-    call._bodyCost += cost;
     _bodyBytes += cost;
   }
 
@@ -702,14 +882,17 @@ class DurbunInspectorStore extends ChangeNotifier {
     return data is String ? data.length : 0;
   }
 
-  /// Drops the bodies of the oldest calls until the budget fits.
+  /// Drops the bodies of the oldest calls until the budget fits: calls to
+  /// hosts outside [defaultHosts] first.
   void _enforceBodyBudget() {
-    if (_bodyBytes <= maxBodyBytes) return;
-    for (final call in _calls) {
-      if (_bodyBytes <= maxBodyBytes) break;
-      if (call._bodyCost == 0) continue;
-      _bodyBytes -= call._bodyCost;
-      call._dropBodies();
+    if (_bodyBytes <= _maxBodyBytes) return;
+    for (final otherHostsOnly in <bool>[if (defaultHosts.isNotEmpty) true, false]) {
+      for (final call in _calls) {
+        if (_bodyBytes <= _maxBodyBytes) return;
+        if (call._bodyCost == 0 || (otherHostsOnly && _listed(call))) continue;
+        _bodyBytes -= call._bodyCost;
+        call._dropBodies();
+      }
     }
   }
 

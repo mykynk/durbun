@@ -8,8 +8,10 @@ import android.hardware.SensorManager
 
 /**
  * Opens the in-app inspector when the phone is shaken. The accelerometer is read only while Dart asks for
- * it (an inspector is mounted and the app is in the foreground). Detection follows Square's Seismic: the
- * phone counts as shaking when at least 3/4 of the samples of the last 0.5 s exceed 13 m/s².
+ * it (an inspector is mounted, its panel is closed and the app is in the foreground), at the UI rate
+ * (about 16 samples a second, enough for the 4-sample window below and lighter on the battery than the
+ * game rate). Detection follows Square's Seismic: the phone counts as shaking when at least 3/4 of the
+ * samples of the last 0.5 s exceed 13 m/s².
  */
 internal class ShakeDetector(private val context: Context, private val onShake: () -> Unit) : SensorEventListener {
     private var manager: SensorManager? = null
@@ -20,7 +22,7 @@ internal class ShakeDetector(private val context: Context, private val onShake: 
         if (manager != null) return true
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager ?: return false
         val sensor = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return false
-        if (!sm.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME)) return false
+        if (!sm.registerListener(this, sensor, SensorManager.SENSOR_DELAY_UI)) return false
         manager = sm
         return true
     }

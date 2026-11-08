@@ -43,7 +43,9 @@ class DurbunExampleApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Dürbün Example',
-      // In-app inspector: bubble + panel on the phone, with or without a Mac.
+      // In-app inspector: shake the phone (or call Durbun.showInspector()) to
+      // open the panel, with or without a Mac. Nothing is drawn over the app;
+      // `DurbunInspector(showBubble: true, ...)` adds a floating button.
       builder: DurbunInspector.builder,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(

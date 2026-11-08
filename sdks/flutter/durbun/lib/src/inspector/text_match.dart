@@ -2,6 +2,9 @@
 /// percent-encoding-insensitive, with the positions kept for highlighting.
 library;
 
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/painting.dart';
 
 const Map<int, int> _fold = <int, int>{
@@ -17,33 +20,114 @@ const Map<int, int> _fold = <int, int>{
 
 /// Lower-cases [text] and folds ş ı ğ ü ö ç (and İ, I) to their ASCII
 /// letters. One UTF-16 unit in, one out, so an index in the result is the
-/// same index in [text].
+/// same index in [text]. Returns [text] itself when nothing changes (most
+/// JSON is lower case), so a cached copy costs nothing then.
 String foldText(String text) {
-  final out = List<int>.filled(text.length, 0);
+  Uint16List? out;
   for (var i = 0; i < text.length; i++) {
     final u = text.codeUnitAt(i);
-    final f = _fold[u];
-    if (f != null) {
-      out[i] = f;
-    } else if (u >= 0x41 && u <= 0x5A) {
-      out[i] = u + 32;
-    } else if (u < 0x80) {
-      out[i] = u;
-    } else {
-      final l = String.fromCharCode(u).toLowerCase();
-      out[i] = l.length == 1 ? l.codeUnitAt(0) : u;
+    final f = u < 0x80 ? (u >= 0x41 && u <= 0x5A ? u + 32 : u) : _foldUnit(u);
+    if (f == u) {
+      out?[i] = u;
+      continue;
     }
+    if (out == null) {
+      out = Uint16List(text.length);
+      for (var j = 0; j < i; j++) {
+        out[j] = text.codeUnitAt(j);
+      }
+    }
+    out[i] = f;
   }
-  return String.fromCharCodes(out);
+  return out == null ? text : String.fromCharCodes(out);
 }
 
-/// [url] with %xx sequences decoded (the original when it is malformed).
+/// Folded units above ASCII, filled in as they are met (0: not yet).
+final Uint16List _foldTable = Uint16List(0x10000);
+
+int _foldUnit(int u) {
+  final known = _foldTable[u];
+  if (known != 0) return known;
+  final f = _fold[u];
+  final int folded;
+  if (f != null) {
+    folded = f;
+  } else {
+    final l = String.fromCharCode(u).toLowerCase();
+    folded = l.length == 1 ? l.codeUnitAt(0) : u;
+  }
+  return _foldTable[u] = folded;
+}
+
+/// [url] with %xx sequences decoded. Escapes that are not valid UTF-8
+/// (`%FF`, Latin-1 `%E7`, a cut `%E2%82`) and a `%` without two hex digits
+/// stay as they are; the rest is decoded.
 String decodeUrl(String url) {
   if (!url.contains('%') && !url.contains('+')) return url;
   try {
     return Uri.decodeFull(url);
   } catch (_) {
-    return url;
+    return lenientPercentDecode(url);
+  }
+}
+
+/// Decodes %xx escapes like [Uri.decodeComponent] but never throws: a run
+/// of escapes that is not valid UTF-8, or a `%` without two hex digits, is
+/// kept as written. [plusToSpace] reads `+` as a space (form and query
+/// values).
+String lenientPercentDecode(String text, {bool plusToSpace = false}) {
+  if (!text.contains('%') && !(plusToSpace && text.contains('+'))) return text;
+  final out = StringBuffer();
+  var i = 0;
+  while (i < text.length) {
+    final ch = text.codeUnitAt(i);
+    if (ch == 0x25 && _hexAt(text, i)) {
+      // A run of escapes, decoded together (one character can be several).
+      final start = i;
+      final bytes = <int>[];
+      while (i < text.length && text.codeUnitAt(i) == 0x25 && _hexAt(text, i)) {
+        bytes.add(int.parse(text.substring(i + 1, i + 3), radix: 16));
+        i += 3;
+      }
+      try {
+        out.write(utf8.decode(bytes));
+      } catch (_) {
+        out.write(text.substring(start, i));
+      }
+      continue;
+    }
+    out.writeCharCode(plusToSpace && ch == 0x2B ? 0x20 : ch);
+    i++;
+  }
+  return out.toString();
+}
+
+bool _hexAt(String s, int percent) {
+  if (percent + 2 >= s.length) return false;
+  bool hex(int c) => (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x46) || (c >= 0x61 && c <= 0x66);
+  return hex(s.codeUnitAt(percent + 1)) && hex(s.codeUnitAt(percent + 2));
+}
+
+/// The name / value pairs of a query string or a form body (`a=1&b=%C3%A7`),
+/// in order, repeats kept. Never throws: [Uri.splitQueryString] and
+/// [Uri.queryParametersAll] throw on `discount=50%`, `%FF` or a cut escape.
+List<List<String>> queryPairs(String query) {
+  final out = <List<String>>[];
+  for (final part in query.split('&')) {
+    if (part.isEmpty) continue;
+    final eq = part.indexOf('=');
+    final name = eq < 0 ? part : part.substring(0, eq);
+    final value = eq < 0 ? '' : part.substring(eq + 1);
+    out.add(<String>[_queryComponent(name), _queryComponent(value)]);
+  }
+  return out;
+}
+
+String _queryComponent(String s) {
+  try {
+    return Uri.decodeQueryComponent(s);
+  } catch (_) {
+    return lenientPercentDecode(s, plusToSpace: true);
   }
 }
 

@@ -95,6 +95,13 @@ class _ShareSheet extends StatefulWidget {
 
 class _ShareSheetState extends State<_ShareSheet> {
   late ShareOptions _options = shareOptionsOf(widget.store);
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   void _set(ShareOptions o) {
     _lastOptions[widget.store] = o;
@@ -137,60 +144,67 @@ class _ShareSheetState extends State<_ShareSheet> {
     final t = InspectorStrings.of(context);
     final report = shareReportFor(context, widget.call, widget.store, _options);
     final bottom = MediaQuery.paddingOf(context).bottom;
+    // Options and preview scroll together (landscape, large text); the
+    // buttons stay pinned under them.
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.9),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: Text(t.shareTitle, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3, color: c.text)),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-            child: Text(t.shareDescription, style: TextStyle(fontSize: 12.5, height: 1.35, color: c.textMeta)),
-          ),
-          SheetSwitch(
-              label: t.shareMask,
-              hint: t.shareMaskHint,
-              icon: Icons.visibility_off_outlined,
-              value: _options.mask,
-              onChanged: (v) => _set(_options.copyWith(mask: v))),
-          SheetSwitch(
-              label: t.shareBodies,
-              icon: Icons.data_object_rounded,
-              value: _options.bodies,
-              onChanged: (v) => _set(_options.copyWith(bodies: v))),
-          SheetSwitch(
-              label: t.shareCurl,
-              icon: Icons.terminal_rounded,
-              value: _options.curl,
-              onChanged: (v) => _set(_options.copyWith(curl: v))),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: SectionTitle(t.preview,
-                trailing: Text(shareBytes(utf8.encode(report).length), style: DurbunType.monoStyle(size: 11, color: c.textMeta))),
-          ),
-          // What the teammate gets, exactly.
           Flexible(
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                  color: c.cardBg, border: Border.all(color: c.border), borderRadius: BorderRadius.circular(DurbunRadius.lg)),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(DurbunRadius.lg),
-                child: Scrollbar(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(12),
-                    child: Text(report, style: DurbunType.monoStyle(size: 11.5, color: c.text, height: 1.4)),
-                  ),
+            child: Scrollbar(
+              controller: _scroll,
+              child: SingleChildScrollView(
+                controller: _scroll,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                      child: Text(t.shareTitle, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3, color: c.text)),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                      child: Text(t.shareDescription, style: TextStyle(fontSize: 12.5, height: 1.35, color: c.textMeta)),
+                    ),
+                    SheetSwitch(
+                        label: t.shareMask,
+                        hint: t.shareMaskHint,
+                        icon: Icons.visibility_off_outlined,
+                        value: _options.mask,
+                        onChanged: (v) => _set(_options.copyWith(mask: v))),
+                    SheetSwitch(
+                        label: t.shareBodies,
+                        icon: Icons.data_object_rounded,
+                        value: _options.bodies,
+                        onChanged: (v) => _set(_options.copyWith(bodies: v))),
+                    SheetSwitch(
+                        label: t.shareCurl,
+                        icon: Icons.terminal_rounded,
+                        value: _options.curl,
+                        onChanged: (v) => _set(_options.copyWith(curl: v))),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: SectionTitle(t.preview,
+                          trailing: Text(shareBytes(utf8.encode(report).length), style: DurbunType.monoStyle(size: 11, color: c.textMeta))),
+                    ),
+                    // What the teammate gets, exactly.
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                          color: c.cardBg, border: Border.all(color: c.border), borderRadius: BorderRadius.circular(DurbunRadius.lg)),
+                      child: Text(report, style: DurbunType.monoStyle(size: 11.5, color: c.text, height: 1.4)),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(12, 12, 12, 12 + bottom),
+          Container(
+            decoration: BoxDecoration(color: c.bgPanel, border: Border(top: BorderSide(color: c.hairline))),
+            padding: EdgeInsets.fromLTRB(12, 10, 12, 12 + bottom),
             child: Row(
               children: <Widget>[
                 Expanded(

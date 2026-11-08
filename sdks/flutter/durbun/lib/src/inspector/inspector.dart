@@ -9,9 +9,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'format.dart';
+import 'panel.dart';
 import 'store.dart';
 import 'strings.dart';
-import 'home.dart';
 import 'theme.dart';
 
 /// Puts Dürbün's in-app inspector into the app: shake the phone to open a
@@ -27,6 +27,11 @@ import 'theme.dart';
 /// );
 /// ```
 ///
+/// Works the same under `MaterialApp.router`, `CupertinoApp` and
+/// `WidgetsApp`. The panel is one route named `/durbun` on the app's
+/// navigator; its own pages, sheets and toasts stay inside it (route
+/// observers and the app's snack bars never see them).
+///
 /// When Dürbün is off in a build (`DurbunOptions.enabled`, `DURBUN=false`,
 /// `DurbunOptions.inspector: false`) it only shows [child].
 class DurbunInspector extends StatefulWidget {
@@ -38,6 +43,9 @@ class DurbunInspector extends StatefulWidget {
     this.navigatorKey,
     this.store,
     this.defaultHosts = const <String>[],
+    this.maxRequests = DurbunInspectorStore.kDefaultMaxCalls,
+    this.maxLogs = DurbunInspectorStore.kDefaultMaxLogs,
+    this.maxBodyBytes = DurbunInspectorStore.kDefaultMaxBodyBytes,
   });
 
   /// For `MaterialApp.builder` / `CupertinoApp.builder`.
@@ -54,11 +62,15 @@ class DurbunInspector extends StatefulWidget {
   /// accelerometer is read only while the app is in the foreground.
   final bool openOnShake;
 
-  /// Navigator the panel opens on. By default the first navigator below this
-  /// widget (the app's own, when used as `MaterialApp.builder`).
+  /// Navigator the panel's one route (`/durbun`) is pushed on. By default
+  /// the first navigator below this widget: the app's own when this is the
+  /// app's `builder` (`MaterialApp`, `MaterialApp.router`, `CupertinoApp`).
+  /// The panel's pages are on a navigator of its own inside that route.
   final GlobalKey<NavigatorState>? navigatorKey;
 
-  /// Store to show (tests); defaults to the one the SDK feeds.
+  /// Store to show (tests); defaults to the one the SDK feeds. A store
+  /// passed here keeps its own limits: [maxRequests], [maxLogs] and
+  /// [maxBodyBytes] set the SDK's store.
   final DurbunInspectorStore? store;
 
   /// Hosts the panel lists by default: exact names or `*.example.com`
@@ -66,6 +78,18 @@ class DurbunInspector extends StatefulWidget {
   /// are still captured and still reach the desktop; on the phone they are
   /// hidden until ticked under Network → Filters → Hosts.
   final List<String> defaultHosts;
+
+  /// Requests kept on the phone (default 1000). When full, requests to
+  /// hosts outside [defaultHosts] go first, then the oldest.
+  final int maxRequests;
+
+  /// Log lines kept on the phone (default 2000); the oldest go first.
+  final int maxLogs;
+
+  /// Request and response bodies kept on the phone, in bytes (default
+  /// 24 MB). Past it the oldest bodies are dropped (other hosts' first);
+  /// their requests stay in the list.
+  final int maxBodyBytes;
 
   static final ValueNotifier<int> _openRequests = ValueNotifier<int>(0);
 
@@ -83,6 +107,7 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
 
   bool _open = false;
   Offset? _bubble;
+  DurbunInspectorStore? _watched;
 
   DurbunInspectorStore get _store =>
       widget.store ?? DurbunInspectorStore.instance;
@@ -93,7 +118,7 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   void initState() {
     super.initState();
     InspectorBody.prettyJson ??= prettyJsonText;
-    _store.defaultHosts = widget.defaultHosts;
+    _configure();
     DurbunInspector._openRequests.addListener(_openPanel);
     WidgetsBinding.instance.addObserver(this);
     _syncShake();
@@ -102,7 +127,30 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   @override
   void didUpdateWidget(DurbunInspector old) {
     super.didUpdateWidget(old);
-    _store.defaultHosts = widget.defaultHosts;
+    _configure();
+    _syncShake();
+  }
+
+  /// Hands the options to the store and follows whether the SDK feeds it
+  /// (`Durbun.init()` can run after `runApp`).
+  void _configure() {
+    final store = _store..defaultHosts = widget.defaultHosts;
+    if (widget.store == null) {
+      store
+        ..maxCalls = widget.maxRequests
+        ..maxLogs = widget.maxLogs
+        ..maxBodyBytes = widget.maxBodyBytes;
+    }
+    if (!identical(store, _watched)) {
+      _watched?.attachedListenable.removeListener(_attachedChanged);
+      store.attachedListenable.addListener(_attachedChanged);
+      _watched = store;
+    }
+  }
+
+  void _attachedChanged() {
+    if (!mounted) return;
+    setState(() {});
     _syncShake();
   }
 
@@ -112,16 +160,18 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   @override
   void dispose() {
     DurbunInspector._openRequests.removeListener(_openPanel);
+    _watched?.attachedListenable.removeListener(_attachedChanged);
     WidgetsBinding.instance.removeObserver(this);
     _setShake(false);
     super.dispose();
   }
 
-  /// Listens for shakes only while it can open the panel and the app is in front.
+  /// Listens for shakes only while it can open the panel: the app in front
+  /// and the panel closed (no sensor while it is open).
   void _syncShake([AppLifecycleState? state]) {
     final s = state ?? WidgetsBinding.instance.lifecycleState;
     final foreground = s == null || s == AppLifecycleState.resumed;
-    _setShake(widget.openOnShake && _enabled && foreground);
+    _setShake(widget.openOnShake && _enabled && foreground && !_open);
   }
 
   void _setShake(bool on) {
@@ -162,21 +212,37 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
     final navigator = _navigator();
     if (navigator == null) return;
     setState(() => _open = true);
-    _store.markSeen();
-    _store.panelOpen.value = true;
+    _syncShake();
+    final store = _store;
+    store.markSeen();
+    store.panelOpen.value = true;
+    late final MaterialPageRoute<void> route;
+    route = MaterialPageRoute<void>(
+      settings: const RouteSettings(name: kInspectorRouteName),
+      // Rises over the app like a sheet; no edge swipe fighting the tabs.
+      fullscreenDialog: true,
+      builder: (_) => InspectorPanelHost(store: store, onClose: () => _close(route)),
+    );
     try {
-      await navigator.push<void>(
-        MaterialPageRoute<void>(
-          settings: const RouteSettings(name: '/durbun'),
-          // Rises over the app like a sheet; no edge swipe fighting the tabs.
-          fullscreenDialog: true,
-          builder: (routeContext) => DurbunTheme.wrap(routeContext, InspectorHome(store: _store)),
-        ),
-      );
+      await navigator.push<void>(route);
     } finally {
-      if (mounted) setState(() => _open = false);
-      _store.markSeen();
-      _store.panelOpen.value = false;
+      if (mounted) {
+        setState(() => _open = false);
+        _syncShake();
+      }
+      store.markSeen();
+      store.panelOpen.value = false;
+    }
+  }
+
+  /// Closes the panel's route, also when the app pushed something over it.
+  static void _close(Route<void> route) {
+    final navigator = route.navigator;
+    if (navigator == null || !route.isActive) return;
+    if (route.isCurrent) {
+      navigator.pop();
+    } else {
+      navigator.removeRoute(route);
     }
   }
 

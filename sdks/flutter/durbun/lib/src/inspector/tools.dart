@@ -159,10 +159,13 @@ class _ToolsSheet extends StatelessWidget {
                   label: t.clearAll,
                   hint: t.clearAllHint,
                   chevron: false,
-                  onTap: () {
-                    store.clear();
+                  onTap: () async {
+                    // Nothing comes back: ask first.
                     final messenger = ScaffoldMessenger.maybeOf(context);
-                    Navigator.of(context).pop();
+                    final navigator = Navigator.of(context);
+                    if (!await confirmClear(context)) return;
+                    store.clear();
+                    if (navigator.canPop()) navigator.pop();
                     messenger?.showSnackBar(SnackBar(content: Text(t.cleared), duration: const Duration(milliseconds: 1400)));
                   },
                 ),
@@ -177,6 +180,37 @@ class _ToolsSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+/// "Clear captured data?" on the panel's own navigator; true to clear.
+Future<bool> confirmClear(BuildContext context) async {
+  final t = InspectorStrings.of(context);
+  final yes = await showDialog<bool>(
+    context: context,
+    // The panel's navigator: the app's route observers never see it.
+    useRootNavigator: false,
+    builder: (dialogContext) => DurbunTheme.wrap(
+      dialogContext,
+      Builder(builder: (dialog) {
+        final c = DurbunColors.of(dialog);
+        return AlertDialog(
+          backgroundColor: c.bgElevated,
+          surfaceTintColor: Colors.transparent,
+          title: Text(t.clearConfirmTitle, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: c.text)),
+          content: Text(t.clearConfirmBody, style: TextStyle(fontSize: 13.5, height: 1.4, color: c.textMuted)),
+          actions: <Widget>[
+            TextButton(onPressed: () => Navigator.of(dialog).pop(false), child: Text(t.cancel)),
+            TextButton(
+              onPressed: () => Navigator.of(dialog).pop(true),
+              style: TextButton.styleFrom(foregroundColor: c.danger),
+              child: Text(t.clear),
+            ),
+          ],
+        );
+      }),
+    ),
+  );
+  return yes ?? false;
 }
 
 class _ConnectionPill extends StatelessWidget {

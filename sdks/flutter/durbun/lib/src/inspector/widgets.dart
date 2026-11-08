@@ -10,7 +10,12 @@ import 'strings.dart';
 import 'text_match.dart';
 import 'theme.dart';
 
-/// Copies [text] and confirms with a short toast.
+/// Smallest tap target where a row has the room (iOS 44 pt).
+const double kMinTapTarget = 44;
+
+/// Copies [text] and confirms with a short toast. The toast goes to the
+/// panel's own [ScaffoldMessenger] (the nearest one), so the app's snack
+/// bars are never hidden or replaced.
 void copyText(BuildContext context, String text, {String? note}) {
   Clipboard.setData(ClipboardData(text: text));
   final t = InspectorStrings.of(context);
@@ -44,16 +49,21 @@ class LevelBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final color = c.level(level);
-    return Container(
-      width: 17,
-      height: 17,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(DurbunRadius.sm)),
-      child: Text(letter(level),
-          style: DurbunType.monoStyle(
-              size: 10, color: color, weight: FontWeight.w700, height: 1)),
+    // A screen reader says "Error", not "E".
+    return Semantics(
+      label: InspectorStrings.of(context).levelName(level),
+      excludeSemantics: true,
+      child: Container(
+        width: 17,
+        height: 17,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(DurbunRadius.sm)),
+        child: Text(letter(level),
+            style: DurbunType.monoStyle(
+                size: 10, color: color, weight: FontWeight.w700, height: 1)),
+      ),
     );
   }
 }
@@ -246,7 +256,7 @@ class _DSearchFieldState extends State<DSearchField> {
     final t = InspectorStrings.of(context);
     final controller = _controller;
     return Container(
-      height: 38,
+      height: 40,
       decoration: BoxDecoration(
         color: c.fieldBg,
         borderRadius: BorderRadius.circular(DurbunRadius.md + 1),
@@ -271,13 +281,16 @@ class _DSearchFieldState extends State<DSearchField> {
               decoration: InputDecoration(
                 isDense: true,
                 border: InputBorder.none,
-                // In the phone's UI font: a hint text would take the
-                // field's mono style.
-                hint: Text(widget.hint,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: DefaultTextStyle.of(context).style.copyWith(
-                        inherit: false, fontSize: 14, color: c.textSubtle, height: 1.2)),
+                // In the phone's UI font: a non-inheriting style replaces
+                // the field's mono style (`hint:` needs Flutter 3.32).
+                hintText: widget.hint,
+                hintMaxLines: 1,
+                hintStyle: DefaultTextStyle.of(context).style.copyWith(
+                    inherit: false,
+                    fontSize: 14,
+                    color: c.textSubtle,
+                    height: 1.2,
+                    overflow: TextOverflow.ellipsis),
               ),
             ),
           ),
@@ -288,7 +301,7 @@ class _DSearchFieldState extends State<DSearchField> {
                 : DIconButton(
                     icon: Icons.close_rounded,
                     tooltip: t.clearSearch,
-                    size: 32,
+                    size: 40,
                     onTap: () {
                       controller.clear();
                       widget.onChanged('');
@@ -299,7 +312,7 @@ class _DSearchFieldState extends State<DSearchField> {
             DIconButton(
                 icon: Icons.help_outline_rounded,
                 tooltip: t.queryHelp,
-                size: 32,
+                size: 40,
                 onTap: widget.onHelp),
           if (widget.trailing != null) widget.trailing!,
           const SizedBox(width: 3),
@@ -317,7 +330,7 @@ class DIconButton extends StatelessWidget {
       required this.onTap,
       this.active = false,
       this.color,
-      this.size = 32});
+      this.size = 40});
 
   final IconData icon;
   final String tooltip;
@@ -397,11 +410,16 @@ class DButton extends StatelessWidget {
                 Icon(icon, size: 16, color: primary ? fg : c.textMuted),
                 const SizedBox(width: 6)
               ],
-              Text(label,
-                  style: TextStyle(
-                      fontSize: large ? 15 : 13,
-                      color: fg,
-                      fontWeight: large ? FontWeight.w600 : FontWeight.w500)),
+              // Shrinks with an ellipsis (two sheet buttons, large text).
+              Flexible(
+                child: Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: large ? 15 : 13,
+                        color: fg,
+                        fontWeight: large ? FontWeight.w600 : FontWeight.w500)),
+              ),
               if (trailingIcon != null) ...<Widget>[
                 const SizedBox(width: 4),
                 Icon(trailingIcon, size: 15, color: c.textMuted)
@@ -678,14 +696,37 @@ class MenuRow extends StatelessWidget {
   }
 }
 
-/// Text selection on a page of a swipe tab view. On iOS and macOS a
-/// [SelectionArea] lets the swipe win; elsewhere its drag-to-select takes
-/// horizontal drags and the tabs would not move, so there the page relies
-/// on its copy actions (row menus, copy buttons) instead.
-Widget swipeSafeSelection(Widget child) => switch (defaultTargetPlatform) {
-      TargetPlatform.iOS || TargetPlatform.macOS => SelectionArea(child: child),
-      _ => child,
+/// Whether a [SelectionArea] inside a page of a swipe tab view lets the
+/// swipe win. On iOS and macOS it waits for the tab view; elsewhere its
+/// drag-to-select wins horizontal drags and the tabs would not move, so
+/// there [SwipeTabs] puts one selection area around the whole tab view
+/// instead (the tab view, nearer the finger, then wins the horizontal drag,
+/// and a long press still selects).
+bool get _selectionInsidePages => switch (defaultTargetPlatform) {
+      TargetPlatform.iOS || TargetPlatform.macOS => true,
+      _ => false,
     };
+
+/// Text selection (long press, handles) for a page's text. Inside a page of
+/// a swipe tab view on Android the [SwipeTabs] around it already selects;
+/// elsewhere the page gets its own [SelectionArea].
+Widget swipeSafeSelection(Widget child) => Builder(
+      builder: (context) => _selectionInsidePages || !_SwipeSelection.covers(context)
+          ? SelectionArea(child: child)
+          : child,
+    );
+
+/// Marks pages under a [SwipeTabs] whose selection area is outside the tab
+/// view (Android and other touch platforms).
+class _SwipeSelection extends InheritedWidget {
+  const _SwipeSelection({required super.child});
+
+  static bool covers(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<_SwipeSelection>() != null;
+
+  @override
+  bool updateShouldNotify(_SwipeSelection old) => false;
+}
 
 enum CalloutTone { info, warning, danger }
 
@@ -1205,17 +1246,20 @@ class _SwipeTabsState extends State<SwipeTabs> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final view = TabBarView(
+      controller: _tabs,
+      children: <Widget>[
+        for (var i = 0; i < widget.pages.length; i++) SwipePage(tabs: _tabs, index: i, child: widget.pages[i]),
+      ],
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Padding(padding: widget.barPadding, child: DTabBar(controller: _tabs, tabs: widget.tabs)),
         Expanded(
-          child: TabBarView(
-            controller: _tabs,
-            children: <Widget>[
-              for (var i = 0; i < widget.pages.length; i++) SwipePage(tabs: _tabs, index: i, child: widget.pages[i]),
-            ],
-          ),
+          child: _selectionInsidePages
+              ? view
+              : SelectionArea(child: _SwipeSelection(child: view)),
         ),
       ],
     );

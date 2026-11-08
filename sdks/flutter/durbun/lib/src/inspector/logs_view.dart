@@ -142,13 +142,18 @@ bool callMatchesLogQuery(InspectorCall c, LogFilters f, List<QueryClause> q, {bo
 }
 
 /// Logs (and requests) in time order, consecutive identical lines merged.
+/// Entries with the same time keep their arrival order (the lines of one
+/// multi-line `print` share a time; [List.sort] is not stable).
 List<StreamItem> buildStream(DurbunInspectorStore store, LogFilters f, List<QueryClause> q) {
   final items = <StreamItem>[
     for (final l in store.logs)
       if (logMatches(l, f, q)) StreamItem.log(l),
     for (final c in store.calls)
       if (callMatchesLogQuery(c, f, q, isDefaultHost: store.isDefaultHost)) StreamItem.call(c),
-  ]..sort((a, b) => a.ts.compareTo(b.ts));
+  ]..sort((a, b) {
+      final byTime = a.ts.compareTo(b.ts);
+      return byTime != 0 ? byTime : a.seq.compareTo(b.seq);
+    });
   final out = <StreamItem>[];
   for (final it in items) {
     final prev = out.isEmpty ? null : out.last;
@@ -162,10 +167,22 @@ List<StreamItem> buildStream(DurbunInspectorStore store, LogFilters f, List<Quer
   return out;
 }
 
+/// What the Logs page keeps for one store (one app run): its filters and
+/// search, so closing and opening the panel does not lose them. Pause is
+/// not kept: the panel opens live.
+class _LogsMemory {
+  final LogFilters filters = LogFilters();
+  String query = '';
+}
+
+final Expando<_LogsMemory> _logsMemories = Expando<_LogsMemory>('durbun.logs');
+
 class LogsView extends StatefulWidget {
   const LogsView({super.key, required this.store, this.initialErrorsOnly = false});
 
   final DurbunInspectorStore store;
+
+  /// Turns "Errors only" on when the page opens.
   final bool initialErrorsOnly;
 
   @override
@@ -173,15 +190,16 @@ class LogsView extends StatefulWidget {
 }
 
 class _LogsViewState extends State<LogsView> {
-  final LogFilters _f = LogFilters();
-  final TextEditingController _search = TextEditingController();
-  List<QueryClause> _q = const <QueryClause>[];
+  late final _LogsMemory _memory = _logsMemories[widget.store] ??= _LogsMemory();
+  LogFilters get _f => _memory.filters;
+  late final TextEditingController _search = TextEditingController(text: _memory.query);
+  late List<QueryClause> _q = parseQuery(_memory.query);
   bool _paused = false;
 
   @override
   void initState() {
     super.initState();
-    _f.errorsOnly = widget.initialErrorsOnly;
+    if (widget.initialErrorsOnly) _f.errorsOnly = true;
   }
 
   @override
@@ -190,7 +208,10 @@ class _LogsViewState extends State<LogsView> {
     super.dispose();
   }
 
-  void _setQuery(String v) => setState(() => _q = parseQuery(v));
+  void _setQuery(String v) {
+    _memory.query = v;
+    setState(() => _q = parseQuery(v));
+  }
 
   void _applyTagAction(String action, String tag) {
     if (action == 'hide') {
@@ -203,6 +224,7 @@ class _LogsViewState extends State<LogsView> {
 
   void _clearAll() {
     _search.clear();
+    _memory.query = '';
     setState(() {
       _f.reset();
       _q = const <QueryClause>[];
@@ -371,7 +393,7 @@ class _LogsViewState extends State<LogsView> {
                     icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
                     tooltip: _paused ? t.resume : t.pause,
                     active: _paused,
-                    size: 38,
+                    size: 40,
                     onTap: () => setState(() => _paused = !_paused),
                   ),
                 ],
@@ -394,6 +416,7 @@ class _LogsViewState extends State<LogsView> {
                       seqOf: (x) => x.seq,
                       paused: _paused,
                       filterKey: '${_f.signature}#${_search.text}',
+                      epoch: widget.store.clears,
                       newText: t.newItems,
                       itemBuilder: (context, it) => it.call != null
                           ? _NetLogRow(call: it.call!, store: widget.store, terms: terms)
@@ -556,7 +579,7 @@ class _NetLogRow extends StatelessWidget {
     final t = InspectorStrings.of(context);
     final uri = call.uri;
     final failed = call.error != null && !call.cancelled;
-    final status = call.error != null ? (call.cancelled ? t.cancelledShort : 'FAIL') : (call.status?.toString() ?? '···');
+    final status = call.error != null ? (call.cancelled ? t.cancelledShort : t.failShort) : (call.status?.toString() ?? '···');
     final tint = switch (statusClass(call)) {
       '4xx' => c.lvWarnBg,
       '5xx' || 'fail' => c.lvErrorBg,
@@ -644,16 +667,19 @@ class _LogDetailPageState extends State<LogDetailPage> {
         ),
         actions: <Widget>[
           if (l.tag != null)
-            PopupMenuButton<String>(
-              tooltip: t.tagActions,
-              icon: Icon(Icons.filter_alt_outlined, size: 19, color: c.textMuted),
-              onSelected: (a) => Navigator.of(context).pop((a, l.tag!)),
-              itemBuilder: (_) => <PopupMenuEntry<String>>[
-                PopupMenuItem<String>(value: 'only', child: Text(t.onlyThisTag(l.tag!))),
-                PopupMenuItem<String>(value: 'hide', child: Text(t.hideThisTag(l.tag!))),
-              ],
+            SizedBox.square(
+              dimension: kMinTapTarget,
+              child: PopupMenuButton<String>(
+                tooltip: t.tagActions,
+                icon: Icon(Icons.filter_alt_outlined, size: 19, color: c.textMuted),
+                onSelected: (a) => Navigator.of(context).pop((a, l.tag!)),
+                itemBuilder: (_) => <PopupMenuEntry<String>>[
+                  PopupMenuItem<String>(value: 'only', child: Text(t.onlyThisTag(l.tag!))),
+                  PopupMenuItem<String>(value: 'hide', child: Text(t.hideThisTag(l.tag!))),
+                ],
+              ),
             ),
-          DIconButton(icon: Icons.copy_rounded, tooltip: t.copy, onTap: () => copyText(context, logAsText(l))),
+          DIconButton(icon: Icons.copy_rounded, tooltip: t.copy, size: kMinTapTarget, onTap: () => copyText(context, logAsText(l))),
           const SizedBox(width: 6),
         ],
       ),
@@ -665,9 +691,9 @@ class _LogDetailPageState extends State<LogDetailPage> {
             child: Text(
               <String>[
                 formatClock(l.ts),
-                if (l.isEvent) t.event else l.level,
+                if (l.isEvent) t.event else t.levelName(l.level),
                 if (l.native) t.nativeLayer else 'Dart',
-                if (l.kind != null && l.kind != 'text') l.kind!,
+                if (l.kind != null && l.kind != 'text') switch (l.kind) { 'crash' => t.crash, 'flutter-error' => 'Flutter', final k => k! },
                 if (widget.repeats > 1) t.repeated(widget.repeats),
               ].join(' · '),
               style: DurbunType.monoStyle(size: 11.5, color: c.textMeta),

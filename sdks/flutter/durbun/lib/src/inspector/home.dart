@@ -15,13 +15,20 @@ import 'theme.dart';
 import 'tools.dart';
 import 'widgets.dart';
 
+/// The tab last shown with a store (one app run): the panel opens there
+/// again.
+final Expando<int> _lastTab = Expando<int>('durbun.tab');
+
 class InspectorHome extends StatefulWidget {
-  const InspectorHome({super.key, required this.store, this.initialTab = 0});
+  const InspectorHome({super.key, required this.store, this.initialTab, this.onClose});
 
   final DurbunInspectorStore store;
 
-  /// 0: Network, 1: Logs.
-  final int initialTab;
+  /// 0: Network, 1: Logs; null: the tab last shown with [store].
+  final int? initialTab;
+
+  /// Closes the panel (default: pops this page's route).
+  final VoidCallback? onClose;
 
   @override
   State<InspectorHome> createState() => _InspectorHomeState();
@@ -29,11 +36,14 @@ class InspectorHome extends StatefulWidget {
 
 class _InspectorHomeState extends State<InspectorHome> with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(
-      length: 2, vsync: this, initialIndex: widget.initialTab.clamp(0, 1))
+      length: 2, vsync: this, initialIndex: (widget.initialTab ?? _lastTab[widget.store] ?? 0).clamp(0, 1))
     ..addListener(_onTab);
 
   /// A search field on the other page would keep the keyboard up.
-  void _onTab() => FocusManager.instance.primaryFocus?.unfocus();
+  void _onTab() {
+    _lastTab[widget.store] = _tabs.index;
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
 
   @override
   void dispose() {
@@ -58,7 +68,7 @@ class _InspectorHomeState extends State<InspectorHome> with SingleTickerProvider
                 store: store,
                 tabs: _tabs,
                 onTools: () => showToolsSheet(context, store),
-                onClose: () => Navigator.of(context).maybePop(),
+                onClose: widget.onClose ?? () => Navigator.of(context).maybePop(),
               ),
             ),
           ),
@@ -95,11 +105,11 @@ class _Header extends StatelessWidget {
     final t = InspectorStrings.of(context);
     return Container(
       decoration: BoxDecoration(color: c.bgPanel, border: Border(bottom: BorderSide(color: c.border))),
-      padding: const EdgeInsets.fromLTRB(12, 6, 6, 8),
+      padding: const EdgeInsets.fromLTRB(6, 3, 4, 5),
       child: Row(
         children: <Widget>[
           _BrandMark(onTap: onTools),
-          const SizedBox(width: 10),
+          const SizedBox(width: 4),
           Expanded(
             child: ListenableBuilder(
               listenable: store,
@@ -125,8 +135,8 @@ class _Header extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 4),
-          DIconButton(icon: Icons.grid_view_rounded, tooltip: t.tools, size: 38, onTap: onTools),
-          DIconButton(icon: Icons.close_rounded, tooltip: t.close, size: 38, onTap: onClose),
+          DIconButton(icon: Icons.grid_view_rounded, tooltip: t.tools, size: kMinTapTarget, onTap: onTools),
+          DIconButton(icon: Icons.close_rounded, tooltip: t.close, size: kMinTapTarget, onTap: onClose),
         ],
       ),
     );
@@ -147,31 +157,45 @@ class _BrandMark extends StatelessWidget {
       stream: Durbun.connection,
       builder: (context, _) {
         final connected = Durbun.isConnected;
-        return Tooltip(
-          message: connected ? t.desktopConnected : t.onPhoneOnly,
-          child: GestureDetector(
-            onTap: onTap,
-            child: SizedBox(
-              width: 32,
-              height: 32,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: <Widget>[
-                  const Positioned(left: 1, top: 1, child: DurbunLogo(size: 30)),
-                  Positioned(
-                    right: -2,
-                    bottom: -2,
-                    child: Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: connected ? c.success : c.textSubtle,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: c.bgPanel, width: 2.5),
-                      ),
+        // A 44 pt target around the 32 pt logo; read as a button that
+        // opens the tools and says the connection.
+        return Semantics(
+          button: true,
+          label: '${t.tools}, ${connected ? t.desktopConnected : t.onPhoneOnly}',
+          excludeSemantics: true,
+          onTap: onTap,
+          child: Tooltip(
+            message: connected ? t.desktopConnected : t.onPhoneOnly,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onTap,
+              child: SizedBox.square(
+                dimension: kMinTapTarget,
+                child: Center(
+                  child: SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: <Widget>[
+                        const Positioned(left: 1, top: 1, child: DurbunLogo(size: 30)),
+                        Positioned(
+                          right: -2,
+                          bottom: -2,
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: connected ? c.success : c.textSubtle,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: c.bgPanel, width: 2.5),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
+                ),
               ),
             ),
           ),

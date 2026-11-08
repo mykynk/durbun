@@ -1,5 +1,41 @@
 ## Unreleased (phase 3)
 
+- Requires Flutter 3.27 / Dart 3.6 or newer (the panel uses
+  `Color.withValues`, `Flex.spacing` and `NavigatorPopHandler.onPopWithResult`);
+  the pubspec floor said Flutter 3.24 / Dart 3.5, where it did not compile.
+- In-app panel hardening (it must never red-screen or touch the host app):
+  - Works under `MaterialApp`, `MaterialApp.router` (go_router), `CupertinoApp`
+    and `WidgetsApp`. It opens as one `/durbun` route; its pages, sheets,
+    menus, dialogs and toasts live on its own navigator, `ScaffoldMessenger`
+    and localizations, so app route observers (analytics, Sentry) see only
+    `/durbun` and app snack bars are untouched. Back closes the panel's page
+    first. `Durbun.init()` after `runApp` enables shaking without a restart;
+    shaking is not listened to while the panel is open, and Android reads the
+    accelerometer at the UI rate instead of the game rate.
+  - URLs and form bodies with escapes that are not UTF-8 (`%FF`, Latin-1
+    `%E7`, a cut `%E2%82`, `discount=50%`) no longer throw in the Request
+    tab, search, GraphQL labels, compare or share; the bad escape is shown as
+    written. A JWT with `exp: 1e20` or `1e400` decodes; JSON nested thousands
+    deep is shown to 200 levels instead of overflowing the stack, without
+    overflowing the screen.
+  - Body search in the list folds each body once and re-matches only calls
+    that changed, after typing stops (250 ms). Rows read the body size
+    without decoding it; a decoded body frees its captured bytes and the
+    budget counts what is kept. Images decode at display width.
+  - 1000 requests by default (was 300); `DurbunInspector(maxRequests:,
+    maxLogs:, maxBodyBytes:)`; requests and bodies of hosts outside
+    `defaultHosts` are evicted first. Filters, search and the last tab are
+    kept between opens; logs with the same time keep arrival order; a frozen
+    list keeps the rows in view still when old entries are evicted.
+  - Network: Pause, an empty state when all requests are on hidden hosts
+    ("Show other hosts"), "Clear captured data" asks first. Find in a body
+    cut at 200 KB says when the match is past the shown part. CJK and emoji
+    wrap by their width. The share sheet scrolls in landscape and at large
+    text with its buttons pinned. Android text selection no longer blocks
+    tab swipes. 44 pt tap targets, spoken level names, 4.5:1 subtle text,
+    chart labels follow the text size, long tag chips ellipsize, "FAIL" and
+    level names translated.
+
 - In-app panel fixes: pages opened from a list row (request, log, compare,
   filter sheets) build their theme from their own route context, so a row
   removed while the page is open no longer throws "Looking up a deactivated

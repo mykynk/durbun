@@ -42,6 +42,12 @@ class InspectorStrings {
   String get clearAll => _('Kayıtları temizle', 'Clear captured data');
   String get clearAllHint => _('Loglar, istekler ve ölçümler silinir.', 'Removes logs, requests and samples.');
   String get cleared => _('Temizlendi', 'Cleared');
+  String get clearConfirmTitle => _('Kayıtlar temizlensin mi?', 'Clear captured data?');
+  String get clearConfirmBody => _(
+    'Bu telefondaki loglar, istekler ve ölçümler silinir. Masaüstündeki kopya kalır.',
+    'Logs, requests and samples on this phone are removed. The desktop keeps its copy.',
+  );
+  String get cancel => _('Vazgeç', 'Cancel');
   String get shakeHint => _(
     'Paneli açmak için telefonu sallayın ya da Durbun.showInspector() çağırın.',
     'Shake the phone or call Durbun.showInspector() to open this panel.',
@@ -200,6 +206,15 @@ class InspectorStrings {
   String get showAllHosts => _('Tümünü göster', 'Show all');
   String get defaultHostsOnly => _('Yalnızca varsayılanlar', 'Defaults only');
   String otherHostsHidden(int n) => _('$n istek başka hostta', '$n on other hosts');
+  String get onlyOtherHostsTitle => _('İstekler başka hostlarda', 'The requests are on other hosts');
+  String onlyOtherHostsBody(int n) => _(
+    '$n istek varsayılan host listesinin dışındaki hostlara gitti; liste yalnızca varsayılan hostları gösterir.',
+    n == 1
+        ? '1 request went to a host outside the default host list; the list shows the default hosts only.'
+        : '$n requests went to hosts outside the default host list; the list shows the default hosts only.',
+  );
+  String get showOtherHosts => _('Başka hostları göster', 'Show other hosts');
+  String alsoOtherHosts(int n) => _('$n istek de başka hostta, gizli.', n == 1 ? '1 more request is on another host, hidden.' : '$n more requests are on other hosts, hidden.');
   String get failedHint => _('4xx, 5xx ya da bağlantı hatası', '4xx, 5xx or a transport error');
   String get other => _('Diğer', 'Other');
   String get failed => _('Başarısız', 'Failed');
@@ -214,6 +229,8 @@ class InspectorStrings {
   );
   String get mock => 'Mock';
   String get cancelledShort => _('İPTAL', 'CANCEL');
+  /// The status pill of a request that failed without a response.
+  String get failShort => _('HATA', 'FAIL');
   String get cancelled => _('İptal edildi', 'Cancelled');
   String get pending => _('Bekliyor', 'Pending');
   String get waitingResponse => _('Yanıt henüz gelmedi.', 'The response has not arrived yet.');
@@ -258,6 +275,10 @@ class InspectorStrings {
     'Body capture is off on the desktop or the body was over the size limit; only its size is known.',
   );
   String get bodiesDropped => _('Bu isteğin gövdesi telefondaki bellek sınırı yüzünden silindi.', 'This request’s body was removed to stay within the memory limit on the phone.');
+  String matchBeyondShown(String shown) => _(
+    'Eşleşme gövdenin gösterilmeyen kısmında (ilk $shown gösteriliyor). Tamamı için gövdeyi kopyalayın.',
+    'The match is past the shown part of the body (the first $shown is shown). Copy the body to see all of it.',
+  );
   String truncated(String size) => _('Gövde kısaltıldı (toplam $size).', 'Body truncated (total $size).');
   String get imageUnreadable => _('Görsel açılamadı', 'The image could not be decoded');
   String get noResponseBody => _('Yanıt gelmedi; gösterilecek başlık ya da gövde yok.', 'No response arrived; there are no headers or body to show.');

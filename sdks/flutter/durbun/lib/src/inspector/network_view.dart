@@ -4,6 +4,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -32,30 +33,87 @@ class NetworkView extends StatefulWidget {
   State<NetworkView> createState() => _NetworkViewState();
 }
 
-class _NetworkViewState extends State<NetworkView> {
-  final NetFilters _filters = NetFilters();
-  final TextEditingController _search = TextEditingController();
-  List<QueryClause> _clauses = const <QueryClause>[];
+/// What the Network page keeps for one store (one app run): its filters and
+/// search, so closing and opening the panel does not lose them.
+class _NetworkMemory {
+  final NetFilters filters = NetFilters();
+  String query = '';
+}
 
-  bool _matches(InspectorCall c) =>
-      callMatchesFilters(c, _filters, isDefaultHost: widget.store.isDefaultHost) &&
-      callMatchesQuery(c, _clauses, bodies: _filters.searchBodies);
+final Expando<_NetworkMemory> _networkMemories = Expando<_NetworkMemory>('durbun.network');
+
+/// A call's last match result and the revision it was for.
+typedef _Hit = (int revision, bool hit);
+
+class _NetworkViewState extends State<NetworkView> {
+  late final _NetworkMemory _memory = _networkMemories[widget.store] ??= _NetworkMemory();
+  NetFilters get _filters => _memory.filters;
+  late final TextEditingController _search = TextEditingController(text: _memory.query);
+  late List<QueryClause> _clauses = parseQuery(_memory.query);
+  bool _paused = false;
+  Timer? _debounce;
+
+  /// Match results per call: a store update (a log line, a metric each
+  /// second) re-matches only the calls that changed, not every body. Kept
+  /// for one set of filters and query ([_syncHits]).
+  Expando<_Hit> _hits = Expando<_Hit>();
+  Object? _hitsKey;
+
+  /// Forgets the results when the filters, the applied query or the
+  /// default hosts changed (each change rebuilds before the list filters).
+  void _syncHits() {
+    final key = (_filters.signature, _clauses, widget.store.defaultHosts);
+    if (key == _hitsKey) return;
+    _hitsKey = key;
+    _hits = Expando<_Hit>();
+  }
+
+  bool _matches(InspectorCall c) {
+    final cached = _hits[c];
+    if (cached != null && cached.$1 == c.revision) return cached.$2;
+    final hit = callMatchesFilters(c, _filters, isDefaultHost: widget.store.isDefaultHost) &&
+        callMatchesQuery(c, _clauses, bodies: _filters.searchBodies);
+    _hits[c] = (c.revision, hit);
+    return hit;
+  }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _search.dispose();
     super.dispose();
   }
 
-  void _setQuery(String v) => setState(() => _clauses = parseQuery(v));
+  /// A body search reads every captured body: it waits until typing stops.
+  void _setQuery(String v) {
+    _memory.query = v;
+    _debounce?.cancel();
+    if (!_filters.searchBodies || v.isEmpty) {
+      setState(() => _clauses = parseQuery(v));
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _clauses = parseQuery(_search.text));
+    });
+  }
 
   void _clearAll() {
     _search.clear();
+    _memory.query = '';
     setState(() {
       _filters.reset();
       _clauses = const <QueryClause>[];
     });
   }
+
+  /// Ticks every host outside the default list.
+  void _showOtherHosts() => setState(() {
+        _filters.hiddenHosts.clear();
+        for (final x in widget.store.calls) {
+          final h = hostOf(x);
+          if (!widget.store.isDefaultHost(h)) _filters.extraHosts.add(h);
+        }
+      });
 
   Color _statusColor(DurbunColors c, String s) => switch (s) {
         '2xx' => c.st2xx,
@@ -70,7 +128,7 @@ class _NetworkViewState extends State<NetworkView> {
     showFilterSheet(
       context,
       title: t.netFilters,
-      onChanged: () => setState(() {}),
+      onChanged: () => setState(() => _clauses = parseQuery(_search.text)),
       onReset: _filters.reset,
       build: (context, changed) {
         final c = DurbunColors.of(context);
@@ -144,7 +202,10 @@ class _NetworkViewState extends State<NetworkView> {
       if (f.errorsOnly) ActiveChip(label: t.errorsOnly, onRemove: () => setState(() => f.errorsOnly = false)),
       if (f.slowOnly) ActiveChip(label: t.slowOnly, onRemove: () => setState(() => f.slowOnly = false)),
       if (f.mockedOnly) ActiveChip(label: t.mockedOnly, onRemove: () => setState(() => f.mockedOnly = false)),
-      if (f.searchBodies) ActiveChip(label: t.inBodies, onRemove: () => setState(() => f.searchBodies = false)),
+      if (f.searchBodies) ActiveChip(label: t.inBodies, onRemove: () => setState(() {
+            f.searchBodies = false;
+            _clauses = parseQuery(_search.text);
+          })),
     ];
     final quick = <Widget>[
       if (!f.errorsOnly) DToggle(label: t.errorsOnly, icon: Icons.warning_amber_rounded, selected: false, onTap: () => setState(() => f.errorsOnly = true)),
@@ -152,10 +213,7 @@ class _NetworkViewState extends State<NetworkView> {
       for (final st in const <String>['4xx', '5xx'])
         if (!f.statuses.contains(st)) DToggle(label: st, mono: true, color: _statusColor(c, st), selected: false, onTap: () => setState(() => f.statuses.add(st))),
     ];
-    final otherHosts = widget.store.calls.where((x) {
-      final h = hostOf(x);
-      return !f.showsHost(h, isDefault: widget.store.isDefaultHost(h));
-    }).length;
+    final otherHosts = _otherHosts();
     return <Widget>[
       FilterButton(count: f.activeCount, onTap: () => _openFilters(hosts)),
       // Says that requests are left out by the host list, and opens it.
@@ -165,6 +223,40 @@ class _NetworkViewState extends State<NetworkView> {
     ];
   }
 
+  /// Calls the host list leaves out right now.
+  int _otherHosts() {
+    final f = _filters;
+    return widget.store.calls.where((x) {
+      final h = hostOf(x);
+      return !f.showsHost(h, isDefault: widget.store.isDefaultHost(h));
+    }).length;
+  }
+
+  /// The empty list: nothing yet, nothing matching, or everything on hosts
+  /// outside the default list (then "Clear filters" would not bring it).
+  Widget _empty(InspectorStrings t, List<InspectorCall> all, bool filtered) {
+    if (all.isEmpty) {
+      return EmptyState(icon: Icons.swap_horiz, title: t.noRequestsTitle, body: t.noRequestsBody);
+    }
+    final hiddenByHost = _otherHosts();
+    if (!filtered && hiddenByHost > 0) {
+      return EmptyState(
+        icon: Icons.visibility_off_outlined,
+        title: t.onlyOtherHostsTitle,
+        body: t.onlyOtherHostsBody(hiddenByHost),
+        actionLabel: t.showOtherHosts,
+        onAction: _showOtherHosts,
+      );
+    }
+    return EmptyState(
+      icon: Icons.swap_horiz,
+      title: t.noMatchTitle,
+      body: hiddenByHost > 0 ? '${t.noMatchBody} ${t.alsoOtherHosts(hiddenByHost)}' : t.noMatchBody,
+      actionLabel: t.clearFilters,
+      onAction: _clearAll,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = InspectorStrings.of(context);
@@ -172,10 +264,12 @@ class _NetworkViewState extends State<NetworkView> {
     return ActiveListenableBuilder(
       listenable: widget.store,
       builder: (context) {
+        _syncHits();
         final all = widget.store.calls;
         final shown = all.where(_matches).toList();
         final hosts = (<String>{for (final x in all) hostOf(x)}..remove('')).toList()..sort();
         final terms = freeTerms(_clauses);
+        // Only the filters the user set (the default host list is not one).
         final filtered = _filters.activeCount > 0 || _clauses.isNotEmpty;
         return Column(
           children: <Widget>[
@@ -198,6 +292,14 @@ class _NetworkViewState extends State<NetworkView> {
                     Text('${shown.length}/${all.length}',
                         style: DurbunType.monoStyle(size: 12, color: c.textMeta, weight: FontWeight.w600)),
                   ],
+                  const SizedBox(width: 4),
+                  DIconButton(
+                    icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                    tooltip: _paused ? t.resume : t.pause,
+                    active: _paused,
+                    size: 40,
+                    onTap: () => setState(() => _paused = !_paused),
+                  ),
                 ],
               ),
             ),
@@ -205,18 +307,14 @@ class _NetworkViewState extends State<NetworkView> {
             Divider(height: 1, color: c.border),
             Expanded(
               child: shown.isEmpty
-                  ? EmptyState(
-                      icon: Icons.swap_horiz,
-                      title: all.isEmpty ? t.noRequestsTitle : t.noMatchTitle,
-                      body: all.isEmpty ? t.noRequestsBody : t.noMatchBody,
-                      actionLabel: all.isEmpty ? null : t.clearFilters,
-                      onAction: all.isEmpty ? null : _clearAll,
-                    )
+                  ? _empty(t, all, filtered)
                   : LiveList<InspectorCall>(
                       items: shown,
                       keyOf: (x) => x.key,
                       seqOf: (x) => x.seq,
+                      paused: _paused,
                       filterKey: '${_filters.signature}#${_search.text}',
+                      epoch: widget.store.clears,
                       newText: t.newItems,
                       itemBuilder: (context, call) => CallRow(
                           call: call,
@@ -370,7 +468,7 @@ class CallRow extends StatelessWidget {
     final q = uri != null && uri.hasQuery ? decodeUrl('?${uri.query}') : '';
     final failed = call.error != null && !call.cancelled;
     final statusText = call.error != null
-        ? (call.cancelled ? t.cancelledShort : 'FAIL')
+        ? (call.cancelled ? t.cancelledShort : t.failShort)
         : (call.status?.toString() ?? '···');
     final statusColor =
         call.cancelled ? c.textSubtle : c.status(call.status, failed: failed);
@@ -389,7 +487,8 @@ class CallRow extends StatelessWidget {
                 ? c.warning
                 : c.textMuted;
     final gql = graphqlLabel(call);
-    final size = call.responseBody?.size;
+    // The size without decoding the body (rows build while scrolling).
+    final size = call.responseSize;
     final mono = DurbunType.monoStyle(size: 13, color: c.text, height: 1.35, weight: FontWeight.w500);
     final meta = DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.3);
     final edge = switch (cls) {
@@ -593,7 +692,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
   int _firstTab() {
     final q = widget.bodyQuery;
     if (q == null || q.isEmpty) return _memory.tab;
-    bool has(InspectorBody? b) => b != null && b.isText && foldText(b.data).contains(q);
+    bool has(InspectorBody? b) => bodyContains(b, q);
     if (has(widget.call.responseBody)) return 2;
     if (has(widget.call.requestBody)) return 1;
     return _memory.tab;
@@ -693,7 +792,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
             ? call.statusText!
             : (reasonPhrase(call.status) ?? '');
         final statusText = call.error != null
-            ? (call.cancelled ? t.cancelledShort : 'FAIL')
+            ? (call.cancelled ? t.cancelledShort : t.failShort)
             : (call.status?.toString() ?? '···');
         final statusColor = call.cancelled ? c.textSubtle : c.status(call.status, failed: failed);
         final statusWord = call.error != null
@@ -767,45 +866,48 @@ class _CallDetailPageState extends State<CallDetailPage> {
                 DIconButton(
                     icon: Icons.keyboard_arrow_up_rounded,
                     tooltip: t.prevRequest,
-                    size: 36,
+                    size: kMinTapTarget,
                     onTap: prev == null ? null : () => _show(prev)),
                 DIconButton(
                     icon: Icons.keyboard_arrow_down_rounded,
                     tooltip: t.nextRequest,
-                    size: 36,
+                    size: kMinTapTarget,
                     onTap: next == null ? null : () => _show(next)),
               ],
               DIconButton(
                   icon: Theme.of(context).platform == TargetPlatform.iOS ? Icons.ios_share_rounded : Icons.share_rounded,
                   tooltip: t.share,
-                  size: 36,
+                  size: kMinTapTarget,
                   onTap: () => unawaited(showShareSheet(context, call, widget.store))),
               if (canReplay && !replayInMenu)
                 _replaying
                     ? const SizedBox(
-                        width: 36,
+                        width: kMinTapTarget,
                         child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))))
-                    : DIconButton(icon: Icons.replay_rounded, tooltip: t.replay, size: 36, onTap: _replay),
-              PopupMenuButton<String>(
-                tooltip: t.moreActions,
-                icon: Icon(Icons.more_horiz_rounded, size: 22, color: c.textMuted),
-                onSelected: _menu,
-                itemBuilder: (_) => <PopupMenuEntry<String>>[
-                  if (replayInMenu)
-                    PopupMenuItem<String>(
-                        value: 'replay',
-                        enabled: !_replaying,
-                        child: MenuRow(Icons.replay_rounded, _replaying ? t.replaying : t.replay)),
-                  PopupMenuItem<String>(value: 'compare', child: MenuRow(Icons.compare_arrows_rounded, t.compareEllipsis)),
-                  const PopupMenuDivider(),
-                  PopupMenuItem<String>(value: 'url', child: MenuRow(Icons.link_rounded, t.copyUrl)),
-                  for (final f in kCopyFormats)
-                    PopupMenuItem<String>(value: f, child: MenuRow(Icons.code_rounded, '${t.copyAs}: ${t.copyAsFormat(f)}')),
-                  const PopupMenuDivider(),
-                  if (call.responseBody?.isText == true)
-                    PopupMenuItem<String>(value: 'response', child: MenuRow(Icons.south_rounded, t.copyResponseBody)),
-                  PopupMenuItem<String>(value: 'all', child: MenuRow(Icons.notes_rounded, t.copyReport)),
-                ],
+                    : DIconButton(icon: Icons.replay_rounded, tooltip: t.replay, size: kMinTapTarget, onTap: _replay),
+              SizedBox.square(
+                dimension: kMinTapTarget,
+                child: PopupMenuButton<String>(
+                  tooltip: t.moreActions,
+                  icon: Icon(Icons.more_horiz_rounded, size: 22, color: c.textMuted),
+                  onSelected: _menu,
+                  itemBuilder: (_) => <PopupMenuEntry<String>>[
+                    if (replayInMenu)
+                      PopupMenuItem<String>(
+                          value: 'replay',
+                          enabled: !_replaying,
+                          child: MenuRow(Icons.replay_rounded, _replaying ? t.replaying : t.replay)),
+                    PopupMenuItem<String>(value: 'compare', child: MenuRow(Icons.compare_arrows_rounded, t.compareEllipsis)),
+                    const PopupMenuDivider(),
+                    PopupMenuItem<String>(value: 'url', child: MenuRow(Icons.link_rounded, t.copyUrl)),
+                    for (final f in kCopyFormats)
+                      PopupMenuItem<String>(value: f, child: MenuRow(Icons.code_rounded, '${t.copyAs}: ${t.copyAsFormat(f)}')),
+                    const PopupMenuDivider(),
+                    if (call.responseBody?.isText == true)
+                      PopupMenuItem<String>(value: 'response', child: MenuRow(Icons.south_rounded, t.copyResponseBody)),
+                    PopupMenuItem<String>(value: 'all', child: MenuRow(Icons.notes_rounded, t.copyReport)),
+                  ],
+                ),
               ),
               const SizedBox(width: 4),
             ],
@@ -907,7 +1009,7 @@ class _Summary extends StatelessWidget {
                     ],
                   ),
                 ),
-                DIconButton(icon: Icons.copy_rounded, tooltip: t.copyUrl, size: 30, onTap: onCopyUrl),
+                DIconButton(icon: Icons.copy_rounded, tooltip: t.copyUrl, size: 40, onTap: onCopyUrl),
               ],
             ),
             const SizedBox(height: 9),
@@ -1201,11 +1303,9 @@ class _HttpTabState extends State<_HttpTab> {
     final headers = widget.request ? call.requestHeaders : call.responseHeaders;
     final cookies =
         widget.request ? requestCookies(headers) : responseCookies(headers);
-    final query = <List<String>>[
-      if (widget.request)
-        for (final e in (call.uri?.queryParametersAll ?? const <String, List<String>>{}).entries)
-          for (final v in e.value) <String>[e.key, v],
-    ];
+    // Not Uri.queryParametersAll: it throws on `%FF`, Latin-1 `%E7` or a
+    // cut escape, and a red screen would replace the tab.
+    final query = widget.request ? queryPairs(call.uri?.query ?? '') : const <List<String>>[];
     final body = widget.request ? call.requestBody : call.responseBody;
     final parts = <(String, String, Object?)>[
       ('body', t.body, body == null || body.size == 0 ? null : formatBytes(body.size)),
@@ -1503,6 +1603,35 @@ class _BodyPaneState extends State<BodyPane> {
 
   static const int _maxShownChars = 200 * 1024;
 
+  /// The body's bytes, decoded once per body (base64 images, hex view): a
+  /// new list on every rebuild also made the image decode again.
+  InspectorBody? _bytesOf;
+  Uint8List _bytes = Uint8List(0);
+
+  Uint8List _bytesFor(InspectorBody b) {
+    if (!identical(b, _bytesOf)) {
+      _bytesOf = b;
+      _bytes = b.bytes;
+    }
+    return _bytes;
+  }
+
+  String? _hexText;
+  InspectorBody? _hexOf;
+
+  String _hexFor(InspectorBody b) {
+    if (!identical(b, _hexOf) || _hexText == null) {
+      _hexOf = b;
+      _hexText = hexDump(_bytesFor(b));
+    }
+    return _hexText!;
+  }
+
+  /// The whole text the code view shows the start of, folded once (says
+  /// when a find matches only past the shown part).
+  String? _fullFolded;
+  String? _fullFoldedOf;
+
   Object? _parsedJson(InspectorBody b) {
     if (_jsonParsed) return _json;
     _jsonParsed = true;
@@ -1633,33 +1762,44 @@ class _BodyPaneState extends State<BodyPane> {
             child: b.truncated
                 ? Text(t.truncated(formatBytes(b.size)),
                     style: TextStyle(color: c.textMuted))
-                : Image.memory(b.bytes,
-                    errorBuilder: (_, __, ___) => Text(t.imageUnreadable,
-                        style: TextStyle(color: c.textMuted))),
+                // Decoded at most as wide as it is shown, not at full
+                // resolution (a camera photo is tens of MB decoded).
+                : LayoutBuilder(
+                    builder: (context, box) {
+                      final dpr = MediaQuery.devicePixelRatioOf(context);
+                      final width = box.maxWidth.isFinite ? (box.maxWidth * dpr).round() : null;
+                      final image = MemoryImage(_bytesFor(b));
+                      return Image(
+                        image: width == null || width <= 0
+                            ? image
+                            : ResizeImage(image, width: width, allowUpscaling: false),
+                        errorBuilder: (_, __, ___) => Text(t.imageUnreadable,
+                            style: TextStyle(color: c.textMuted)),
+                      );
+                    },
+                  ),
           ),
         ],
       );
     } else if (mode == 0 &&
         (widget.contentType ?? '').contains('form-urlencoded') &&
         b.isText) {
-      final pairs = <List<String>>[
-        for (final e in Uri.splitQueryString(b.data).entries)
-          <String>[e.key, e.value],
-      ];
-      content = _PairsList(pairs: pairs, empty: t.noBody);
+      // Uri.splitQueryString throws on `discount=50%` or `%FF`.
+      content = _PairsList(pairs: queryPairs(b.data.trim()), empty: t.noBody);
     } else if ((mode == 2 || (mode == 0 && !b.isText)) ||
         (mode == 1 && !b.isText)) {
       content = ListView(
         padding: _pagePadding(context),
         children: <Widget>[
           swipeSafeSelection(
-            Text(hexDump(b.bytes),
+            Text(_hexFor(b),
                 style: DurbunType.monoStyle(size: 11.5, color: c.textMuted)),
           )
         ],
       );
     } else {
-      var text = mode == 1 ? (b.displayText ?? b.data) : b.data;
+      final full = mode == 1 ? (b.displayText ?? b.data) : b.data;
+      var text = full;
       final cut = text.length > _maxShownChars;
       if (cut) text = text.substring(0, _maxShownChars);
       final style = DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.3);
@@ -1682,6 +1822,18 @@ class _BodyPaneState extends State<BodyPane> {
               textStyle: style,
               prefixWidth: gutter + 8,
               buildLines: (_) => lines,
+              // The list's body search reads the whole body; say when the
+              // only matches are past the shown part.
+              note: !cut
+                  ? null
+                  : (folded, matches) {
+                      if (matches > 0 || folded.isEmpty) return null;
+                      if (!identical(_fullFoldedOf, full)) {
+                        _fullFoldedOf = full;
+                        _fullFolded = foldText(full);
+                      }
+                      return _fullFolded!.contains(folded) ? t.matchBeyondShown(formatBytes(_maxShownChars)) : null;
+                    },
               // Line numbers on the left, on a line's first row only.
               rowBuilder: (context, i, first, spans) => Row(
                 children: <Widget>[

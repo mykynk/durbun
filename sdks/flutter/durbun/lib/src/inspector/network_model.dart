@@ -217,14 +217,17 @@ bool callMatchesQuery(InspectorCall c, List<QueryClause> clauses, {bool bodies =
             '${c.status ?? ''}' == v ||
             foldContains(c.error ?? '', v) ||
             foldContains(graphqlLabel(c) ?? '', v) ||
-            (bodies &&
-                ((c.requestBody?.isText == true && foldContains(c.requestBody!.data, v)) ||
-                    (c.responseBody?.isText == true && foldContains(c.responseBody!.data, v))));
+            (bodies && (bodyContains(c.requestBody, v) || bodyContains(c.responseBody, v)));
     }
     if (hit == q.negate) return false;
   }
   return true;
 }
+
+/// Whether a text [body] contains the folded [needle] (the body's folded
+/// text is computed once and kept).
+bool bodyContains(InspectorBody? body, String needle) =>
+    body != null && body.isText && body.folded.contains(needle);
 
 bool callMatchesFilters(InspectorCall c, NetFilters f, {bool Function(String host)? isDefaultHost}) {
   final host = hostOf(c);
@@ -352,9 +355,11 @@ String? _graphql(InspectorCall c) {
   String? query;
   String? name;
   if (c.method.toUpperCase() == 'GET') {
-    final params = c.uri?.queryParameters ?? const <String, String>{};
-    query = params['query'];
-    name = params['operationName'];
+    // Not Uri.queryParameters: it throws on `%FF` or a cut escape.
+    for (final p in queryPairs(c.uri?.query ?? '')) {
+      if (p[0] == 'query') query ??= p[1];
+      if (p[0] == 'operationName') name ??= p[1];
+    }
   } else {
     final body = c.requestBody;
     if (body == null || !body.isText || body.data.isEmpty) return null;

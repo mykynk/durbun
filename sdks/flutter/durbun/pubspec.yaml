@@ -10,8 +10,10 @@ version: 0.1.0
 publish_to: none
 
 environment:
-  sdk: ">=3.5.0 <4.0.0"
-  flutter: ">=3.24.0"
+  # Flutter 3.27: Color.withValues / Color.from, Row(spacing:),
+  # NavigatorPopHandler.onPopWithResult.
+  sdk: ">=3.6.0 <4.0.0"
+  flutter: ">=3.27.0"
 
 dependencies:
   flutter:

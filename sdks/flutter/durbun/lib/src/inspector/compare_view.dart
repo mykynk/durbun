@@ -13,6 +13,7 @@ import 'network_model.dart';
 import 'network_view.dart' show CallRow;
 import 'store.dart';
 import 'strings.dart';
+import 'text_match.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -92,13 +93,8 @@ class _SideSummary extends StatelessWidget {
   }
 }
 
-String decodeUrlForDisplay(String s) {
-  try {
-    return Uri.decodeFull(s);
-  } catch (_) {
-    return s;
-  }
-}
+/// [s] with its escapes decoded; malformed ones (`%FF`) stay as written.
+String decodeUrlForDisplay(String s) => decodeUrl(s);
 
 /* ───────────────────────────── picker ───────────────────────────── */
 

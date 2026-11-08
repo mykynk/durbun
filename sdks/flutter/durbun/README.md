@@ -93,7 +93,8 @@ Future<void> main() async {
 
 ## Uygulama içi panel (Mac'siz)
 
-Telefonun kendisinde de her şeyi görmek için `MaterialApp`'e tek satır ekleyin:
+Telefonun kendisinde de her şeyi görmek için `MaterialApp`'e tek satır ekleyin
+(`MaterialApp.router` / go_router, `CupertinoApp` ve `WidgetsApp` için de aynı satır):
 
 ```dart
 MaterialApp(
@@ -144,8 +145,11 @@ sayılarını gösterir.
 
 Sınırlar ve ayarlar:
 
-- Telefonda yaklaşık son 2.000 log satırı, 300 istek ve toplam 24 MB gövde tutulur.
-  Sınır dolunca en eskiler silinir ve panel bunu söyler.
+- Telefonda son 2.000 log satırı, 1.000 istek ve toplam 24 MB gövde tutulur.
+  Sınır dolunca en eskiler silinir ve panel bunu söyler. `defaultHosts`
+  verildiyse önce panelde gizli hostlara giden istekler (ve gövdeleri) silinir.
+  Sınırları değiştirmek için:
+  `DurbunInspector(maxRequests: 2000, maxLogs: 5000, maxBodyBytes: 48 << 20, child: child!)`.
 - Paneli kendi debug menünüzden ya da bir düğmeden de açabilirsiniz:
   `Durbun.showInspector()`. Sallamayı kapatmak için `openOnShake: false`,
   ekranda küçük bir Dürbün düğmesi istiyorsanız `showBubble: true` verin.
@@ -165,8 +169,16 @@ Sınırlar ve ayarlar:
 - İstek ve yanıt gövdesinde (önizleme ve kod) **Gövdede bul**: eşleşme sayısı,
   önceki/sonraki ve eşleşmeye kaydırma. Ağ listesinde "Gövdelerde de ara"
   açıkken bir isteğe girince arama gövdede dolu açılır.
-- Panel uygulamanın kendi navigator'ında açılır (`MaterialApp.builder` içinde
-  bulunur). Başka bir navigator için `DurbunInspector(navigatorKey: …)` verin.
+- Panel uygulamanın navigator'ında tek bir `/durbun` rotası olarak açılır.
+  Ayrıntı sayfaları, alt sayfalar, menüler ve "Kopyalandı" bildirimleri panelin
+  kendi navigator'ında ve `ScaffoldMessenger`'ında kalır: uygulamanın route
+  observer'ları (analitik, Sentry) yalnızca `/durbun`'u görür, uygulamanın
+  snack bar'larına dokunulmaz. Geri tuşu önce paneldeki sayfayı, sonra paneli
+  kapatır. Başka bir navigator için `DurbunInspector(navigatorKey: …)` verin.
+- Filtreler, arama ve son açılan sekme panel kapanıp açılınca korunur. Ağ
+  listesinde **Duraklat** yeni istekleri bekletir; yukarı kaydırılmış listede
+  okunan satırlar, eski kayıtlar silinse de yerinden oynamaz. *Kayıtları
+  temizle* önce onay ister. Panel açıkken sallama dinlenmez.
 - Dürbün'ün kapalı olduğu derlemelerde (`DURBUN=false`, ya da define verilmemiş
   bir release) panel açılmaz, sallama dinlenmez; widget yalnızca uygulamayı çizer.
 
@@ -551,7 +563,9 @@ Swift `Durbun.info("message", tag: "tag")` (`import durbun`).
 
 ## In-app inspector (no Mac needed)
 
-One line in `MaterialApp` adds the panel; nothing is drawn over the app.
+One line in `MaterialApp` adds the panel (the same line for
+`MaterialApp.router` / go_router, `CupertinoApp` and `WidgetsApp`); nothing is
+drawn over the app.
 **Shake the phone** to open it (simulator: Device → Shake; Android emulator:
 Virtual sensors → Shake). It opens a panel with the desktop's design and tabs, on the phone, with or
 without a Mac:
@@ -578,9 +592,11 @@ MaterialApp(builder: DurbunInspector.builder, home: const HomePage());
 The panel shows the same messages the desktop receives, plus the app's own
 native logs (Android logcat, iOS 15+ `os_log` / `Logger` / `NSLog`) with or
 without a Mac and with no setup in the host app (`capturePrint: never` turns
-them off). On the phone it keeps
-about 2,000 log lines, 300 requests and 24 MB of bodies, and says when the
-oldest entries were removed.
+them off). On the phone it keeps the last 2,000 log lines, 1,000 requests and
+24 MB of bodies, and says when the oldest entries were removed. With
+`defaultHosts`, requests to hidden hosts (and their bodies) go first.
+`DurbunInspector(maxRequests: …, maxLogs: …, maxBodyBytes: …)` changes the
+limits.
 
 Options:
 
@@ -595,6 +611,16 @@ Options:
   Network → Filters → Hosts. Empty: every host.
 - Find in the request and response bodies (preview and code): a match count,
   previous / next, and the match scrolled into view.
+- The panel is one `/durbun` route on the app's navigator. Its detail pages,
+  sheets, menus and "Copied" toasts live on its own navigator and
+  `ScaffoldMessenger`: the app's route observers (analytics, Sentry) see only
+  `/durbun`, and the app's snack bars are left alone. Back closes the panel's
+  page first, then the panel. `DurbunInspector(navigatorKey: …)` picks another
+  navigator.
+- Filters, search and the last tab are kept between opens. **Pause** holds new
+  requests on Network; a list scrolled up keeps the rows in view still while
+  old entries are evicted. *Clear captured data* asks first. Shaking is not
+  listened to while the panel is open.
 - `DurbunOptions(inspector: false)` keeps nothing on the device.
 - In builds where Dürbün is off, only the app is drawn.
 
