@@ -64,18 +64,41 @@ function hasContent(body: WireBody | undefined): boolean {
   return !!body && (body.size > 0 || body.data.length > 0);
 }
 
-function bodyMatches(body: WireBody | undefined, contentType: string | undefined, needle: string, caseSensitive: boolean): boolean {
-  if (!body || body.data.length === 0) return false;
-  let text: string;
-  if (body.encoding === 'utf8') text = body.data;
-  else if (isTextContentType(contentType)) {
-    try {
-      text = Buffer.from(body.data, 'base64').toString('utf8');
-    } catch {
-      return false;
-    }
-  } else return false;
-  return caseSensitive ? text.includes(needle) : text.toLowerCase().includes(needle);
+/** Body text to search: utf8 bodies as stored, base64 ones only when their content type is text. */
+function bodyText(body: WireBody | undefined, contentType: string | undefined): string | undefined {
+  if (!body || body.data.length === 0) return undefined;
+  if (body.encoding === 'utf8') return body.data;
+  if (!isTextContentType(contentType)) return undefined;
+  try {
+    return Buffer.from(body.data, 'base64').toString('utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Does a text contain `needle`? Case-insensitive search runs a native regex over the text as it is: no
+ * lowercased copy of every body on every keystroke.
+ */
+export function textMatcher(needle: string, caseSensitive: boolean): (text: string | undefined) => boolean {
+  if (caseSensitive) return (text) => !!text && text.includes(needle);
+  try {
+    const re = new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'iu');
+    return (text) => !!text && re.test(text);
+  } catch {
+    const lower = needle.toLowerCase();
+    return (text) => !!text && text.toLowerCase().includes(lower);
+  }
+}
+
+/** Entries scanned / body characters read between two yields of searchAsync. */
+const SEARCH_SLICE_ENTRIES = 200;
+const SEARCH_SLICE_CHARS = 4 * 1024 * 1024;
+
+function abortError(): Error {
+  const err = new Error('Search aborted');
+  err.name = 'AbortError';
+  return err;
 }
 
 export class NetworkStore {
@@ -282,27 +305,49 @@ export class NetworkStore {
 
   /** Ids whose URL, headers or text bodies contain `text`. */
   search(text: string, opts: { ids?: string[]; caseSensitive?: boolean } = {}): string[] {
-    const caseSensitive = !!opts.caseSensitive;
-    const candidates = opts.ids ? opts.ids.map((id) => this.entries.get(id)).filter((e): e is NetworkEntry => !!e) : [...this.entries.values()];
+    const candidates = this.searchCandidates(opts.ids);
     if (text.length === 0) return candidates.map((e) => e.id);
-    const needle = caseSensitive ? text : text.toLowerCase();
-    const has = (s: string | undefined) => !!s && (caseSensitive ? s.includes(needle) : s.toLowerCase().includes(needle));
-    const headersHave = (headers: Header[] | undefined) => !!headers && headers.some(([k, v]) => has(`${k}: ${v}`));
+    const has = textMatcher(text, !!opts.caseSensitive);
+    return candidates.filter((e) => this.entryMatches(e, has)).map((e) => e.id);
+  }
+
+  /**
+   * search() in slices: yields to the event loop every SEARCH_SLICE_ENTRIES entries or SEARCH_SLICE_CHARS of
+   * body text, and rejects with an AbortError once `signal` aborts.
+   */
+  async searchAsync(text: string, opts: { ids?: string[]; caseSensitive?: boolean; signal?: AbortSignal } = {}): Promise<string[]> {
+    const { signal } = opts;
+    if (signal?.aborted) throw abortError();
+    const candidates = this.searchCandidates(opts.ids);
+    if (text.length === 0) return candidates.map((e) => e.id);
+    const has = textMatcher(text, !!opts.caseSensitive);
     const out: string[] = [];
+    let entries = 0;
+    let chars = 0;
     for (const e of candidates) {
-      const stored = this.bodies.get(e.id);
-      if (
-        has(e.url) ||
-        has(e.error) ||
-        headersHave(e.requestHeaders) ||
-        headersHave(e.responseHeaders) ||
-        bodyMatches(stored?.request, e.requestContentType, needle, caseSensitive) ||
-        bodyMatches(stored?.response, e.responseContentType, needle, caseSensitive)
-      ) {
-        out.push(e.id);
+      if (entries >= SEARCH_SLICE_ENTRIES || chars >= SEARCH_SLICE_CHARS) {
+        entries = 0;
+        chars = 0;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (signal?.aborted) throw abortError();
       }
+      if (this.entries.get(e.id) !== e) continue; // removed while we yielded
+      entries++;
+      chars += this.bodies.get(e.id)?.bytes ?? 0;
+      if (this.entryMatches(e, has)) out.push(e.id);
     }
     return out;
+  }
+
+  private searchCandidates(ids: string[] | undefined): NetworkEntry[] {
+    return ids ? ids.map((id) => this.entries.get(id)).filter((e): e is NetworkEntry => !!e) : [...this.entries.values()];
+  }
+
+  private entryMatches(e: NetworkEntry, has: (text: string | undefined) => boolean): boolean {
+    const headersHave = (headers: Header[] | undefined) => !!headers && headers.some(([k, v]) => has(`${k}: ${v}`));
+    if (has(e.url) || has(e.error) || headersHave(e.requestHeaders) || headersHave(e.responseHeaders)) return true;
+    const stored = this.bodies.get(e.id);
+    return has(bodyText(stored?.request, e.requestContentType)) || has(bodyText(stored?.response, e.responseContentType));
   }
 
   private placeholder(id: string, appId: string | undefined, deviceId: string, ts: number): NetworkEntry {

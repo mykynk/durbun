@@ -154,6 +154,11 @@ export interface Hub extends HubSink {
   getNetworkDetail(id: string): NetworkDetail | undefined;
   /** Search URL, headers and bodies; returns matching network ids. */
   searchNetwork(text: string, opts?: { ids?: string[]; caseSensitive?: boolean }): string[];
+  /**
+   * searchNetwork that yields to the event loop while it scans bodies (POST /api/network/search uses it);
+   * rejects with an AbortError once `signal` aborts (the UI typed on, the request was dropped).
+   */
+  searchNetworkAsync?(text: string, opts?: { ids?: string[]; caseSensitive?: boolean; signal?: AbortSignal }): Promise<string[]>;
   getMetrics(): MetricSample[];
   /** Latest known process info per (deviceId, pid). */
   getProcesses(): ProcessUpdate[];
@@ -189,6 +194,10 @@ export interface Hub extends HubSink {
 export interface CreateHubOptions {
   settings: ServerSettings;
   logger: Logger;
+  /** Byte budget of the log ring (estimated, see hub/logSize.ts); default MAX_LOG_STORE_BYTES. */
+  maxLogBytes?: number;
+  /** Byte budget of the crash / ANR rows kept after the ring evicted them (tests); default MAX_KEPT_CRASH_BYTES. */
+  maxKeptCrashBytes?: number;
 }
 
 /* ────────────────────────────── SDK layer ────────────────────────────── */
@@ -254,7 +263,12 @@ export interface DriverContext {
   tempDir: string;
   /** URL path the UI can GET for a file saved directly inside tempDir. */
   fileUrl(fileName: string): string;
-  ports: { http: number; sdk: number };
+  /**
+   * `device`: loopback port of the device gateway (/sdk + GET /api/health only), the target of
+   * `adb reverse tcp:9750`; never the HTTP port, which loopback peers may use for everything. Undefined
+   * when the gateway is not listening (no tcp:9750 mapping then).
+   */
+  ports: { http: number; sdk: number; device?: number };
 }
 
 export interface DeviceDriver {

@@ -103,10 +103,16 @@ async function deadPort(): Promise<number> {
   return port;
 }
 
-/** One Dürbün's router for the device: its HTTP port is `httpPort` (never a real Dürbün's 9750). */
-async function instance(table: Table, httpPort: number): Promise<{ router: AdbReverseRouter; calls: string[]; ctx: FakeCtx }> {
+/** Fake HTTP port of every instance below (the UI's port: tcp:9750 must never point there). */
+const HTTP = 9700;
+
+/**
+ * One Dürbün's router for the device: its device gateway (what tcp:9750 is reversed to) is `gatewayPort`
+ * (never a real Dürbün's port), its HTTP port `HTTP`.
+ */
+async function instance(table: Table, gatewayPort: number | undefined): Promise<{ router: AdbReverseRouter; calls: string[]; ctx: FakeCtx }> {
   const ctx = createCtx();
-  ctx.ports = { http: httpPort, sdk: 9803 };
+  ctx.ports = { http: HTTP, sdk: 9803, ...(gatewayPort === undefined ? {} : { device: gatewayPort }) };
   const { adb, calls } = fakeAdb(table);
   const router = new AdbReverseRouter({ adb: () => adb, serial: SERIAL, deviceId: ID, ctx, logger: silentLogger });
   await router.start();
@@ -245,7 +251,42 @@ describe('AdbReverseRouter with another Dürbün on the same computer', () => {
     const cSdk = await tcpListener();
     table.set('tcp:9751', `tcp:${cSdk}`).set('tcp:9750', `tcp:${cHttp}`);
     expect(await b.router.ensure()).toBe(false);
-    expect(routeLines(b.ctx).map((l) => l.input.params)).toEqual([{ port: a.ctx.ports.http }, { port: cHttp }]);
+    expect(routeLines(b.ctx).map((l) => l.input.params)).toEqual([{ port: a.ctx.ports.device }, { port: cHttp }]);
+  });
+});
+
+describe('AdbReverseRouter never routes the phone to the HTTP port', () => {
+  it('reverses tcp:9750 to the device gateway and moves its own older HTTP-port mapping there', async () => {
+    const table: Table = new Map([['tcp:9750', `tcp:${HTTP}`]]); // this Dürbün's mapping from an older build
+    const me = await instance(table, 9802);
+    expect(await me.router.ensure()).toBe(true);
+    expect(table.get('tcp:9750')).toBe('tcp:9802');
+    expect(table.get('tcp:9751')).toBe(`tcp:${me.router.localPort}`);
+    expect(me.router.heldBy).toBeUndefined();
+    expect(routeLines(me.ctx)).toHaveLength(0);
+    await me.router.stop(true);
+    expect(table.size).toBe(0);
+  });
+
+  it('without a gateway, sets no tcp:9750 mapping and removes its own HTTP-port one', async () => {
+    const table: Table = new Map([['tcp:9750', `tcp:${HTTP}`]]);
+    const me = await instance(table, undefined);
+    expect(await me.router.ensure()).toBe(true);
+    expect([...table]).toEqual([['tcp:9751', `tcp:${me.router.localPort}`]]);
+    expect(me.calls).toContain('remove tcp:9750');
+  });
+
+  it('names the other Dürbün by the HTTP port its gateway reports, not by the gateway port', async () => {
+    const otherGateway = await healthServer({ ok: true, name: 'durbun', version: '0.1.0', httpPort: 9750 });
+    const table: Table = new Map([
+      ['tcp:9751', `tcp:${await tcpListener()}`],
+      ['tcp:9750', `tcp:${otherGateway}`],
+    ]);
+    const me = await instance(table, 9802);
+    expect(await me.router.ensure()).toBe(false);
+    expect(me.router.heldBy).toBe(9750);
+    expect(routeLines(me.ctx).map((l) => l.input.params)).toEqual([{ port: 9750 }]);
+    expect(routeLines(me.ctx)[0]!.input.message).toContain('localhost:9750');
   });
 });
 

@@ -2,7 +2,8 @@
  * Persistent configuration in the data directory (default ~/.durbun):
  *   settings.json  ServerSettings — only explicitly set keys are written, merged over DEFAULT_SETTINGS on load
  *   mocks.json     MockRule[]
- *   tmp/           uploads, screenshots, recordings (entries older than 24 h are removed at start)
+ *   tmp/           uploads, screenshots, recordings, crash report copies (entries older than 24 h are removed
+ *                  at start, and every hour while running except crash/: see TEMP_CLEAN_INTERVAL_MS)
  *
  * Everything read from disk or received from the UI is validated: wrong types fall back to the default
  * (on load) or are rejected (UI patches), out-of-range numbers are clamped. Writes are atomic
@@ -27,8 +28,15 @@ import { silentLogger } from './util/logger';
 export const SETTINGS_FILE = 'settings.json';
 export const MOCKS_FILE = 'mocks.json';
 export const TEMP_DIR_NAME = 'tmp';
-/** Temp entries older than this are deleted at start. */
+/** Temp entries older than this are deleted at start (and hourly while running, see TEMP_CLEAN_INTERVAL_MS). */
 export const TEMP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/**
+ * The Mac app runs for days: old screenshots, recordings and uploads are removed this often while it runs.
+ * crash/ is left alone then: its .ips copies are downloads of crash rows the hub may still hold.
+ */
+export const TEMP_CLEAN_INTERVAL_MS = 60 * 60 * 1000;
+/** Top-level temp entries the running cleanup skips (see TEMP_CLEAN_INTERVAL_MS). */
+export const TEMP_KEEP_WHILE_RUNNING: ReadonlySet<string> = new Set(['crash']);
 
 /** Inclusive ranges for numeric settings (values outside are clamped). */
 export const SETTINGS_LIMITS = {
@@ -403,8 +411,8 @@ export async function writeFileAtomic(file: string, data: string | Uint8Array, m
   }
 }
 
-/** Remove entries (files or folders) of `dir` whose mtime is older than `maxAgeMs`. Returns the count. */
-export async function cleanTempDir(dir: string, maxAgeMs = TEMP_MAX_AGE_MS, now = Date.now()): Promise<number> {
+/** Remove entries (files or folders) of `dir` whose mtime is older than `maxAgeMs`, except `skip`. Returns the count. */
+export async function cleanTempDir(dir: string, maxAgeMs = TEMP_MAX_AGE_MS, now = Date.now(), skip?: ReadonlySet<string>): Promise<number> {
   let entries: string[];
   try {
     entries = await fsp.readdir(dir);
@@ -413,6 +421,7 @@ export async function cleanTempDir(dir: string, maxAgeMs = TEMP_MAX_AGE_MS, now 
   }
   let removed = 0;
   for (const name of entries) {
+    if (skip?.has(name)) continue;
     const p = path.join(dir, name);
     try {
       const st = await fsp.lstat(p);

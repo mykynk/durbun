@@ -1,7 +1,8 @@
 /**
- * Hub: the in-memory store behind Dürbün (SPEC §5.2). Logs live in a bounded ring (crash / ANR rows it
- * evicts are kept apart, see MAX_KEPT_CRASH_LOGS), network entries and bodies in a budgeted store, metrics in
- * per-series rings. Every change is batched (~100 ms) for the UI.
+ * Hub: the in-memory store behind Dürbün (SPEC §5.2). Logs live in a ring bounded by rows and bytes, each
+ * row capped when stored (hub/logSize.ts; crash / ANR rows it evicts are kept apart, see MAX_KEPT_CRASH_LOGS),
+ * network entries and bodies in a budgeted store, metrics in per-series rings. Every change is batched
+ * (~100 ms) for the UI.
  *
  * Implemented with closures (no `this`) so callers may pass methods around unbound.
  */
@@ -35,7 +36,8 @@ import {
   markerLine,
   processLine,
 } from './lifecycle';
-import { MetricsStore, sanitizeSample } from './metrics';
+import { capLogEntry, logEntryBytes } from './logSize';
+import { MetricsStore, sanitizeSample, type MetricSeriesInfo } from './metrics';
 import { cleanUndefined, DISCONNECTED_ERROR, NetworkStore, type NetworkLimits } from './network';
 import { RingBuffer } from './ringBuffer';
 import {
@@ -61,6 +63,17 @@ export const HUB_MAX_QUEUED_LOGS = 2000;
  * count still says it happened.
  */
 export const MAX_KEPT_CRASH_LOGS = 5_000;
+/**
+ * Byte budget of the kept crashes next to their count: a crash row may hold 256 K characters each of
+ * message, stack and data, so 5 000 of them could reach gigabytes. The oldest go first; the newest stays.
+ */
+export const MAX_KEPT_CRASH_BYTES = 64 * 1024 * 1024;
+/**
+ * Byte budget of the log ring (estimated JSON size, hub/logSize.ts) next to its row count: rows are capped
+ * at 256 K characters, but 200 000 of them would still not fit in memory. The oldest rows go first while
+ * the ring is over budget (crash / ANR rows move to the kept crashes as with the row count).
+ */
+export const MAX_LOG_STORE_BYTES = 256 * 1024 * 1024;
 /** Rows that survive ring eviction: crashes and ANRs, live or read from the device (dropbox, .ips). */
 export const isKeptCrashLog = (e: Pick<LogEntry, 'kind' | 'origin'>): boolean =>
   e.kind === 'crash' || e.kind === 'anr' || e.origin === 'dropbox' || e.origin === 'crash-report';
@@ -105,8 +118,14 @@ export function createHub(opts: CreateHubOptions): Hub {
   let disposed = false;
 
   const logs = new RingBuffer<LogEntry>(settings.maxLogEntries);
+  const maxLogBytes = opts.maxLogBytes !== undefined && opts.maxLogBytes > 0 ? opts.maxLogBytes : MAX_LOG_STORE_BYTES;
+  /** Estimated size of every row in `logs` (logEntryBytes, taken when stored) and their sum. */
+  const logSizes = new WeakMap<LogEntry, number>();
+  let logBytes = 0;
   /** Crash / ANR rows evicted from `logs`, in id order; every one is older than the oldest row in `logs`. */
   const keptCrashes = new RingBuffer<LogEntry>(MAX_KEPT_CRASH_LOGS);
+  const maxKeptBytes = opts.maxKeptCrashBytes !== undefined && opts.maxKeptCrashBytes > 0 ? opts.maxKeptCrashBytes : MAX_KEPT_CRASH_BYTES;
+  let keptBytes = 0;
   const devices = new Map<string, DeviceInfo>();
   const apps = new Map<string, AppSession>();
   /** deviceId + sessionKey → app id (session reuse on reconnect). */
@@ -122,7 +141,7 @@ export function createHub(opts: CreateHubOptions): Hub {
 
   const batcher = new ChangeBatcher(HUB_BATCH_INTERVAL_MS, HUB_MAX_QUEUED_LOGS, logger);
   const network = new NetworkStore(limitsFrom(settings), (entry) => batcher.networkChanged(entry));
-  const metrics = new MetricsStore();
+  const metrics = new MetricsStore({ keep: () => keepMetricSeries() });
   const deviceApps = new DeviceAppStore({
     onChange: (app) => batcher.deviceAppChanged(app),
     onRemove: (key) => batcher.deviceAppRemoved(key),
@@ -145,7 +164,39 @@ export function createHub(opts: CreateHubOptions): Hub {
   }
 
   function keepIfCrash(evicted: LogEntry | undefined): void {
-    if (evicted && isKeptCrashLog(evicted)) keptCrashes.push(evicted);
+    if (!evicted || !isKeptCrashLog(evicted)) return;
+    keptBytes += sizeOf(evicted);
+    const dropped = keptCrashes.push(evicted);
+    if (dropped) keptBytes -= sizeOf(dropped);
+    while (keptBytes > maxKeptBytes && keptCrashes.size > 1) keptBytes -= sizeOf(keptCrashes.shift()!);
+  }
+
+  const sizeOf = (e: LogEntry): number => logSizes.get(e) ?? logEntryBytes(e);
+
+  /** Recount `logBytes` / `keptBytes` after rows left other than by push/shift (clear, retain, new capacity). */
+  function recountLogBytes(): void {
+    logBytes = 0;
+    logs.forEach((e) => (logBytes += sizeOf(e)));
+    keptBytes = 0;
+    keptCrashes.forEach((e) => (keptBytes += sizeOf(e)));
+  }
+
+  /**
+   * Metric series the store must spare (hub/metrics.ts): those of a connected session and of the newest
+   * session of each app on each device. The Performance view shows an app across its sessions, so after hot
+   * restarts the older sessions' series may go; a pid series (device polling) lives only while sampled.
+   */
+  function keepMetricSeries(): (series: MetricSeriesInfo) => boolean {
+    const newest = new Map<string, AppSession>();
+    for (const app of apps.values()) {
+      const key = `${app.deviceId}\u0000${app.app.id}`;
+      const prev = newest.get(key);
+      if (!prev || app.connectedAt >= prev.connectedAt) newest.set(key, app);
+    }
+    const kept = new Set<string>();
+    for (const app of newest.values()) kept.add(app.id);
+    for (const app of apps.values()) if (app.connected) kept.add(app.id);
+    return (series) => series.appId !== undefined && kept.has(series.appId);
   }
 
   /** Every stored row in id order: kept crashes (older than the ring) first, then the ring. */
@@ -155,7 +206,22 @@ export function createHub(opts: CreateHubOptions): Hub {
 
   function appendLogs(entries: LogEntry[], tap = true): void {
     if (entries.length === 0 || disposed) return;
-    for (const e of entries) keepIfCrash(logs.push(e));
+    for (const e of entries) {
+      capLogEntry(e);
+      const size = logEntryBytes(e);
+      logSizes.set(e, size);
+      logBytes += size;
+      const evicted = logs.push(e);
+      if (evicted) {
+        logBytes -= sizeOf(evicted);
+        keepIfCrash(evicted);
+      }
+    }
+    while (logBytes > maxLogBytes && logs.size > 1) {
+      const evicted = logs.shift()!;
+      logBytes -= sizeOf(evicted);
+      keepIfCrash(evicted);
+    }
     batcher.addLogs(entries);
     if (tap && logTaps.size > 0) callAll(logTaps, entries, 'onLogs');
   }
@@ -265,11 +331,21 @@ export function createHub(opts: CreateHubOptions): Hub {
     return map;
   }
 
+  /**
+   * Over the cap, back to 75 % of it: dead processes first, then the oldest reports whatever their event
+   * (iOS drivers report every syslog pid as 'seen' and never 'died'; without this the map grew toward every
+   * pid ever seen and each insert past the cap scanned all of it). Map order is recency (setProcess).
+   */
   function pruneProcesses(map: Map<number, ProcessUpdate>): void {
     if (map.size <= MAX_PROCESSES_PER_DEVICE) return;
+    const target = Math.floor(MAX_PROCESSES_PER_DEVICE * 0.75);
     for (const [pid, p] of map) {
-      if (map.size <= MAX_PROCESSES_PER_DEVICE * 0.75) break;
+      if (map.size <= target) return;
       if (p.event === 'died') map.delete(pid);
+    }
+    for (const pid of map.keys()) {
+      if (map.size <= target) return;
+      map.delete(pid);
     }
   }
 
@@ -524,6 +600,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     app.connected = false;
     app.disconnectedAt = Date.now();
     const failed = network.failPending(id, DISCONNECTED_ERROR, appLastTs.get(id));
+    appLastTs.delete(id); // only needed for requests still pending; a reconnect notes it again
     batcher.appChanged(app);
     pushSystem(app.deviceId, appDisconnectedLine(app, deviceName(app.deviceId), failed.length));
   }
@@ -743,6 +820,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     getNetwork: () => network.list().map((e) => ({ ...e })),
     getNetworkDetail: (id) => network.detail(id),
     searchNetwork: (text, opts) => network.search(typeof text === 'string' ? text : '', opts ?? {}),
+    searchNetworkAsync: (text, opts) => network.searchAsync(typeof text === 'string' ? text : '', opts ?? {}),
     getMetrics: () => metrics.all(),
     getProcesses: () => {
       const out: ProcessUpdate[] = [];
@@ -797,6 +875,7 @@ export function createHub(opts: CreateHubOptions): Hub {
           logs.retain((e) => !logInScope(e));
           keptCrashes.retain((e) => !logInScope(e));
         }
+        recountLogBytes();
         for (const app of apps.values()) {
           if (!appInScope(app) || (app.stats.logs === 0 && app.stats.errors === 0)) continue;
           app.stats.logs = 0;
@@ -1036,7 +1115,9 @@ export function createHub(opts: CreateHubOptions): Hub {
     setSettings(next: ServerSettings): void {
       if (!next) return;
       settings = { ...next };
-      for (const evicted of logs.setCapacity(settings.maxLogEntries)) keepIfCrash(evicted);
+      const shrunk = logs.setCapacity(settings.maxLogEntries);
+      for (const evicted of shrunk) keepIfCrash(evicted);
+      if (shrunk.length > 0) recountLogBytes();
       network.setLimits(limitsFrom(settings));
       watched = new Set(Array.isArray(settings.watchedApps) ? settings.watchedApps : []);
     },

@@ -156,7 +156,7 @@ describe('AndroidDriver with a fake adb', () => {
       }
     });
     const sdk = rev.find((m) => m[0] === 'tcp:9751')!;
-    expect(rev.find((m) => m[0] === 'tcp:9750')).toEqual(['tcp:9750', 'tcp:9750']);
+    expect(rev.find((m) => m[0] === 'tcp:9750')).toEqual(['tcp:9750', 'tcp:9760']); // the device gateway, never the HTTP port
     const port = Number(sdk[1]!.slice(4));
     const client = net.connect(port, '127.0.0.1');
     const att = await waitFor(() => ctx.attached[0]);
@@ -223,6 +223,34 @@ describe('AndroidDriver shutdown', () => {
       const calls = fs.readFileSync(path.join(dir, 'calls.txt'), 'utf8');
       expect(calls).toContain(JSON.stringify(['-s', SERIAL, 'forward', '--remove', 'tcp:45678']));
       expect(ctx.hub.disconnected).toEqual([{ id: ID, detail: 'Dürbün stopped watching Android devices', code: 'device.driverStopped' }]);
+      expect(liveChildCount()).toBe(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+describe('AndroidDriver log restart racing a stop', () => {
+  it('starts no logcat that nobody would stop when the driver stops while the restart waits', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'durbun-adb-restart-'));
+    try {
+      const fake = writeFakeAdb(dir);
+      const ctx = createCtx({ settings: { adbPath: fake.adb } });
+      const driver = createPlatform().drivers.find((d) => d.id === 'android')!;
+      await driver.start(ctx);
+      await waitFor(() => ctx.hub.devices.get(ID)?.logs.status === 'streaming', 8000);
+      const logcats = () =>
+        fs
+          .readFileSync(path.join(dir, 'calls.txt'), 'utf8')
+          .trim()
+          .split('\n')
+          .filter((l) => l.includes('"logcat"') && !l.includes('"-c"')).length;
+      const before = logcats();
+      const restart = driver.runAction(ID, 'logs-restart', {});
+      await driver.stop();
+      await restart;
+      await new Promise((r) => setTimeout(r, 300));
+      expect(logcats()).toBe(before);
       expect(liveChildCount()).toBe(0);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

@@ -20,6 +20,11 @@ export interface ResolvedDevice {
   deviceId: string;
   /** A `net:` device whose online state follows its SDK sessions. */
   network: boolean;
+  /**
+   * An `ios-sim:` placeholder this hello put online (no driver reported the simulator): it follows its SDK
+   * sessions like a `net:` device until a driver reports it (see isSdkPlaceholder).
+   */
+  placeholder?: boolean;
 }
 
 /** Lower-case ASCII slug ("Yusuf'un iPhone'u" → "yusuf-un-iphone-u"). */
@@ -76,6 +81,14 @@ function placeholderDevice(id: string, hints: DeviceHints, meta: SdkAttachMeta, 
   if (hints.osVersion) device.osVersion = hints.osVersion;
   if (hints.apiLevel !== undefined) device.apiLevel = hints.apiLevel;
   return device;
+}
+
+/**
+ * Is this still the placeholder an SDK hello created (placeholderDevice), not yet reported by a driver?
+ * Drivers report a log stream (`logs.via`) and actions; a placeholder has neither.
+ */
+export function isSdkPlaceholder(device: DeviceInfo): boolean {
+  return device.logs.status === 'stopped' && device.logs.via === undefined && device.actions.length === 0 && device.readers === undefined;
 }
 
 /** Model identifiers compare without case or separators: adb's `sdk_gphone64_arm64` (humanized to
@@ -155,8 +168,12 @@ export function resolveDevice(hub: HubSink & DeviceLookup, hints: DeviceHints, m
   }
   if (hints.simulatorUdid) {
     const id = `ios-sim:${hints.simulatorUdid}`;
-    if (!hub.getDevice(id)) hub.upsertDevice(placeholderDevice(id, { ...hints, platform: 'ios', isPhysical: false }, meta, now));
-    return { deviceId: id, network: false };
+    const existing = hub.getDevice(id);
+    // Not known, or left offline (its placeholder after the last app quit, or a simulator the driver saw shut
+    // down): the app runs on it, so it is online until the simulator driver says more.
+    if (existing && existing.state === 'online') return { deviceId: id, network: false };
+    hub.upsertDevice(placeholderDevice(id, { ...hints, platform: 'ios', isPhysical: false }, meta, now));
+    return { deviceId: id, network: false, placeholder: true };
   }
   const match = findUniqueDevice(hub.getDevices(), hints, meta.transport, meta.remote);
   if (match) return { deviceId: match.id, network: false };

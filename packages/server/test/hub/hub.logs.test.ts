@@ -265,3 +265,30 @@ describe('hub ingestion speed', () => {
     expect(ms).toBeLessThan(1000);
   });
 });
+
+describe('hub process table', () => {
+  it('stays bounded when a driver only ever reports "seen" (iOS syslog pids), dropping the oldest', () => {
+    hub = makeHub();
+    const started = performance.now();
+    for (let pid = 1; pid <= 20_000; pid++) hub.setProcess({ deviceId: 'ios:X', pid, name: `proc${pid}`, event: 'seen' });
+    const ms = performance.now() - started;
+    const pids = hub.getProcesses().map((p) => p.pid);
+    expect(pids.length).toBeLessThanOrEqual(4096);
+    expect(pids).toContain(20_000);
+    expect(pids).not.toContain(1);
+    expect(ms).toBeLessThan(2000); // no full scan on every insert past the cap
+  });
+
+  it('drops dead processes before live ones', () => {
+    hub = makeHub();
+    hub.setProcess({ deviceId: 'android:X', pid: 1, name: 'init', event: 'seen' });
+    for (let pid = 2; pid <= 1500; pid++) {
+      hub.setProcess({ deviceId: 'android:X', pid, name: `p${pid}`, event: 'started' });
+      hub.setProcess({ deviceId: 'android:X', pid, name: `p${pid}`, event: 'died' });
+    }
+    for (let pid = 2000; pid < 5000; pid++) hub.setProcess({ deviceId: 'android:X', pid, name: `p${pid}`, event: 'seen' });
+    const pids = new Set(hub.getProcesses().map((p) => p.pid));
+    expect(pids.has(1)).toBe(true); // oldest, but alive
+    expect(pids.size).toBeLessThanOrEqual(4096);
+  });
+});

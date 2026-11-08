@@ -1,7 +1,7 @@
 import net from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { MockRule } from '@durbun/protocol';
-import { createSdkLayerWithTimings } from '../../src/sdk/layer';
+import { admissionKey, createSdkLayerWithTimings, SDK_ADMISSION } from '../../src/sdk/layer';
 import type { Hub, SdkLayer } from '../../src/types';
 import { silentLogger } from '../../src/util/logger';
 import { device, freePort, hello, makeHub, makeSettings, NdjsonClient, sleep, waitFor } from './helpers';
@@ -254,6 +254,58 @@ describe('SDK layer over raw TCP', () => {
     expect(c.closed).toBe(false);
     await waitFor(() => c.closed, 2000);
     await waitFor(() => hub.getApp(appId)?.connected === false);
+  });
+
+  it('closes a connection whose first line grows past the hello limit, takes 1 MB frames after the hello', async () => {
+    const port = await setup();
+    const flood = await connect(port);
+    flood.writeRaw(`{"type":"hello","pad":"${'x'.repeat(SDK_ADMISSION.maxHelloBytes + 10)}`); // no newline yet
+    await waitFor(() => flood.closed, 2000);
+
+    const c = await connect(port);
+    c.send(hello());
+    const { appId } = await c.next('welcome');
+    c.send({ type: 'log', ts: 1, level: 'info', message: 'm'.repeat(1024 * 1024) });
+    await waitFor(() => hub.getLogs().some((l) => l.appId === appId && l.source === 'app'));
+    expect(c.closed).toBe(false);
+  });
+
+  it('limits connections waiting for their hello per address and new connections per address', async () => {
+    const saved = { ...SDK_ADMISSION };
+    Object.assign(SDK_ADMISSION, { maxPendingPerRemote: 3, maxNewPerRemote: 5, rateWindowMs: 60_000 });
+    try {
+      const port = await setup();
+      // One after another as the server accepts them (a client's 'connect' can come before the server's accept).
+      const accepted = async () => {
+        const c = await connect(port);
+        await sleep(30);
+        return c;
+      };
+      const silent = [await accepted(), await accepted(), await accepted()];
+      const fourth = await accepted();
+      await waitFor(() => fourth.closed, 2000); // three are already waiting for their hello
+      expect(silent.some((c) => c.closed)).toBe(false);
+      silent[0]!.send(hello());
+      await silent[0]!.next('welcome');
+      const fifth = await accepted(); // one of the three finished its hello: room again
+      fifth.send(hello({ session: 'launch-5' }));
+      await fifth.next('welcome');
+      const sixth = await accepted(); // the 5th admitted from 127.0.0.1 in the window (refused ones do not count)
+      sixth.send(hello({ session: 'launch-6' }));
+      await sixth.next('welcome');
+      const seventh = await accepted(); // over the rate although nobody waits for a hello
+      await waitFor(() => seventh.closed, 2000);
+      expect(silent.slice(1).some((c) => c.closed)).toBe(false);
+    } finally {
+      Object.assign(SDK_ADMISSION, saved);
+    }
+  });
+
+  it('keys admission by address, not port; an adb reverse route by its device', () => {
+    expect(admissionKey({ transport: 'tcp', remote: '192.168.1.42:53211' })).toBe('192.168.1.42');
+    expect(admissionKey({ transport: 'tcp', remote: '::ffff:192.168.1.42:53211' })).toBe('192.168.1.42');
+    expect(admissionKey({ transport: 'websocket', remote: 'fe80::1:60000' })).toBe('fe80::1');
+    expect(admissionKey({ transport: 'adb-reverse', remote: 'adb-reverse:R58M123ABC', deviceId: 'android:R58M123ABC' })).toBe('adb-reverse:R58M123ABC');
   });
 
   it('can rebind the listener (LAN toggle) without dropping live sessions', async () => {

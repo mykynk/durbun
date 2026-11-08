@@ -21,6 +21,7 @@ import { PRODUCT_NAME, type NetworkDetail, type SessionExport, type ToolCheck } 
 import { isPlainObject } from '../config';
 import type { Hub, Logger } from '../types';
 import { buildHar, headerValue } from './har';
+import { parseJsonBuffer } from './jsonParse';
 import { streamJson } from './jsonStream';
 import { extensionFor } from './mime';
 import { isInside, SANDBOX_CSP, sendFile, statFile } from './static';
@@ -33,13 +34,18 @@ import {
   HttpError,
   isTruthyParam,
   queryString,
+  readBody,
   readJson,
   sendError,
   sendJson,
 } from './util';
 
 export const UPLOAD_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
-/** Stays below V8's maximum string length so the body can be decoded and parsed. */
+/**
+ * Largest session import. The body is parsed member by member and list element by element (jsonParse.ts),
+ * never decoded into one string, so its parsed form is what has to fit in the heap. Not lowered to "the
+ * largest export": with the default caps an export is already ~0.5 GB (256 MB of log text, 256 MB of bodies).
+ */
 export const IMPORT_LIMIT_BYTES = 500 * 1024 * 1024;
 const JSON_LIMIT_BYTES = 16 * 1024 * 1024;
 
@@ -64,6 +70,18 @@ const CRASH_FILE = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,199}\.ips$/i;
 /** Is `udid` / `name` a crash report copy the server may serve (GET /api/files/crash/:udid/:name)? */
 export function isServableCrashFile(udid: string, name: string): boolean {
   return CRASH_UDID.test(udid) && CRASH_FILE.test(name) && !name.includes('..');
+}
+
+/** Name POST /api/upload gives a file in the temp directory: "<time36>-<6 hex>-<safe name>". */
+export function uploadFileName(name: string): string {
+  return `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}-${safeUploadName(name)}`;
+}
+
+/** Is `file` an upload saved by POST /api/upload (directly inside `tempDir`, named by uploadFileName)? */
+export function isUploadedFile(tempDir: string, file: string): boolean {
+  if (!path.isAbsolute(file)) return false;
+  const resolved = path.resolve(file);
+  return path.dirname(resolved) === path.resolve(tempDir) && /^[0-9a-z]+-[0-9a-f]{6}-[A-Za-z0-9]/.test(path.basename(resolved));
 }
 
 /** Safe file name for an upload: basename only, ASCII letters/digits/._-, max 120 chars, extension kept. */
@@ -204,11 +222,32 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
       ids = body.ids as string[];
     }
     const caseSensitive = body.caseSensitive === true;
-    const result =
-      body.text === ''
-        ? (ids ?? deps.hub.getNetwork().map((e) => e.id))
-        : deps.hub.searchNetwork(body.text, ids ? { ids, caseSensitive } : { caseSensitive });
-    sendJson(res, 200, { ids: result });
+    if (body.text === '') {
+      sendJson(res, 200, { ids: ids ?? deps.hub.getNetwork().map((e) => e.id) });
+      return;
+    }
+    const opts = ids ? { ids, caseSensitive } : { caseSensitive };
+    if (!deps.hub.searchNetworkAsync) {
+      sendJson(res, 200, { ids: deps.hub.searchNetwork(body.text, opts) });
+      return;
+    }
+    // The UI aborts its search on every keystroke: stop scanning bodies once the request is gone.
+    const abort = new AbortController();
+    const onClose = () => {
+      if (!res.writableFinished) abort.abort();
+    };
+    res.once('close', onClose);
+    try {
+      sendJson(res, 200, { ids: await deps.hub.searchNetworkAsync(body.text, { ...opts, signal: abort.signal }) });
+    } catch (err) {
+      if (abort.signal.aborted) {
+        deps.logger.debug('network search stopped: the client went away');
+        return;
+      }
+      throw err;
+    } finally {
+      res.off('close', onClose);
+    }
   }
 
   async function har(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -262,7 +301,7 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
   }
 
   async function importSession(req: IncomingMessage, res: ServerResponse, query: URLSearchParams): Promise<void> {
-    const raw = await readJson(req, importLimit);
+    const raw = await parseJsonBuffer(await readBody(req, importLimit));
     const data = validateSessionExport(raw);
     const label = importLabel(queryString(query, 'name'), data.exportedAt);
     let result: { deviceIds: string[] };
@@ -282,7 +321,7 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
     }
     const name = safeUploadName(queryString(query, 'name') ?? 'upload.bin');
     await fsp.mkdir(tempDir, { recursive: true });
-    const finalPath = path.join(tempDir, `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}-${name}`);
+    const finalPath = path.join(tempDir, uploadFileName(name));
     const partPath = `${finalPath}.part`;
     let size = 0;
     const out = createWriteStream(partPath, { flags: 'wx', mode: 0o600 });

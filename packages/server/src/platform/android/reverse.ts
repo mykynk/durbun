@@ -1,8 +1,11 @@
 /**
  * SDK routing for one Android device (SPEC §2.1 / §5.5): a 127.0.0.1 listener on a dynamic port plus
- *   adb -s S reverse tcp:9751 tcp:<dyn>        (raw NDJSON SDK transport → we know the device)
- *   adb -s S reverse tcp:9750 tcp:<http port>  (React Native WebSocket /sdk)
+ *   adb -s S reverse tcp:9751 tcp:<dyn>           (raw NDJSON SDK transport → we know the device)
+ *   adb -s S reverse tcp:9750 tcp:<gateway port>  (React Native WebSocket /sdk)
  * Accepted sockets go to ctx.sdk.attachStream(socket, { transport: 'adb-reverse', deviceId }).
+ * tcp:9750 never points at the HTTP port itself: a reversed connection arrives from 127.0.0.1, which the
+ * HTTP port trusts with everything (/api, /ui), so any app on the phone could read and steer Dürbün. The
+ * device gateway (`ctx.ports.device`, see http/app.ts) serves /sdk and GET /api/health only.
  *
  * Two Dürbüns on one computer (the Mac app next to a CLI or test server) see the same phones, but a phone
  * has one tcp:9751 and one tcp:9750. Re-pointing them on every check made the two take the route from each
@@ -54,22 +57,32 @@ export const ROUTE_ELSEWHERE_CODE = 'sdk.routeElsewhere';
 export type DurbunProbe = 'durbun' | 'notDurbun' | 'refused' | 'noAnswer';
 
 export async function probeDurbun(port: number, timeoutMs = REVERSE_TIMING.probeTimeoutMs): Promise<DurbunProbe> {
-  if (!Number.isInteger(port) || port <= 0 || port > 65_535) return 'refused';
+  return (await probeHealth(port, timeoutMs)).state;
+}
+
+/**
+ * probeDurbun plus the HTTP port that Dürbün reports (`httpPort`: its device gateway answers on another
+ * port than the one the user opens; older builds reverse tcp:9750 to the HTTP port and report none).
+ */
+async function probeHealth(port: number, timeoutMs: number): Promise<{ state: DurbunProbe; httpPort?: number }> {
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) return { state: 'refused' };
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) {
       await res.body?.cancel().catch(() => undefined);
-      return 'notDurbun';
+      return { state: 'notDurbun' };
     }
-    const body = (await res.json()) as { ok?: unknown; name?: unknown } | null;
-    return body && body.ok === true && body.name === 'durbun' ? 'durbun' : 'notDurbun';
+    const body = (await res.json()) as { ok?: unknown; name?: unknown; httpPort?: unknown } | null;
+    if (!body || body.ok !== true || body.name !== 'durbun') return { state: 'notDurbun' };
+    const httpPort = Number(body.httpPort);
+    return Number.isInteger(httpPort) && httpPort > 0 && httpPort <= 65_535 ? { state: 'durbun', httpPort } : { state: 'durbun' };
   } catch (e) {
-    if (e instanceof SyntaxError) return 'notDurbun'; // body is not JSON
+    if (e instanceof SyntaxError) return { state: 'notDurbun' }; // body is not JSON
     const err = e as { code?: unknown; cause?: { code?: unknown } };
     const code = String(err.cause?.code ?? err.code ?? '');
-    if (code === 'ECONNREFUSED') return 'refused';
-    if (code.startsWith('HPE_')) return 'notDurbun'; // undici: the answer is not HTTP
-    return 'noAnswer'; // TimeoutError, ECONNRESET, "other side closed", …
+    if (code === 'ECONNREFUSED') return { state: 'refused' };
+    if (code.startsWith('HPE_')) return { state: 'notDurbun' }; // undici: the answer is not HTTP
+    return { state: 'noAnswer' }; // TimeoutError, ECONNRESET, "other side closed", …
   }
 }
 
@@ -111,8 +124,10 @@ export class AdbReverseRouter {
   private readonly sockets = new Set<net.Socket>();
   private closed = false;
   private lastError?: string;
-  /** HTTP port of the other Dürbün whose route we leave alone (announced once per owner, see `noticeGone`). */
+  /** Port tcp:9750 maps to for the other Dürbün whose route we leave alone (announced once per owner, see `noticeGone`). */
   private yieldedTo?: number;
+  /** HTTP port that Dürbün reports (its UI), else `yieldedTo`. */
+  private yieldedHttp?: number;
   /** Consecutive checks that found that Dürbün not answering in time, or its SDK listener missing or dead. */
   private deadChecks = 0;
   /** The routeElsewhere line pushed for `yieldedTo`: when, and its hub log id. */
@@ -133,7 +148,7 @@ export class AdbReverseRouter {
 
   /** HTTP port of the other Dürbün that holds this device's SDK route, while we leave it alone. */
   get heldBy(): number | undefined {
-    return this.yieldedTo;
+    return this.yieldedHttp ?? this.yieldedTo;
   }
 
   get connectionCount(): number {
@@ -165,10 +180,13 @@ export class AdbReverseRouter {
     const { serial, ctx } = this.deps;
     const list = await adb.reverseList(serial);
     if (list && (await this.leaveToOtherDurbun(list))) return false;
-    const wanted: Array<[number, number]> = [
-      [DEFAULT_PORTS.sdk, this.port],
-      [DEFAULT_PORTS.http, ctx.ports.http],
-    ];
+    const wanted: Array<[number, number]> = [[DEFAULT_PORTS.sdk, this.port]];
+    const gateway = ctx.ports.device;
+    if (gateway) wanted.push([DEFAULT_PORTS.http, gateway]);
+    else if (list?.some((m) => m.local === `tcp:${DEFAULT_PORTS.http}` && m.remote === `tcp:${ctx.ports.http}`)) {
+      // No device gateway: never leave the phone a route to the HTTP port (an older build's mapping).
+      await adb.reverseRemove(serial, DEFAULT_PORTS.http);
+    }
     let ok = true;
     for (const [devicePort, hostPort] of wanted) {
       if (this.closed) return false;
@@ -204,27 +222,34 @@ export class AdbReverseRouter {
     if (!list) return;
     const ours: Array<[number, number | undefined]> = [
       [DEFAULT_PORTS.sdk, this.port],
-      [DEFAULT_PORTS.http, ctx.ports.http],
+      [DEFAULT_PORTS.http, ctx.ports.device],
+      [DEFAULT_PORTS.http, ctx.ports.http], // an older build's mapping
     ];
+    const removed = new Set<number>();
     for (const [devicePort, hostPort] of ours) {
+      if (removed.has(devicePort)) continue;
       if (hostPort && list.some((m) => m.local === `tcp:${devicePort}` && m.remote === `tcp:${hostPort}`)) {
+        removed.add(devicePort);
         await adb.reverseRemove(serial, devicePort);
       }
     }
   }
 
   /**
-   * true = another Dürbün holds this device's route: tcp:9750 points to its answering HTTP port and its
-   * tcp:9751 listener is alive (or is given `takeOverAfterChecks` checks to come back). See the header.
+   * true = another Dürbün holds this device's route: tcp:9750 points to its answering device gateway (an
+   * older build: its HTTP port) and its tcp:9751 listener is alive (or is given `takeOverAfterChecks` checks
+   * to come back). See the header.
    */
   private async leaveToOtherDurbun(list: PortMapping[]): Promise<boolean> {
     const { serial, ctx, logger } = this.deps;
     const http = hostPortOf(list, DEFAULT_PORTS.http);
-    if (http === undefined || http === ctx.ports.http) {
+    // Ours: our gateway, or our own HTTP port from an older build (re-pointed to the gateway by ensure()).
+    if (http === undefined || http === ctx.ports.device || http === ctx.ports.http) {
       this.release();
       return false;
     }
-    const probe = await probeDurbun(http);
+    const health = await probeHealth(http, REVERSE_TIMING.probeTimeoutMs);
+    const probe = health.state;
     if (this.closed) return true;
     if (probe === 'refused' || probe === 'notDurbun') {
       // A killed Dürbün (nothing listens) or another program on that port: nobody to leave the route to.
@@ -241,13 +266,15 @@ export class AdbReverseRouter {
     // Missing / dead listener, or tcp:9751 half taken by us: let that Dürbün repair its route first.
     if (!serving) return this.missedCheck(http, `has no live tcp:${DEFAULT_PORTS.sdk} listener`);
     this.deadChecks = 0;
-    if (this.yieldedTo !== http) {
+    const owner = health.httpPort ?? http;
+    if (this.yieldedTo !== http || this.yieldedHttp !== owner) {
       this.yieldedTo = http;
-      this.lastError = `adb reverse tcp:${DEFAULT_PORTS.sdk} / tcp:${DEFAULT_PORTS.http} belong to another Dürbün (port ${http})`;
-      logger.info(`${serial}: SDK connections from this device go to another Dürbün on port ${http}; leaving its adb reverse mappings alone`);
-      this.announce(http);
+      this.yieldedHttp = owner;
+      this.lastError = `adb reverse tcp:${DEFAULT_PORTS.sdk} / tcp:${DEFAULT_PORTS.http} belong to another Dürbün (port ${owner})`;
+      logger.info(`${serial}: SDK connections from this device go to another Dürbün on port ${owner}; leaving its adb reverse mappings alone`);
+      this.announce(owner);
     } else if (this.noticeGone()) {
-      this.announce(http);
+      this.announce(owner);
     }
     return true;
   }
@@ -268,6 +295,7 @@ export class AdbReverseRouter {
   /** We no longer yield (route ours, free, or taken over). */
   private release(): void {
     this.yieldedTo = undefined;
+    this.yieldedHttp = undefined;
     this.deadChecks = 0;
     this.notice = undefined;
     this.newestLogId = 0;

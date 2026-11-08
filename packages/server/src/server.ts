@@ -294,8 +294,8 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
   }
   if (!ui.dir) warn('ui.missing', 'The web UI is not built yet: run "npm run build" (the browser shows a placeholder page until then).');
 
-  // Mutable: ports.http becomes the bound port after listen() (drivers read it when they start).
-  const ports = { http: opts.httpPort, sdk: opts.sdkPort };
+  // Mutable: ports.http becomes the bound port and ports.device the device gateway after listen() (drivers read them when they start).
+  const ports: DriverContext['ports'] = { http: opts.httpPort, sdk: opts.sdkPort };
   const baseContext: DriverContext = {
     hub,
     getDevices: () => hub.getDevices(),
@@ -330,6 +330,7 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
   const lan = config.settings.allowLan;
   try {
     ports.http = await app.listen(opts.httpPort, lan ? '0.0.0.0' : '127.0.0.1');
+    if (app.devicePort !== undefined) ports.device = app.devicePort;
   } catch (err) {
     await app.close().catch(() => {});
     await settle('sdk.close', () => sdk.close(), logger, 2_000);

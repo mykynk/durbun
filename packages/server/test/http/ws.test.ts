@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
@@ -272,6 +273,117 @@ describe('WS /sdk', () => {
     expect(await rawHandshake(handshake('http://localhost:5173', 'same-site'))).toBe('HTTP/1.1 101 Switching Protocols');
     for (let i = 0; i < 100 && t.sdk.sockets.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
     expect(t.sdk.sockets).toHaveLength(1);
+  });
+});
+
+describe('device gateway (the target of adb reverse tcp:9750)', () => {
+  /** HTTP status of a WebSocket upgrade (101 = accepted). */
+  async function upgrade(url: string, headers: Record<string, string> = {}): Promise<number> {
+    const ws = new WebSocket(url, { headers });
+    return new Promise<number>((resolve) => {
+      ws.once('open', () => {
+        ws.terminate();
+        resolve(101);
+      });
+      ws.once('unexpected-response', (_req, res) => {
+        resolve(res.statusCode ?? 0);
+        ws.terminate();
+      });
+      ws.once('error', () => resolve(-1));
+    });
+  }
+
+  it('serves /sdk and GET /api/health only: apps on a plugged-in phone never reach /api, /ui or the UI', async () => {
+    t = await startTestApp();
+    t.hub.network.set('app:1:7', sampleNetwork());
+    const port = t.app.devicePort!;
+    expect(port).toBeGreaterThan(0);
+    expect(port).not.toBe(t.port);
+    const gw = `http://127.0.0.1:${port}`;
+
+    const health = await fetch(`${gw}/api/health`);
+    expect(health.status).toBe(200);
+    expect(await health.json()).toMatchObject({ ok: true, name: 'durbun', httpPort: t.port });
+
+    // A native client on the phone: loopback peer, Host localhost:9750, no Origin / fetch metadata.
+    const headers = { Host: 'localhost:9750' };
+    for (const [method, pathname] of [
+      ['GET', '/api/doctor'],
+      ['GET', '/api/network/app:1:7'],
+      ['GET', '/api/network/app:1:7/body/response'],
+      ['GET', '/api/export'],
+      ['PUT', '/api/settings'],
+      ['POST', '/api/upload'],
+      ['POST', '/api/import'],
+      ['GET', '/'],
+      ['GET', '/index.html'],
+    ] as const) {
+      const res = await fetch(`${gw}${pathname}`, { method, headers, ...(method === 'GET' ? {} : { body: 'x'.repeat(1024) }) });
+      expect(res.status, `${method} ${pathname}`).toBe(404);
+      await res.body?.cancel();
+    }
+    expect(await upgrade(`ws://127.0.0.1:${port}/ui`, headers)).toBe(404);
+    expect(await upgrade(`ws://127.0.0.1:${port}/ui`, { Origin: `http://localhost:${t.port}` })).toBe(404);
+    expect((await fetch(`${gw}/sdk`)).status).toBe(426);
+
+    // React Native over adb reverse dials ws://localhost:9750/sdk and sends that URL's origin.
+    expect(await upgrade(`ws://127.0.0.1:${port}/sdk`, { ...headers, Origin: 'http://localhost:9750' })).toBe(101);
+    expect(await upgrade(`ws://127.0.0.1:${port}/sdk`)).toBe(101);
+    expect(await upgrade(`ws://127.0.0.1:${port}/sdk`, { Origin: 'https://evil.example', 'Sec-Fetch-Site': 'cross-site' })).toBe(403);
+    for (let i = 0; i < 100 && t.sdk.sockets.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(t.sdk.sockets.map((s) => s.meta.transport)).toEqual(['websocket', 'websocket']);
+
+    // The HTTP port itself still serves the UI.
+    expect((await fetch(`${t.base}/api/network/app:1:7`)).status).toBe(200);
+  });
+
+  it('closes with the app', async () => {
+    t = await startTestApp();
+    const port = t.app.devicePort!;
+    await t.close();
+    t = undefined;
+    await expect(fetch(`http://127.0.0.1:${port}/api/health`)).rejects.toThrow();
+  });
+});
+
+describe('temp files while running for days', () => {
+  it('removes old screenshots, recordings and uploads every interval, but not crash report copies', async () => {
+    t = await startTestApp({ tempCleanIntervalMs: 30, tempMaxAgeMs: 60_000 });
+    const tmp = t.config.tempDir;
+    const old = new Date(Date.now() - 120_000);
+    await mkdir(path.join(tmp, 'crash', 'UDID'), { recursive: true });
+    for (const name of ['screenshot-old.png', 'recording-old.mp4', 'crash/UDID/Runner.ips']) await writeFile(path.join(tmp, name), 'x');
+    await writeFile(path.join(tmp, 'screenshot-new.png'), 'x');
+    for (const name of ['screenshot-old.png', 'recording-old.mp4', 'crash']) await utimes(path.join(tmp, name), old, old);
+    for (let i = 0; i < 100 && (await readdir(tmp)).includes('screenshot-old.png'); i++) await new Promise((r) => setTimeout(r, 20));
+    expect((await readdir(tmp)).sort()).toEqual(['crash', 'screenshot-new.png']);
+    expect(await readdir(path.join(tmp, 'crash', 'UDID'))).toEqual(['Runner.ips']);
+  });
+
+  it('deletes an uploaded install file once app-install ends, never a file of the user', async () => {
+    t = await startTestApp();
+    const c = await open();
+    await c.synced();
+    const upload = async () => ((await (await fetch(`${t!.base}/api/upload?name=Pati.apk`, { method: 'POST', body: 'apk' })).json()) as { file: string }).file;
+
+    const ok = await upload();
+    expect(await c.command({ name: 'device.action', deviceId: 'android:R5CT1234', action: 'app-install', params: { file: ok } })).toMatchObject({ ok: true });
+    for (let i = 0; i < 50 && existsSync(ok); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(existsSync(ok)).toBe(false);
+
+    t.android.result = { ok: false, error: 'INSTALL_FAILED_VERSION_DOWNGRADE', code: 'action.installFailed' };
+    const failed = await upload();
+    expect(await c.command({ name: 'device.action', deviceId: 'android:R5CT1234', action: 'app-install', params: { file: failed } })).toMatchObject({ ok: false });
+    for (let i = 0; i < 50 && existsSync(failed); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(existsSync(failed)).toBe(false); // the UI uploads again for the next try
+
+    const own = path.join(t.dir, 'Pati.apk'); // a path the user typed (not an upload)
+    await writeFile(own, 'apk');
+    const named = path.join(t.config.tempDir, 'screenshot-1.png'); // inside tmp, but not an upload
+    await writeFile(named, 'png');
+    for (const file of [own, named]) await c.command({ name: 'device.action', deviceId: 'android:R5CT1234', action: 'app-install', params: { file } });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(existsSync(own) && existsSync(named)).toBe(true);
   });
 });
 

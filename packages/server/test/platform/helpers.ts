@@ -178,7 +178,7 @@ export function createCtx(opts: { settings?: Partial<ServerSettings>; tempDir?: 
     logger: silentLogger,
     tempDir,
     fileUrl: (name) => `/api/files/${encodeURIComponent(name)}`,
-    ports: { http: 9750, sdk: 9751 },
+    ports: { http: 9750, sdk: 9751, device: 9760 }, // device: the device gateway, what tcp:9750 is reversed to
   };
 }
 

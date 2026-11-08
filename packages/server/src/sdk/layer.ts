@@ -10,6 +10,7 @@ import { DEFAULT_SETTINGS, MAX_FRAME_BYTES } from '@durbun/protocol';
 import type { WebSocket } from 'ws';
 import type { CreateSdkLayerOptions, HubChange, SdkAttachMeta, SdkLayer, VirtualSdkSession } from '../types';
 import { configKey, type ConnectionHost, DEFAULT_SDK_TIMINGS, SdkConnection, type SdkTimings } from './connection';
+import { isSdkPlaceholder } from './devices';
 import { NdjsonDecoder } from './ndjson';
 import { rawDataToBuffer, streamWire, virtualWire, webSocketWire } from './wires';
 
@@ -22,6 +23,30 @@ interface PendingCommand {
 
 const describeMeta = (meta: SdkAttachMeta) => `${meta.transport}${meta.remote ? ` ${meta.remote}` : ''}`;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Limits for connections that have not completed their hello (the SDK port is open to the LAN when "allow
+ * LAN" is on, and to every app on a plugged-in phone through adb reverse). An SDK sends one small `hello`
+ * first, so: its line may be at most `maxHelloBytes` (frames grow to MAX_FRAME_BYTES once established), at most
+ * `maxPendingPerRemote` connections per address (`maxPendingTotal` in all) may wait for their hello, and an
+ * address may open at most `maxNewPerRemote` connections per `rateWindowMs`. Mutable for tests.
+ */
+export const SDK_ADMISSION = {
+  maxHelloBytes: 64 * 1024,
+  maxPendingPerRemote: 8,
+  maxPendingTotal: 64,
+  maxNewPerRemote: 30,
+  rateWindowMs: 10_000,
+};
+
+/** Who a connection comes from, for SDK_ADMISSION: its IP (no port), or the adb reverse device. */
+export function admissionKey(meta: SdkAttachMeta): string {
+  const remote = meta.remote ?? '';
+  if (meta.transport !== 'tcp' && meta.transport !== 'websocket') return remote || meta.transport;
+  const colon = remote.lastIndexOf(':');
+  const ip = (colon > 0 ? remote.slice(0, colon) : remote).toLowerCase();
+  return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+}
 
 /** "POST / HTTP/1.1": a browser (fetch / form / <img>) or an HTTP tool talking to the raw SDK port. */
 const HTTP_REQUEST_LINE = /^[A-Z]+ \S+ HTTP\/\d(?:\.\d)?$/;
@@ -40,7 +65,17 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
   const byApp = new Map<string, Set<SdkConnection>>();
   /** `net:` device → number of established sessions on it. */
   const netDeviceRefs = new Map<string, number>();
+  /**
+   * Driverless `ios-sim:` placeholder → number of established sessions on it. When the last one ends and no
+   * driver has reported the simulator meanwhile, it goes offline like a `net:` device (no ghost stays online).
+   */
+  const placeholderRefs = new Map<string, number>();
   const pending = new Map<string, PendingCommand>();
+  /** Admission key → connections still waiting for their hello (SDK_ADMISSION). */
+  const preHello = new Map<string, Set<SdkConnection>>();
+  let preHelloTotal = 0;
+  /** Admission key → times of its recent new connections (within rateWindowMs). */
+  const recentOpens = new Map<string, number[]>();
   let mocksOverride: MockRule[] | undefined;
   let configOverride: Partial<SdkConfig> = {};
   let server: net.Server | undefined;
@@ -91,6 +126,7 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
     },
 
     onEstablished(conn: SdkConnection): void {
+      leavePreHello(conn);
       const appId = conn.appId as string;
       let set = byApp.get(appId);
       if (!set) {
@@ -99,10 +135,15 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
       }
       set.add(conn);
       if (conn.networkDevice && conn.deviceId) netDeviceRefs.set(conn.deviceId, (netDeviceRefs.get(conn.deviceId) ?? 0) + 1);
+      else if (conn.deviceId && (conn.placeholderDevice || placeholderRefs.has(conn.deviceId))) {
+        conn.placeholderDevice = true;
+        placeholderRefs.set(conn.deviceId, (placeholderRefs.get(conn.deviceId) ?? 0) + 1);
+      }
     },
 
     onClosed(conn: SdkConnection): void {
       connections.delete(conn);
+      leavePreHello(conn);
       for (const [id, p] of pending) {
         if (p.conn !== conn) continue;
         clearTimeout(p.timer);
@@ -122,6 +163,17 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
         else {
           netDeviceRefs.delete(conn.deviceId);
           hub.markDeviceDisconnected(conn.deviceId, 'No app is connected over the network', 'device.networkIdle');
+        }
+      } else if (conn.placeholderDevice && conn.deviceId && placeholderRefs.has(conn.deviceId)) {
+        const left = (placeholderRefs.get(conn.deviceId) ?? 1) - 1;
+        if (left > 0) placeholderRefs.set(conn.deviceId, left);
+        else {
+          placeholderRefs.delete(conn.deviceId);
+          const device = hub.getDevice(conn.deviceId);
+          // A driver that reported the simulator meanwhile owns its state now.
+          if (device && device.state === 'online' && isSdkPlaceholder(device)) {
+            hub.markDeviceDisconnected(conn.deviceId, 'No app is connected, and Dürbün does not watch this simulator itself', 'device.sdkIdle');
+          }
         }
       }
     },
@@ -157,6 +209,52 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
   });
 
   /**
+   * May a new inbound connection from `meta` start? Refused (with a log line) when its address opened too
+   * many connections lately or too many connections are still waiting for their hello.
+   */
+  function admit(meta: SdkAttachMeta): string | undefined {
+    if (meta.transport !== 'tcp' && meta.transport !== 'websocket' && meta.transport !== 'adb-reverse') return undefined;
+    const key = admissionKey(meta);
+    const now = Date.now();
+    const since = now - SDK_ADMISSION.rateWindowMs;
+    const opens = (recentOpens.get(key) ?? []).filter((t) => t > since);
+    if (opens.length >= SDK_ADMISSION.maxNewPerRemote) {
+      recentOpens.set(key, opens);
+      return `more than ${SDK_ADMISSION.maxNewPerRemote} new connections from ${key} within ${SDK_ADMISSION.rateWindowMs / 1000} s`;
+    }
+    if ((preHello.get(key)?.size ?? 0) >= SDK_ADMISSION.maxPendingPerRemote) {
+      return `${SDK_ADMISSION.maxPendingPerRemote} connections from ${key} are still waiting for their hello`;
+    }
+    if (preHelloTotal >= SDK_ADMISSION.maxPendingTotal) return `${SDK_ADMISSION.maxPendingTotal} connections are still waiting for their hello`;
+    opens.push(now);
+    recentOpens.set(key, opens);
+    if (recentOpens.size > 1024) {
+      for (const [k, list] of recentOpens) if (!list.some((t) => t > since)) recentOpens.delete(k);
+    }
+    return undefined;
+  }
+
+  function enterPreHello(conn: SdkConnection): void {
+    if (conn.meta.transport !== 'tcp' && conn.meta.transport !== 'websocket' && conn.meta.transport !== 'adb-reverse') return;
+    const key = admissionKey(conn.meta);
+    let set = preHello.get(key);
+    if (!set) {
+      set = new Set();
+      preHello.set(key, set);
+    }
+    set.add(conn);
+    preHelloTotal++;
+  }
+
+  function leavePreHello(conn: SdkConnection): void {
+    const key = admissionKey(conn.meta);
+    const set = preHello.get(key);
+    if (!set?.delete(conn)) return;
+    preHelloTotal--;
+    if (set.size === 0) preHello.delete(key);
+  }
+
+  /**
    * Every SDK starts with its JSON `hello`. A stream whose first line is something else is not an SDK —
    * typically a web page's no-cors POST to the raw port, whose body could carry a forged hello: closed
    * before any of it is read (an HTTP client gets a short 400 that says what this port is).
@@ -181,14 +279,23 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
       if (!stream.destroyed) stream.destroy();
       return;
     }
+    const refused = admit(meta);
+    if (refused) {
+      logger.warn(`refused an SDK connection from ${describeMeta(meta)}: ${refused}`);
+      stream.on('error', () => undefined);
+      stream.destroy();
+      return;
+    }
     let conn: SdkConnection | undefined;
     const wire = streamWire(stream, timings.maxBufferedBytes, () => conn?.close('client is not reading (backpressure)', 1013), logger);
     const connection = new SdkConnection(host, meta, wire, true);
     conn = connection;
     connections.add(connection);
+    enterPreHello(connection);
     let firstLine = true;
     const decoder = new NdjsonDecoder({
-      maxLineBytes: MAX_FRAME_BYTES,
+      // Until the hello is in, a line may be only as long as a hello (a 16 MB line would be held in memory).
+      maxLineBytes: SDK_ADMISSION.maxHelloBytes,
       onLine: (line) => {
         if (connection.closed) return;
         const first = firstLine;
@@ -202,8 +309,16 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
           return;
         }
         connection.receive(value);
+        if (connection.established) decoder.maxLineBytes = MAX_FRAME_BYTES;
       },
-      onOversize: (bytes) => logger.warn(`dropped an oversized SDK frame (${bytes} bytes) from ${connection.describe()}`),
+      onOversize: (bytes) => {
+        if (!connection.established) {
+          logger.warn(`closed an SDK connection from ${describeMeta(meta)}: a ${bytes}-byte line before its hello (limit ${SDK_ADMISSION.maxHelloBytes})`);
+          connection.close('hello too large', 1009);
+          return;
+        }
+        logger.warn(`dropped an oversized SDK frame (${bytes} bytes) from ${connection.describe()}`);
+      },
     });
     stream.on('data', (chunk: Buffer | string) => {
       if (connection.closed) return;
@@ -212,6 +327,10 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
         decoder.push(chunk);
       } catch (err) {
         logger.warn(`failed to decode data from ${connection.describe()}`, err);
+      }
+      if (decoder.overflowing && !connection.established && !connection.closed) {
+        logger.warn(`closed an SDK connection from ${describeMeta(meta)}: more than ${SDK_ADMISSION.maxHelloBytes} bytes before its hello`);
+        connection.close('hello too large', 1009);
       }
     });
     stream.on('end', () => {
@@ -243,15 +362,31 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
       }
       return;
     }
+    const refused = admit(meta);
+    if (refused) {
+      logger.warn(`refused an SDK connection from ${describeMeta(meta)}: ${refused}`);
+      try {
+        ws.close(1013, 'too many connections, try again later');
+      } catch {
+        ws.terminate();
+      }
+      return;
+    }
     let conn: SdkConnection | undefined;
     const wire = webSocketWire(ws, timings.maxBufferedBytes, () => conn?.close('client is not reading (backpressure)', 1013), logger);
     const connection = new SdkConnection(host, meta, wire, true);
     conn = connection;
     connections.add(connection);
+    enterPreHello(connection);
     ws.on('message', (data, isBinary) => {
       if (connection.closed) return;
       connection.touch();
       const buf = rawDataToBuffer(data);
+      if (!connection.established && buf.length > SDK_ADMISSION.maxHelloBytes) {
+        logger.warn(`closed an SDK connection from ${describeMeta(meta)}: a ${buf.length}-byte message before its hello (limit ${SDK_ADMISSION.maxHelloBytes})`);
+        connection.close('hello too large', 1009);
+        return;
+      }
       if (buf.length > MAX_FRAME_BYTES) {
         logger.warn(`dropped an oversized WebSocket frame (${buf.length} bytes) from ${connection.describe()}`);
         return;

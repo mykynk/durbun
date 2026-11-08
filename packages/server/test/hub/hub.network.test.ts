@@ -211,6 +211,32 @@ describe('network search', () => {
     expect(ids('iVBOR')).toEqual([]); // binary bodies are not searched
     expect(ids('pets', { ids: [`${app.id}:2`, 'nope'] })).toEqual(['2']);
     expect(ids('')).toHaveLength(3);
+    expect(ids('a.p')).toEqual([]); // the text is literal, not a pattern
+    expect(ids('(42')).toEqual([]);
+  });
+
+  it('searches in slices: same result, the event loop runs in between, and an abort stops it', async () => {
+    const app = setup();
+    const body = utf8(`{"items":[${'"x",'.repeat(20_000)}"Needle"]}`);
+    for (let i = 0; i < 1_000; i++) {
+      hub.netRequest(app.id, req(String(i), { url: `https://api.pati.app/v1/feed?page=${i}` }));
+      hub.netResponse(app.id, res(String(i), { body: i % 100 === 7 ? body : utf8('{"items":[]}') }));
+    }
+    const sync = hub.searchNetwork('needle');
+    expect(sync).toHaveLength(10);
+    let ticks = 0;
+    const ticker = setInterval(() => ticks++, 0);
+    try {
+      expect(await hub.searchNetworkAsync!('needle')).toEqual(sync);
+    } finally {
+      clearInterval(ticker);
+    }
+    expect(ticks).toBeGreaterThan(0);
+
+    const abort = new AbortController();
+    const running = hub.searchNetworkAsync!('needle', { signal: abort.signal });
+    abort.abort();
+    await expect(running).rejects.toMatchObject({ name: 'AbortError' });
   });
 });
 

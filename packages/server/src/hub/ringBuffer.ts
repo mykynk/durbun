@@ -43,6 +43,16 @@ export class RingBuffer<T> {
     return evicted;
   }
 
+  /** Removes and returns the oldest item. */
+  shift(): T | undefined {
+    if (this.len === 0) return undefined;
+    const item = this.buf[this.head];
+    this.buf[this.head] = undefined;
+    this.head = (this.head + 1) % this.buf.length;
+    this.len--;
+    return item;
+  }
+
   /** Item at logical index (0 = oldest). */
   at(index: number): T | undefined {
     if (index < 0 || index >= this.len) return undefined;

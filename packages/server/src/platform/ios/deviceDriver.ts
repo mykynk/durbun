@@ -746,6 +746,8 @@ class IosDeviceSession {
       params: { via: VIA },
     });
     await this.syslog?.stop();
+    // Disposed (unplugged, Dürbün stopping) or untrusted while it stopped: a new idevicesyslog would be orphaned.
+    if (this.disposed || !this.trusted) return;
     this.parser.flush();
     this.flutter.flushAll();
     this.batcher.flush();

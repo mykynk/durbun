@@ -87,7 +87,8 @@ on at a glance:
 |---|---|---|
 | 9750 | 127.0.0.1 (0.0.0.0 when `allowLan`) | HTTP: UI static, REST `/api/*`, WS `/ui` (UI), WS `/sdk` (JS/RN SDK) |
 | 9751 | 127.0.0.1 (0.0.0.0 when `allowLan`) | Generic raw-TCP NDJSON SDK listener (simulators, LAN) |
-| dynamic | 127.0.0.1 | One per Android device: `adb -s S reverse tcp:9751 tcp:<dyn>` so the server knows which device a connection came from. Also `adb reverse tcp:9750 tcp:9750` (for RN WS). |
+| dynamic | 127.0.0.1 | One per Android device: `adb -s S reverse tcp:9751 tcp:<dyn>` so the server knows which device a connection came from. Also `adb reverse tcp:9750 tcp:<device gateway>` (for RN WS). |
+| dynamic | 127.0.0.1 | Device gateway, the target of `adb reverse tcp:9750`: WS `/sdk` and `GET /api/health` only. A reversed connection arrives from 127.0.0.1, so the HTTP port (which trusts loopback with `/api` and `/ui`) is never the target. |
 | 9752–9755 (on device) | device 127.0.0.1 | On-device SDK listener (iOS physical devices). Desktop reaches it with usbmux `Connect`. |
 
 ### 2.2 Device ids
@@ -288,7 +289,7 @@ every failure is reported as data (device `logs.status`, `DriverStatus`, `ToolCh
   when unknown pids appear; parse ActivityManager `Start proc <pid>:<pkg>/…` → `setProcess(started)`,
   `Process <pkg> (pid <pid>) has died` / `Killing <pid>:<pkg>/…` → `setProcess(died)`.
 - SDK routing: per online device create a 127.0.0.1 listener on a dynamic port,
-  `adb -s S reverse tcp:9751 tcp:<dyn>` and `adb -s S reverse tcp:9750 tcp:<http port>`; hand accepted
+  `adb -s S reverse tcp:9751 tcp:<dyn>` and `adb -s S reverse tcp:9750 tcp:<device gateway port>` (never the HTTP port, see §2.1); hand accepted
   sockets to `ctx.sdk.attachStream(socket, { transport: 'adb-reverse', deviceId })`. Re-apply when lost;
   remove on stop.
 - Actions (only list those that work for the device): `screenshot` (`exec-out screencap -p`),

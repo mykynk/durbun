@@ -601,7 +601,8 @@ export class AndroidDeviceSession {
 
   /** logs-restart action. */
   async restartLogs(): Promise<void> {
-    if (!this.online) return;
+    if (!this.online || this.disposed) return;
+    const gen = this.gen;
     this.deps.ctx.hub.pushSystemLog(this.id, {
       level: 'info',
       code: 'logs.streamStopped',
@@ -609,6 +610,9 @@ export class AndroidDeviceSession {
       params: { via: VIA },
     });
     await this.stopLogcat();
+    // Unplugged, offline or disposed while logcat stopped (a later goOnline starts its own): a new logcat
+    // here would never be stopped.
+    if (gen !== this.gen || this.disposed || !this.online) return;
     this.pipeline.beginResume();
     this.setLogs({ status: 'starting', via: VIA });
     this.startLogcat();

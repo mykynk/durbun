@@ -1,6 +1,7 @@
 /**
- * WebSocket /ui: per connection `hello` → `snapshot` → the whole log buffer as `history` chunks (5 000
- * entries, `done: true` on the last) → live messages. Live messages that arrive while the initial sync is
+ * WebSocket /ui: per connection `hello` → `snapshot` → the whole log buffer as `history` chunks (at most
+ * 5 000 entries and ~8 MB, `done: true` on the last, always sent) → live messages. Live batches with more
+ * log text than one chunk holds go out as several batches. Live messages that arrive while the initial sync is
  * still being written are queued and delivered afterwards in order; log lines already contained in the
  * history are filtered out of later batches by id, and `cleared` events that happened before the sync
  * point are dropped (their effect is already in the snapshot). History chunks are written with
@@ -9,11 +10,17 @@
 import { WebSocket } from 'ws';
 import type { LogEntry, ServerToUi, UiNotice } from '@durbun/protocol';
 import { isPlainObject } from '../config';
+import { logEntryBytes } from '../hub/logSize';
 import type { Hub, HubChange, Logger } from '../types';
 import type { CommandClient, CommandReply } from './commands';
 import { errorMessage } from './util';
 
 export const HISTORY_CHUNK = 5_000;
+/**
+ * Estimated log bytes per history chunk or live batch (hub/logSize.ts). A row holds up to ~1 MB of text,
+ * so 5 000 rows could exceed the longest string JSON.stringify can build; then the chunk (and `done`) was lost.
+ */
+export const CHUNK_BYTES = 8 * 1024 * 1024;
 export const MAX_BUFFERED_BYTES = 64 * 1024 * 1024;
 /** Close code for "try again later" (client reconnects and resyncs). */
 export const CLOSE_TRY_AGAIN = 1013;
@@ -35,6 +42,8 @@ export interface UiChannelDeps {
     clientClosed(clientId: number): void;
   };
   historyChunk?: number;
+  /** Estimated log bytes per history chunk / live batch (default CHUNK_BYTES). */
+  chunkBytes?: number;
   maxBufferedBytes?: number;
   pingIntervalMs?: number;
 }
@@ -66,6 +75,25 @@ export function batchFromChange(change: Partial<HubChange>): BatchMessage | null
   return any ? msg : null;
 }
 
+/** Split rows into runs of at most `maxCount` rows and about `maxBytes` (estimated; at least one row each). */
+export function chunkLogs(logs: LogEntry[], maxCount: number, maxBytes: number): LogEntry[][] {
+  const out: LogEntry[][] = [];
+  let start = 0;
+  while (start < logs.length) {
+    let end = start;
+    let bytes = 0;
+    while (end < logs.length && end - start < maxCount) {
+      const size = logEntryBytes(logs[end]!);
+      if (end > start && bytes + size > maxBytes) break;
+      bytes += size;
+      end++;
+    }
+    out.push(logs.slice(start, end));
+    start = end;
+  }
+  return out;
+}
+
 function sanitizeLog(log: LogEntry): LogEntry {
   try {
     JSON.stringify(log);
@@ -83,10 +111,12 @@ export class UiChannel {
   private nextId = 1;
   private readonly pingTimer: NodeJS.Timeout;
   private readonly historyChunk: number;
+  private readonly chunkBytes: number;
   private readonly maxBuffered: number;
 
   constructor(private readonly deps: UiChannelDeps) {
     this.historyChunk = deps.historyChunk ?? HISTORY_CHUNK;
+    this.chunkBytes = deps.chunkBytes ?? CHUNK_BYTES;
     this.maxBuffered = deps.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
     this.pingTimer = setInterval(() => this.ping(), deps.pingIntervalMs ?? PING_INTERVAL_MS);
     this.pingTimer.unref();
@@ -123,10 +153,24 @@ export class UiChannel {
     }
   }
 
-  /** Fan a hub change out as one batch message. */
+  /** Fan a hub change out as one batch message (several when its log rows are too large for one). */
   broadcastChange(change: Partial<HubChange>): void {
+    if (this.clients.size === 0) return;
     const batch = batchFromChange(change);
     if (!batch) return;
+    const logs = batch.logs;
+    if (logs && logs.length > 1) {
+      const runs = chunkLogs(logs, logs.length, this.chunkBytes);
+      if (runs.length > 1) {
+        // The first batch carries everything else; the rest only rows, in order.
+        runs.forEach((run, i) => this.broadcastBatch(i === 0 ? { ...batch, logs: run } : { type: 'batch', logs: run }));
+        return;
+      }
+    }
+    this.broadcastBatch(batch);
+  }
+
+  private broadcastBatch(batch: BatchMessage): void {
     let minLogId = Infinity;
     for (const l of batch.logs ?? []) if (l.id < minLogId) minLogId = l.id;
     let shared: string | undefined;
@@ -185,13 +229,14 @@ export class UiChannel {
 
       this.sendMessage(client, hello);
       this.sendMessage(client, snapshot);
-      if (logs.length === 0) {
-        await this.sendAndWait(client, { type: 'history', logs: [], done: true });
-      }
-      for (let i = 0; i < logs.length; i += this.historyChunk) {
+      const chunks = chunkLogs(logs, this.historyChunk, this.chunkBytes);
+      if (chunks.length === 0) chunks.push([]);
+      for (let i = 0; i < chunks.length; i++) {
         if (client.closed) return;
-        const done = i + this.historyChunk >= logs.length;
-        await this.sendAndWait(client, { type: 'history', logs: logs.slice(i, i + this.historyChunk), done });
+        const done = i === chunks.length - 1;
+        const sent = await this.sendAndWait(client, { type: 'history', logs: chunks[i]!, done });
+        // A chunk that could not be serialized must not swallow the end of the sync.
+        if (!sent && done && !client.closed) await this.sendAndWait(client, { type: 'history', logs: [], done: true });
       }
       if (client.closed) return;
       client.ready = true;
@@ -264,18 +309,21 @@ export class UiChannel {
     });
   }
 
-  /** Send one history chunk and wait until it has been handed to the socket (backpressure). */
-  private sendAndWait(client: UiClient, message: ServerToUi): Promise<void> {
+  /**
+   * Send one history chunk and wait until it has been handed to the socket (backpressure). Resolves false
+   * when nothing was sent (not serializable, or the socket is closed).
+   */
+  private sendAndWait(client: UiClient, message: ServerToUi): Promise<boolean> {
     const json = this.serialize(message);
     const ws = client.ws;
-    if (json === undefined || client.closed || ws.readyState !== WebSocket.OPEN) return Promise.resolve();
-    return new Promise<void>((resolve, reject) => {
+    if (json === undefined || client.closed || ws.readyState !== WebSocket.OPEN) return Promise.resolve(false);
+    return new Promise<boolean>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('client is not reading (history write timed out)')), HISTORY_WRITE_TIMEOUT_MS);
       timer.unref();
       ws.send(json, (err) => {
         clearTimeout(timer);
         if (err) reject(err);
-        else resolve();
+        else resolve(true);
       });
     });
   }

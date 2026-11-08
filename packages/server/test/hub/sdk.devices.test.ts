@@ -86,8 +86,10 @@ describe('Android hints (adb reverse missing, emulator 10.0.2.2, React Native ov
 describe('iOS hints', () => {
   it('simulatorUdid → ios-sim:<udid> (placeholder kind simulator until the driver reports it)', () => {
     const r = resolve([], { platform: 'ios', simulatorUdid: '7F1E2D3C-AAAA-BBBB-CCCC-000011112222', isPhysical: false });
-    expect(r).toEqual({ deviceId: 'ios-sim:7F1E2D3C-AAAA-BBBB-CCCC-000011112222', network: false });
+    expect(r).toEqual({ deviceId: 'ios-sim:7F1E2D3C-AAAA-BBBB-CCCC-000011112222', network: false, placeholder: true });
     expect(hub.getDevice(r.deviceId)).toMatchObject({ kind: 'simulator', platform: 'ios', connection: 'local' });
+    // A simulator the driver reports is no placeholder.
+    expect(resolve([simulator('S1', 'iPhone 16 Pro')], { platform: 'ios', simulatorUdid: 'S1', isPhysical: false })).toEqual({ deviceId: 'ios-sim:S1', network: false });
   });
 
   it('isPhysical false without a udid (React Native) → the only booted simulator', () => {
@@ -129,6 +131,59 @@ describe('net: devices', () => {
   it('findUniqueDevice ignores everything but the platform pool', () => {
     const pool = [device('net:android-pixel-8-x'), device('import:1'), device('desktop', { platform: 'android' })];
     expect(findUniqueDevice(pool, { platform: 'android', model: 'Pixel 8' }, 'tcp')).toBeUndefined();
+  });
+});
+
+describe('driverless simulator placeholders', () => {
+  let sdk: SdkLayer | undefined;
+  const clients: NdjsonClient[] = [];
+  afterEach(async () => {
+    for (const c of clients.splice(0)) c.close();
+    await sdk?.close();
+    sdk = undefined;
+  });
+
+  async function layer(devices: DeviceInfo[] = []) {
+    hub = makeHub();
+    for (const d of devices) hub.upsertDevice(d);
+    sdk = createSdkLayerWithTimings({ hub, logger: silentLogger, settings: () => makeSettings(), mocks: () => [], serverVersion: '0.1.0' });
+    const port = await freePort();
+    await sdk.listen(port, '127.0.0.1');
+    return async (session: string) => {
+      const c = await NdjsonClient.connect(port);
+      clients.push(c);
+      c.send(hello({ session, device: { platform: 'ios', model: 'iPhone17,1', name: 'iPhone 16 Pro', isPhysical: false, simulatorUdid: 'AAAA1111-2222-3333-4444-555566667777' } }));
+      await c.next('welcome');
+      return c;
+    };
+  }
+  const ID = 'ios-sim:AAAA1111-2222-3333-4444-555566667777';
+  const until = async (ok: () => boolean) => {
+    for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
+  };
+
+  it('goes offline with its last app like a net: device, and comes back with the next one', async () => {
+    const open = await layer();
+    const a = await open('launch-1');
+    const b = await open('launch-2');
+    expect(hub.getDevice(ID)?.state).toBe('online');
+    a.close();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(hub.getDevice(ID)?.state).toBe('online'); // b is still there
+    b.close();
+    await until(() => hub.getDevice(ID)?.state === 'disconnected');
+    expect(hub.getDevice(ID)).toMatchObject({ state: 'disconnected', stateCode: 'device.sdkIdle' });
+    await open('launch-3');
+    expect(hub.getDevice(ID)?.state).toBe('online');
+  });
+
+  it('is left to the simulator driver once it reported the simulator', async () => {
+    const open = await layer();
+    const a = await open('launch-1');
+    hub.upsertDevice(simulator('AAAA1111-2222-3333-4444-555566667777', 'iPhone 16 Pro', { logs: { status: 'streaming', via: 'simctl log stream' }, actions: ['screenshot'] }));
+    a.close();
+    await new Promise((r) => setTimeout(r, 80));
+    expect(hub.getDevice(ID)?.state).toBe('online');
   });
 });
 

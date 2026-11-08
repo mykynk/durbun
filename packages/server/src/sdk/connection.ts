@@ -86,6 +86,8 @@ export class SdkConnection {
   appName: string | undefined;
   /** Session lives on a `net:` device whose state follows its connections. */
   networkDevice = false;
+  /** Its hello put a driverless `ios-sim:` placeholder online (ResolvedDevice.placeholder). */
+  placeholderDevice = false;
   established = false;
   closed = false;
   /** Last config sent (to push updates only when something changed). */
@@ -246,6 +248,7 @@ export class SdkConnection {
     this.bundleId = hello.app.id;
     this.appName = hello.app.name;
     this.networkDevice = resolved.network;
+    this.placeholderDevice = resolved.placeholder === true;
     this.established = true;
     if (this.helloTimer) clearTimeout(this.helloTimer);
     this.helloTimer = undefined;

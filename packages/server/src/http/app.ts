@@ -3,7 +3,9 @@
  *   - static UI (or the "please build" page),
  *   - REST /api/* (loopback + allowed origins only),
  *   - WebSocket upgrades: /ui (loopback + allowed origins) and /sdk (any address, no pages of other sites;
- *     handed to the SDK layer).
+ *     handed to the SDK layer),
+ * plus a device gateway on its own loopback port (`adb reverse tcp:9750` points there): /sdk and
+ * GET /api/health only, so apps on a plugged-in phone never reach /api or /ui.
  * It also owns the runtime state the UI can change: demo on/off, SDK listener binding (LAN toggle), driver
  * status broadcasts, settings/mocks propagation. Built from plain dependencies so tests can pass fakes.
  */
@@ -23,7 +25,7 @@ import {
   type ToolCheck,
   type UiNotice,
 } from '@durbun/protocol';
-import type { ConfigStore } from '../config';
+import { cleanTempDir, TEMP_CLEAN_INTERVAL_MS, TEMP_KEEP_WHILE_RUNNING, TEMP_MAX_AGE_MS, type ConfigStore } from '../config';
 import { runDoctor as runDoctorChecks, type PortState } from '../doctor';
 import type { ClearEvent, DeviceDriver, DriverContext, FlutterVmModule, Hub, HubChange, Logger, SdkLayer } from '../types';
 import { SERVER_VERSION } from '../version';
@@ -32,7 +34,7 @@ import { CommandError, createCommandRouter, withTimeout } from './commands';
 import { checkLocalAccess, checkSdkUpgrade } from './security';
 import { createStaticHandler } from './static';
 import { UiChannel } from './uiSocket';
-import { errorMessage, sendError } from './util';
+import { errorMessage, sendError, sendJson } from './util';
 
 export const DRIVER_STATUS_INTERVAL_MS = 5_000;
 const UI_MAX_PAYLOAD = 32 * 1024 * 1024;
@@ -62,6 +64,9 @@ export interface HttpAppDeps {
   importLimitBytes?: number;
   /** This Mac's own addresses and host names, for /sdk pages (tests); default ownHostNames() per upgrade. */
   ownHostNames?: () => Iterable<string>;
+  /** Temp cleanup while running (tests): every `tempCleanIntervalMs`, entries older than `tempMaxAgeMs`. */
+  tempCleanIntervalMs?: number;
+  tempMaxAgeMs?: number;
 }
 
 export interface SdkListenerState {
@@ -78,7 +83,15 @@ export interface HttpApp {
   /** Bound HTTP port (the requested one before listen()). */
   readonly port: number;
   readonly host: string;
-  /** Bind the HTTP server. Rejects (e.g. EADDRINUSE) without side effects. Resolves with the bound port. */
+  /**
+   * Loopback port of the device gateway, the target of `adb reverse tcp:9750` (see createHttpApp): it serves
+   * only the /sdk WebSocket and GET /api/health. Undefined before listen() or when it could not listen.
+   */
+  readonly devicePort: number | undefined;
+  /**
+   * Bind the HTTP server, then the device gateway (127.0.0.1, a free port). Rejects (e.g. EADDRINUSE) without
+   * side effects. Resolves with the bound HTTP port.
+   */
   listen(port: number, host: string): Promise<number>;
   /** Close UI sockets, stop timers, close the HTTP server (drivers/SDK are stopped by server.ts). */
   close(): Promise<void>;
@@ -216,6 +229,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     onLanChanged,
     replayTimeoutMs: deps.replayTimeoutMs,
     fetchImpl: deps.fetchImpl,
+    tempDir: config.tempDir,
   });
 
   const ui = new UiChannel({
@@ -303,6 +317,22 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
   };
   const driverTimer = setInterval(guard('driver status refresh', refreshDrivers), deps.driverStatusIntervalMs ?? DRIVER_STATUS_INTERVAL_MS);
   driverTimer.unref();
+
+  // Screenshots, recordings and uploads older than a day go while the app runs for days (config.ts).
+  let tempCleaning = false;
+  const tempTimer = setInterval(() => {
+    if (tempCleaning || closed) return;
+    tempCleaning = true;
+    cleanTempDir(config.tempDir, deps.tempMaxAgeMs ?? TEMP_MAX_AGE_MS, Date.now(), TEMP_KEEP_WHILE_RUNNING)
+      .then((removed) => {
+        if (removed > 0) logger.debug(`removed ${removed} old temp entr${removed === 1 ? 'y' : 'ies'}`);
+      })
+      .catch((err) => logger.debug(`temp cleanup failed: ${errorMessage(err)}`))
+      .finally(() => {
+        tempCleaning = false;
+      });
+  }, deps.tempCleanIntervalMs ?? TEMP_CLEAN_INTERVAL_MS);
+  tempTimer.unref();
 
   /* ───────────── demo + SDK listener ───────────── */
 
@@ -422,6 +452,25 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
   const uiWss = new WebSocketServer({ noServer: true, maxPayload: UI_MAX_PAYLOAD, clientTracking: false });
   const sdkWss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES, clientTracking: true });
 
+  /** /sdk upgrade, on the HTTP port and on the device gateway alike. */
+  function upgradeSdk(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+    const access = checkSdkUpgrade(req, deps.ownHostNames?.());
+    if (!access.ok) {
+      logger.warn(`blocked WebSocket /sdk from ${req.socket.remoteAddress ?? '?'}: ${access.reason}`);
+      rejectUpgrade(socket, 403, 'Forbidden');
+      return;
+    }
+    sdkWss.handleUpgrade(req, socket, head, (ws) => {
+      const remote = `${req.socket.remoteAddress ?? '?'}:${req.socket.remotePort ?? '?'}`;
+      try {
+        sdk.attachWebSocket(ws, { transport: 'websocket', remote });
+      } catch (err) {
+        logger.error(`SDK WebSocket from ${remote} rejected: ${errorMessage(err)}`);
+        ws.close(1011, 'SDK layer unavailable');
+      }
+    });
+  }
+
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on('error', (err) => logger.debug(`upgrade socket error: ${err.message}`));
     const { pathname } = splitTarget(req.url);
@@ -440,27 +489,86 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
       return;
     }
     if (pathname === '/sdk' || pathname === '/sdk/') {
-      const access = checkSdkUpgrade(req, deps.ownHostNames?.());
-      if (!access.ok) {
-        logger.warn(`blocked WebSocket /sdk from ${req.socket.remoteAddress ?? '?'}: ${access.reason}`);
-        rejectUpgrade(socket, 403, 'Forbidden');
-        return;
-      }
-      sdkWss.handleUpgrade(req, socket, head, (ws) => {
-        const remote = `${req.socket.remoteAddress ?? '?'}:${req.socket.remotePort ?? '?'}`;
-        try {
-          sdk.attachWebSocket(ws, { transport: 'websocket', remote });
-        } catch (err) {
-          logger.error(`SDK WebSocket from ${remote} rejected: ${errorMessage(err)}`);
-          ws.close(1011, 'SDK layer unavailable');
-        }
-      });
+      upgradeSdk(req, socket, head);
       return;
     }
     rejectUpgrade(socket, 404, 'Not Found');
   });
 
-  function listen(port: number, host: string): Promise<number> {
+  /* ───────────── device gateway ───────────── */
+
+  /*
+   * `adb reverse tcp:9750` makes the phone's localhost:9750 a loopback connection on this Mac, so every app
+   * on a plugged-in phone would pass checkLocalAccess on the HTTP port (logs, bodies, mocks, device actions,
+   * replay). The reverse mapping therefore points at this listener instead: 127.0.0.1 only, its own port,
+   * and it serves what device apps need and nothing else (the /sdk WebSocket of React Native / the JS SDK
+   * and GET /api/health, which another Dürbün probes before it leaves the device's route to us).
+   */
+  let gateway: http.Server | undefined;
+  let devicePort: number | undefined;
+
+  function onGatewayRequest(req: IncomingMessage, res: ServerResponse): void {
+    const { pathname } = splitTarget(req.url);
+    if (pathname === '/api/health' && (req.method === 'GET' || req.method === 'HEAD')) {
+      // httpPort: the port the user knows this Dürbün by (another Dürbün names it when it leaves us the route).
+      sendJson(res, 200, { ok: true, name: 'durbun', version, httpPort: boundPort });
+      return;
+    }
+    if (pathname === '/sdk' || pathname === '/sdk/') {
+      res.writeHead(426, { 'Content-Type': 'text/plain; charset=utf-8', Upgrade: 'websocket', Connection: 'Upgrade' });
+      res.end('This endpoint only accepts WebSocket connections.\n');
+      return;
+    }
+    logger.debug(`device gateway: refused ${req.method} ${pathname}`);
+    sendError(res, 404, 'Not found', 'api.notFound');
+  }
+
+  async function listenGateway(): Promise<void> {
+    const g = http.createServer(onGatewayRequest);
+    g.requestTimeout = 30_000;
+    g.headersTimeout = 10_000;
+    g.on('connection', (socket: Socket) => {
+      sockets.add(socket);
+      socket.on('close', () => sockets.delete(socket));
+    });
+    g.on('clientError', (err, socket) => {
+      if (socket.writable && !socket.destroyed) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+      else socket.destroy();
+    });
+    g.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+      socket.on('error', (err) => logger.debug(`gateway upgrade socket error: ${err.message}`));
+      const { pathname } = splitTarget(req.url);
+      if (closed) rejectUpgrade(socket, 503, 'Service Unavailable');
+      else if (pathname === '/sdk' || pathname === '/sdk/') upgradeSdk(req, socket, head);
+      else rejectUpgrade(socket, 404, 'Not Found');
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        g.once('error', reject);
+        g.listen({ port: 0, host: '127.0.0.1', exclusive: true }, () => {
+          g.off('error', reject);
+          resolve();
+        });
+      });
+    } catch (err) {
+      // Raw-TCP SDK connections (tcp:9751) still work; only React Native over USB goes without.
+      logger.warn(`device gateway could not listen: ${errorMessage(err)} — React Native apps over USB cannot connect`);
+      return;
+    }
+    g.on('error', (err) => logger.error(`device gateway error: ${err.message}`));
+    const addr = g.address();
+    gateway = g;
+    devicePort = typeof addr === 'object' && addr ? addr.port : undefined;
+  }
+
+  async function listen(port: number, host: string): Promise<number> {
+    const bound = await listenHttp(port, host);
+    if (!gateway) await listenGateway();
+    if (closed && gateway) gateway.close();
+    return bound;
+  }
+
+  function listenHttp(port: number, host: string): Promise<number> {
     return new Promise<number>((resolve, reject) => {
       const onError = (err: Error) => {
         server.off('listening', onListening);
@@ -485,6 +593,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     if (closed) return;
     closed = true;
     clearInterval(driverTimer);
+    clearInterval(tempTimer);
     for (const u of unsubscribers) {
       try {
         u();
@@ -502,6 +611,8 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
       server.close(() => resolve());
     });
     server.closeIdleConnections();
+    gateway?.close();
+    gateway?.closeIdleConnections();
     const graceTimer = setTimeout(() => {
       for (const s of sockets) s.destroy();
     }, 1_000);
@@ -518,6 +629,9 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     server,
     get port() {
       return boundPort;
+    },
+    get devicePort() {
+      return devicePort;
     },
     get host() {
       return boundHost;

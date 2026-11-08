@@ -156,6 +156,53 @@ describe('UiChannel', () => {
     ch.dispose();
   });
 
+  it('splits history by bytes as well as rows, and the last chunk always says done', async () => {
+    // 30 rows of ~10 KB with a 32 KB chunk budget: never more than 3 rows per chunk.
+    const buffer = logs(1, 30).map((l) => ({ ...l, message: `${l.id} ${'x'.repeat(10_000)}` }));
+    const ch = channel(buffer, { chunkBytes: 32 * 1024 });
+    const ws = new MockWs();
+    ch.attach(ws as unknown as WebSocket);
+    await new Promise((r) => setTimeout(r, 50));
+    const history = ws.parsed().filter((m): m is Extract<ServerToUi, { type: 'history' }> => m.type === 'history');
+    expect(history.length).toBeGreaterThanOrEqual(10);
+    expect(Math.max(...history.map((h) => h.logs.length))).toBeLessThanOrEqual(3);
+    expect(history.flatMap((h) => h.logs.map((l) => l.id))).toEqual(buffer.map((l) => l.id));
+    expect(history.map((h) => h.done)).toEqual([...history.slice(1).map(() => false), true]);
+    ch.dispose();
+  });
+
+  it('still ends the sync with done when the last chunk cannot be serialized', async () => {
+    const bad = { ...logs(3, 3)[0]!, params: { n: 1n } } as unknown as LogEntry; // even sanitizeLog cannot fix params
+    const ch = channel([...logs(1, 2), bad], { historyChunk: 2 });
+    const ws = new MockWs();
+    ch.attach(ws as unknown as WebSocket);
+    await new Promise((r) => setTimeout(r, 50));
+    const history = ws.parsed().filter((m): m is Extract<ServerToUi, { type: 'history' }> => m.type === 'history');
+    expect(history.map((h) => [h.logs.length, h.done])).toEqual([
+      [2, false],
+      [0, true],
+    ]);
+    ch.broadcastChange({ logs: logs(4, 4) });
+    expect((JSON.parse(ws.sent.at(-1)!) as { logs: LogEntry[] }).logs[0]!.id).toBe(4); // live after the sync
+    ch.dispose();
+  });
+
+  it('splits a live batch with large rows into several, the other changes in the first', async () => {
+    const ch = channel([], { chunkBytes: 32 * 1024 });
+    const ws = new MockWs();
+    ch.attach(ws as unknown as WebSocket);
+    await new Promise((r) => setTimeout(r, 10));
+    const before = ws.sent.length;
+    const rows = logs(1, 9).map((l) => ({ ...l, message: 'x'.repeat(10_000) }));
+    ch.broadcastChange({ logs: rows, apps: [{ id: 'app:1' } as never] });
+    const batches = ws.parsed().slice(before) as Extract<ServerToUi, { type: 'batch' }>[];
+    expect(batches.length).toBe(3);
+    expect(batches[0]!.apps).toEqual([{ id: 'app:1' }]);
+    expect(batches.slice(1).every((b) => Object.keys(b).sort().join() === 'logs,type')).toBe(true);
+    expect(batches.flatMap((b) => b.logs!.map((l) => l.id))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    ch.dispose();
+  });
+
   it('terminates clients that stop answering pings', async () => {
     const ch = channel([], { pingIntervalMs: 15 });
     const ws = new MockWs();

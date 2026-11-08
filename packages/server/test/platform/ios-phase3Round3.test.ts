@@ -589,6 +589,20 @@ describe('IosDeviceDriver · round-3 verification', () => {
     expect(ctx.hub.disconnected).toEqual([]);
   });
 
+  it('a log restart overlapping a stop starts no idevicesyslog that nobody would stop', async () => {
+    flow(true);
+    await start({ useDevicectl: false });
+    const before = spawns();
+    // The restart is waiting for the old idevicesyslog to exit when the driver stops (phone unplugged, Dürbün quits).
+    const restart = driver!.runAction(ID, 'logs-restart', {});
+    const stopping = driver!.stop();
+    driver = undefined;
+    await Promise.all([restart, stopping]);
+    await sleep(400);
+    expect(spawns()).toBe(before);
+    await waitFor(() => liveChildCount() === 0, 3000);
+  });
+
   /* 6 */
   it('stall watchdog: a device away within the grace is no stall; neither is the time a user restart takes', async () => {
     flow(true);

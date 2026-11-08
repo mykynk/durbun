@@ -286,6 +286,7 @@ export class SimulatorSession {
       params: { via: VIA },
     });
     await this.stream?.stop();
+    if (this.disposed) return; // shut down or gone while it stopped: a new `log stream` would be orphaned
     this.flutter.flushAll();
     this.batcher.flush();
     this.setLogs({ status: 'starting', via: VIA });

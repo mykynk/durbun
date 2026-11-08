@@ -18,7 +18,8 @@ export class NdjsonDecoder {
   /** Inside an oversized line: drop bytes until the next newline. */
   private discarding = false;
   private discardedBytes = 0;
-  private readonly maxLineBytes: number;
+  /** Longest line kept; may change between chunks (the SDK layer raises it once the hello is in). */
+  maxLineBytes: number;
 
   constructor(private readonly opts: NdjsonDecoderOptions) {
     this.maxLineBytes = opts.maxLineBytes ?? MAX_FRAME_BYTES;
@@ -27,6 +28,11 @@ export class NdjsonDecoder {
   /** Bytes held while waiting for the end of the current line. */
   get buffered(): number {
     return this.pendingBytes;
+  }
+
+  /** Inside a line longer than maxLineBytes (dropped until its newline). */
+  get overflowing(): boolean {
+    return this.discarding;
   }
 
   push(chunk: Buffer | Uint8Array | string): void {

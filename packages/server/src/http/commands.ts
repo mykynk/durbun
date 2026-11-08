@@ -11,8 +11,10 @@ import type {
   ToolCheck,
   UiNotice,
 } from '@durbun/protocol';
+import { promises as fsp } from 'node:fs';
 import { ConfigValidationError, isPlainObject, type ConfigStore } from '../config';
 import type { DeviceDriver, FlutterVmModule, Hub, Logger, SdkLayer } from '../types';
+import { isUploadedFile } from './api';
 import { replayRequest, ReplayError } from './replay';
 import { errorMessage } from './util';
 
@@ -53,6 +55,8 @@ export interface CommandDeps {
   onLanChanged(lan: boolean): Promise<void>;
   replayTimeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /** Temp directory of POST /api/upload: an uploaded install file is deleted once its app-install ends. */
+  tempDir?: string;
 }
 
 const CLEAR_TARGETS: ClearTarget[] = ['logs', 'network', 'metrics', 'all'];
@@ -183,12 +187,16 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
     const params = optParams(cmd.params);
     const driver = findDriver(deviceId);
     if (!driver) throw noDriverError(deviceId);
-    const result = await withTimeout(
-      Promise.resolve().then(() => driver.runAction(deviceId, action as DeviceActionId, params)),
-      actionTimeoutMs(action, params),
-      `Device action ${action}`,
-      'action.timeout',
-    );
+    const running = Promise.resolve().then(() => driver.runAction(deviceId, action as DeviceActionId, params));
+    // The UI uploads the file for each install: it is not needed once the install ends (even after our timeout).
+    const upload = action === 'app-install' && deps.tempDir && typeof params.file === 'string' && isUploadedFile(deps.tempDir, params.file) ? params.file : undefined;
+    if (upload) {
+      void running
+        .catch(() => undefined)
+        .then(() => fsp.rm(upload, { force: true }))
+        .catch((err) => deps.logger.debug(`could not remove the uploaded ${upload}: ${errorMessage(err)}`));
+    }
+    const result = await withTimeout(running, actionTimeoutMs(action, params), `Device action ${action}`, 'action.timeout');
     return replyFromResult(result);
   }
 

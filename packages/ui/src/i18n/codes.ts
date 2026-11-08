@@ -73,6 +73,7 @@ export const SERVER_CODES = {
     'device.driverStopped',
     'device.imported',
     'device.networkIdle',
+    'device.sdkIdle',
     'demo.stopped',
   ],
   /** `DeviceInfo.logs.code`. */
@@ -285,6 +286,7 @@ registerMessages('code', {
     'device.driverStopped': 'Dürbün bu cihazı izlemeyi bıraktı',
     'device.imported': 'İçe aktarılan kayıt · salt okunur',
     'device.networkIdle': 'Ağ üzerinden bağlı uygulama kalmadı',
+    'device.sdkIdle': 'Bağlı uygulama kalmadı; Dürbün bu simülatörü kendisi izlemiyor',
     'demo.stopped': 'Demo modu kapatıldı',
     'device.booting': 'Cihaz açılıyor…',
 
@@ -495,6 +497,7 @@ registerMessages('code', {
         simulatorShutdown: 'simülatör kapatıldı',
         demoStopped: 'demo modu kapatıldı',
         networkIdle: 'ağ üzerinden bağlı uygulama kalmadı',
+        sdkIdle: 'bağlı uygulama kalmadı; Dürbün bu simülatörü kendisi izlemiyor',
         driverStopped: 'Dürbün izlemeyi bıraktı',
         vmDurbunStopped: 'Dürbün kapatıldı',
         vmByUser: 'elle ayrıldı',
@@ -572,6 +575,7 @@ registerMessages('code', {
     'device.driverStopped': 'Dürbün stopped watching this device',
     'device.imported': 'Imported recording · read-only',
     'device.networkIdle': 'No app is connected over the network',
+    'device.sdkIdle': 'No app is connected, and Dürbün does not watch this simulator itself',
     'demo.stopped': 'Demo mode turned off',
     'device.booting': 'Device is booting…',
 
@@ -776,6 +780,7 @@ registerMessages('code', {
         simulatorShutdown: 'simulator shut down',
         demoStopped: 'demo mode turned off',
         networkIdle: 'no app is connected over the network',
+        sdkIdle: 'no app is connected, and Dürbün does not watch this simulator itself',
         driverStopped: 'Dürbün stopped watching it',
         vmDurbunStopped: 'Dürbün stopped',
         vmByUser: 'detached by you',
@@ -824,6 +829,7 @@ const DISCONNECT_REASONS: Record<string, string> = {
   'Simulator shut down': 'simulatorShutdown',
   'Demo mode turned off': 'demoStopped',
   'No app is connected over the network': 'networkIdle',
+  'No app is connected, and Dürbün does not watch this simulator itself': 'sdkIdle',
   'Dürbün stopped watching Android devices': 'driverStopped',
   'Dürbün stopped watching iOS devices': 'driverStopped',
   'Dürbün stopped watching simulators': 'driverStopped',

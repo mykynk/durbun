@@ -10,6 +10,9 @@
  *    other sites, which browsers send without an Origin header).
  * /sdk stays open to any address (apps on the LAN, React Native over adb reverse) but not to web pages of
  * other sites, DNS-rebinding pages included (checkSdkUpgrade).
+ * A loopback peer is not always this Mac's user: `adb reverse` turns any app on a plugged-in phone into a
+ * 127.0.0.1 peer. So adb reverse never points at the HTTP port, only at the device gateway (app.ts), which
+ * serves /sdk and GET /api/health and nothing that checkLocalAccess guards.
  */
 import type { IncomingMessage } from 'node:http';
 import os from 'node:os';

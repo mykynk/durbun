@@ -86,7 +86,9 @@ describe('startServer wiring', () => {
     expect(f.sdk.listenCalls).toEqual([{ port: 39_761, host: '127.0.0.1' }]);
     for (const d of [f.android, f.iosSim, f.iosDevice]) {
       expect(d.started).toBe(true);
-      expect(d.context?.ports).toEqual({ http: port, sdk: 39_761 });
+      // device: the device gateway (adb reverse tcp:9750 goes there), a loopback port of its own.
+      expect(d.context?.ports).toEqual({ http: port, sdk: 39_761, device: running.app.devicePort });
+      expect(running.app.devicePort).not.toBe(port);
       expect(d.context?.fileUrl('shot 1.png')).toBe('/api/files/shot%201.png');
       expect(d.context?.tempDir).toBe(path.join(dir, 'data', 'tmp'));
     }
