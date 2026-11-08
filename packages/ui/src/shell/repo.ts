@@ -4,6 +4,8 @@ declare const __DURBUN_REPO_DIR__: string;
 
 /** Absolute path of the Dürbün repository at build time (Vite `define`), for SDK path snippets. */
 export const BUILD_REPO_DIR: string = typeof __DURBUN_REPO_DIR__ === 'string' && __DURBUN_REPO_DIR__ ? __DURBUN_REPO_DIR__ : '/path/to/durbun';
+/** False for a release build (no clone path baked in): the SDK guide then starts on the package registries. */
+export const HAS_BUILD_REPO_DIR: boolean = typeof __DURBUN_REPO_DIR__ === 'string' && __DURBUN_REPO_DIR__ !== '';
 
 /** The repo path the user confirmed in the SDK guide (falls back to the build-time path). */
 export function repoDir(): string {

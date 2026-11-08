@@ -1,11 +1,19 @@
 /**
  * SDK setup snippets. Every API line mirrors the real SDKs (sdks/flutter/durbun + durbun_dio, sdks/android,
- * sdks/ios, sdks/js — READMEs and public APIs); only the local path to this repository's `sdks/` folders
- * and the comment language change. `repo` is an absolute path (may contain spaces).
+ * sdks/ios, sdks/js — READMEs and public APIs). Two sources: the package registries (pub.dev, Maven
+ * Central, SwiftPM / CocoaPods, npm) and a local clone of this repository (`repo`, an absolute path that
+ * may contain spaces). Only the source lines and the comment language change.
  */
 import type { Lang } from '../i18n/core';
 
 declare const __DURBUN_RN_VERSION__: string;
+declare const __DURBUN_SDK_VERSION__: string;
+
+/** Published SDK version (Flutter, Android, iOS) at build time. */
+export const SDK_VERSION: string = typeof __DURBUN_SDK_VERSION__ === 'string' && __DURBUN_SDK_VERSION__ ? __DURBUN_SDK_VERSION__ : '0.1.0';
+export const REPO_URL = 'https://github.com/mykynk/durbun';
+/** Maven Central group of the Android SDK (sdks/android publishing). */
+export const MAVEN_GROUP = 'io.github.mykynk';
 
 /** `@durbun/react-native` version at build time → `npm pack` file name. */
 const RN_VERSION: string = typeof __DURBUN_RN_VERSION__ === 'string' && __DURBUN_RN_VERSION__ ? __DURBUN_RN_VERSION__ : '0.1.0';
@@ -14,6 +22,16 @@ export const RN_TGZ = `durbun-react-native-${RN_VERSION}.tgz`;
 const c = (lang: Lang, tr: string, en: string) => (lang === 'tr' ? tr : en);
 
 /* ───────────── Flutter ───────────── */
+
+export function flutterPubspecRegistry(): string {
+  return `dependencies:
+  durbun: ^${SDK_VERSION}`;
+}
+
+export function flutterDioPubspecRegistry(): string {
+  return `dependencies:
+  durbun_dio: ^${SDK_VERSION}`;
+}
 
 export function flutterPubspec(repo: string): string {
   return `dependencies:
@@ -92,6 +110,16 @@ project(':durbun').projectDir = new File('${repo}/sdks/android/durbun')
 project(':durbun-noop').projectDir = new File('${repo}/sdks/android/durbun-noop')`;
 }
 
+export function androidDependenciesRegistry(lang: Lang): string {
+  return `dependencies {
+    debugImplementation("${MAVEN_GROUP}:durbun:${SDK_VERSION}")        // ${c(lang, 'gerçek SDK yalnızca debug’da', 'the real SDK in debug only')}
+    releaseImplementation("${MAVEN_GROUP}:durbun-noop:${SDK_VERSION}") // ${c(lang, 'release’te aynı API, boş gövdeler', 'same API, empty bodies in release')}
+    // ${c(lang, 'Flutter host uygulamalarında “profile” build type’ı da vardır:', 'Flutter host apps also have a “profile” build type:')}
+    // "profileImplementation"("${MAVEN_GROUP}:durbun-noop:${SDK_VERSION}")
+}
+// ${c(lang, 'Depo: mavenCentral() (Android projelerinde varsayılan olarak tanımlıdır)', 'Repository: mavenCentral() (declared by default in Android projects)')}`;
+}
+
 export function androidDependencies(lang: Lang): string {
   return `dependencies {
     debugImplementation(project(":durbun"))        // ${c(lang, 'gerçek SDK yalnızca debug’da', 'the real SDK in debug only')}
@@ -127,6 +155,22 @@ export function androidWifi(host: string, sdkPort?: number): string {
 }
 
 /* ───────────── iOS ───────────── */
+
+export function iosPackageRegistry(lang: Lang): string {
+  return `// Package.swift
+dependencies: [
+    .package(url: "${REPO_URL}", from: "${SDK_VERSION}"),
+],
+// ${c(lang, 'hedefin bağımlılığı', 'target dependency')}
+.product(name: "Durbun", package: "durbun")`;
+}
+
+export function iosPodfile(lang: Lang): string {
+  return `# Podfile
+pod 'Durbun', '~> ${SDK_VERSION}'
+# ${c(lang, 'Yalnızca debug derlemelerinde isterseniz:', 'Only in debug builds, if you prefer:')}
+# pod 'Durbun', '~> ${SDK_VERSION}', :configurations => ['Debug']`;
+}
 
 export function iosPackage(repo: string, lang: Lang): string {
   return `// Package.swift
@@ -170,6 +214,10 @@ export function iosLocalNetwork(lang: Lang): string {
 }
 
 /* ───────────── React Native ───────────── */
+
+export function rnInstallRegistry(): string {
+  return `npm install @durbun/react-native`;
+}
 
 export function rnPack(repo: string, lang: Lang): string {
   return `cd "${repo}/sdks/js" && npm pack   # → ${RN_TGZ} (${c(lang, 'prepack derler', 'prepack builds it')})`;

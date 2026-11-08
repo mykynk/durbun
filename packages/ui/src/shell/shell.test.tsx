@@ -212,6 +212,20 @@ describe('SDK guide snippets', () => {
     expect(S.RN_TGZ).toBe(`durbun-react-native-${version}.tgz`);
   });
 
+  it('registry snippets name the published packages with the SDK version (pub.dev, Maven Central, SwiftPM, CocoaPods, npm)', () => {
+    const version = /^version:\s*(\S+)/m.exec(readFileSync(join(root, 'sdks/flutter/durbun/pubspec.yaml'), 'utf8'))![1]!;
+    expect(S.SDK_VERSION).toBe(version);
+    expect(S.flutterPubspecRegistry()).toBe(`dependencies:\n  durbun: ^${version}`);
+    expect(S.flutterDioPubspecRegistry()).toContain(`durbun_dio: ^${version}`);
+    expect(S.androidDependenciesRegistry('en')).toContain(`debugImplementation("io.github.mykynk:durbun:${version}")`);
+    expect(S.androidDependenciesRegistry('en')).toContain(`releaseImplementation("io.github.mykynk:durbun-noop:${version}")`);
+    expect(S.iosPackageRegistry('en')).toContain(`.package(url: "https://github.com/mykynk/durbun", from: "${version}")`);
+    expect(S.iosPodfile('tr')).toContain(`pod 'Durbun', '~> ${version}'`);
+    expect(S.rnInstallRegistry()).toBe('npm install @durbun/react-native');
+    // No snippet of the registry source mentions a local folder.
+    for (const code of [S.flutterPubspecRegistry(), S.androidDependenciesRegistry('tr'), S.iosPackageRegistry('tr'), S.rnInstallRegistry()]) expect(code).not.toContain('sdks/');
+  });
+
   it('quotes repository paths with spaces and spells non-default ports for Wi-Fi', () => {
     const repo = '/Users/yusuf/Library/Application Support/durbun';
     expect(S.flutterPubspec(repo)).toContain(`path: "${repo}/sdks/flutter/durbun"`);

@@ -26,7 +26,7 @@
     "app:test": "npm --prefix apps/desktop test",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "app:release": "npm run build && npm --prefix apps/desktop run release"
+    "app:release": "DURBUN_REPO_DIR= npm run build && npm --prefix apps/desktop run release"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

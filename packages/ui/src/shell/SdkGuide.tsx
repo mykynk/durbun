@@ -9,7 +9,7 @@ import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Form';
 import { Callout } from '../components/Layout';
 import { CopyButton } from '../components/CopyButton';
-import { Toggle } from '../components/Controls';
+import { SegmentedControl, Toggle } from '../components/Controls';
 import { toast } from '../components/Toast';
 import { usePersistentState } from '../hooks';
 import { deviceDisplayName } from '../i18n/codes';
@@ -17,7 +17,10 @@ import { attachVm, errorMessage } from './actions';
 import { Snippet } from './Snippet';
 import * as S from './sdkSnippets';
 import { sdkHostLines } from './sdkHosts';
-import { BUILD_REPO_DIR } from './repo';
+import { BUILD_REPO_DIR, HAS_BUILD_REPO_DIR } from './repo';
+
+/** Where the snippets take the SDK from: the package registries, or a local clone of the repository. */
+type SdkSource = 'registry' | 'local';
 
 const TABS: SdkGuideTab[] = ['flutter', 'android', 'ios', 'react-native'];
 
@@ -84,6 +87,10 @@ function SdkGuideBody({ tab }: { tab: SdkGuideTab }) {
   const t = useT();
   const [repo, setRepo] = usePersistentState('sdk.repoDir', BUILD_REPO_DIR);
   const repoDir = repo.trim().replace(/\/+$/, '') || BUILD_REPO_DIR;
+  // A build made inside a clone (npm run app:dist, the CLI) starts on that folder; a release build on the registries.
+  const [sourceRaw, setSource] = usePersistentState<SdkSource>('sdk.source', HAS_BUILD_REPO_DIR ? 'local' : 'registry');
+  const source: SdkSource = sourceRaw === 'local' ? 'local' : 'registry';
+  const local = source === 'local' ? repoDir : undefined;
   const root = useSectionScroll(tab);
   return (
     <div className="sdk" ref={root}>
@@ -97,16 +104,31 @@ function SdkGuideBody({ tab }: { tab: SdkGuideTab }) {
       <div className="sdk__grid" role="tabpanel" id={`sdk-panel-${tab}`} aria-labelledby={`sdk-tab-${tab}`}>
         <div className="sdk__main">
           <div className="sdk-repo">
-            <FolderOpen size={14} aria-hidden className="subtle" />
-            <label htmlFor="sdk-repo" className="sdk-repo__label">
-              {t('shell.sdk.repoDir')}
-            </label>
-            <Input id="sdk-repo" size="sm" mono value={repo} onChange={(e) => setRepo(e.target.value)} wrapperClassName="grow" className="grow" />
+            <span className="sdk-repo__label">{t('shell.sdk.source')}</span>
+            <SegmentedControl
+              size="sm"
+              value={source}
+              onChange={setSource}
+              aria-label={t('shell.sdk.source')}
+              options={[
+                { value: 'registry', label: t('shell.sdk.sourceRegistry') },
+                { value: 'local', label: t('shell.sdk.sourceLocal') },
+              ]}
+            />
           </div>
-          {tab === 'flutter' ? <FlutterGuide repo={repoDir} /> : null}
-          {tab === 'android' ? <AndroidGuide repo={repoDir} /> : null}
-          {tab === 'ios' ? <IosGuide repo={repoDir} /> : null}
-          {tab === 'react-native' ? <RnGuide repo={repoDir} /> : null}
+          {source === 'local' ? (
+            <div className="sdk-repo">
+              <FolderOpen size={14} aria-hidden className="subtle" />
+              <label htmlFor="sdk-repo" className="sdk-repo__label">
+                {t('shell.sdk.repoDir')}
+              </label>
+              <Input id="sdk-repo" size="sm" mono value={repo} onChange={(e) => setRepo(e.target.value)} wrapperClassName="grow" className="grow" />
+            </div>
+          ) : null}
+          {tab === 'flutter' ? <FlutterGuide repo={local} /> : null}
+          {tab === 'android' ? <AndroidGuide repo={local} /> : null}
+          {tab === 'ios' ? <IosGuide repo={local} /> : null}
+          {tab === 'react-native' ? <RnGuide repo={local} /> : null}
         </div>
         <aside className="sdk__aside">
           <ConnectionNotes tab={tab} />
@@ -116,7 +138,8 @@ function SdkGuideBody({ tab }: { tab: SdkGuideTab }) {
   );
 }
 
-function FlutterGuide({ repo }: { repo: string }) {
+/** `repo`: the local clone's folder; undefined → the package registries. */
+function FlutterGuide({ repo }: { repo?: string }) {
   const t = useT();
   const lang = useLanguage();
   return (
@@ -137,8 +160,8 @@ function FlutterGuide({ repo }: { repo: string }) {
       <Section id="setup" title={t('shell.sdk.flutter.setupTitle')}>
         <ol className="sdk-steps">
           <Step n={1} title={t('shell.sdk.flutter.add')}>
-            <p className="sdk-p">{t('shell.sdk.flutter.addHint')}</p>
-            <Snippet title="pubspec.yaml" lang="yaml" code={S.flutterPubspec(repo)} />
+            <p className="sdk-p">{t(repo ? 'shell.sdk.flutter.addHint' : 'shell.sdk.flutter.addHintRegistry')}</p>
+            <Snippet title="pubspec.yaml" lang="yaml" code={repo ? S.flutterPubspec(repo) : S.flutterPubspecRegistry()} />
           </Step>
           <Step n={2} title={t('shell.sdk.flutter.wrap')}>
             <p className="sdk-p">{t('shell.sdk.flutter.wrapHint')}</p>
@@ -167,7 +190,7 @@ function FlutterGuide({ repo }: { repo: string }) {
           </Step>
           <Step n={2} title={t('shell.sdk.flutter.dio')}>
             <p className="sdk-p">{t('shell.sdk.flutter.dioHint')}</p>
-            <Snippet title="pubspec.yaml" lang="yaml" code={S.flutterDioPubspec(repo)} />
+            <Snippet title="pubspec.yaml" lang="yaml" code={repo ? S.flutterDioPubspec(repo) : S.flutterDioPubspecRegistry()} />
             <Snippet lang="dart" code={S.FLUTTER_DIO} />
           </Step>
         </ol>
@@ -231,17 +254,24 @@ function VmAttach() {
   );
 }
 
-function AndroidGuide({ repo }: { repo: string }) {
+function AndroidGuide({ repo }: { repo?: string }) {
   const t = useT();
   const lang = useLanguage();
   return (
     <ol className="sdk-steps" data-sdk-section="setup">
-      <Step n={1} title={t('shell.sdk.android.modules')}>
-        <p className="sdk-p">{t('shell.sdk.android.modulesHint')}</p>
-        <Snippet title="settings.gradle.kts" lang="kotlin" code={S.androidSettings(repo)} />
-        <Snippet title={t('shell.sdk.android.groovy')} lang="kotlin" code={S.androidSettingsGroovy(repo)} />
-        <Snippet title="app/build.gradle.kts" lang="kotlin" code={S.androidDependencies(lang)} />
-      </Step>
+      {repo ? (
+        <Step n={1} title={t('shell.sdk.android.modules')}>
+          <p className="sdk-p">{t('shell.sdk.android.modulesHint')}</p>
+          <Snippet title="settings.gradle.kts" lang="kotlin" code={S.androidSettings(repo)} />
+          <Snippet title={t('shell.sdk.android.groovy')} lang="kotlin" code={S.androidSettingsGroovy(repo)} />
+          <Snippet title="app/build.gradle.kts" lang="kotlin" code={S.androidDependencies(lang)} />
+        </Step>
+      ) : (
+        <Step n={1} title={t('shell.sdk.android.deps')}>
+          <p className="sdk-p">{t('shell.sdk.android.depsHint')}</p>
+          <Snippet title="app/build.gradle.kts" lang="kotlin" code={S.androidDependenciesRegistry(lang)} />
+        </Step>
+      )}
       <Step n={2} title={t('shell.sdk.android.start')}>
         <div data-sdk-section="native">
           <p className="sdk-p">{t('shell.sdk.android.startHint')}</p>
@@ -256,20 +286,27 @@ function AndroidGuide({ repo }: { repo: string }) {
   );
 }
 
-function IosGuide({ repo }: { repo: string }) {
+function IosGuide({ repo }: { repo?: string }) {
   const t = useT();
   const lang = useLanguage();
+  const where = repo ? `${repo}/sdks/ios` : S.REPO_URL;
   return (
     <ol className="sdk-steps" data-sdk-section="setup">
       <Step n={1} title={t('shell.sdk.ios.add')}>
-        <p className="sdk-p">{t('shell.sdk.ios.addHint')}</p>
+        <p className="sdk-p">{t(repo ? 'shell.sdk.ios.addHint' : 'shell.sdk.ios.addHintRegistry')}</p>
         <div className="sdk-path">
-          <code className="mono selectable">{`${repo}/sdks/ios`}</code>
-          <CopyButton size="sm" value={`${repo}/sdks/ios`} />
+          <code className="mono selectable">{where}</code>
+          <CopyButton size="sm" value={where} />
         </div>
         <p className="sdk-p">{t('shell.sdk.ios.productHint')}</p>
         <p className="sdk-p subtle">{t('shell.sdk.ios.spmHint')}</p>
-        <Snippet lang="swift" code={S.iosPackage(repo, lang)} />
+        <Snippet lang="swift" code={repo ? S.iosPackage(repo, lang) : S.iosPackageRegistry(lang)} />
+        {repo ? null : (
+          <>
+            <p className="sdk-p subtle">{t('shell.sdk.ios.podHint')}</p>
+            <Snippet title="Podfile" lang="shell" code={S.iosPodfile(lang)} />
+          </>
+        )}
       </Step>
       <Step n={2} title={t('shell.sdk.ios.start')}>
         <p className="sdk-p">{t('shell.sdk.ios.startHint')}</p>
@@ -282,24 +319,27 @@ function IosGuide({ repo }: { repo: string }) {
   );
 }
 
-function RnGuide({ repo }: { repo: string }) {
+function RnGuide({ repo }: { repo?: string }) {
   const t = useT();
   const lang = useLanguage();
+  const first = repo ? 2 : 1;
   return (
     <ol className="sdk-steps" data-sdk-section="setup">
-      <Step n={1} title={t('shell.sdk.rn.build')}>
-        <p className="sdk-p">{t('shell.sdk.rn.buildHint')}</p>
-        <Snippet lang="shell" code={S.rnPack(repo, lang)} />
+      {repo ? (
+        <Step n={1} title={t('shell.sdk.rn.build')}>
+          <p className="sdk-p">{t('shell.sdk.rn.buildHint')}</p>
+          <Snippet lang="shell" code={S.rnPack(repo, lang)} />
+        </Step>
+      ) : null}
+      <Step n={first} title={t('shell.sdk.rn.add')}>
+        <Snippet lang="shell" code={repo ? S.rnInstall(repo, lang) : S.rnInstallRegistry()} />
+        <p className="sdk-p subtle">{t(repo ? 'shell.sdk.rn.metroHint' : 'shell.sdk.rn.registryHint')}</p>
       </Step>
-      <Step n={2} title={t('shell.sdk.rn.add')}>
-        <Snippet lang="shell" code={S.rnInstall(repo, lang)} />
-        <p className="sdk-p subtle">{t('shell.sdk.rn.metroHint')}</p>
-      </Step>
-      <Step n={3} title={t('shell.sdk.rn.start')}>
+      <Step n={first + 1} title={t('shell.sdk.rn.start')}>
         <p className="sdk-p">{t('shell.sdk.rn.startHint')}</p>
         <Snippet title="index.js" lang="js" code={S.rnStart(lang)} />
       </Step>
-      <Step n={4} title={t('shell.sdk.rn.use')}>
+      <Step n={first + 2} title={t('shell.sdk.rn.use')}>
         <Snippet lang="js" code={S.rnUsage(lang)} />
       </Step>
     </ol>
