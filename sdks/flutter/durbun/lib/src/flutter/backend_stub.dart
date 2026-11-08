@@ -13,11 +13,17 @@ class _StubBackend implements DurbunBackend {
   bool get isActive => false;
 
   @override
-  Future<void> init(DurbunOptions options) async {}
+  Future<void> init(
+    DurbunOptions options, {
+    List<DurbunAction> actions = const <DurbunAction>[],
+  }) async {}
 
   @override
-  Future<void> run(FutureOr<void> Function() body, DurbunOptions options) =>
-      Future<void>.sync(body);
+  Future<void> run(
+    FutureOr<void> Function() body,
+    DurbunOptions options, {
+    List<DurbunAction> actions = const <DurbunAction>[],
+  }) => Future<void>.sync(body);
 
   @override
   void log(
@@ -58,6 +64,12 @@ class _StubBackend implements DurbunBackend {
   bool get capturesUrlSession => false;
 
   @override
+  int get maxBodyBytes => 0;
+
+  @override
+  bool get captureBodies => false;
+
+  @override
   DurbunMockDecision? findMock(String method, Uri url) => null;
 
   @override
@@ -69,6 +81,7 @@ class _StubBackend implements DurbunBackend {
     String? contentType,
     required String source,
     String? mockRuleId,
+    int? bodySize,
   }) => null;
 
   @override

@@ -70,7 +70,7 @@ class Origin {
         res.add(gzip.encode(utf8.encode(jsonEncode({'compressed': true, 'pad': 'x' * 500}))));
       case '/redirect':
         res.statusCode = HttpStatus.found;
-        res.headers.set(HttpHeaders.locationHeader, '/json');
+        res.headers.set(HttpHeaders.locationHeader, req.uri.queryParameters['to'] ?? '/json');
       case '/big':
         res.headers.contentType = ContentType.text;
         res.write('x' * 5000);
@@ -277,16 +277,32 @@ void main() {
     expect(eRaw['body'], {'encoding': 'utf8', 'data': autoText, 'size': autoText.length});
   });
 
-  test('redirects are followed; the final response is reported', () async {
+  test('redirects dart:io follows itself: one entry per hop, the final response on the last', () async {
     final c = HttpClient();
-    final res = await (await c.getUrl(Uri.parse('${origin.base}/redirect?case=redir'))).close();
-    expect(res.redirects, hasLength(1));
-    expect(res.redirects.first.statusCode, 302);
+    // /redirect → /redirect → /json?case=redir-final
+    final second = Uri.encodeQueryComponent('/json?case=redir-final');
+    final first = Uri.encodeQueryComponent('/redirect?case=redir-hop&to=$second');
+    final req = await c.getUrl(Uri.parse('${origin.base}/redirect?case=redir&to=$first'));
+    req.headers.set('X-Trace', 'hop-1');
+    final res = await req.close();
+    expect(res.redirects, hasLength(2));
     final text = await utf8.decoder.bind(res).join();
     c.close();
-    final (_, end) = await net('/redirect?case=redir');
-    expect(end['status'], 200);
-    expect((end['body']! as Map)['data'], text);
+
+    final (q1, e1) = await net('/redirect?case=redir&to=$first');
+    expect(q1['method'], 'GET');
+    expect(e1['status'], 302);
+    expect(headerMap(e1['headers'])['location'], '/redirect?case=redir-hop&to=$second');
+    expect(e1.containsKey('body'), isFalse);
+    final (q2, e2) = await net('/redirect?case=redir-hop&to=$second');
+    expect(q2['method'], 'GET');
+    expect(headerMap(q2['headers'])['x-trace'], 'hop-1');
+    expect(e2['status'], 302);
+    final (q3, e3) = await net('/json?case=redir-final');
+    expect(q3['url'], '${origin.base}/json?case=redir-final');
+    expect(e3['status'], 200);
+    expect((e3['body']! as Map)['data'], text);
+    expect(int.parse(q1['id']! as String) < int.parse(q3['id']! as String), isTrue);
   });
 
   test('manual redirect() is reported as a second request', () async {
@@ -399,8 +415,28 @@ void main() {
     final (_, end) = await net('/json?case=unread');
     expect(end['status'], 200);
     expect(end.containsKey('body'), isFalse);
+    expect((end['timings']! as Map)['receive'], 0, reason: 'no made-up receive time');
     await res.drain<void>();
     c.close();
+  });
+
+  test('a body read late is still captured (the tee stays armed)', () async {
+    final c = HttpClient();
+    final res = await (await c.getUrl(Uri.parse('${origin.base}/json?case=late-read'))).close();
+    final req = await conn.waitFor(
+      (m) => m['type'] == 'net.request' && (m['url']! as String).endsWith('/json?case=late-read'),
+    );
+    // The app looks at the headers first and reads the body a while later.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(
+      conn.received.where((m) => m['type'] == 'net.response' && m['id'] == req['id']),
+      isEmpty,
+      reason: 'not reported before the body is read',
+    );
+    final text = await utf8.decoder.bind(res).join();
+    c.close();
+    final end = await conn.waitForNetEnd(req['id']! as String);
+    expect((end['body']! as Map)['data'], text);
   });
 
   test('package:http (IOClient) traffic is captured', () async {

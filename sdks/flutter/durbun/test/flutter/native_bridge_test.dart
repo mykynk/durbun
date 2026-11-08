@@ -431,6 +431,67 @@ void main() {
       expect(lastDeviceLogsState()['read'], isFalse);
       expect(DurbunInspectorStore.instance.nativeDeviceLogs, 'off');
     });
+
+    String logLine(String message) =>
+        jsonEncode(<String, Object?>{'type': 'log', 'ts': 1700000000000, 'level': 'info', 'message': message});
+
+    test('a native reply that comes after the hello stopped waiting still joins the session', () async {
+      // The native side is running by then (logcat, OkHttp, crash handler):
+      // dropping it would lose everything it reports for the whole session.
+      startDelay = const Duration(milliseconds: 800);
+      IoDurbunBackend.debugNativeBridgeFactory = (client) => NativeBridge(
+        client,
+        channel: _channel,
+        platformSupported: true,
+        replyTimeout: const Duration(milliseconds: 150),
+      );
+      final conn = await startSdk();
+      expect((conn.hello!['sdk']! as Map)['layers'], <String>['dart'], reason: 'the hello did not wait');
+      await nativeCall('events', <String>[logLine('sent before the reply')]);
+      await conn.waitForLog('sent before the reply');
+      final update = await conn.waitFor(
+        (m) => m['type'] == 'actions' && (m['actions']! as List).any((a) => (a as Map)['id'] == 'android.dumpThreads'),
+      );
+      expect(update['actions'], isNotEmpty);
+      await connectedStatePushed();
+      await nativeCall('events', <String>[logLine('sent after the reply')]);
+      await conn.waitForLog('sent after the reply');
+    });
+
+    test('native batches of an older session (before a hot restart) are ignored', () async {
+      final conn = await startSdk();
+      final session = conn.hello!['session'];
+      await nativeCall('events', <String, Object?>{
+        'session': 'older-session',
+        'lines': <String>[logLine('stale native line')],
+      });
+      await nativeCall('deviceLogs', <String, Object?>{
+        'session': 'older-session',
+        'lines': <String>[deviceLine('stale device line')],
+      });
+      await nativeCall('actions', <String, Object?>{
+        'session': 'older-session',
+        'actions': jsonEncode(<Map<String, Object?>>[
+          <String, Object?>{'id': 'stale.action', 'kind': 'button', 'label': 'Stale'},
+        ]),
+      });
+      await nativeCall('events', <String, Object?>{
+        'session': session,
+        'lines': <String>[logLine('current native line')],
+      });
+      await nativeCall('deviceLogs', <String, Object?>{
+        'session': session,
+        'lines': <String>[deviceLine('current device line')],
+      });
+      await conn.waitForLog('current native line');
+      expect(conn.received.where((m) => m['message'] == 'stale native line'), isEmpty);
+      expect(panelMessages(), contains('current device line'));
+      expect(panelMessages(), isNot(contains('stale device line')));
+      expect(
+        conn.received.where((m) => m['type'] == 'actions' && '${m['actions']}'.contains('stale.action')),
+        isEmpty,
+      );
+    });
   });
 
   group('NativeStartInfo', () {

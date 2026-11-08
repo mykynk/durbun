@@ -125,7 +125,9 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
             allowInReleaseBuilds: true
         )
         let redacted = Set((opts["redactHeaders"] as? [Any] ?? []).compactMap { ($0 as? String)?.lowercased() })
-        let link = ChannelLink(channel: channel)
+        // Dart's session id tags every batch: one sent before a hot restart and delivered to the new isolate
+        // is ignored there.
+        let link = ChannelLink(channel: channel, session: args["session"] as? String ?? "")
         let core = DurbunCore.shared
         guard core.startHosted(options: options, link: link, redactedHeaders: redacted) else {
             return Self.encode(["attached": false, "platform": "ios", "reason": "the native layer is disabled"])
@@ -176,30 +178,42 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
     }
 }
 
-/// Hands native messages to Dart on the main thread (Flutter channels are main-thread only).
+/// Hands native messages to Dart on the main thread (Flutter channels are main-thread only), each batch
+/// tagged with Dart's session id. Once Dart answers "not implemented" (no handler: the isolate was hot
+/// restarted, or Dart stopped), the link stops sending until Dart starts a new session, so nothing piles up
+/// in the engine's channel buffer.
 final class ChannelLink: HostLink {
     private weak var channel: FlutterMethodChannel?
+    private let session: String
+    /// Main thread only.
+    private var stale = false
 
-    init(channel: FlutterMethodChannel) {
+    init(channel: FlutterMethodChannel, session: String) {
         self.channel = channel
+        self.session = session
+    }
+
+    private func send(_ method: String, _ key: String, _ payload: Any) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.stale, let channel = self.channel else { return }
+            channel.invokeMethod(method, arguments: ["session": self.session, key: payload]) { [weak self] reply in
+                if let marker = reply as? NSObject, marker === FlutterMethodNotImplemented {
+                    self?.stale = true
+                }
+            }
+        }
     }
 
     func deliver(_ lines: [String]) {
-        DispatchQueue.main.async { [weak self] in
-            self?.channel?.invokeMethod("events", arguments: lines)
-        }
+        send("events", "lines", lines)
     }
 
     func deliverDeviceLogs(_ lines: [String]) {
-        DispatchQueue.main.async { [weak self] in
-            self?.channel?.invokeMethod("deviceLogs", arguments: lines)
-        }
+        send("deviceLogs", "lines", lines)
     }
 
     func actionsChanged(_ descriptorsJSON: String) {
-        DispatchQueue.main.async { [weak self] in
-            self?.channel?.invokeMethod("actions", arguments: descriptorsJSON)
-        }
+        send("actions", "actions", descriptorsJSON)
     }
 
     func flush(timeout: TimeInterval) -> Bool {

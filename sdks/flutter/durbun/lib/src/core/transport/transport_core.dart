@@ -24,6 +24,10 @@ abstract final class TransportEvents {
   /// `['handshake', via]`: a socket is open and hello was sent.
   static const String handshake = 'handshake';
 
+  /// `['handshake-failed', via]`: that handshake ended without a welcome
+  /// (timeout, closed, or another link won).
+  static const String handshakeFailed = 'handshake-failed';
+
   /// `['round-failed']`: a full round of client attempts failed.
   static const String roundFailed = 'round-failed';
 
@@ -77,6 +81,8 @@ class TransportConfig {
     this.listenPorts = const <int>[],
     this.maxBufferedMessages = 5000,
     this.maxBufferedBytes = 48 * 1024 * 1024,
+    this.maxOfflineBufferedBytes = 8 * 1024 * 1024,
+    this.offlineGraceMs = 30000,
     this.minBackoffMs = 500,
     this.maxBackoffMs = 3000,
     this.handshakeTimeoutMs = 5000,
@@ -92,6 +98,15 @@ class TransportConfig {
 
   /// Approximate memory budget of the queue (bodies are dropped first).
   final int maxBufferedBytes;
+
+  /// Smaller budget while no desktop is in reach: before the first
+  /// connection, and once a connection has been gone for [offlineGraceMs].
+  /// Past it the bodies of the oldest messages are stripped (the requests
+  /// stay, marked truncated; the in-app panel has its own copy), so an app
+  /// used without a desktop does not hold every image it loaded. Whole
+  /// messages are still dropped only past [maxBufferedBytes].
+  final int maxOfflineBufferedBytes;
+  final int offlineGraceMs;
   final int minBackoffMs;
   final int maxBackoffMs;
   final int handshakeTimeoutMs;
@@ -104,6 +119,8 @@ class TransportConfig {
     'listenPorts': listenPorts,
     'maxBufferedMessages': maxBufferedMessages,
     'maxBufferedBytes': maxBufferedBytes,
+    'maxOfflineBufferedBytes': maxOfflineBufferedBytes,
+    'offlineGraceMs': offlineGraceMs,
     'minBackoffMs': minBackoffMs,
     'maxBackoffMs': maxBackoffMs,
     'handshakeTimeoutMs': handshakeTimeoutMs,
@@ -120,6 +137,8 @@ class TransportConfig {
     ],
     maxBufferedMessages: (m['maxBufferedMessages'] as num).toInt(),
     maxBufferedBytes: (m['maxBufferedBytes'] as num).toInt(),
+    maxOfflineBufferedBytes: (m['maxOfflineBufferedBytes'] as num).toInt(),
+    offlineGraceMs: (m['offlineGraceMs'] as num).toInt(),
     minBackoffMs: (m['minBackoffMs'] as num).toInt(),
     maxBackoffMs: (m['maxBackoffMs'] as num).toInt(),
     handshakeTimeoutMs: (m['handshakeTimeoutMs'] as num).toInt(),
@@ -129,7 +148,10 @@ class TransportConfig {
 
 class _Queued {
   _Queued(this.message, this.cost);
-  final Map<String, Object?> message;
+
+  /// Replaced (never mutated) when its body is shed: on a local engine the
+  /// map is shared with the sender, e.g. the in-app panel's copy.
+  Map<String, Object?> message;
   int cost;
 }
 
@@ -143,6 +165,12 @@ class TransportCore {
   int _queuedCost = 0;
   int _dropped = 0;
   bool _droppedWhileOffline = false;
+  bool _everConnected = false;
+
+  /// When the last active connection was lost (stopwatch ms), or null.
+  int? _offlineSinceMs;
+  final Stopwatch _clock = Stopwatch()..start();
+  Timer? _offlineTimer;
 
   Map<String, Object?>? _hello;
   Completer<void>? _helloWaiter;
@@ -162,6 +190,21 @@ class TransportCore {
 
   bool get isConnected => _active != null;
   int get queueLength => _queue.length;
+
+  /// Approximate memory held by the queue (see [estimateMessageCost]).
+  int get queuedBytes => _queuedCost;
+
+  /// The byte budget that applies right now (see
+  /// [TransportConfig.maxOfflineBufferedBytes]).
+  int get byteBudget {
+    final full = config.maxBufferedBytes;
+    if (_active != null) return full;
+    final since = _offlineSinceMs;
+    final offline = !_everConnected ||
+        (since != null && _clock.elapsedMilliseconds - since >= config.offlineGraceMs);
+    if (!offline) return full;
+    return math.min(full, config.maxOfflineBufferedBytes);
+  }
 
   void start() {
     if (_started || _stopped) return;
@@ -189,7 +232,8 @@ class TransportCore {
     while (_queue.length > config.maxBufferedMessages) {
       _dropOldest();
     }
-    if (_queuedCost > config.maxBufferedBytes) _shedBytes();
+    final budget = byteBudget;
+    if (_queuedCost > budget) _shedBytes(budget);
     if (_active != null) _schedulePump();
   }
 
@@ -212,6 +256,7 @@ class TransportCore {
   Future<void> stop() async {
     if (_stopped) return;
     _stopped = true;
+    _offlineTimer?.cancel();
     for (final s in _sleepers.toList()) {
       if (!s.isCompleted) s.complete();
     }
@@ -371,6 +416,7 @@ class TransportCore {
     );
     if (!ok) {
       conn.close('handshake failed');
+      _emit(<Object?>[TransportEvents.handshakeFailed, conn.via]);
       return false;
     }
     return true;
@@ -379,6 +425,10 @@ class TransportCore {
   void _activate(_Conn conn) {
     _active = conn;
     conn.active = true;
+    _everConnected = true;
+    _offlineSinceMs = null;
+    _offlineTimer?.cancel();
+    _offlineTimer = null;
     _activeLost = Completer<void>();
     _emit(<Object?>[
       TransportEvents.connected,
@@ -393,6 +443,17 @@ class TransportCore {
     _connections.remove(conn);
     if (identical(_active, conn)) {
       _active = null;
+      _offlineSinceMs = _clock.elapsedMilliseconds;
+      _offlineTimer?.cancel();
+      if (!_stopped) {
+        // Still gone after the grace period: shrink the queue to the offline
+        // budget even if the app sends nothing more.
+        _offlineTimer = Timer(Duration(milliseconds: config.offlineGraceMs), () {
+          _offlineTimer = null;
+          final budget = byteBudget;
+          if (!_stopped && _queuedCost > budget) _shedBytes(budget);
+        });
+      }
       _emit(<Object?>[TransportEvents.disconnected, reason]);
       final lost = _activeLost;
       _activeLost = null;
@@ -446,17 +507,24 @@ class TransportCore {
     if (_active == null) _droppedWhileOffline = true;
   }
 
-  /// Over the byte budget: strip body data from the oldest messages first
-  /// (the requests stay visible), then drop whole messages.
-  void _shedBytes() {
+  /// Over [bodyBudget]: strip body data from the oldest messages first (the
+  /// requests stay visible, marked truncated); over [maxBufferedBytes] drop
+  /// whole messages too.
+  void _shedBytes(int bodyBudget) {
     for (final q in _queue) {
-      if (_queuedCost <= config.maxBufferedBytes) return;
+      if (_queuedCost <= bodyBudget) break;
       final body = q.message['body'];
       if (body is Map && body[kPendingBodyMarker] == true) {
         final bytes = body['bytes'];
         if (bytes is Uint8List && bytes.isNotEmpty) {
-          body['bytes'] = Uint8List(0);
-          body['truncated'] = true;
+          q.message = <String, Object?>{
+            ...q.message,
+            'body': <Object?, Object?>{
+              ...body,
+              'bytes': Uint8List(0),
+              'truncated': true,
+            },
+          };
           q.cost -= bytes.length;
           _queuedCost -= bytes.length;
         }

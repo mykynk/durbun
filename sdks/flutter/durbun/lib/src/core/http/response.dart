@@ -7,9 +7,10 @@ import 'tracker.dart';
 
 /// Tuning knobs (exposed for tests).
 abstract final class DurbunHttpTuning {
-  /// A response whose body is never listened to is reported (without body)
-  /// after this delay.
-  static Duration unconsumedResponseDelay = const Duration(seconds: 3);
+  /// A response whose body is never listened to is reported (without body,
+  /// ending when its headers arrived) after this delay. Until then the
+  /// capture stays armed: a body read late is still reported in full.
+  static Duration unconsumedResponseDelay = const Duration(seconds: 60);
 }
 
 /// Wraps a real [HttpClientResponse]: the body stream is teed into a bounded
@@ -41,7 +42,7 @@ class DurbunHttpClientResponse extends Stream<List<int>>
           ? const Duration(milliseconds: 100)
           : DurbunHttpTuning.unconsumedResponseDelay,
       () {
-        if (!_listened) _finish();
+        if (!_listened) _finish(bodyUnread: true);
       },
     );
   }
@@ -66,7 +67,7 @@ class DurbunHttpClientResponse extends Stream<List<int>>
     } catch (_) {}
   }
 
-  void _finish({Object? error, bool incomplete = false}) {
+  void _finish({Object? error, bool incomplete = false, bool bodyUnread = false}) {
     if (_finished) return;
     _finished = true;
     _unconsumedTimer?.cancel();
@@ -85,6 +86,7 @@ class DurbunHttpClientResponse extends Stream<List<int>>
         remoteAddress: remoteAddressOf(_inner.connectionInfo),
         protocol: 'HTTP/1.1',
         thenError: error,
+        bodyUnread: bodyUnread,
       );
     } catch (_) {}
   }

@@ -28,18 +28,32 @@ import 'backend_stub.dart'
 abstract final class Durbun {
   static DurbunBackend _backend = backend.createDurbunBackend();
 
+  /// Actions added with [addAction] (kept from before the start, so they are
+  /// in the first hello, and while running).
+  static final Map<String, DurbunAction> _actions = <String, DurbunAction>{};
+
   /// Runs [body] (your `main` logic) in a zone that captures `print` output
   /// and uncaught errors, after starting the SDK. Call
-  /// `WidgetsFlutterBinding.ensureInitialized()` inside [body].
+  /// `WidgetsFlutterBinding.ensureInitialized()` inside [body]: when a binding
+  /// already exists (e.g. created before `Firebase.initializeApp()`), [body]
+  /// runs without the zone (like [init]) to avoid Flutter's "Zone mismatch"
+  /// error, and `print` is not captured.
+  ///
+  /// `HttpClient`s created inside [body] are captured even when the app sets
+  /// its own `HttpOverrides.global` there.
   static Future<void> run(
     FutureOr<void> Function() body, {
     DurbunOptions options = const DurbunOptions(),
-  }) => _backend.run(body, options);
+  }) => _backend.run(body, options, actions: _actions.values.toList());
 
   /// Starts the SDK without a zone (no `print` capture except `debugPrint`,
   /// no zone errors). Safe to call more than once.
+  ///
+  /// Set your own `HttpOverrides.global` (if any) before calling [init]: one
+  /// set later is chained within about 2 s, and `HttpClient`s created in that
+  /// window are not captured.
   static Future<void> init([DurbunOptions options = const DurbunOptions()]) =>
-      _backend.init(options);
+      _backend.init(options, actions: _actions.values.toList());
 
   /// Whether the SDK is running (enabled and started).
   static bool get isEnabled => _backend.isActive;
@@ -171,11 +185,18 @@ abstract final class Durbun {
   static void event(String name, [Map<String, Object?>? props]) =>
       _backend.event(name, props);
 
-  /// Adds a control for this app on the desktop (see [DurbunAction]).
-  static void addAction(DurbunAction action) => _backend.addAction(action);
+  /// Adds a control for this app on the desktop (see [DurbunAction]). Safe
+  /// before [init] / [run]: the action is kept and shown once the SDK starts.
+  static void addAction(DurbunAction action) {
+    _actions[action.id] = action;
+    _backend.addAction(action);
+  }
 
   /// Removes a control added with [addAction].
-  static void removeAction(String id) => _backend.removeAction(id);
+  static void removeAction(String id) {
+    _actions.remove(id);
+    _backend.removeAction(id);
+  }
 
   /// Waits until everything sent so far reached the desktop (or [timeout]).
   static Future<bool> flush({Duration timeout = const Duration(seconds: 5)}) =>
@@ -187,7 +208,9 @@ abstract final class Durbun {
   static void showInspector() => DurbunInspector.show();
 
   /// Stops the SDK and removes every hook it installed (mainly for tests).
+  /// Actions added with [addAction] are forgotten too.
   static Future<void> dispose() async {
+    _actions.clear();
     await _backend.dispose();
     _backend = backend.createDurbunBackend();
   }
@@ -215,12 +238,23 @@ abstract final class DurbunNetwork {
   /// `NativeAdapter` on iOS) must not report those requests again.
   static bool get capturesUrlSession => Durbun._backend.capturesUrlSession;
 
+  /// The desktop's body limit (`maxBodyBytes`, at most 10 MiB); 0 when the
+  /// SDK is off. Adapters can stop encoding a body past it.
+  static int get maxBodyBytes => Durbun._backend.maxBodyBytes;
+
+  /// Whether the desktop wants body contents (otherwise sizes only).
+  static bool get captureBodies => Durbun._backend.captureBodies;
+
   /// The mock rule from the desktop that applies to [method] [url], if any.
   static DurbunMockDecision? findMock(String method, Uri url) =>
       Durbun._backend.findMock(method, url);
 
   /// Reports a request now and returns a handle for its response/error;
-  /// null when the SDK is off. Pass [mockRuleId] when a mock was applied.
+  /// null when the SDK is off. Pass [mockRuleId] when a mock was applied,
+  /// and [bodySize] when [body] is only the first part of a larger body.
+  ///
+  /// Also the way to report traffic Dürbün cannot see by itself (cronet_http
+  /// or package:ok_http on Android, gRPC, your own sockets).
   static DurbunHttpCall? begin({
     required String method,
     required Uri url,
@@ -229,6 +263,7 @@ abstract final class DurbunNetwork {
     String? contentType,
     String source = 'dio',
     String? mockRuleId,
+    int? bodySize,
   }) => Durbun._backend.beginHttpCall(
     method: method,
     url: url,
@@ -237,5 +272,6 @@ abstract final class DurbunNetwork {
     contentType: contentType,
     source: source,
     mockRuleId: mockRuleId,
+    bodySize: bodySize,
   );
 }

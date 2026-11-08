@@ -24,6 +24,11 @@ const int kDeviceSdkLastPort = 9755;
 /// `MAX_FRAME_BYTES`: max size of one NDJSON line.
 const int kMaxFrameBytes = 16 * 1024 * 1024;
 
+/// Highest `config.maxBodyBytes` the desktop accepts (its settings range,
+/// `packages/server/src/config.ts`). A larger value from a peer is clamped,
+/// so no peer can make the SDK hold huge bodies.
+const int kMaxBodyBytesCeiling = 10 * 1024 * 1024;
+
 /// Same as Flutter's `kReleaseMode` / `kProfileMode` / `kDebugMode`, without
 /// importing Flutter.
 const bool kDurbunReleaseMode = bool.fromEnvironment('dart.vm.product');
@@ -108,10 +113,10 @@ class SdkConfig {
       captureBodies: json['captureBodies'] is bool
           ? json['captureBodies'] as bool
           : fallback.captureBodies,
-      maxBodyBytes: maxBody is num && maxBody >= 0
-          ? maxBody.toInt()
+      maxBodyBytes: maxBody is num && !maxBody.isNaN && maxBody >= 0
+          ? (maxBody > kMaxBodyBytesCeiling ? kMaxBodyBytesCeiling : maxBody.toInt())
           : fallback.maxBodyBytes,
-      metricsIntervalMs: interval is num && interval >= 100
+      metricsIntervalMs: interval is num && interval.isFinite && interval >= 100
           ? interval.toInt()
           : fallback.metricsIntervalMs,
       deviceLogsAvailable: json['deviceLogsAvailable'] is bool

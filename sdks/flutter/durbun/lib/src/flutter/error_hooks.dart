@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -11,9 +12,20 @@ import '../core/types.dart';
 /// re-chains them when the app installs its own handlers later, e.g.
 /// Crashlytics), reporting `flutter-error` and `crash` entries.
 class FlutterErrorHooks {
-  FlutterErrorHooks(this.client);
+  FlutterErrorHooks(this.client, {Zone? appZone}) : appZone = appZone ?? Zone.current;
 
   final DurbunClient client;
+
+  /// The app's zone (where `Durbun.init` / `Durbun.run` was called). dart:ui
+  /// runs `PlatformDispatcher.onError` in the zone it was set in, so it is
+  /// always set from here: the app's chained handler then runs in the app's
+  /// zone, never in Dürbün's internal one (which swallows errors).
+  final Zone appZone;
+
+  /// An uncaught error reported by the zone handler of `Durbun.run` reaches
+  /// `PlatformDispatcher.onError` right after (same error, same stack): that
+  /// second report is dropped within this window.
+  static const Duration duplicateWindow = Duration(seconds: 1);
 
   /// Every handler closure we installed (each keeps its own `previous`, so
   /// re-chaining can never loop).
@@ -25,7 +37,7 @@ class FlutterErrorHooks {
   ui.ErrorCallback? _latestPlatformPrevious;
 
   FlutterErrorDetails? _lastDetails;
-  final List<(Object, DateTime)> _recentUncaught = <(Object, DateTime)>[];
+  final List<_Reported> _recentUncaught = <_Reported>[];
   bool _disposed = false;
 
   void install() => ensureInstalled();
@@ -37,7 +49,9 @@ class FlutterErrorHooks {
     if (currentFlutter == null || !_ourFlutterHandlers.contains(currentFlutter)) {
       final previous = currentFlutter;
       void handler(FlutterErrorDetails details) {
-        _reportFlutterError(details);
+        try {
+          _reportFlutterError(details);
+        } catch (_) {}
         if (previous != null) previous(details);
       }
 
@@ -53,15 +67,22 @@ class FlutterErrorHooks {
         !_ourPlatformHandlers.contains(currentPlatform)) {
       final previous = currentPlatform;
       bool handler(Object error, StackTrace stack) {
-        reportUncaught(error, stack, source: 'platform');
+        try {
+          reportUncaught(error, stack, source: 'platform');
+        } catch (_) {}
+        // Outside the try: the app's handler behaves exactly as without us.
         return previous?.call(error, stack) ?? false;
       }
 
       _ourPlatformHandlers.add(handler);
       _latestPlatformHandler = handler;
       _latestPlatformPrevious = previous;
-      dispatcher.onError = handler;
+      _setPlatformOnError(dispatcher, handler);
     }
+  }
+
+  void _setPlatformOnError(ui.PlatformDispatcher dispatcher, ui.ErrorCallback? handler) {
+    appZone.run(() => dispatcher.onError = handler);
   }
 
   /// Restores the handlers that were there before our latest installation.
@@ -72,7 +93,7 @@ class FlutterErrorHooks {
     }
     final dispatcher = ui.PlatformDispatcher.instance;
     if (identical(dispatcher.onError, _latestPlatformHandler)) {
-      dispatcher.onError = _latestPlatformPrevious;
+      _setPlatformOnError(dispatcher, _latestPlatformPrevious);
     }
   }
 
@@ -107,15 +128,22 @@ class FlutterErrorHooks {
     } catch (_) {}
   }
 
-  /// Reports an uncaught (zone or platform) error once.
+  /// Reports an uncaught (zone or platform) error. The same error passed on
+  /// from the zone to the platform handler is reported once; an error thrown
+  /// again (e.g. a repeated `throw const X()`) is reported every time.
   void reportUncaught(Object error, StackTrace? stack, {required String source}) {
     if (_disposed) return;
     final now = DateTime.now();
     _recentUncaught.removeWhere(
-      (e) => now.difference(e.$2) > const Duration(seconds: 10),
+      (e) => now.difference(e.at) > duplicateWindow,
     );
-    if (_recentUncaught.any((e) => identical(e.$1, error))) return;
-    _recentUncaught.add((error, now));
+    final duplicate = _recentUncaught.any(
+      (e) =>
+          identical(e.error, error) &&
+          (identical(e.stack, stack) || e.source != source),
+    );
+    if (duplicate) return;
+    _recentUncaught.add(_Reported(error, stack, source, now));
     if (_recentUncaught.length > 32) _recentUncaught.removeAt(0);
     try {
       String text;
@@ -134,6 +162,15 @@ class FlutterErrorHooks {
       );
     } catch (_) {}
   }
+}
+
+class _Reported {
+  _Reported(this.error, this.stack, this.source, this.at);
+
+  final Object error;
+  final StackTrace? stack;
+  final String source;
+  final DateTime at;
 }
 
 /// The error box exactly as `FlutterError.dumpErrorToConsole` prints it in

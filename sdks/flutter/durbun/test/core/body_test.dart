@@ -161,6 +161,30 @@ void main() {
       expect(w['truncated'], isTrue);
     });
 
+    test('a gzip bomb is inflated only up to the limit (chunk by chunk)', () {
+      // 1 MiB of zeros compresses to ~1 KB; 32 MiB would be decoded whole
+      // before the limit applied.
+      final compressed = Uint8List.fromList(gzip.encode(Uint8List(32 * 1024 * 1024)));
+      expect(compressed.length, lessThan(64 * 1024));
+      final bounded = decompressBounded(compressed, 'gzip', keep: 1000, countLimit: 4 * 1024 * 1024)!;
+      expect(bounded.bytes.length, 1000);
+      expect(bounded.size, greaterThanOrEqualTo(4 * 1024 * 1024));
+      expect(bounded.size, lessThan(32 * 1024 * 1024), reason: 'stopped counting at the limit');
+      final w = wire(compressed, contentType: 'text/plain', contentEncoding: 'gzip', limit: 1000);
+      expect(w['truncated'], isTrue);
+      expect((w['data']! as String).length, 1000);
+      expect(w['size'], 32 * 1024 * 1024, reason: 'below the 64 MiB counting cap the size is exact');
+    });
+
+    test('deflate (zlib and raw) is decoded too', () {
+      final text = utf8.encode('deflated ${'body ' * 100}');
+      final zlibbed = Uint8List.fromList(ZLibEncoder().convert(text));
+      final raw = Uint8List.fromList(ZLibEncoder(raw: true).convert(text));
+      expect(decompressBounded(zlibbed, 'deflate', keep: 1 << 20)!.bytes, text);
+      expect(decompressBounded(raw, 'deflate', keep: 1 << 20)!.bytes, text);
+      expect(decompressBounded(Uint8List.fromList([1, 2, 3]), 'gzip', keep: 10), isNull);
+    });
+
     test('undecodable encodings (br) stay base64', () {
       final w = wire(
         [0x1b, 0x2c, 0x00, 0xff],

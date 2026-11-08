@@ -91,12 +91,19 @@ class DurbunHttpClientRequest implements HttpClientRequest {
     if (response is DurbunHttpClientResponse) return response;
     try {
       _tracker.markHeaders();
+      var tracker = _tracker;
+      var method = _inner.method;
+      var uri = _inner.uri;
+      final redirects = response.redirects;
+      if (redirects.isNotEmpty) {
+        (tracker, method, uri) = reportRedirectHops(_tracker, uri, redirects);
+      }
       return DurbunHttpClientResponse(
         response,
-        _tracker,
+        tracker,
         _client,
-        requestMethod: _inner.method,
-        requestUri: _inner.uri,
+        requestMethod: method,
+        requestUri: uri,
       );
     } catch (_) {
       return response;

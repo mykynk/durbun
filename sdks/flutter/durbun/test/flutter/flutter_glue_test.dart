@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:durbun/durbun.dart';
+import 'package:durbun/src/flutter/backend_io.dart';
 import 'package:durbun/src/flutter/metrics.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -88,6 +89,11 @@ void main() {
     });
 
     test('run(): print capture, logs, events and zone crashes', () async {
+      // testWidgets below created the test binding when this file loaded; the
+      // body here never calls runApp, so the zone is safe to open.
+      final bindingExists = IoDurbunBackend.debugBindingExists;
+      IoDurbunBackend.debugBindingExists = () => false;
+      addTearDown(() => IoDurbunBackend.debugBindingExists = bindingExists);
       final desktop = await FakeDesktop.start(appId: 'app:run');
       addTearDown(desktop.close);
       final outerErrors = <Object>[];

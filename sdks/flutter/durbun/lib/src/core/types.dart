@@ -256,14 +256,17 @@ abstract class DurbunHttpCall {
   /// Request id within this app session.
   String get id;
 
-  /// Reports the response (once). [body] is the full decoded body; it is
-  /// truncated to the desktop's limit by the SDK.
+  /// Reports the response (once). [body] is the decoded body (or its first
+  /// `DurbunNetwork.maxBodyBytes` bytes or more); the SDK truncates it to the
+  /// desktop's limit. [bodySize]: the whole body's size when [body] is only a
+  /// prefix of it (or null was passed to save the work).
   void response({
     required int status,
     String? statusText,
     List<List<String>> headers = const <List<String>>[],
     List<int>? body,
     String? contentType,
+    int? bodySize,
   });
 
   /// Reports a failure (once).

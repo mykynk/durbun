@@ -1,6 +1,7 @@
 // The real backend (Android, iOS, macOS, …): pure-Dart core + Flutter glue.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show HttpOverrides;
 
 import 'package:flutter/foundation.dart';
 
@@ -66,13 +67,26 @@ class IoDurbunBackend implements DurbunBackend {
   bool get isActive => _client != null && !_client!.isDisposed;
 
   @override
-  Future<void> init(DurbunOptions options) async {
-    _setUp(options, zoneCapturesPrint: false);
+  Future<void> init(
+    DurbunOptions options, {
+    List<DurbunAction> actions = const <DurbunAction>[],
+  }) async {
+    _setUp(options, zoneCapturesPrint: false, actions: actions);
   }
 
   /// Starts everything once; later calls are no-ops while running.
-  void _setUp(DurbunOptions options, {required bool zoneCapturesPrint}) {
+  ///
+  /// The caller's zone is the app's: `PlatformDispatcher.onError` (which
+  /// dart:ui runs in the zone it was set in) is installed from there, so the
+  /// app's own handler (Crashlytics, Sentry …) never runs in Dürbün's
+  /// error-swallowing internal zone.
+  void _setUp(
+    DurbunOptions options, {
+    required bool zoneCapturesPrint,
+    List<DurbunAction> actions = const <DurbunAction>[],
+  }) {
     if (isActive || !resolveDurbunEnabled(options)) return;
+    final appZone = Zone.current;
     try {
       // The first hello waits (≤ 3 s) for the native layer, so its
       // capabilities, actions and app version are in it.
@@ -85,6 +99,9 @@ class IoDurbunBackend implements DurbunBackend {
       );
       _client = client;
       _options = options;
+      // Actions added before the start (the hello is still held back, so they
+      // are in the first one).
+      if (actions.isNotEmpty) client.runInternal(() => client.addActions(actions));
       if (options.inspector) {
         final store = DurbunInspectorStore.instance
           ..bodyResolver = wireBodyFromPending
@@ -122,7 +139,7 @@ class IoDurbunBackend implements DurbunBackend {
           _hookDebugPrint();
         }
         if (options.captureErrors) {
-          _errors = FlutterErrorHooks(client)..install();
+          _errors = FlutterErrorHooks(client, appZone: appZone)..install();
         }
         FlutterCommands(client).register();
         if (options.metrics) {
@@ -171,12 +188,42 @@ class IoDurbunBackend implements DurbunBackend {
     } catch (_) {}
   }
 
+  /// Test hook: whether a Flutter binding exists (debug builds track it).
+  static bool Function() debugBindingExists = () =>
+      BindingBase.debugBindingType() != null;
+
   @override
-  Future<void> run(FutureOr<void> Function() body, DurbunOptions options) {
+  Future<void> run(
+    FutureOr<void> Function() body,
+    DurbunOptions options, {
+    List<DurbunAction> actions = const <DurbunAction>[],
+  }) {
     if (!resolveDurbunEnabled(options)) return Future<void>.sync(body);
-    _setUp(options, zoneCapturesPrint: true);
+    // A binding created before run() (e.g. ensureInitialized() for
+    // Firebase.initializeApp) belongs to the outer zone: running runApp in a
+    // new zone would print Flutter's "Zone mismatch" error on every launch.
+    // Then run like init(): no zone, debugPrint hooked.
+    var bindingExists = false;
+    try {
+      bindingExists = debugBindingExists();
+    } catch (_) {}
+    _setUp(options, zoneCapturesPrint: !bindingExists, actions: actions);
     final client = _client;
     if (client == null) return Future<void>.sync(body);
+    if (bindingExists) {
+      DurbunClient.diagnostic(
+        'Durbun.run: a Flutter binding already exists, so the body runs '
+        'without the Dürbün zone (avoids "Zone mismatch"). print() is not '
+        'captured, only debugPrint; uncaught errors arrive through '
+        'PlatformDispatcher.onError. To capture print, call '
+        'WidgetsFlutterBinding.ensureInitialized() inside Durbun.run.',
+      );
+      if (_ourDebugPrint == null &&
+          options.capturePrint != DurbunPrintCapture.never) {
+        _hookDebugPrint();
+      }
+      return _runBody(body, options, client);
+    }
     // init() may have hooked debugPrint; the zone captures it from now on.
     if (_ourDebugPrint != null && identical(debugPrint, _ourDebugPrint)) {
       debugPrint = _originalDebugPrint ?? debugPrintThrottled;
@@ -188,18 +235,23 @@ class IoDurbunBackend implements DurbunBackend {
       () {
         Future<void> guardedBody() async {
           try {
-            if (options.waitForDesktop > Duration.zero) {
-              await client.waitForConnection(options.waitForDesktop);
-            }
-            await body();
+            await _runBody(body, options, client);
           } finally {
-            // The app may have replaced our hooks in main(); re-chain now.
-            client.runInternal(_checkHooks);
             if (!done.isCompleted) done.complete();
           }
         }
 
-        unawaited(guardedBody());
+        if (options.captureNetwork) {
+          // Every HttpClient created in the zone asks the global overrides
+          // at creation time, so an HttpOverrides.global the app sets in its
+          // main() is captured from its first client on.
+          HttpOverrides.runWithHttpOverrides<void>(
+            () => unawaited(guardedBody()),
+            DurbunZoneHttpOverrides(client),
+          );
+        } else {
+          unawaited(guardedBody());
+        }
       },
       (error, stack) {
         final errors = _errors;
@@ -218,6 +270,22 @@ class IoDurbunBackend implements DurbunBackend {
       ),
     );
     return done.future;
+  }
+
+  Future<void> _runBody(
+    FutureOr<void> Function() body,
+    DurbunOptions options,
+    DurbunClient client,
+  ) async {
+    try {
+      if (options.waitForDesktop > Duration.zero) {
+        await client.waitForConnection(options.waitForDesktop);
+      }
+      await body();
+    } finally {
+      // The app may have replaced our hooks in main(); re-chain now.
+      client.runInternal(_checkHooks);
+    }
   }
 
   @override
@@ -310,6 +378,19 @@ class IoDurbunBackend implements DurbunBackend {
       isActive && (_native?.info?.capturesUrlSession ?? false);
 
   @override
+  int get maxBodyBytes {
+    final client = _client;
+    if (client == null || client.isDisposed || !client.networkEnabled) return 0;
+    return client.maxBodyBytes;
+  }
+
+  @override
+  bool get captureBodies {
+    final client = _client;
+    return client != null && !client.isDisposed && client.captureBodies;
+  }
+
+  @override
   DurbunMockDecision? findMock(String method, Uri url) {
     final client = _client;
     if (client == null || client.isDisposed || !client.networkEnabled) {
@@ -332,6 +413,7 @@ class IoDurbunBackend implements DurbunBackend {
     String? contentType,
     required String source,
     String? mockRuleId,
+    int? bodySize,
   }) {
     final client = _client;
     if (client == null || client.isDisposed || !client.networkEnabled) {
@@ -355,6 +437,7 @@ class IoDurbunBackend implements DurbunBackend {
       tracker.headersSnapshot = () => redacted;
       tracker.contentTypeSnapshot = () => contentType;
       if (body != null && body.isNotEmpty) tracker.requestBody.add(body);
+      if (bodySize != null) tracker.requestBody.reportSize(bodySize);
       tracker.markOpened();
       tracker.sendRequest();
       return _TrackedCall(client, tracker);
@@ -415,6 +498,7 @@ class _TrackedCall implements DurbunHttpCall {
     List<List<String>> headers = const <List<String>>[],
     List<int>? body,
     String? contentType,
+    int? bodySize,
   }) {
     try {
       final capture = BodyCapture(
@@ -422,6 +506,7 @@ class _TrackedCall implements DurbunHttpCall {
         enabled: _client.captureBodies,
       );
       if (body != null) capture.add(body);
+      if (bodySize != null) capture.reportSize(bodySize);
       _tracker.complete(
         status: status,
         statusText: statusText,

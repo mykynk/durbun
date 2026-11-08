@@ -179,7 +179,9 @@ class DurbunFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCa
             // Dart's captureNetwork: false also keeps OkHttp out (no capture, no mocks, not announced).
             captureNetwork = opts.bool("captureNetwork") ?: true,
         )
-        val link = ChannelLink(this)
+        // Dart's session id tags every batch: one sent before a hot restart and delivered to the new isolate
+        // is ignored there.
+        val link = ChannelLink(this, args.str("session") ?: "")
         val core = AndroidRuntime.startHosted(ctx, options, Durbun.pendingActions(), link, redacted)
         synchronized(lock) {
             owner = this
@@ -220,37 +222,43 @@ class DurbunFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCa
         }
     }
 
-    /** Posts native messages to Dart on the main thread (method channels are main-thread only on Android). */
-    private class ChannelLink(private val plugin: DurbunFlutterPlugin) : HostLink {
-        override fun deliver(lines: List<String>) {
+    /**
+     * Posts native messages to Dart on the main thread (method channels are main-thread only on Android), each
+     * batch tagged with Dart's session id. Once Dart answers "not implemented" (no handler: the isolate was hot
+     * restarted, or Dart stopped), the link stops sending until Dart starts a new session, so nothing piles up
+     * in the engine's channel buffer.
+     */
+    private class ChannelLink(private val plugin: DurbunFlutterPlugin, private val session: String) : HostLink {
+        /** Main thread only. */
+        private var stale = false
+
+        private val reply = object : MethodChannel.Result {
+            override fun success(result: Any?) {}
+
+            override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {}
+
+            override fun notImplemented() {
+                stale = true
+            }
+        }
+
+        private fun send(method: String, key: String, payload: Any, what: String) {
             plugin.main.post {
+                if (stale) return@post
                 try {
-                    plugin.channel?.invokeMethod("events", lines)
+                    plugin.channel?.invokeMethod(method, mapOf("session" to session, key to payload), reply)
                 } catch (t: Throwable) {
-                    Log.d(TAG, "Dürbün could not forward native messages", t)
+                    Log.d(TAG, "Dürbün could not forward $what", t)
                 }
             }
         }
 
-        override fun deliverDeviceLogs(lines: List<String>) {
-            plugin.main.post {
-                try {
-                    plugin.channel?.invokeMethod("deviceLogs", lines)
-                } catch (t: Throwable) {
-                    Log.d(TAG, "Dürbün could not forward logcat lines", t)
-                }
-            }
-        }
+        override fun deliver(lines: List<String>) = send("events", "lines", lines, "native messages")
 
-        override fun actionsChanged(descriptorsJson: String) {
-            plugin.main.post {
-                try {
-                    plugin.channel?.invokeMethod("actions", descriptorsJson)
-                } catch (t: Throwable) {
-                    Log.d(TAG, "Dürbün could not forward native actions", t)
-                }
-            }
-        }
+        override fun deliverDeviceLogs(lines: List<String>) = send("deviceLogs", "lines", lines, "logcat lines")
+
+        override fun actionsChanged(descriptorsJson: String) =
+            send("actions", "actions", descriptorsJson, "native actions")
     }
 
     private fun declined(reason: String): String =

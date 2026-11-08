@@ -69,7 +69,27 @@ Future<void> main() async {
 ```
 
 Bu durumda yalnızca `debugPrint` yakalanır, zone hataları `PlatformDispatcher.onError`
-üzerinden gelir.
+üzerinden gelir. Kendi `HttpOverrides.global`'ınız varsa onu `Durbun.init()`'ten
+**önce** atayın: sonradan atanan override ~2 sn içinde zincirlenir, o arada
+oluşturulan `HttpClient`'lar (ör. Dio'nun ilk istekte sakladığı istemci) yakalanmaz.
+`Durbun.run` içinde bu sınırlama yoktur: zone içindeki her `HttpClient`, o anki
+global override'ı sorup sarılır.
+
+`ensureInitialized()` zone'un **dışında** çağrıldıysa (ör. `Durbun.run`'dan önce
+`await Firebase.initializeApp()` için), `Durbun.run` zone açmaz — Flutter'ın
+"Zone mismatch" hatası çıkmasın diye — ve `init` gibi çalışır: `print` yakalanmaz
+(yalnızca `debugPrint`), konsola bir kez not düşülür. `print` de yakalansın
+istiyorsanız Firebase dahil her şeyi gövdenin içine alın:
+
+```dart
+Future<void> main() async {
+  await Durbun.run(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await Firebase.initializeApp();
+    runApp(const MyApp());
+  });
+}
+```
 
 ## Uygulama içi panel (Mac'siz)
 
@@ -273,7 +293,7 @@ Logger.root.onRecord.listen((r) => Durbun.log(
 | `print` / `debugPrint` | zone (`run`) veya `debugPrint` kancası (`init`) | `flutter` tag'li info log — **yalnızca** masaüstü cihaz loglarını göremiyorsa (`capturePrint: auto`), böylece satırlar iki kez görünmez |
 | `FlutterError.onError` | önceki handler korunarak zincirlenir | `flutter-error`: hata kutusunun tamamı (`══╡ EXCEPTION CAUGHT BY …`) |
 | Yakalanmamış hatalar | zone + `PlatformDispatcher.onError` | `crash` (fatal), stack trace ile; hata ayrıca eski yerine iletilir |
-| HTTP (dart:io) | `HttpOverrides.global` sarmalayıcısı (önceki override zincirlenir) | istek/yanıt, başlıklar, gövdeler (gzip çözülmüş), süreler, redirect, iptal, hata. `package:http`, Dio'nun varsayılan adaptörü, `NetworkImage`, WebSocket el sıkışması dahil |
+| HTTP (dart:io) | `HttpOverrides.global` sarmalayıcısı (önceki override zincirlenir) | istek/yanıt, başlıklar, gövdeler (gzip çözülmüş), süreler, redirect (her adım ayrı satır, URLSession'daki gibi), iptal, hata. `package:http`, Dio'nun varsayılan adaptörü, `NetworkImage`, WebSocket el sıkışması dahil |
 | Event'ler | `Durbun.event` | log akışında event satırı |
 | Metrikler | `SchedulerBinding.addTimingsCallback`, `ProcessInfo.currentRss`, `getrusage` | FPS (çizim sırasında), janky frame, ortalama build/raster ms, bellek MB, CPU %, thread (Android) |
 | Komutlar | masaüstü → uygulama | `flutter.debugPaint`, `repaintRainbow`, `slowAnimations`, `performanceOverlay`, `invertOversizedImages`, `brightness`, `platform`, `dumpWidgetTree`, `dumpRenderTree` + sizin `DurbunAction`'larınız |
@@ -304,6 +324,12 @@ yapar, `fail` → platformun doğal hatası (`SocketException` "Connection refus
 
 Bağlantı yoksa SDK son 5 000 mesajı bekletir, 0,5 sn → 3 sn aralıklarla yeniden
 dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı satırıyla bildirir).
+Masaüstü hiç bağlanmadıysa ya da 30 sn'den uzun süredir yoksa bekleyen mesajlar
+en fazla ~8 MB yer tutar: aşınca en eski gövdeler atılır (istek satırları ve
+loglar kalır, gövde "kesildi" görünür). Uygulama içi panelin kendi kopyası
+bundan etkilenmez.
+Masaüstü yokken istekler beklemez; yalnızca bir masaüstü bağlantıyı kabul etmiş
+ve el sıkışma sürerken (mock kuralları yoldayken) en fazla 0,8 sn bekler.
 
 ## Release güvenliği
 
@@ -311,8 +337,9 @@ dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı sat�
   (`enabled: true` ile açılır).
 - SDK uygulamaya asla hata fırlatmaz; tüm iç hatalar yutulur (native katman dahil).
 - JSON kodlama, gövde base64/gzip işlemleri ve soket I/O arka plan isolate'ta
-  çalışır; kuyruklar sınırlıdır (5 000 mesaj, ~48 MB), gövdeler `maxBodyBytes`
-  (varsayılan 1 MB) ile kesilir. Native katmanın mesajları Dart'a küçük paketler
+  çalışır; kuyruklar sınırlıdır (5 000 mesaj, ~48 MB; masaüstü yokken gövdeler için ~8 MB),
+  gövdeler `maxBodyBytes` (varsayılan 1 MB, en fazla 10 MB) ile kesilir; gzip
+  gövdeler de bu sınırda açılmayı bırakır. Native katmanın mesajları Dart'a küçük paketler
   hâlinde, sınırlı bir tamponla iletilir.
 - Web'de ve masaüstü platformlarda native katman yoktur; Dart tarafı çalışır.
 - Hot restart: native katman yeni oturumla yeniden başlar.
@@ -340,7 +367,7 @@ dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı sat�
 | `maxBufferedMessages` | `5000` | bağlantı yokken tutulan mesaj sayısı |
 | `redactHeaders` | `[]` | değeri gizlenecek başlıklar, ör. `['authorization']` — OkHttp ve URLSession istekleri dahil; değer her katmanda `••••` görünür |
 | `appId` / `appName` / `appVersion` | otomatik | Android'de sürüm/derleme numarasını artık native katman okur; yalnızca ezmek için verin |
-| `waitForDesktop` | `0` | `run` uygulamayı başlatmadan önce bu kadar bekler (açılıştaki isteklere mock uygulansın diye) |
+| `waitForDesktop` | `0` | `run` uygulamayı başlatmadan önce bu kadar bekler (açılıştaki isteklere mock uygulansın diye); verilmezse istekler masaüstünü beklemez |
 | `listenForUsb` | `true` | iOS cihazda usbmux dinleyicisi |
 | `useBackgroundIsolate` | `true` | taşıma katmanı arka plan isolate'ta |
 | `inspector` | `true` | uygulama içi panel için son logları, istekleri ve ölçümleri telefonda tutar (`DurbunInspector`) |
@@ -348,10 +375,17 @@ dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı sat�
 ## Sınırlar
 
 - Android'de **cronet_http / Dio `NativeAdapter`** dart:io'yu ve OkHttp'yi
-  kullanmaz → Dio için `sdks/flutter/durbun_dio` paketindeki
-  `DurbunDioInterceptor(dio: dio)` ekleyin. iOS'ta bunlar URLSession üzerinden
-  native katmanca yakalanır (`DurbunDioInterceptor` o istekleri ikinci kez
-  bildirmez).
+  kullanmaz → Dio için `durbun_dio` paketindeki
+  `DurbunDioInterceptor(dio: dio)`'yu **en son** interceptor olarak ekleyin. iOS'ta
+  bunlar URLSession üzerinden native katmanca yakalanır (`DurbunDioInterceptor`
+  o istekleri ikinci kez bildirmez).
+- **Yakalanmayanlar:** Android'de package:http'nin `CronetClient`'ı ve
+  `package:ok_http` (kendi OkHttp istemcisini kurar, `DurbunInterceptor`
+  eklenemez); her platformda gRPC (`package:grpc`, HTTP/2'yi kendi soketiyle
+  konuşur) ve doğrudan `Socket` kullanan kod. Bunları `DurbunNetwork.begin` ile
+  kendiniz raporlayabilirsiniz (aşağıdaki örnek).
+- dart:io'nun kendiliğinden izlediği redirect'lerde ara adımların yalnızca durum
+  kodu ve `location` başlığı bilinir; mock kuralları ara adımlara uygulanmaz.
 - Arka plan isolate'larındaki (`compute`, `Isolate.run`) Dart HTTP istekleri ve
   loglar yakalanmaz (her isolate'ın kendi `HttpOverrides`'ı vardır).
 - `Durbun.run/init`'ten **önce** oluşturulmuş `HttpClient`'lar sarılmaz.
@@ -367,6 +401,66 @@ dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı sat�
   başlatan engine kullanır.
 - Native-only (Flutter'sız) uygulamalar `sdks/android` ve `sdks/ios` SDK'larını
   kullanır; Flutter uygulamasına ikisini ayrıca eklemeyin (sınıflar çakışır).
+
+### Yakalanmayan istemcileri elle raporlamak
+
+package:http istemcileri (ör. `CronetClient`, `OkHttpClient`) için küçük bir
+sarmalayıcı yeter (Dürbün kapalıyken `begin` null döner ve hiçbir şey yapmaz).
+Yanıt gövdesini bir kez belleğe alır; büyük indirmelerde kullanmayın:
+
+```dart
+import 'package:durbun/durbun.dart';
+import 'package:http/http.dart' as http;
+
+class DurbunReportingClient extends http.BaseClient {
+  DurbunReportingClient(this._inner, {this.source = 'cronet'});
+  final http.Client _inner;
+  final String source;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final call = DurbunNetwork.begin(
+      method: request.method,
+      url: request.url,
+      headers: [for (final h in request.headers.entries) [h.key, h.value]],
+      body: request is http.Request ? request.bodyBytes : null,
+      contentType: request.headers['content-type'],
+      source: source,
+    );
+    if (call == null) return _inner.send(request);
+    try {
+      final response = await _inner.send(request);
+      final bytes = await response.stream.toBytes();
+      call.response(
+        status: response.statusCode,
+        statusText: response.reasonPhrase,
+        headers: [for (final h in response.headers.entries) [h.key, h.value]],
+        body: bytes,
+        contentType: response.headers['content-type'],
+      );
+      return http.StreamedResponse(
+        http.ByteStream.fromBytes(bytes),
+        response.statusCode,
+        contentLength: bytes.length,
+        request: response.request,
+        headers: response.headers,
+        isRedirect: response.isRedirect,
+        persistentConnection: response.persistentConnection,
+        reasonPhrase: response.reasonPhrase,
+      );
+    } catch (e) {
+      call.error(e);
+      rethrow;
+    }
+  }
+
+  @override
+  void close() => _inner.close();
+}
+```
+
+gRPC ve diğer protokoller için aynı `DurbunNetwork.begin` → `call.response(...)`
+/ `call.error(...)` çağrılarını kendi katmanınızda yapın.
 
 ## Saf Dart (Flutter'sız)
 
@@ -440,7 +534,16 @@ a pass-through while Dürbün is off. iOS URLSession traffic (shared and custom
 sessions, Alamofire, cupertino_http) is captured automatically.
 
 Without a zone: `Future<void> main() async { await Durbun.init(); runApp(const MyApp()); }`
-(then only `debugPrint` is captured). API: `Durbun.log(message, tag:, data:, error:, stackTrace:)`,
+(then only `debugPrint` is captured). Set your own `HttpOverrides.global`, if
+any, **before** `Durbun.init()`: one set later is chained within ~2 s, and
+`HttpClient`s created in between (e.g. the one Dio's adapter caches on its
+first request) are not captured. Inside `Durbun.run` there is no such gap:
+every `HttpClient` created in the zone asks the current global overrides and
+is wrapped. If `ensureInitialized()` already ran outside the zone (e.g. before
+`await Firebase.initializeApp()`), `Durbun.run` opens no zone — that would
+print Flutter's "Zone mismatch" error — and works like `init` (no `print`
+capture, only `debugPrint`; one console note). Move `ensureInitialized()` and
+`Firebase.initializeApp()` into the body to capture `print` too. API: `Durbun.log(message, tag:, data:, error:, stackTrace:)`,
 `Durbun.v/d/i/w/e/f`, `Durbun.event(name, props)`, `Durbun.isConnected`,
 `Durbun.connection` (stream), `Durbun.addAction(DurbunAction.button/toggle/select)`.
 Native logs: Kotlin `Durbun.i("tag", "message", data = …)` (`dev.durbun.Durbun`),
@@ -560,8 +663,8 @@ lines are never duplicated — `capturePrint: auto`); `FlutterError.onError`
 always chaining the previous handlers; every dart:io `HttpClient` request through
 an `HttpOverrides.global` wrapper that chains previous overrides (package:http,
 Dio's default adapter, `NetworkImage`, WebSocket handshakes) with headers, bodies
-(gzip decoded, capped at `maxBodyBytes`), timings, redirects, cancellations and
-errors; events; metrics (FPS while rendering, janky frames, avg build/raster ms,
+(gzip decoded, capped at `maxBodyBytes`), timings, redirects (one entry per hop,
+like URLSession), cancellations and errors; events; metrics (FPS while rendering, janky frames, avg build/raster ms,
 memory, CPU, threads); desktop commands `flutter.*` plus your own actions.
 Mocks: `respond` (synthesized, never hits the network, `x-durbun-mock` header),
 `delay`, `fail` (natural dart:io exceptions).
@@ -575,13 +678,28 @@ Wi-Fi: `DurbunOptions(host: '192.168.1.20')` or
 `--dart-define=DURBUN_HOST=192.168.1.20`, run the desktop with `--lan`, and on
 iOS 14+ add `NSLocalNetworkUsageDescription` to `Info.plist`. While offline the
 SDK keeps the last 5 000 messages and reconnects with 0.5 s → 3 s backoff.
+Before the first connection, or once the desktop has been gone for 30 s, the
+waiting messages hold at most ~8 MB: past it the oldest bodies are stripped
+(requests and logs stay, bodies marked truncated; the in-app panel keeps its
+own copy). Requests never
+wait for a missing desktop: only while a desktop has accepted the connection
+and its mock rules are on the way, for at most 0.8 s (`waitForDesktop` waits
+longer on purpose).
 
 ## Limits
 
 On Android, cronet_http / Dio `NativeAdapter` bypass both dart:io and OkHttp:
-use `DurbunDioInterceptor` from `sdks/flutter/durbun_dio` for Dio. On iOS they run
-on URLSession and are captured by the native layer (`DurbunDioInterceptor` does
-not report them twice). Traffic in background isolates is not captured.
+add `DurbunDioInterceptor(dio: dio)` from `durbun_dio` as Dio's **last**
+interceptor. On iOS they run on URLSession and are captured by the native layer
+(`DurbunDioInterceptor` does not report them twice). **Not captured:** on
+Android package:http's `CronetClient` and `package:ok_http` (it builds its own
+OkHttp client, so `DurbunInterceptor` cannot be added); on every platform gRPC
+(`package:grpc` speaks HTTP/2 over its own sockets) and raw `Socket` code.
+Report those yourself with `DurbunNetwork.begin(...)` → `call.response(...)` /
+`call.error(...)`; for package:http clients a small `http.BaseClient` wrapper is
+enough (the Turkish section above has a ready one, `DurbunReportingClient`).
+Redirects dart:io follows by itself expose only each hop's status and
+`location`; mock rules do not apply to those hops. Traffic in background isolates is not captured.
 `HttpClient`s created before `Durbun.run/init` are not wrapped. WebSockets:
 handshake only. `dart:developer` `log()` comes from the desktop's VM-service
 bridge (debug). iOS `os_log` / `Logger` / `NSLog` lines are read from the app's
@@ -603,6 +721,8 @@ that starts Dürbün gets the native layer. Native-only apps use `sdks/android` 
   usbmux) or another app on the device; the logs and network traffic go to it,
   and the mock rules it pushes apply while it stays connected.
 - Header values listed in `redactHeaders` show up as `••••` in every layer.
+- A peer cannot raise the body limit past 10 MiB, and gzip bodies stop
+  inflating at the limit.
   `captureNetwork: false` also keeps OkHttp (Android) and URLSession (iOS) out.
 
 ## Pure Dart

@@ -109,7 +109,6 @@ class DurbunClient implements HttpCaptureHost {
   final Zone _zone;
   final Set<String> _redacted;
   late final Transport _transport;
-  final Stopwatch _sinceStart = Stopwatch()..start();
 
   SdkConfig _config = SdkConfig.defaults;
   bool _configKnown = false;
@@ -117,8 +116,8 @@ class DurbunClient implements HttpCaptureHost {
   String? _appId;
   bool _disposed = false;
   bool _everConnected = false;
-  bool _firstRoundDone = false;
-  bool _handshakeInFlight = false;
+  /// Handshakes in flight (a peer accepted TCP, the welcome is awaited).
+  int _handshakes = 0;
   Completer<void>? _mocksReady;
   int _netSeq = 0;
 
@@ -498,11 +497,10 @@ class DurbunClient implements HttpCaptureHost {
     if (_disposed || event.isEmpty) return;
     switch (event[0]) {
       case TransportEvents.handshake:
-        _handshakeInFlight = true;
-      case TransportEvents.roundFailed:
-        _handshakeInFlight = false;
-        _firstRoundDone = true;
-        _resolveMocksReady();
+        _handshakes++;
+      case TransportEvents.handshakeFailed:
+        if (_handshakes > 0) _handshakes--;
+        if (_handshakes == 0) _resolveMocksReady();
       case TransportEvents.connected:
         final welcome = event[1];
         _applyWelcome(
@@ -510,7 +508,7 @@ class DurbunClient implements HttpCaptureHost {
           event.length > 2 ? event[2]?.toString() : null,
         );
       case TransportEvents.disconnected:
-        _handshakeInFlight = false;
+        _handshakes = 0;
         if (_connection.connected) {
           _diagnostic('disconnected (${event.length > 1 ? event[1] : ''})');
         }
@@ -536,8 +534,7 @@ class DurbunClient implements HttpCaptureHost {
     _mocks = welcome.mocks;
     _rawMocks = json['mocks'];
     _everConnected = true;
-    _handshakeInFlight = false;
-    _firstRoundDone = true;
+    _handshakes = 0;
     _setConfig(welcome.config);
     _setConnection(
       DurbunConnection(
@@ -674,13 +671,13 @@ class DurbunClient implements HttpCaptureHost {
     return findMockRule(_mocks, method, url, app.id);
   }
 
+  /// Requests wait only while a peer has accepted the connection and the
+  /// welcome (with its mock rules) is on its way. Without a desktop — no
+  /// listener, hello still held back, nothing accepted yet — they never wait;
+  /// `DurbunOptions.waitForDesktop` is the explicit way to wait longer.
   @override
   Future<void>? get mocksReady {
-    if (_everConnected || _disposed) return null;
-    if (_firstRoundDone && !_handshakeInFlight) return null;
-    if (_sinceStart.elapsed > const Duration(seconds: 5) && !_handshakeInFlight) {
-      return null;
-    }
+    if (_everConnected || _disposed || _handshakes == 0) return null;
     final completer = _mocksReady ??= Completer<void>();
     return completer.future.timeout(
       const Duration(milliseconds: 800),

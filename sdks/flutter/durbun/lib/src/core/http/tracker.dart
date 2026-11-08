@@ -93,7 +93,9 @@ class RequestTracker {
   }
 
   /// Emits `net.response`; with [thenError] also a `net.error` (the body
-  /// stream failed after the headers arrived).
+  /// stream failed after the headers arrived). [bodyUnread]: the app never
+  /// read the body, so the exchange ends when the headers arrived (no made-up
+  /// receive time).
   void complete({
     required int status,
     String? statusText,
@@ -102,12 +104,13 @@ class RequestTracker {
     String? remoteAddress,
     String? protocol,
     Object? thenError,
+    bool bodyUnread = false,
   }) {
     if (_finished) return;
     sendRequest();
     _finished = true;
     markHeaders();
-    final endUs = _nowUs;
+    final endUs = bodyUnread ? (_headersUs ?? _nowUs) : _nowUs;
     recorder.sendNetMessage(
       buildNetResponse(
         id: id,
@@ -167,6 +170,52 @@ class RequestTracker {
     if (headers != null) t['receive'] = ms(endUs - headers);
     return t;
   }
+}
+
+/// dart:io followed [redirects] on its own (inside the wrapped client, so
+/// the hops never passed through Dürbün): [first] is completed with the first
+/// 3xx and every hop becomes its own entry, as URLSession hops are reported.
+/// Returns the tracker, method and URL of the last hop, which gets the final
+/// response. Hop requests repeat the original headers (without `host`);
+/// their 3xx responses carry only the `location` dart:io exposes.
+(RequestTracker, String, Uri) reportRedirectHops(
+  RequestTracker first,
+  Uri firstUri,
+  List<RedirectInfo> redirects,
+) {
+  var current = first;
+  var uri = firstUri;
+  final original = first.headersSnapshot;
+  HeaderPairs hopHeaders() {
+    final pairs = original?.call() ?? const <List<String>>[];
+    return <List<String>>[
+      for (final h in pairs)
+        if (h.isNotEmpty && h[0].toLowerCase() != HttpHeaders.hostHeader) h,
+    ];
+  }
+
+  for (final hop in redirects) {
+    final next = uri.resolveUri(hop.location).removeFragment();
+    current.complete(
+      status: hop.statusCode,
+      headers: <List<String>>[
+        <String>[HttpHeaders.locationHeader, hop.location.toString()],
+      ],
+      protocol: 'HTTP/1.1',
+    );
+    final tracker = RequestTracker(
+      first.recorder,
+      method: hop.method.toUpperCase(),
+      url: next.toString(),
+    )..headersSnapshot = hopHeaders;
+    tracker
+      ..markOpened()
+      ..sendRequest()
+      ..markHeaders();
+    current = tracker;
+    uri = next;
+  }
+  return (current, current.method, uri);
 }
 
 /// Header pairs with redaction applied.

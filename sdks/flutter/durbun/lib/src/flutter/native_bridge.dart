@@ -27,8 +27,9 @@ import '../inspector/store.dart' show DurbunInspectorStore;
 /// Method channel shared with `DurbunFlutterPlugin` (Android + iOS).
 const String kDurbunNativeChannel = 'dev.durbun/native';
 
-/// How long the Dart side waits for the plugin's `start` reply (the first
-/// hello waits as long, see `DurbunClient.kHelloGateTimeout`).
+/// How long the first hello waits for the plugin's `start` reply (see
+/// `DurbunClient.kHelloGateTimeout`). A later reply is still taken: the
+/// native layer then joins the running session.
 const Duration kNativeReplyTimeout = Duration(seconds: 3);
 
 /// What the native layer reported when it started.
@@ -77,6 +78,7 @@ class NativeBridge {
     this._client, {
     MethodChannel? channel,
     bool? platformSupported,
+    this.replyTimeout = kNativeReplyTimeout,
   }) : _channel =
            channel ??
            const MethodChannel(
@@ -90,6 +92,9 @@ class NativeBridge {
   final DurbunClient _client;
   final MethodChannel _channel;
   final bool _platformSupported;
+
+  /// How long [start] waits before it completes without the reply.
+  final Duration replyTimeout;
 
   NativeStartInfo? _info;
   bool _stopped = false;
@@ -146,10 +151,23 @@ class NativeBridge {
   }
 
   /// Starts the native layer for this session. Completes (never throws) once
-  /// it attached, declined or turned out to be missing.
-  Future<void> start(DurbunOptions options) async {
-    if (!_platformSupported || _stopped) return;
+  /// it attached, declined or turned out to be missing — or after
+  /// [replyTimeout]. A reply that comes later is still applied: the native
+  /// side is running by then (logs, OkHttp / URLSession capture, crash
+  /// handler), so its handler stays and it joins the session late.
+  Future<void> start(DurbunOptions options) {
+    if (!_platformSupported || _stopped) return Future<void>.value();
     _consoleMode = options.capturePrint;
+    final replied = Completer<void>();
+    void done() {
+      if (!replied.isCompleted) replied.complete();
+    }
+
+    try {
+      // Native messages sent while no handler listens (after a hot restart,
+      // or after stop()) are dropped without a console warning each.
+      ui.channelBuffers.allowOverflow(kDurbunNativeChannel, true);
+    } catch (_) {}
     try {
       _channel.setMethodCallHandler(_onNativeCall);
       final args = jsonEncode(<String, Object?>{
@@ -163,14 +181,36 @@ class NativeBridge {
         },
         'state': _client.describeState(),
       });
-      final reply = await _channel
-          .invokeMethod<Object?>('start', args)
-          .timeout(kNativeReplyTimeout);
-      if (_stopped) return;
+      unawaited(
+        _channel
+            .invokeMethod<Object?>('start', args)
+            .then(_onStartReply, onError: _onStartError)
+            .whenComplete(done),
+      );
+    } catch (e) {
+      _onStartError(e);
+      done();
+    }
+    return replied.future.timeout(
+      replyTimeout,
+      onTimeout: () => _diagnostic(
+        'native layer did not answer within ${replyTimeout.inMilliseconds} ms; '
+        'it joins the session when it does',
+      ),
+    );
+  }
+
+  void _onStartReply(Object? reply) {
+    try {
       final info = NativeStartInfo.parse(reply);
+      if (_stopped) {
+        // Dart stopped while the native side was starting: stop it too.
+        if (info != null) _invoke('stop', null);
+        return;
+      }
       if (info == null) {
         _diagnostic('native layer did not attach: ${_decodeMap(reply)?['reason'] ?? 'unknown reason'}');
-        _channel.setMethodCallHandler(null);
+        _safeClearHandler();
         return;
       }
       _info = info;
@@ -194,13 +234,18 @@ class NativeBridge {
       _client.addConfigListener(_onConfig);
       _client.addStateListener(_scheduleStatePush);
       _scheduleStatePush();
-    } on MissingPluginException {
-      // Plugin not registered (pure Dart, desktop platforms, tests).
-      _safeClearHandler();
     } catch (e) {
-      _diagnostic('native layer unavailable: $e');
-      _safeClearHandler();
+      _diagnostic('native layer could not attach: $e');
     }
+  }
+
+  void _onStartError(Object error) {
+    if (error is! MissingPluginException) {
+      // MissingPluginException: plugin not registered (pure Dart, desktop
+      // platforms, tests) — nothing worth a diagnostic.
+      _diagnostic('native layer unavailable: $error');
+    }
+    _safeClearHandler();
   }
 
   Future<void> stop() async {
@@ -228,13 +273,26 @@ class NativeBridge {
     } catch (_) {}
   }
 
+  /// The payload of a native → Dart call, or null when it belongs to an older
+  /// session (sent before a hot restart and delivered to the new isolate).
+  /// The plugin sends `{session, <key>: payload}`; a bare payload (older
+  /// plugin) is taken as is.
+  Object? _payload(Object? arguments, String key) {
+    if (arguments is Map) {
+      final session = arguments['session'];
+      if (session is String && session != _client.session) return null;
+      return arguments[key];
+    }
+    return arguments;
+  }
+
   /// Native → Dart calls.
   Future<Object?> _onNativeCall(MethodCall call) async {
     if (_stopped) return null;
     try {
       switch (call.method) {
         case 'events':
-          final lines = call.arguments;
+          final lines = _payload(call.arguments, 'lines');
           if (lines is List) {
             for (final line in lines) {
               if (line is String) _client.sendEncoded(line);
@@ -242,11 +300,13 @@ class NativeBridge {
           }
           return null;
         case 'deviceLogs':
-          final lines = call.arguments;
+          final lines = _payload(call.arguments, 'lines');
           if (lines is List) _onDeviceLogs(lines);
           return null;
         case 'actions':
-          _client.updateNativeActions(_actionList(_decode(call.arguments)));
+          final actions = _payload(call.arguments, 'actions');
+          if (actions == null) return null;
+          _client.updateNativeActions(_actionList(_decode(actions)));
           return null;
         case 'flush':
           // Native asks before its process may die (crash on a background

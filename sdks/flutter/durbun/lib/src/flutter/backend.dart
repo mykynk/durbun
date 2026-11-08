@@ -10,9 +10,18 @@ abstract class DurbunBackend {
   /// True once the SDK runs (enabled and started).
   bool get isActive;
 
-  Future<void> init(DurbunOptions options);
+  /// [actions]: added through the facade before the SDK started; they are
+  /// in the first hello.
+  Future<void> init(
+    DurbunOptions options, {
+    List<DurbunAction> actions = const <DurbunAction>[],
+  });
 
-  Future<void> run(FutureOr<void> Function() body, DurbunOptions options);
+  Future<void> run(
+    FutureOr<void> Function() body,
+    DurbunOptions options, {
+    List<DurbunAction> actions = const <DurbunAction>[],
+  });
 
   void log(
     DurbunLogLevel level,
@@ -43,6 +52,12 @@ abstract class DurbunBackend {
   /// Whether the plugin's native layer captures URLSession traffic (iOS).
   bool get capturesUrlSession;
 
+  /// The desktop's body limit (`config.maxBodyBytes`); 0 when off.
+  int get maxBodyBytes;
+
+  /// Whether bodies are captured at all (`config.captureBodies`).
+  bool get captureBodies;
+
   /// Mock rule applying to a request made outside dart:io, if any.
   DurbunMockDecision? findMock(String method, Uri url);
 
@@ -55,6 +70,7 @@ abstract class DurbunBackend {
     String? contentType,
     required String source,
     String? mockRuleId,
+    int? bodySize,
   });
 
   /// Desktop state for the in-app inspector: `{connected, via, appId, config,

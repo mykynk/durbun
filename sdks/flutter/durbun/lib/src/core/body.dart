@@ -41,6 +41,12 @@ class BodyCapture {
 
   bool get truncated => _size > _bytes.length;
 
+  /// The whole body is known to be [total] bytes although fewer were added
+  /// (a caller that stopped encoding at the limit).
+  void reportSize(int total) {
+    if (total > _size) _size = total;
+  }
+
   void add(List<int> chunk) {
     final n = chunk.length;
     if (n == 0) return;
@@ -98,17 +104,12 @@ Map<String, Object?> wireBodyFromPending(Map<Object?, Object?> pending) {
       contentEncoding.isNotEmpty &&
       contentEncoding != 'identity') {
     final decoded = (capture && !truncated)
-        ? tryDecompress(bytes, contentEncoding)
+        ? decompressBounded(bytes, contentEncoding, keep: limit)
         : null;
     if (decoded != null) {
-      size = decoded.length;
-      if (decoded.length > limit) {
-        bytes = Uint8List.sublistView(decoded, 0, limit);
-        truncated = true;
-      } else {
-        bytes = decoded;
-        truncated = false;
-      }
+      size = decoded.size;
+      bytes = decoded.bytes;
+      truncated = decoded.size > decoded.bytes.length;
     } else {
       stillCompressed = true;
     }
@@ -143,7 +144,80 @@ Map<String, Object?> wireBodyFromPending(Map<Object?, Object?> pending) {
   };
 }
 
-/// Decodes gzip / deflate bodies; returns null when not possible (e.g. `br`).
+/// Most decoded bytes [decompressBounded] inflates (and counts) before it
+/// stops: a small gzip body can expand a thousandfold.
+const int kMaxInflatedBytes = 64 * 1024 * 1024;
+
+/// Decodes gzip / deflate bodies chunk by chunk: keeps the first [keep]
+/// bytes, counts the decoded size up to [countLimit] and stops there (`size`
+/// is then a lower bound). Null when the encoding is unknown (e.g. `br`) or
+/// the data is not valid.
+({Uint8List bytes, int size})? decompressBounded(
+  Uint8List bytes,
+  String contentEncoding, {
+  required int keep,
+  int countLimit = kMaxInflatedBytes,
+}) {
+  ({Uint8List bytes, int size})? run(ZLibDecoder decoder) {
+    final sink = _CappedSink(keep < 0 ? 0 : keep, countLimit);
+    try {
+      decoder.startChunkedConversion(sink)
+        ..add(bytes)
+        ..close();
+    } on _InflateLimitReached {
+      // Enough: the rest is never decoded.
+    }
+    return (bytes: sink.kept.takeBytes(), size: sink.total);
+  }
+
+  try {
+    switch (contentEncoding) {
+      case 'gzip':
+      case 'x-gzip':
+        return run(gzip.decoder);
+      case 'deflate':
+        try {
+          return run(ZLibDecoder());
+        } on FormatException {
+          return run(ZLibDecoder(raw: true));
+        }
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+class _InflateLimitReached implements Exception {
+  const _InflateLimitReached();
+}
+
+/// Keeps the first [keep] decoded bytes and counts the rest; throws
+/// [_InflateLimitReached] past [countLimit] so the decoder stops.
+class _CappedSink implements Sink<List<int>> {
+  _CappedSink(this.keep, this.countLimit);
+
+  final int keep;
+  final int countLimit;
+  final BytesBuilder kept = BytesBuilder(copy: true);
+  int total = 0;
+
+  @override
+  void add(List<int> chunk) {
+    total += chunk.length;
+    final room = keep - kept.length;
+    if (room > 0) {
+      kept.add(chunk.length <= room ? chunk : chunk.sublist(0, room));
+    }
+    if (total >= countLimit) throw const _InflateLimitReached();
+  }
+
+  @override
+  void close() {}
+}
+
+/// Decodes a whole gzip / deflate body; returns null when not possible (e.g.
+/// `br`). Only for bodies the app itself receives (mock responses).
 Uint8List? tryDecompress(Uint8List bytes, String contentEncoding) {
   try {
     switch (contentEncoding) {

@@ -416,3 +416,62 @@ class DurbunHttpOverrides extends HttpOverrides {
     }
   }
 }
+
+/// Zone overrides for code that runs inside `Durbun.run` (see
+/// `HttpOverrides.runWithHttpOverrides`): every `HttpClient()` created there
+/// asks the *current* global overrides at creation time and wraps what they
+/// return. An app that sets its own `HttpOverrides.global` inside the zone is
+/// therefore captured from its very next client on, without waiting for the
+/// re-chaining of [DurbunHttpOverrides.ensureInstalled] (clients created in
+/// between — e.g. the one Dio's dart:io adapter caches — would be missed).
+class DurbunZoneHttpOverrides extends HttpOverrides {
+  DurbunZoneHttpOverrides(this.host);
+
+  final HttpCaptureHost host;
+  bool _creating = false;
+
+  /// The global overrides to delegate to, Dürbün's own skipped.
+  static HttpOverrides? _delegate() {
+    final global = DurbunHttpOverrides.currentGlobal;
+    return global is DurbunHttpOverrides ? global.previous : global;
+  }
+
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    // App overrides that captured `HttpOverrides.current` inside this zone
+    // call back into us: hand them the real client (the outer call wraps).
+    if (_creating) return super.createHttpClient(context);
+    _creating = true;
+    try {
+      bool enabled;
+      try {
+        enabled = host.networkEnabled;
+      } catch (_) {
+        enabled = false;
+      }
+      if (!enabled) {
+        // Disposed: whatever is global now (maybe a newer Dürbün session).
+        final global = DurbunHttpOverrides.currentGlobal;
+        return global?.createHttpClient(context) ?? super.createHttpClient(context);
+      }
+      final inner =
+          _delegate()?.createHttpClient(context) ?? super.createHttpClient(context);
+      if (inner is DurbunHttpClient) return inner;
+      return DurbunHttpClient(inner, host);
+    } finally {
+      _creating = false;
+    }
+  }
+
+  @override
+  String findProxyFromEnvironment(Uri url, Map<String, String>? environment) {
+    final delegate = _creating ? null : _delegate();
+    if (delegate == null) return super.findProxyFromEnvironment(url, environment);
+    _creating = true;
+    try {
+      return delegate.findProxyFromEnvironment(url, environment);
+    } finally {
+      _creating = false;
+    }
+  }
+}
