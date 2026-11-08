@@ -16,8 +16,8 @@ Streams the app's native iOS crashes, URLSession traffic, stdout/stderr and Swif
 desktop inspector through the Dart SDK's connection. Inert until the Dart side starts it.
                        DESC
   s.homepage         = 'https://github.com/mykynk/durbun'
-  s.license          = { :type => 'Proprietary', :text => 'Internal tool.' }
-  s.author           = { 'Dürbün' => 'dev@durbun.dev' }
+  s.license          = { :type => 'MIT', :file => '../LICENSE' }
+  s.author           = { 'Muhammed Yusuf Kaynak' => 'https://github.com/mykynk' }
   s.source           = { :path => '.' }
   s.source_files     = 'durbun/Sources/durbun/**/*.swift'
   s.resource_bundles = { 'durbun_privacy' => ['durbun/Sources/durbun/PrivacyInfo.xcprivacy'] }
