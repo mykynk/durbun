@@ -4,15 +4,17 @@
 /// `NativeAdapter` from native_dio_adapter, cupertino_http, cronet_http).
 /// Dio's default `IOHttpClientAdapter` is already captured by `package:durbun`,
 /// and on iOS so is every URLSession-based adapter (the plugin's native layer).
+/// Add it last: the request is reported as the interceptors before it left it.
 ///
 /// ```dart
 /// final dio = Dio()..httpClientAdapter = NativeAdapter();
-/// dio.interceptors.add(DurbunDioInterceptor(dio: dio));
+/// dio.interceptors.add(DurbunDioInterceptor(dio: dio)); // last
 /// ```
 library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -25,23 +27,24 @@ import 'src/dart_io_adapter_stub.dart'
 /// (`respond` → resolved without a network call, `delay` → waits, `fail` →
 /// the matching [DioException]: connectionTimeout / connectionError /
 /// badCertificate / unknown).
+///
+/// Add it as the last interceptor: headers and body are taken as the
+/// interceptors before it left the request.
 class DurbunDioInterceptor extends Interceptor {
-  DurbunDioInterceptor({this.dio, this.source = 'dio'});
+  DurbunDioInterceptor({required this.dio, this.source = 'dio'});
 
-  /// The Dio instance this interceptor is added to. When given and it still
-  /// uses the dart:io adapter, requests are left to package:durbun's dart:io
-  /// capture (no duplicates).
-  final Dio? dio;
+  /// The Dio instance this interceptor is added to. While it uses the
+  /// dart:io adapter (Dio's default), package:durbun's dart:io capture
+  /// already reports — and mocks — its requests, so this interceptor stays
+  /// out of the way (no duplicates, no double delays).
+  final Dio dio;
 
   /// `net.request.source` shown on the desktop.
   final String source;
 
   static const String _callKey = 'durbun.call';
 
-  bool get _usesDartIoAdapter {
-    final d = dio;
-    return d != null && usesDartIoHttpClient(d.httpClientAdapter);
-  }
+  bool get _usesDartIoAdapter => usesDartIoHttpClient(dio.httpClientAdapter);
 
   /// Adapters built on URLSession (native_dio_adapter's `NativeAdapter` /
   /// `CupertinoAdapter` on iOS). package:durbun's iOS layer already captures
@@ -52,9 +55,8 @@ class DurbunDioInterceptor extends Interceptor {
   /// are minified, so such requests are reported by both layers rather than
   /// risk losing them.
   bool get _usesUrlSessionAdapter {
-    final d = dio;
-    if (d == null || !DurbunNetwork.capturesUrlSession) return false;
-    final name = d.httpClientAdapter.runtimeType.toString();
+    if (!DurbunNetwork.capturesUrlSession) return false;
+    final name = dio.httpClientAdapter.runtimeType.toString();
     return name == 'NativeAdapter' || name == 'CupertinoAdapter';
   }
 
@@ -156,11 +158,17 @@ class DurbunDioInterceptor extends Interceptor {
           !headers.any((h) => h[0].toLowerCase() == 'content-type')) {
         headers.add(<String>['content-type', contentType]);
       }
+      final body = bodyBytesForReport(
+        options.data,
+        contentType,
+        limit: _bodyLimit(),
+      );
       return DurbunNetwork.begin(
         method: options.method,
         url: options.uri,
         headers: headers,
-        body: _encodeBody(options.data, contentType),
+        body: body?.bytes,
+        bodySize: body?.size,
         contentType: contentType,
         source: source,
         mockRuleId: mock?.ruleId,
@@ -169,6 +177,11 @@ class DurbunDioInterceptor extends Interceptor {
       return null;
     }
   }
+
+  /// How many body bytes are worth producing: the desktop's limit (+1 so
+  /// the SDK still sees that more existed); 0 when bodies are not wanted.
+  static int _bodyLimit() =>
+      DurbunNetwork.captureBodies ? DurbunNetwork.maxBodyBytes + 1 : 0;
 
   static void _reportResponse(DurbunHttpCall call, Response<dynamic> response) {
     try {
@@ -180,47 +193,29 @@ class DurbunDioInterceptor extends Interceptor {
       });
       final contentType = response.headers.map['content-type']?.first;
       final data = response.data;
+      final body = data is ResponseBody
+          ? null
+          : bodyBytesForReport(data, contentType, limit: _bodyLimit());
+      var size = body?.size;
+      if (size == null && data != null && data is! ResponseBody) {
+        // Encoding stopped at the limit (or bodies are off): the declared
+        // length is the best size there is, when the bytes on the wire are
+        // the decoded ones.
+        final encoding = response.headers.value('content-encoding');
+        final length = int.tryParse(response.headers.value('content-length') ?? '');
+        if (length != null && (encoding == null || encoding == 'identity')) {
+          size = length;
+        }
+      }
       call.response(
         status: response.statusCode ?? 0,
         statusText: response.statusMessage,
         headers: headers,
-        body: data is ResponseBody ? null : _encodeBody(data, contentType),
+        body: body?.bytes,
+        bodySize: size,
         contentType: contentType,
       );
     } catch (_) {}
-  }
-
-  /// Bytes of a request/response payload as Dio holds it.
-  static List<int>? _encodeBody(Object? data, String? contentType) {
-    if (data == null) return null;
-    if (data is String) return utf8.encode(data);
-    if (data is List<int>) return data;
-    if (data is FormData) {
-      final sb = StringBuffer('multipart/form-data (boundary ${data.boundary})\n');
-      for (final f in data.fields) {
-        sb.writeln('${f.key}=${f.value}');
-      }
-      for (final f in data.files) {
-        sb.writeln('${f.key}: ${f.value.filename ?? 'file'} (${f.value.length} bytes)');
-      }
-      return utf8.encode(sb.toString());
-    }
-    if (data is Stream) return null;
-    if (data is Map || data is List) {
-      if ((contentType ?? '').contains('x-www-form-urlencoded') && data is Map) {
-        return utf8.encode(
-          Transformer.urlEncodeMap(<String, dynamic>{
-            for (final e in data.entries) '${e.key}': e.value,
-          }),
-        );
-      }
-      try {
-        return utf8.encode(jsonEncode(data));
-      } catch (_) {
-        return utf8.encode(data.toString());
-      }
-    }
-    return utf8.encode(data.toString());
   }
 
   static Response<dynamic> _mockResponse(
@@ -326,4 +321,136 @@ class DurbunDioInterceptor extends Interceptor {
     504 => 'Gateway Timeout',
     _ => '',
   };
+}
+
+/// The bytes Dürbün reports for a request/response payload as Dio holds it,
+/// produced only up to [limit] bytes (`size` is then null when the whole
+/// size is unknown, or the exact size when it is cheap to know). Decoded
+/// JSON is re-encoded straight to UTF-8 and the encoding stops at the limit;
+/// byte payloads are passed as they are (the SDK copies only what it keeps).
+/// Null when there is nothing to report (no data, a stream).
+({List<int> bytes, int? size})? bodyBytesForReport(
+  Object? data,
+  String? contentType, {
+  required int limit,
+}) {
+  if (data == null || data is Stream) return null;
+  if (data is List<int>) return (bytes: data, size: data.length);
+  if (data is ByteBuffer) {
+    final bytes = data.asUint8List();
+    return (bytes: bytes, size: bytes.length);
+  }
+  if (data is TypedData) {
+    final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    return (bytes: bytes, size: bytes.length);
+  }
+  if (limit <= 0) {
+    // Bodies are off: only a cheap size.
+    return data is String ? (bytes: const <int>[], size: _utf8Length(data)) : null;
+  }
+  if (data is String) return _boundedString(data, limit);
+  if (data is FormData) {
+    final sb = StringBuffer('multipart/form-data (boundary ${data.boundary})\n');
+    for (final f in data.fields) {
+      sb.writeln('${f.key}=${f.value}');
+    }
+    for (final f in data.files) {
+      sb.writeln('${f.key}: ${f.value.filename ?? 'file'} (${f.value.length} bytes)');
+    }
+    return _boundedString(sb.toString(), limit);
+  }
+  if (data is Map && (contentType ?? '').contains('x-www-form-urlencoded')) {
+    return _boundedString(
+      Transformer.urlEncodeMap(<String, dynamic>{
+        for (final e in data.entries) '${e.key}': e.value,
+      }),
+      limit,
+    );
+  }
+  if (data is Map || data is List) {
+    final sink = _CappedBytes(limit);
+    try {
+      JsonUtf8Encoder(null, null, math.min(limit, 64 * 1024))
+          .startChunkedConversion(sink)
+        ..add(data)
+        ..close();
+      final bytes = sink.takeBytes();
+      return (bytes: bytes, size: bytes.length);
+    } on _BodyLimitReached {
+      return (bytes: sink.takeBytes(), size: null);
+    } catch (_) {
+      // Not JSON-encodable (custom objects): fall back to its text.
+    }
+  }
+  String text;
+  try {
+    text = data.toString();
+  } catch (_) {
+    return null;
+  }
+  return _boundedString(text, limit);
+}
+
+/// UTF-8 of at most about [limit] bytes of [text] (a code unit is at least
+/// one byte, so `limit` code units always fill the limit).
+({List<int> bytes, int? size}) _boundedString(String text, int limit) {
+  if (text.length <= limit) {
+    final bytes = utf8.encode(text);
+    return (bytes: bytes, size: bytes.length);
+  }
+  var end = limit;
+  // Never split a surrogate pair.
+  if (end > 0 && end < text.length && (text.codeUnitAt(end - 1) & 0xFC00) == 0xD800) {
+    end--;
+  }
+  return (bytes: utf8.encode(text.substring(0, end)), size: _utf8Length(text));
+}
+
+/// UTF-8 length of [text] without encoding it.
+int _utf8Length(String text) {
+  var n = 0;
+  for (var i = 0; i < text.length; i++) {
+    final c = text.codeUnitAt(i);
+    if (c < 0x80) {
+      n += 1;
+    } else if (c < 0x800) {
+      n += 2;
+    } else if ((c & 0xFC00) == 0xD800 &&
+        i + 1 < text.length &&
+        (text.codeUnitAt(i + 1) & 0xFC00) == 0xDC00) {
+      n += 4;
+      i++;
+    } else {
+      n += 3;
+    }
+  }
+  return n;
+}
+
+class _BodyLimitReached implements Exception {
+  const _BodyLimitReached();
+}
+
+/// Collects encoder output up to [limit] bytes, then stops the encoder.
+class _CappedBytes implements Sink<List<int>> {
+  _CappedBytes(this.limit);
+
+  final int limit;
+  final BytesBuilder _bytes = BytesBuilder(copy: true);
+
+  Uint8List takeBytes() => _bytes.takeBytes();
+
+  @override
+  void add(List<int> chunk) {
+    final room = limit - _bytes.length;
+    if (chunk.length <= room) {
+      _bytes.add(chunk);
+      return;
+    }
+    if (room > 0) _bytes.add(chunk.sublist(0, room));
+    throw const _BodyLimitReached();
+  }
+
+  @override
+  void close() {}
 }

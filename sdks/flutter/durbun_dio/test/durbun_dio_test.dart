@@ -36,6 +36,12 @@ class FakeNativeAdapter implements HttpClientAdapter {
             Headers.contentTypeHeader: ['application/json; charset=utf-8'],
           },
         );
+      case '/big':
+        final json = jsonEncode({'items': List.generate(2000, (i) => {'id': i, 'name': 'Ürün $i'})});
+        return ResponseBody.fromString(json, 200, headers: {
+          Headers.contentTypeHeader: ['application/json; charset=utf-8'],
+          Headers.contentLengthHeader: ['${utf8.encode(json).length}'],
+        });
       case '/missing':
         return ResponseBody.fromString('{"error":"nope"}', 404, headers: {
           Headers.contentTypeHeader: ['application/json'],
@@ -219,5 +225,61 @@ void main() {
     final (req, end) = await net('/users?via=native');
     expect(req['source'], 'dio');
     expect(end['status'], 200);
+  });
+
+  test('large decoded bodies are encoded only up to the desktop limit', () async {
+    conn.send({'type': 'config', 'config': FakeDesktop.defaultConfig(maxBodyBytes: 1000)});
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (DurbunNetwork.maxBodyBytes != 1000 && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    addTearDown(() => conn.send({'type': 'config', 'config': FakeDesktop.defaultConfig()}));
+    final res = await nativeDio(FakeNativeAdapter()).post<Map<String, dynamic>>(
+      '/big',
+      data: {'filter': 'x' * 5000},
+    );
+    expect((res.data!['items'] as List), hasLength(2000), reason: 'the app gets everything');
+    final (req, end) = await net('/big');
+    final reqBody = req['body']! as Map;
+    expect(reqBody['truncated'], isTrue);
+    expect((reqBody['data']! as String).length, 1000);
+    final body = end['body']! as Map;
+    expect(body['truncated'], isTrue);
+    expect((body['data']! as String).length, lessThanOrEqualTo(1000));
+    final declared = int.parse(res.headers.value(Headers.contentLengthHeader)!);
+    expect(body['size'], declared, reason: 'the size comes from content-length');
+  });
+
+  group('bodyBytesForReport', () {
+    test('JSON stops at the limit; the size is only known when it fit', () {
+      final big = {'items': List.generate(5000, (i) => {'id': i})};
+      final cut = bodyBytesForReport(big, 'application/json', limit: 1001)!;
+      expect(cut.bytes, hasLength(1001));
+      expect(cut.size, isNull);
+      expect(utf8.decode(cut.bytes), startsWith('{"items":[{"id":0}'));
+      final small = bodyBytesForReport({'a': 'ğ'}, 'application/json', limit: 1001)!;
+      expect(utf8.decode(small.bytes), '{"a":"ğ"}');
+      expect(small.size, small.bytes.length);
+    });
+
+    test('strings, bytes, typed data, form data and disabled bodies', () {
+      final text = bodyBytesForReport('ğ' * 3000, 'text/plain', limit: 1001)!;
+      expect(text.bytes.length, lessThanOrEqualTo(2002));
+      expect(text.size, 6000);
+      final bytes = Uint8List.fromList([1, 2, 3]);
+      expect(identical(bodyBytesForReport(bytes, null, limit: 10)!.bytes, bytes), isTrue);
+      final floats = Float32List.fromList([1, 2]);
+      expect(bodyBytesForReport(floats, null, limit: 10)!.bytes, hasLength(8));
+      final form = bodyBytesForReport(FormData.fromMap({'k': 'v'}), null, limit: 1001)!;
+      expect(utf8.decode(form.bytes), contains('k=v'));
+      expect(bodyBytesForReport(Stream<List<int>>.empty(), null, limit: 10), isNull);
+      // Bodies off: no encoding, sizes only where they are cheap.
+      expect(bodyBytesForReport({'a': 1}, 'application/json', limit: 0), isNull);
+      expect(bodyBytesForReport('abc', 'text/plain', limit: 0)!.size, 3);
+      expect(
+        utf8.decode(bodyBytesForReport({'a': 1, 'b': 'x y'}, 'application/x-www-form-urlencoded', limit: 100)!.bytes),
+        'a=1&b=x+y',
+      );
+    });
   });
 }

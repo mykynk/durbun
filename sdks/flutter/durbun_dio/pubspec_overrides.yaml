@@ -1,0 +1,7 @@
+# Local development inside the Dürbün repo: use the durbun package next to
+# this one instead of the hosted release. Pub never applies a dependency's
+# overrides, so apps that depend on durbun_dio get `durbun: ^0.1.0` from
+# pub.dev.
+dependency_overrides:
+  durbun:
+    path: ../durbun
