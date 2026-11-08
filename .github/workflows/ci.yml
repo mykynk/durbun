@@ -55,7 +55,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        flutter: [stable]
+        # The oldest Flutter the pubspecs allow (3.27 / Dart 3.6) and the current stable.
+        flutter: ['3.27.4', stable]
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -63,6 +64,11 @@ jobs:
           channel: ${{ matrix.flutter == 'stable' && 'stable' || '' }}
           flutter-version: ${{ matrix.flutter != 'stable' && matrix.flutter || '' }}
           cache: true
+      - name: Lints the oldest Flutter can resolve
+        if: matrix.flutter != 'stable'
+        # flutter_lints 6 needs Dart 3.8; only the dev dependency changes, the packages stay the same.
+        run: |
+          sed -i '' 's/flutter_lints: \^6.0.0/flutter_lints: ^5.0.0/' sdks/flutter/durbun/pubspec.yaml sdks/flutter/durbun_dio/pubspec.yaml
       - name: durbun
         working-directory: sdks/flutter/durbun
         run: |
