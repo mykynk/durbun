@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { LogEntry } from '@durbun/protocol';
-import { isCrashEntry, logStore, useConnection } from '../../data';
+import { isCrashEntry, keptAfter, logStore, useConnection } from '../../data';
 import { isMarkedDuplicate, isTwinPair } from './model/dedupe';
 import { isPreviousLaunch } from './model/types';
 import { isDeviceCrashRecord } from '../../sources/text';
@@ -72,13 +72,16 @@ export function useLiveCrashes(scope: (e: LogEntry) => boolean, scopeKey: string
       }
       const entries = logStore.entries;
       const from = logStore.lowerBound(cursor + 1);
-      if (from >= entries.length) return;
+      // Crashes a burst pushed out of the ring before this scan live on in logStore.kept.
+      const trimmed = keptAfter(logStore.kept, cursor);
+      if (from >= entries.length && trimmed.length === 0) return;
       const found: LogEntry[] = [];
+      for (const e of trimmed) if (isCrashEntry(e) && isLiveEntry(e) && scope(e) && !isQuietCrashRecord(e)) found.push(e);
       for (let i = from; i < entries.length; i++) {
         const e = entries[i]!;
         if (isCrashEntry(e) && isLiveEntry(e) && scope(e) && !isQuietCrashRecord(e)) found.push(e);
       }
-      cursor = entries[entries.length - 1]!.id;
+      cursor = Math.max(cursor, entries.length > 0 ? entries[entries.length - 1]!.id : 0, trimmed.length > 0 ? trimmed[trimmed.length - 1]!.id : 0);
       if (found.length === 0) return;
       const fresh: LogEntry[] = [];
       const next = mergeCrashes(list, found, fresh);

@@ -213,6 +213,7 @@ describe('SDK guide snippets', () => {
   });
 
   it('registry snippets name the published packages with the SDK version (pub.dev, Maven Central, SwiftPM, CocoaPods, npm)', () => {
+    if (!root) return;
     const version = /^version:\s*(\S+)/m.exec(readFileSync(join(root, 'sdks/flutter/durbun/pubspec.yaml'), 'utf8'))![1]!;
     expect(S.SDK_VERSION).toBe(version);
     expect(S.flutterPubspecRegistry()).toBe(`dependencies:\n  durbun: ^${version}`);

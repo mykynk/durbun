@@ -299,3 +299,14 @@ export class LogStore extends VersionedStore {
 }
 
 export const logStore = new LogStore();
+
+/**
+ * Protected rows newer than `afterId`, oldest first. A burst can push a crash out of the ring before a
+ * scan reaches it, and a resync rebuilds the ring without the rows it trimmed: both only exist in `kept`.
+ */
+export function keptAfter(kept: readonly LogEntry[] | undefined, afterId: number): readonly LogEntry[] {
+  if (!kept || kept.length === 0 || kept[kept.length - 1]!.id <= afterId) return [];
+  let i = kept.length;
+  while (i > 0 && kept[i - 1]!.id > afterId) i--;
+  return kept.slice(i);
+}

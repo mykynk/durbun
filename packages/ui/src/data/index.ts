@@ -4,7 +4,7 @@
  */
 
 /* High-frequency stores (outside React) + hooks */
-export { logStore, LogStore, isCrashEntry, isProtectedEntry, emptyLogCounts, PROTECTED_MAX } from './logStore';
+export { logStore, LogStore, isCrashEntry, isProtectedEntry, emptyLogCounts, keptAfter, PROTECTED_MAX } from './logStore';
 export type { LogCounts } from './logStore';
 export { networkStore, NetworkStore, isNetworkError, emptyNetworkCounts } from './networkStore';
 export type { NetworkCounts } from './networkStore';

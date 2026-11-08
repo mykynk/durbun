@@ -6,6 +6,7 @@
  */
 import type { LogEntry, NetworkEntry } from '@durbun/protocol';
 import { MAX_HISTORY_MS, RateBuckets } from './model';
+import { keptAfter } from '../../data';
 
 export type AnnotationType = 'crash' | 'anr' | 'marker' | 'connect' | 'reconnect';
 
@@ -20,6 +21,8 @@ export interface Annotation {
 /** Minimal log store surface (see data/logStore). */
 export interface LogSource {
   readonly entries: readonly LogEntry[];
+  /** Crash / ANR rows the ring already trimmed (data/logStore `kept`), oldest first. */
+  readonly kept?: readonly LogEntry[];
   readonly generation: number;
   readonly lastId: number;
   lowerBound(id: number): number;
@@ -69,8 +72,9 @@ export class LogTraffic {
     const start = this.lastId > 0 ? store.lowerBound(this.lastId + 1) : 0;
     const floor = now - MAX_HISTORY_MS;
     let added: Annotation[] | null = null;
-    for (let i = start; i < entries.length; i++) {
-      const e = entries[i]!;
+    const trimmed = keptAfter(store.kept, this.lastId);
+    for (let i = start - trimmed.length; i < entries.length; i++) {
+      const e = i < start ? trimmed[i - start + trimmed.length]! : entries[i]!;
       if (!inScope(e)) continue;
       this.buckets.add(e.ts, 'logs', 1, now);
       if (isErrorLog(e)) this.buckets.add(e.ts, 'errorLogs', 1, now);
@@ -79,6 +83,7 @@ export class LogTraffic {
       changed = true;
     }
     if (store.lastId > this.lastId) this.lastId = store.lastId;
+    if (trimmed.length > 0 && trimmed[trimmed.length - 1]!.id > this.lastId) this.lastId = trimmed[trimmed.length - 1]!.id;
     if (added) {
       const next = this.annotations.concat(added);
       this.annotations = next.length > MAX_ANNOTATIONS ? next.slice(next.length - MAX_ANNOTATIONS) : next;

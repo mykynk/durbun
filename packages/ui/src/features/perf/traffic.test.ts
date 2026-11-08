@@ -15,6 +15,7 @@ function log(sec: number, p: Partial<LogEntry> = {}): LogEntry {
 /** A minimal LogStore stand-in (entries ordered by id). */
 class FakeStore implements LogSource {
   entries: LogEntry[] = [];
+  kept: LogEntry[] = [];
   generation = 0;
   get lastId() {
     return this.entries[this.entries.length - 1]?.id ?? 0;
@@ -67,6 +68,23 @@ describe('LogTraffic', () => {
       ['crash', 'Unhandled exception'],
       ['marker', 'Login'],
     ]);
+  });
+
+  it('keeps crash markers the ring trimmed before a scan or a resync (logStore.kept)', () => {
+    const store = new FakeStore();
+    const tr = new LogTraffic();
+    store.entries.push(log(0));
+    tr.update(store, 'a', () => true, describe2, T0 + 60_000);
+    // A burst: the crash arrived and was already trimmed into `kept` before the next scan.
+    const crash = log(1, { kind: 'crash', level: 'fatal', message: 'FATAL EXCEPTION: main' });
+    store.kept.push(crash);
+    store.entries = [log(2), log(3)];
+    tr.update(store, 'a', () => true, describe2, T0 + 60_000);
+    expect(tr.annotations.map((a) => a.id)).toEqual([crash.id]);
+    // A resync rebuilds the ring without it: the marker comes back from `kept`.
+    store.generation++;
+    tr.update(store, 'a', () => true, describe2, T0 + 60_000);
+    expect(tr.annotations.map((a) => [a.id, a.type])).toEqual([[crash.id, 'crash']]);
   });
 
   it('scans only new entries and resets on key or generation change', () => {
