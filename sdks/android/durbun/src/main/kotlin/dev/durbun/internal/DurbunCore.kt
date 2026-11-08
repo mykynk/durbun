@@ -25,6 +25,8 @@ internal class DurbunCore(
     private val env: Environment,
     timing: Transport.Timing = Transport.Timing(),
     private val host: HostLink? = null,
+    /** Hosted mode: queues a marker behind the host's work for a batch (see [HostRelay]); null = no wait. */
+    hostBarrier: ((Runnable) -> Boolean)? = null,
 ) : Transport.Listener {
     val logger: InternalLogger get() = env.logger
     val appId: String get() = env.appId
@@ -37,7 +39,9 @@ internal class DurbunCore(
         maxChars = MAX_BUFFER_CHARS,
     )
     private val transport = Transport(this::endpoints, this::helloLine, this, queue, env.logger, timing)
-    private val relay: HostRelay? = host?.let { HostRelay(queue, it, env.logger, onStart = ::drainPendingCrashes) }
+    private val relay: HostRelay? = host?.let {
+        HostRelay(queue, it, env.logger, onStart = ::drainPendingCrashes, handledBarrier = hostBarrier)
+    }
 
     /** Hosted mode: this app's logcat lines travel apart from other messages, so the host can route them. */
     private val deviceLogQueue: OutboundQueue? = host?.let {
@@ -45,7 +49,15 @@ internal class DurbunCore(
     }
     private val deviceLogRelay: HostRelay? = host?.let { link ->
         deviceLogQueue?.let { queue ->
-            HostRelay(queue, link, env.logger, onStart = {}, threadName = "durbun-relay-logs", deliver = link::deliverDeviceLogs)
+            HostRelay(
+                queue,
+                link,
+                env.logger,
+                onStart = {},
+                threadName = "durbun-relay-logs",
+                deliver = link::deliverDeviceLogs,
+                handledBarrier = hostBarrier,
+            )
         }
     }
 
@@ -312,7 +324,7 @@ internal class DurbunCore(
         val hello = state.helloLine
         val delivered = if (state.connected && endpoint != null && hello != null) {
             try {
-                EmergencyDelivery.deliver(endpoint, hello, line)
+                EmergencyDelivery.deliverOffThread(endpoint, hello, line)
             } catch (_: Throwable) {
                 false
             }

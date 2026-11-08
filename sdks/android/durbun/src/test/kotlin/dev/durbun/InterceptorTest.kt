@@ -1,12 +1,14 @@
 package dev.durbun
 
 import dev.durbun.internal.DurbunCore
+import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
+import okio.source
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -16,6 +18,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.ConnectException
@@ -70,6 +73,11 @@ class InterceptorTest {
                     headers = listOf("Content-Type" to "image/png"),
                     body = ByteArray(64) { (it * 3).toByte() },
                 )
+                request.path.startsWith("/slow-json") -> TestResponse(
+                    headers = listOf("Content-Type" to "application/json"),
+                    body = "{\"tick\":1}".toByteArray(),
+                    holdOpenMs = 2_000,
+                )
                 request.path.startsWith("/events") -> TestResponse(
                     headers = listOf("Content-Type" to "text/event-stream"),
                     body = "data: merhaba\n\n".toByteArray(),
@@ -115,6 +123,13 @@ class InterceptorTest {
 
     private fun responseFor(request: Map<String, Any?>) = desktop.await("net.response") { it["id"] == request["id"] }
 
+    /** The last `net.request` of a call: bodies captured during OkHttp's write are reported again (same id). */
+    private fun finalRequestFor(url: String): Map<String, Any?> {
+        val first = requestFor(url)
+        desktop.await("net.response") { it["id"] == first["id"] }
+        return desktop.messages("net.request").last { it["id"] == first["id"] }
+    }
+
     @Test
     fun capturesGetWithJsonResponse() {
         connect()
@@ -155,18 +170,23 @@ class InterceptorTest {
         assertEquals("the server received the untouched body", json, echoed)
         assertEquals(json, String(server.requests.last().body))
 
-        val request = requestFor(url)
+        val first = requestFor(url)
+        assertEquals("size first, bytes once OkHttp wrote them", "", first.objAt("body")["data"])
+        assertEquals(json.length.toLong(), first.objAt("body")["size"])
+        val request = finalRequestFor(url)
+        assertEquals(first["ts"], request["ts"])
         assertEquals("POST", request["method"])
         assertEquals("application/json; charset=utf-8", headerValue(request, "Content-Type"))
         assertEquals(json.length.toString(), headerValue(request, "Content-Length"))
         assertEquals(json, request.objAt("body")["data"])
+        assertEquals(2, desktop.messages("net.request").count { it["id"] == first["id"] })
         val response = responseFor(request)
         assertEquals(201L, response["status"])
         assertEquals("Created", response["statusText"])
     }
 
     @Test
-    fun oneShotRequestBodiesAreNotReplayed() {
+    fun oneShotRequestBodiesAreCapturedFromOkHttpsOwnWrite() {
         connect()
         var writes = 0
         val oneShot = object : RequestBody() {
@@ -181,10 +201,11 @@ class InterceptorTest {
         val url = server.url("/echo")
         client().newCall(Request.Builder().url(url).post(oneShot).build()).execute().close()
         assertEquals("written once, by OkHttp only", 1, writes)
-        val body = requestFor(url).objAt("body")
-        assertEquals("", body["data"])
+        assertEquals("hello", String(server.requests.last().body))
+        val body = finalRequestFor(url).objAt("body")
+        assertEquals("hello", body["data"])
         assertEquals(5L, body["size"])
-        assertEquals(true, body["truncated"])
+        assertNull(body["truncated"])
     }
 
     @Test
@@ -203,7 +224,82 @@ class InterceptorTest {
         client().newCall(Request.Builder().url(url).post(streaming).build()).execute().close()
         assertEquals(1, writes)
         assertEquals("chunk", String(server.requests.last().body))
-        assertNull(requestFor(url)["body"])
+        assertNull("unknown size: nothing to show before the write", requestFor(url)["body"])
+        val captured = finalRequestFor(url).objAt("body")
+        assertEquals("base64", captured["encoding"])
+        assertEquals("chunk", String(Base64.getDecoder().decode(captured["data"] as String)))
+    }
+
+    @Test
+    fun inputStreamUploadsReachTheServerWhole() {
+        connect(DurbunOptions(maxBodyBytes = 1_000))
+        val payload = ByteArray(3 * 1024 * 1024) { (it % 251).toByte() }
+        var writes = 0
+        val stream = ByteArrayInputStream(payload)
+        val upload = object : RequestBody() {
+            override fun contentType() = "application/octet-stream".toMediaType()
+            override fun contentLength() = payload.size.toLong()
+            override fun writeTo(sink: BufferedSink) {
+                writes++
+                sink.writeAll(stream.source()) // like a content-URI / file stream: can be read once
+            }
+        }
+        val url = server.url("/echo")
+        client().newCall(Request.Builder().url(url).post(upload).build()).execute().use { it.body!!.bytes() }
+        assertEquals(1, writes)
+        assertArrayEquals("the server got every byte", payload, server.requests.last().body)
+        val body = finalRequestFor(url).objAt("body")
+        assertEquals(payload.size.toLong(), body["size"])
+        assertEquals(true, body["truncated"])
+        assertArrayEquals(payload.copyOf(1_000), Base64.getDecoder().decode(body["data"] as String))
+    }
+
+    @Test
+    fun formBodiesStayFormBodiesForLaterInterceptors() {
+        connect()
+        var seen: RequestBody? = null
+        val client = OkHttpClient.Builder()
+            .proxy(Proxy.NO_PROXY)
+            .addInterceptor(DurbunInterceptor())
+            .addInterceptor { chain -> seen = chain.request().body; chain.proceed(chain.request()) }
+            .build()
+        val url = server.url("/echo")
+        val form = FormBody.Builder().add("kullanıcı", "ayşe").add("plan", "pro").build()
+        client.newCall(Request.Builder().url(url).post(form).build()).execute().use { it.body!!.string() }
+        assertTrue("the next interceptor still sees the app's FormBody", seen === form)
+        val request = requestFor(url)
+        assertEquals("captured at once (plain in-memory data)", "kullan%C4%B1c%C4%B1=ay%C5%9Fe&plan=pro", request.objAt("body")["data"])
+        assertEquals(1, desktop.messages("net.request").count { it["id"] == request["id"] })
+    }
+
+    @Test
+    fun theAppGetsTheResponseBeforeTheBodyArrives() {
+        connect()
+        val url = server.url("/slow-json")
+        val started = System.nanoTime()
+        client().newCall(Request.Builder().url(url).build()).execute().use { response ->
+            val headersMs = (System.nanoTime() - started) / 1_000_000
+            assertTrue("execute() must not wait for the body (took $headersMs ms)", headersMs < 1_500)
+            val id = requestFor(url)["id"]
+            assertTrue("reported once the app read the body", desktop.messages("net.response").none { it["id"] == id })
+            assertEquals("{\"tick\":1}", response.body!!.string())
+        }
+        val captured = responseFor(requestFor(url)).objAt("body")
+        assertEquals("{\"tick\":1}", captured["data"])
+        assertNull(captured["truncated"])
+    }
+
+    @Test
+    fun bodiesClosedUnreadAreReportedWithTheirSize() {
+        connect()
+        val url = server.url("/users")
+        client().newCall(Request.Builder().url(url).build()).execute().close()
+        val response = responseFor(requestFor(url))
+        assertEquals(200L, response["status"])
+        val body = response.objAt("body")
+        assertEquals("", body["data"])
+        assertEquals(true, body["truncated"])
+        assertTrue((body["size"] as Long) > 0)
     }
 
     @Test
@@ -265,13 +361,13 @@ class InterceptorTest {
     fun binaryBodiesAreBase64AndErrorsBodiesAreKept() {
         connect()
         val imageUrl = server.url("/image.png")
-        client().newCall(Request.Builder().url(imageUrl).build()).execute().close()
+        client().newCall(Request.Builder().url(imageUrl).build()).execute().use { it.body!!.bytes() }
         val image = responseFor(requestFor(imageUrl)).objAt("body")
         assertEquals("base64", image["encoding"])
         assertArrayEquals(ByteArray(64) { (it * 3).toByte() }, Base64.getDecoder().decode(image["data"] as String))
 
         val missingUrl = server.url("/missing/42")
-        client().newCall(Request.Builder().url(missingUrl).build()).execute().close()
+        client().newCall(Request.Builder().url(missingUrl).build()).execute().use { it.body!!.string() }
         val missing = responseFor(requestFor(missingUrl))
         assertEquals(404L, missing["status"])
         assertEquals("{\"title\":\"Kayıt bulunamadı\"}", missing.objAt("body")["data"])
@@ -352,12 +448,29 @@ class InterceptorTest {
     }
 
     @Test
+    fun respondMocksShowTheRequestBodyBeforeTheResponse() {
+        desktop.mocks = listOf(mockRule("m-login", "/login", mapOf("type" to "respond", "status" to 200, "body" to "{}")))
+        connect()
+        val url = server.url("/login")
+        val json = "{\"email\":\"ayse@example.com\"}"
+        client().newCall(Request.Builder().url(url).post(json.toRequestBody("application/json".toMediaType())).build())
+            .execute().use { assertEquals("{}", it.body!!.string()) }
+        val request = finalRequestFor(url)
+        assertEquals(json, request.objAt("body")["data"])
+        val order = desktop.messages().filter { it["id"] == request["id"] }.map { it["type"] }
+        assertEquals(listOf("net.request", "net.request", "net.response"), order)
+    }
+
+    @Test
     fun delayMockStillPerformsTheRealRequest() {
         desktop.mocks = listOf(mockRule("slow", "/users", mapOf("type" to "delay", "delayMs" to 300)))
         connect()
         val url = server.url("/users")
         val started = System.nanoTime()
-        client().newCall(Request.Builder().url(url).build()).execute().use { assertEquals(200, it.code) }
+        client().newCall(Request.Builder().url(url).build()).execute().use {
+            assertEquals(200, it.code)
+            it.body!!.string()
+        }
         assertTrue((System.nanoTime() - started) / 1_000_000 >= 290)
         assertEquals(1, server.requests.count { it.path == "/users" })
         val response = responseFor(requestFor(url))

@@ -5,9 +5,10 @@ import okhttp3.Interceptor
 import okhttp3.Response
 
 /**
- * OkHttp interceptor that shows every request and response in Dürbün — headers, bodies (gzip-aware, peeked
- * without consuming the app's stream), status, timings, errors — and applies the desktop's mock rules
- * (fake responses, added latency, simulated timeouts / DNS / TLS / connection failures).
+ * OkHttp interceptor that shows every request and response in Dürbün — headers, bodies (gzip-aware; copied
+ * while OkHttp writes the request and while the app reads the response, so nothing is written twice or read
+ * ahead), status, timings, errors — and applies the desktop's mock rules (fake responses, added latency,
+ * simulated timeouts / DNS / TLS / connection failures).
  *
  * ```kotlin
  * val client = OkHttpClient.Builder()

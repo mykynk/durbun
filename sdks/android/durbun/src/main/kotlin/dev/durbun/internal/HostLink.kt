@@ -3,6 +3,9 @@ package dev.durbun.internal
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Hosted mode: another SDK in the same process — the Flutter plugin (`package:durbun`) — owns the only
@@ -51,6 +54,11 @@ internal class HostState(
 /**
  * Drains the core's [OutboundQueue] into the [HostLink] in small batches on one daemon thread. The queue keeps
  * its normal semantics (bounded, oldest dropped first), so a slow or busy host never grows memory.
+ *
+ * With a [handledBarrier] at most one batch is in flight: the barrier queues a marker behind the host's own work
+ * for the batch (the Flutter plugin posts each batch to the main looper, so the barrier posts there too), and the
+ * next batch waits until that marker ran. While the main thread is stalled, messages stay in the bounded queue
+ * instead of piling up as main-looper messages.
  */
 internal class HostRelay(
     private val queue: OutboundQueue,
@@ -60,6 +68,8 @@ internal class HostRelay(
     private val batchIntervalMs: Long = 40,
     private val threadName: String = "durbun-relay",
     private val deliver: (List<String>) -> Unit = link::deliver,
+    /** Runs the given marker after the host handled the batch; returns false when it cannot (marker dropped). */
+    private val handledBarrier: ((Runnable) -> Boolean)? = null,
 ) {
     @Volatile
     private var running = false
@@ -102,6 +112,7 @@ internal class HostRelay(
             } catch (t: Throwable) {
                 logger.warn("Dürbün could not hand messages to the Flutter side", t)
             }
+            if (!awaitHandled()) break
             if (!running) break
             try {
                 Thread.sleep(batchIntervalMs)
@@ -109,6 +120,25 @@ internal class HostRelay(
                 break
             }
         }
+    }
+
+    /** Waits until the host handled the last batch (no-op without a barrier). False when stopped meanwhile. */
+    private fun awaitHandled(): Boolean {
+        val barrier = handledBarrier ?: return true
+        val handled = CountDownLatch(1)
+        val queued = try {
+            barrier(Runnable { handled.countDown() })
+        } catch (t: Throwable) {
+            logger.warn("Dürbün could not queue its relay marker", t)
+            false
+        }
+        if (!queued) return true
+        try {
+            while (running && !handled.await(1, TimeUnit.SECONDS)) Unit
+        } catch (_: InterruptedException) {
+            return false
+        }
+        return running
     }
 
     private companion object {
@@ -124,6 +154,38 @@ internal class HostRelay(
  * the same app session). Returns true once the line was written after a `welcome`.
  */
 internal object EmergencyDelivery {
+    /**
+     * [deliver] on a short-lived thread of its own, waited for at most [waitMs]: the crashing thread may be the
+     * main thread, where Android forbids network I/O (NetworkOnMainThreadException).
+     */
+    fun deliverOffThread(
+        endpoint: Transport.Endpoint,
+        helloLine: String,
+        line: String,
+        waitMs: Long = 3_500,
+        connectTimeoutMs: Int = 1_000,
+        handshakeTimeoutMs: Int = 1_500,
+    ): Boolean {
+        val delivered = AtomicBoolean(false)
+        val worker = Thread({
+            try {
+                delivered.set(deliver(endpoint, helloLine, line, connectTimeoutMs, handshakeTimeoutMs))
+            } catch (_: Throwable) {
+            }
+        }, "durbun-crash-report")
+        worker.isDaemon = true
+        return try {
+            worker.start()
+            worker.join(waitMs)
+            delivered.get()
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            delivered.get()
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     fun deliver(
         endpoint: Transport.Endpoint,
         helloLine: String,

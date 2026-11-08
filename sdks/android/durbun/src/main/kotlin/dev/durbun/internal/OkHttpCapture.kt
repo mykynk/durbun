@@ -1,13 +1,19 @@
 package dev.durbun.internal
 
+import okhttp3.FormBody
 import okhttp3.Headers
 import okhttp3.Interceptor
+import okhttp3.MediaType
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.Response
+import okhttp3.ResponseBody
 import okio.Buffer
+import okio.BufferedSink
+import okio.BufferedSource
 import okio.Sink
+import okio.Source
 import okio.Timeout
 import okio.buffer
 import java.io.ByteArrayOutputStream
@@ -22,8 +28,10 @@ import javax.net.ssl.SSLHandshakeException
 
 /**
  * The work behind `DurbunInterceptor`: reports each call as `net.request` → `net.response` / `net.error`
- * and applies mock rules. Bodies are captured without consuming the app's streams (request bodies are
- * written into a side buffer, response bodies are peeked). Capture failures never affect the call.
+ * and applies mock rules. Bodies are copied while OkHttp writes the request and while the app reads the
+ * response: the app's bodies are never written twice and nothing is read ahead of the app. A request whose
+ * body is captured this way is reported again (same id) once the body was written. Capture failures never
+ * affect the call.
  *
  * Only OkHttp/Okio APIs that exist in OkHttp 3.12 … 5.x are used (see [OkHttpCompat]).
  */
@@ -54,26 +62,27 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         }
         // The rule reported with the call (`mocked: true`).
         var applied = mock
-        guard(core) {
-            core.send(
-                Wire.netRequest(
-                    id = id,
-                    ts = startWall.toDouble(),
-                    method = method,
-                    url = url,
-                    headers = requestHeaders(core, request),
-                    body = captureRequestBody(core, request),
-                    source = SOURCE,
-                ),
-            )
+        val headers = guard(core) { requestHeaders(core, request) } ?: emptyList()
+        val sendRequest = { body: WireBody? ->
+            guard(core) {
+                core.send(Wire.netRequest(id, startWall.toDouble(), method, url, headers, body, SOURCE))
+            }
+            Unit
         }
+        val plan = guard(core) { planRequestBody(core, request, sendRequest) }
+        sendRequest(plan?.initial)
 
         if (mock != null) {
             when (val action = mock.action) {
                 is MockAction.Respond -> {
                     waitForMock(core, chain, id, mock, action.delayMs, startWall, startNs)
-                    val mocked = guard(core) { mockResponse(core, request, id, mock, action, startWall, startNs) }
-                    if (mocked != null) return mocked
+                    val mocked = guard(core) { mockResponse(request, action, startWall) }
+                    if (mocked != null) {
+                        // The network never sees this body, so this is its only write.
+                        plan?.tee?.let { tee -> guard(core) { tee.captureWithoutNetwork() } }
+                        guard(core) { reportMockResponse(core, id, mock, action, mocked.second, startWall, startNs) }
+                        return mocked.first
+                    }
                     applied = null // could not synthesize a response with this OkHttp: perform the real call
                 }
                 is MockAction.Delay -> waitForMock(core, chain, id, mock, action.delayMs, startWall, startNs)
@@ -81,8 +90,9 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
             }
         }
 
+        val outgoing = plan?.tee?.let { tee -> guard(core) { request.newBuilder().method(method, tee).build() } } ?: request
         val response = try {
-            chain.proceed(request)
+            chain.proceed(outgoing)
         } catch (e: IOException) {
             reportError(core, chain, id, e, startWall, startNs, applied)
             throw e
@@ -91,22 +101,13 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
             throw e
         }
         val reported = applied
-        guard(core) { reportResponse(core, chain, request, response, id, startWall, startNs, reported) }
-        return response
+        return guard(core) { reportResponse(core, chain, request, response, id, startWall, startNs, reported) } ?: response
     }
 
     /* ───────────── mocks ───────────── */
 
-    /** Synthesizes the response of a `respond` mock and reports it (the network is never touched). */
-    private fun mockResponse(
-        core: DurbunCore,
-        request: Request,
-        id: String,
-        rule: MockRule,
-        action: MockAction.Respond,
-        startWall: Long,
-        startNs: Long,
-    ): Response {
+    /** Synthesizes the response of a `respond` mock (the network is never touched) and its decoded body. */
+    private fun mockResponse(request: Request, action: MockAction.Respond, startWall: Long): Pair<Response, ByteArray> {
         val headers = Headers.Builder()
         for ((name, value) in action.headers) {
             try {
@@ -115,47 +116,59 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
                 // invalid header name/value for OkHttp: leave it out of the synthesized response
             }
         }
-        val contentType = action.headers.lastOrNull { it.first.equals("Content-Type", ignoreCase = true) }?.second
-        val bytes = when (action.bodyEncoding) {
-            "base64" -> Base64Codec.decode(action.body.orEmpty()) ?: ByteArray(0)
-            else -> action.body.orEmpty().toByteArray(Charsets.UTF_8)
-        }
-        val statusText = reasonPhrase(action.status)
+        val bytes = mockBodyBytes(action)
         val response = Response.Builder()
             .request(request)
             .protocol(Protocol.HTTP_1_1)
             .code(action.status)
-            .message(statusText)
+            .message(reasonPhrase(action.status))
             .headers(headers.build())
-            .body(OkHttpCompat.responseBody(OkHttpCompat.mediaType(contentType), bytes))
+            .body(OkHttpCompat.responseBody(OkHttpCompat.mediaType(mockContentType(action)), bytes))
             .sentRequestAtMillis(startWall)
             .receivedResponseAtMillis(System.currentTimeMillis())
             .build()
-        guard(core) {
-            val body = if (bytes.isEmpty()) {
-                null
-            } else if (!core.captureBodies) {
-                WireBody.sizeOnly(bytes.size.toLong())
-            } else {
-                BodyCapture.encode(bytes, bytes.size, true, bytes.size.toLong(), contentType, null, core.maxBodyBytes)
-            }
-            core.send(
-                Wire.netResponse(
-                    id = id,
-                    ts = endTs(startWall, startNs),
-                    status = action.status,
-                    statusText = statusText,
-                    headers = action.headers.map { it.first to redact(core, it.first, it.second) },
-                    body = body,
-                    protocol = null,
-                    remoteAddress = null,
-                    timings = null,
-                    mocked = true,
-                    mockRuleId = rule.id,
-                ),
-            )
+        return response to bytes
+    }
+
+    private fun reportMockResponse(
+        core: DurbunCore,
+        id: String,
+        rule: MockRule,
+        action: MockAction.Respond,
+        bytes: ByteArray,
+        startWall: Long,
+        startNs: Long,
+    ) {
+        val body = if (bytes.isEmpty()) {
+            null
+        } else if (!core.captureBodies) {
+            WireBody.sizeOnly(bytes.size.toLong())
+        } else {
+            BodyCapture.encode(bytes, bytes.size, true, bytes.size.toLong(), mockContentType(action), null, core.maxBodyBytes)
         }
-        return response
+        core.send(
+            Wire.netResponse(
+                id = id,
+                ts = endTs(startWall, startNs),
+                status = action.status,
+                statusText = reasonPhrase(action.status),
+                headers = action.headers.map { it.first to redact(core, it.first, it.second) },
+                body = body,
+                protocol = null,
+                remoteAddress = null,
+                timings = null,
+                mocked = true,
+                mockRuleId = rule.id,
+            ),
+        )
+    }
+
+    private fun mockContentType(action: MockAction.Respond): String? =
+        action.headers.lastOrNull { it.first.equals("Content-Type", ignoreCase = true) }?.second
+
+    private fun mockBodyBytes(action: MockAction.Respond): ByteArray = when (action.bodyEncoding) {
+        "base64" -> Base64Codec.decode(action.body.orEmpty()) ?: ByteArray(0)
+        else -> action.body.orEmpty().toByteArray(Charsets.UTF_8)
     }
 
     private fun failWithMock(
@@ -224,6 +237,11 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         }
     }
 
+    /**
+     * Reports the response. When its body is captured, the app gets the response at once with a body that copies
+     * what the app reads (up to the capture limit); `net.response` follows at end of body, at the capture limit,
+     * or when the app closes the body, whichever comes first. Nothing waits for bytes the app has not asked for.
+     */
     private fun reportResponse(
         core: DurbunCore,
         chain: Interceptor.Chain,
@@ -233,26 +251,69 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         startWall: Long,
         startNs: Long,
         mock: MockRule?,
-    ) {
-        val peekStart = System.nanoTime()
-        val body = captureResponseBody(core, request, response)
-        val receiveMs = (System.nanoTime() - peekStart) / 1_000_000.0
+    ): Response {
         val code = response.code
-        core.send(
-            Wire.netResponse(
-                id = id,
-                ts = endTs(startWall, startNs),
-                status = code,
-                statusText = response.message.ifEmpty { reasonPhrase(code) },
-                headers = headerList(core, response.headers),
-                body = body,
-                protocol = response.protocol.toString(),
-                remoteAddress = remoteAddress(chain),
-                timings = timings(response, startWall, if (body != null) receiveMs else null),
-                mocked = mock != null,
-                mockRuleId = mock?.id,
-            ),
-        )
+        val statusText = response.message.ifEmpty { reasonPhrase(code) }
+        val headers = headerList(core, response.headers)
+        val protocol = response.protocol.toString()
+        val remote = remoteAddress(chain)
+        val send = { body: WireBody?, receiveMs: Double? ->
+            core.send(
+                Wire.netResponse(
+                    id = id,
+                    ts = endTs(startWall, startNs),
+                    status = code,
+                    statusText = statusText,
+                    headers = headers,
+                    body = body,
+                    protocol = protocol,
+                    remoteAddress = remote,
+                    timings = timings(response, startWall, receiveMs),
+                    mocked = mock != null,
+                    mockRuleId = mock?.id,
+                ),
+            )
+        }
+        val body = response.body
+        if (body == null || !promisesBody(request, response)) {
+            send(null, null)
+            return response
+        }
+        val length = body.contentLength()
+        val contentType = body.contentType()?.toString() ?: response.header("Content-Type", null)
+        if (!core.captureBodies || length == 0L || isStream(request, response, contentType)) {
+            send(WireBody.sizeOnly(length), null)
+            return response
+        }
+        val limit = core.maxBodyBytes
+        val contentEncoding = response.header("Content-Encoding", null)
+        val readStart = System.nanoTime()
+        val tee = TeeResponseBody(body, limit, length) { capture, eof ->
+            guard(core) {
+                val wire = if (capture.stored == 0 && !eof) {
+                    WireBody.sizeOnly(length)
+                } else {
+                    BodyCapture.encode(
+                        raw = capture.bytes(),
+                        rawLength = capture.stored,
+                        rawComplete = eof && capture.total <= limit,
+                        transferSize = if (length >= 0) length else capture.total,
+                        contentType = contentType,
+                        contentEncoding = contentEncoding,
+                        limit = limit,
+                    )
+                }
+                send(wire, (System.nanoTime() - readStart) / 1_000_000.0)
+            }
+        }
+        return try {
+            response.newBuilder().body(tee).build()
+        } catch (t: Throwable) {
+            // Could not hand out the copying body with this OkHttp: report what is known and return the original.
+            tee.abandon()
+            send(WireBody.sizeOnly(length), null)
+            response
+        }
     }
 
     private fun requestHeaders(core: DurbunCore, request: Request): List<Header> {
@@ -288,16 +349,47 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
 
     /* ───────────── bodies ───────────── */
 
-    private fun captureRequestBody(core: DurbunCore, request: Request): WireBody? {
+    /** How a request body is captured: [initial] goes with the first `net.request`; [tee] reports later. */
+    private class RequestBodyPlan(val initial: WireBody?, val tee: TeeRequestBody?)
+
+    /**
+     * The app's request body is never written twice. A [FormBody] is plain in-memory data and is captured right
+     * away (and stays a `FormBody` for later interceptors); any other body is wrapped so that OkHttp's own write
+     * is copied into a side buffer, and the request is reported again with the captured body once written.
+     */
+    private fun planRequestBody(core: DurbunCore, request: Request, sendRequest: (WireBody?) -> Unit): RequestBodyPlan? {
         val body = request.body ?: return null
         val declared = contentLength(body)
-        if (!core.captureBodies || isOneShotOrDuplex(body)) return WireBody.sizeOnly(declared)
-        // A custom body of unknown length is usually a stream (file / content URI upload); writing it twice
-        // could consume it, so only OkHttp's own (repeatable) bodies are captured in that case.
-        if (declared < 0 && !body.javaClass.name.startsWith("okhttp3.")) return null
+        if (!core.captureBodies || isDuplex(body) || hasUnrepeatableMarker(body)) {
+            return RequestBodyPlan(WireBody.sizeOnly(declared), null)
+        }
         val contentType = body.contentType()?.toString() ?: request.header("Content-Type")
+        val contentEncoding = request.header("Content-Encoding")
         val limit = core.maxBodyBytes
-        val sink = CappedSink(limit, stopAfterLimit = declared >= 0)
+        if (body is FormBody) {
+            return RequestBodyPlan(captureInMemory(body, declared, contentType, contentEncoding, limit), null)
+        }
+        val tee = TeeRequestBody(body, limit, declared) { capture ->
+            guard(core) {
+                sendRequest(
+                    BodyCapture.encode(
+                        raw = capture.bytes(),
+                        rawLength = capture.stored,
+                        rawComplete = capture.total <= limit,
+                        transferSize = capture.total,
+                        contentType = contentType,
+                        contentEncoding = contentEncoding,
+                        limit = limit,
+                    ),
+                )
+            }
+        }
+        return RequestBodyPlan(WireBody.sizeOnly(declared), tee)
+    }
+
+    /** Writes an in-memory body (no side effects, known length) into a side buffer, stopping after [limit]. */
+    private fun captureInMemory(body: RequestBody, declared: Long, contentType: String?, contentEncoding: String?, limit: Int): WireBody? {
+        val sink = CappedSink(limit, declared)
         try {
             val buffered = sink.buffer()
             body.writeTo(buffered)
@@ -307,43 +399,29 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         } catch (_: IOException) {
             return WireBody.sizeOnly(declared)
         }
-        val complete = sink.total <= limit && (declared < 0 || sink.total >= declared)
-        val transferSize = if (declared >= 0) declared else sink.total
+        val capture = sink.capture
         return BodyCapture.encode(
-            raw = sink.bytes(),
-            rawLength = sink.stored,
-            rawComplete = complete,
-            transferSize = transferSize,
+            raw = capture.bytes(),
+            rawLength = capture.stored,
+            rawComplete = capture.total <= limit && (declared < 0 || capture.total >= declared),
+            transferSize = if (declared >= 0) declared else capture.total,
             contentType = contentType,
-            contentEncoding = request.header("Content-Encoding"),
+            contentEncoding = contentEncoding,
             limit = limit,
         )
     }
 
-    private fun captureResponseBody(core: DurbunCore, request: Request, response: Response): WireBody? {
-        if (!promisesBody(request, response)) return null
-        val body = response.body ?: return null
-        val length = body.contentLength()
-        val contentType = body.contentType()?.toString() ?: response.header("Content-Type", null)
-        if (!core.captureBodies || isStream(request, response, contentType)) return WireBody.sizeOnly(length)
-        val limit = core.maxBodyBytes
-        val peeked = try {
-            response.peekBody(limit.toLong() + 1).bytes()
-        } catch (_: IOException) {
-            return WireBody.sizeOnly(length)
+    /** OkHttp < 3.14 marks bodies it must not retry with this interface; a wrapper would hide it. */
+    private fun hasUnrepeatableMarker(body: RequestBody): Boolean {
+        var type: Class<*>? = body.javaClass
+        while (type != null && type != Any::class.java) {
+            if (type.interfaces.any { it.name == "okhttp3.internal.http.UnrepeatableRequestBody" }) return true
+            type = type.superclass
         }
-        return BodyCapture.encode(
-            raw = peeked,
-            rawLength = peeked.size,
-            rawComplete = peeked.size <= limit,
-            transferSize = length,
-            contentType = contentType,
-            contentEncoding = response.header("Content-Encoding", null),
-            limit = limit,
-        )
+        return false
     }
 
-    /** Responses that never end or are taken over by the app (SSE, WebSocket, media) are not peeked. */
+    /** Responses that never end or are taken over by the app (SSE, WebSocket, media) are reported at once, size only. */
     private fun isStream(request: Request, response: Response, contentType: String?): Boolean {
         if (response.code == 101 || request.header("Upgrade") != null) return true
         if (request.body?.let(::isDuplex) == true) return true
@@ -361,12 +439,6 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         body.contentLength()
     } catch (_: IOException) {
         -1L
-    }
-
-    private fun isOneShotOrDuplex(body: RequestBody): Boolean = try {
-        body.isOneShot() || body.isDuplex()
-    } catch (_: LinkageError) {
-        false // OkHttp < 3.14
     }
 
     private fun isDuplex(body: RequestBody): Boolean = try {
@@ -437,23 +509,34 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         null
     }
 
-    /** Collects the first [limit] bytes written; counts all of them. */
-    private class CappedSink(private val limit: Int, private val stopAfterLimit: Boolean) : Sink {
-        private val out = ByteArrayOutputStream(minOf(limit, 64 * 1024).coerceAtLeast(16))
+    /** Keeps the first [limit] bytes of a body and counts all of them. */
+    private class Capture(private val limit: Int, sizeHint: Long) {
+        private val out = ByteArrayOutputStream(
+            (if (sizeHint in 1..Int.MAX_VALUE) minOf(sizeHint.toInt(), limit) else minOf(limit, 8 * 1024))
+                .coerceIn(16, 64 * 1024),
+        )
         var total = 0L
             private set
         val stored: Int get() = out.size()
 
         fun bytes(): ByteArray = out.toByteArray()
 
-        override fun write(source: Buffer, byteCount: Long) {
-            val room = (limit - out.size()).coerceAtLeast(0).toLong()
-            val keep = minOf(byteCount, room)
-            if (keep > 0) out.write(source.readByteArray(keep))
-            val rest = byteCount - keep
-            if (rest > 0) source.skip(rest)
+        /** Copies (without consuming) [byteCount] bytes of [buffer] starting at [offset]. */
+        fun copy(buffer: Buffer, offset: Long, byteCount: Long) {
+            val room = (limit - out.size()).toLong()
+            if (room > 0 && byteCount > 0) buffer.copyTo(out, offset, minOf(room, byteCount))
             total += byteCount
-            if ((stopAfterLimit && total > limit) || total > HARD_LIMIT) throw CapReached()
+        }
+    }
+
+    /** A side buffer for bodies written only for the capture: stops the write after the limit. */
+    private class CappedSink(private val limit: Int, sizeHint: Long) : Sink {
+        val capture = Capture(limit, sizeHint)
+
+        override fun write(source: Buffer, byteCount: Long) {
+            capture.copy(source, 0, byteCount)
+            source.skip(byteCount)
+            if (capture.total > limit) throw CapReached()
         }
 
         override fun flush() = Unit
@@ -463,16 +546,181 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         override fun close() = Unit
     }
 
-    /** Stops writing a request body into the side buffer once enough was captured. */
+    /** Stops writing a body into the side buffer once enough was captured. */
     private class CapReached : RuntimeException() {
         override fun fillInStackTrace(): Throwable = this
+    }
+
+    /** Passes everything to OkHttp's sink and copies a prefix on the way. Copy problems never fail the write. */
+    private class TeeSink(private val downstream: Sink, val capture: Capture) : Sink {
+        var closed = false
+            private set
+        var copyFailed = false
+            private set
+
+        override fun write(source: Buffer, byteCount: Long) {
+            if (!copyFailed) {
+                try {
+                    capture.copy(source, 0, byteCount)
+                } catch (_: Throwable) {
+                    copyFailed = true
+                }
+            }
+            downstream.write(source, byteCount)
+        }
+
+        override fun flush() = downstream.flush()
+
+        override fun timeout(): Timeout = downstream.timeout()
+
+        override fun close() {
+            closed = true
+            downstream.close()
+        }
+    }
+
+    /**
+     * The app's request body, unchanged for OkHttp (type, length, one-shot / duplex flags), whose first complete
+     * write is copied: OkHttp writes it once, as without Dürbün; [onCaptured] runs after that write.
+     */
+    private class TeeRequestBody(
+        private val delegate: RequestBody,
+        private val limit: Int,
+        private val sizeHint: Long,
+        private val onCaptured: (Capture) -> Unit,
+    ) : RequestBody() {
+        private val captured = AtomicBoolean(false)
+
+        override fun contentType(): MediaType? = delegate.contentType()
+
+        override fun contentLength(): Long = delegate.contentLength()
+
+        override fun isOneShot(): Boolean = try {
+            delegate.isOneShot()
+        } catch (_: LinkageError) {
+            false // OkHttp < 3.14
+        }
+
+        override fun isDuplex(): Boolean = try {
+            delegate.isDuplex()
+        } catch (_: LinkageError) {
+            false
+        }
+
+        override fun writeTo(sink: BufferedSink) {
+            if (captured.get()) {
+                delegate.writeTo(sink) // a retry or redirect: already captured
+                return
+            }
+            val tee = TeeSink(sink, Capture(limit, sizeHint))
+            val buffered = tee.buffer()
+            delegate.writeTo(buffered)
+            if (!tee.closed) buffered.emit()
+            if (!tee.copyFailed && captured.compareAndSet(false, true)) onCaptured(tee.capture)
+        }
+
+        /** A `respond` mock answers without the network: this is the body's only write, into a side buffer. */
+        fun captureWithoutNetwork() {
+            if (!captured.compareAndSet(false, true)) return
+            val sink = CappedSink(limit, sizeHint)
+            try {
+                val buffered = sink.buffer()
+                delegate.writeTo(buffered)
+                buffered.flush()
+            } catch (_: CapReached) {
+                // enough captured
+            } catch (_: IOException) {
+                return
+            }
+            onCaptured(sink.capture)
+        }
+    }
+
+    /**
+     * The app's response body; bytes are copied as the app reads them (OkHttp's source is never read ahead).
+     * [onDone] runs once: at end of body (`eof`), past the capture limit, on a read error or when the body is closed.
+     */
+    private class TeeResponseBody(
+        private val delegate: ResponseBody,
+        private val limit: Int,
+        private val length: Long,
+        onDone: (Capture, eof: Boolean) -> Unit,
+    ) : ResponseBody() {
+        private val tee = TeeSource(limit, length, onDone)
+        private var source: BufferedSource? = null
+
+        override fun contentType(): MediaType? = delegate.contentType()
+
+        override fun contentLength(): Long = delegate.contentLength()
+
+        @Synchronized
+        override fun source(): BufferedSource = source ?: tee.attach(delegate.source()).buffer().also { source = it }
+
+        /** The wrapper was not handed out: report nothing more. */
+        fun abandon() = tee.abandon()
+    }
+
+    private class TeeSource(limit: Int, sizeHint: Long, private val onDone: (Capture, eof: Boolean) -> Unit) : Source {
+        private val capture = Capture(limit, sizeHint)
+        private val limit = limit.toLong()
+        private val done = AtomicBoolean(false)
+        private lateinit var upstream: Source
+
+        fun attach(source: Source): TeeSource {
+            upstream = source
+            return this
+        }
+
+        fun abandon() {
+            done.set(true)
+        }
+
+        override fun read(sink: Buffer, byteCount: Long): Long {
+            val read = try {
+                upstream.read(sink, byteCount)
+            } catch (e: IOException) {
+                finish(eof = false)
+                throw e
+            }
+            if (read == -1L) {
+                finish(eof = true)
+                return read
+            }
+            if (!done.get()) {
+                try {
+                    capture.copy(sink, sink.size - read, read)
+                } catch (_: Throwable) {
+                    // keep what was copied
+                }
+                if (capture.total > limit) finish(eof = false)
+            }
+            return read
+        }
+
+        override fun timeout(): Timeout = upstream.timeout()
+
+        override fun close() {
+            try {
+                upstream.close()
+            } finally {
+                finish(eof = false)
+            }
+        }
+
+        private fun finish(eof: Boolean) {
+            if (!done.compareAndSet(false, true)) return
+            try {
+                onDone(capture, eof)
+            } catch (_: Throwable) {
+                // never fail the app's read
+            }
+        }
     }
 
     companion object {
         const val SOURCE = "okhttp"
         /** Same marker as the Dart (dart:io) and Swift (URLSession) layers. */
         private const val REDACTED = "••••"
-        private const val HARD_LIMIT = 64L * 1024 * 1024
 
         private val STREAMING_TYPES = listOf(
             "text/event-stream",

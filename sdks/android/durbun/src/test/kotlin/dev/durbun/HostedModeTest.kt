@@ -1,11 +1,13 @@
 package dev.durbun
 
 import dev.durbun.internal.DurbunCore
+import dev.durbun.internal.EmergencyDelivery
 import dev.durbun.internal.HostLink
 import dev.durbun.internal.HostState
 import dev.durbun.internal.Json
 import dev.durbun.internal.LogcatController
 import dev.durbun.internal.PendingCrashStore
+import dev.durbun.internal.Transport
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -13,9 +15,14 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.nio.file.Files
 import java.util.Collections
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 
 /**
  * Hosted mode (the core inside the Flutter plugin): no socket of its own, messages go to the host, desktop
@@ -313,6 +320,53 @@ class HostedModeTest {
         assertTrue((previous["message"] as String).startsWith("Previous launch crashed — "))
         assertEquals(true, previous.objAt("data")["previousLaunch"])
         dir.deleteRecursively()
+    }
+
+    @Test
+    fun relayKeepsOneBatchInFlightUntilTheHostHandledIt() {
+        val markers = LinkedBlockingQueue<Runnable>()
+        val link = RecordingLink()
+        val core = DurbunCore(DurbunOptions(captureMetrics = false), FakeEnvironment(), FAST_TIMING, host = link) { marker ->
+            markers.add(marker)
+        }
+        core.start()
+        cores += core
+        core.log(Level.INFO, "main", "first", null, null)
+        waitUntil { link.batches.size == 1 }
+        repeat(50) { core.log(Level.INFO, "main", "while main is stalled $it", null, null) }
+        Thread.sleep(300)
+        assertEquals("nothing more is posted while the last batch waits on the main thread", 1, link.batches.size)
+        markers.take().run() // the main thread got to the batch
+        waitUntil { link.lines.size == 51 }
+        assertEquals(2, link.batches.size)
+    }
+
+    @Test
+    fun hostedCrashReportConnectsOffTheCrashingThreadAndWaitsBriefly() {
+        ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { server ->
+            val connectingThread = AtomicReference<String?>()
+            thread(isDaemon = true) {
+                try {
+                    server.accept().use {
+                        connectingThread.set(Thread.getAllStackTraces().keys.firstOrNull { t -> t.name == "durbun-crash-report" }?.name)
+                        Thread.sleep(3_000) // never answers the hello
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            val started = System.nanoTime()
+            val delivered = EmergencyDelivery.deliverOffThread(
+                Transport.Endpoint("127.0.0.1", server.localPort, 1_000),
+                "{\"type\":\"hello\"}",
+                "{\"type\":\"log\"}",
+                waitMs = 500,
+            )
+            val elapsedMs = (System.nanoTime() - started) / 1_000_000
+            assertFalse(delivered)
+            assertTrue("the crashing thread waits at most waitMs (took $elapsedMs ms)", elapsedMs < 1_500)
+            waitUntil { connectingThread.get() != null }
+            assertEquals("durbun-crash-report", connectingThread.get())
+        }
     }
 
     @Test

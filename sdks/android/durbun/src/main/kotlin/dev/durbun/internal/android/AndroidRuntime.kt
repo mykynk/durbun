@@ -2,6 +2,8 @@ package dev.durbun.internal.android
 
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import dev.durbun.DurbunAction
 import dev.durbun.DurbunOptions
 import dev.durbun.internal.CrashHandler
@@ -55,7 +57,10 @@ internal object AndroidRuntime {
     ): DurbunCore {
         val hostedOptions = options.copy(captureMetrics = false)
         val env = AndroidEnvironment(context, hostedOptions)
-        val core = DurbunCore(hostedOptions, env, host = link)
+        // The Flutter plugin posts each batch to the main looper; a marker posted right after it runs once the
+        // batch was handed to Dart, so the relay keeps at most one batch queued on a stalled main thread.
+        val main = Handler(Looper.getMainLooper())
+        val core = DurbunCore(hostedOptions, env, host = link, hostBarrier = { marker -> main.post(marker) })
         core.redactedHeaders = redactedHeaders
         core.crashStore = PendingCrashStore { env.storageDir }
         actions.forEach(core::addAction)
