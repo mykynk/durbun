@@ -1,0 +1,109 @@
+# Every push and pull request: the server, UI and JS SDK, the Mac app, and the Flutter, Android and iOS
+# SDKs, each with the same commands as the READMEs.
+name: CI
+
+on:
+  push:
+    branches: [main, feat/views]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Server, UI, JS SDK
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run build -w @durbun/react-native
+
+  desktop:
+    name: Mac app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: apps/desktop
+      - run: npm --prefix apps/desktop run typecheck
+      - run: npm run app:test
+
+  flutter:
+    name: Flutter SDK (${{ matrix.flutter }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter: [stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.flutter == 'stable' && 'stable' || '' }}
+          flutter-version: ${{ matrix.flutter != 'stable' && matrix.flutter || '' }}
+          cache: true
+      - name: durbun
+        working-directory: sdks/flutter/durbun
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test --concurrency=2 -r failures-only
+          dart run tool/sync_native.dart --check
+      - name: durbun_dio
+        working-directory: sdks/flutter/durbun_dio
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test --concurrency=2 -r failures-only
+
+  android:
+    name: Android SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests, debug AAR, no-op release AAR
+        working-directory: sdks/android
+        run: ./gradlew --max-workers=2 :durbun:testDebugUnitTest :durbun:assembleDebug :durbun-noop:assembleRelease
+      - name: durbun and durbun-noop expose the same API
+        working-directory: sdks/android
+        run: python3 -I tools/check-binary-compat.py
+
+  ios:
+    name: iOS SDK
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: macOS build and tests
+        working-directory: sdks/ios
+        run: |
+          swift build -j 2
+          swift test -j 2
+      - name: iOS Simulator build (UIKit code)
+        working-directory: sdks/ios
+        run: xcodebuild -scheme Durbun -destination 'generic/platform=iOS Simulator' -quiet build
