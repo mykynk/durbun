@@ -15,7 +15,7 @@
  *  - menu-bar item, closing the window keeps capturing; Quit (⌘Q / menu bar) stops the server cleanly
  *  - the window only ever loads the local server; links open in the default browser
  */
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell, Tray, type WebContents } from 'electron';
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell, Tray, type WebContents } from 'electron';
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -36,6 +36,7 @@ import { runSelfTest, type ConsoleEntry } from './selftest';
 import { startedOrigin, startOrAttachServer } from './startup';
 import { applyZoomLevel, BLANK_PAGE, LEGACY_HOST, legacyOriginFor, migrateUiStorage, planZoomMove, recordZoomMoved } from './storageMigration';
 import { renderTrayBitmap } from './trayIcon';
+import { checkForUpdates, createRateLimiter, REPO_URL } from './updates';
 import { fitBounds, MIN_SIZE, readWindowState, THEME_BACKGROUND, writeWindowState, type Theme, type WindowState } from './windowState';
 
 /** The part of dist/server.mjs this app uses (packages/server/src/server.ts). */
@@ -89,6 +90,13 @@ function run(): void {
   // Errors are data: a bug in one module must not take down the window (Electron would show a dialog).
   process.on('uncaughtException', (err) => log.error(`uncaught exception (still running): ${err.stack ?? err.message}`));
   process.on('unhandledRejection', (reason) => log.error(`unhandled rejection (still running): ${String((reason as Error)?.stack ?? reason)}`));
+  // Native crashes (GPU, renderer, main) leave a minidump in ~/Library/Application Support/Dürbün/Crashpad
+  // for bug reports. Nothing is uploaded anywhere.
+  try {
+    crashReporter.start({ uploadToServer: false, compress: true });
+  } catch (err) {
+    log.warn(`crash reporter unavailable: ${(err as Error).message}`);
+  }
 
   // Start asking the login shell right away; it runs while Electron initializes.
   const envReady: Promise<{ result: ShellEnvResult; changed: ShellEnvKey[] }> = applyLoginShellEnv(process.env).catch((err) => ({
@@ -141,7 +149,57 @@ function run(): void {
     },
     showLog: () => shell.showItemInFolder(log.file),
     quit: () => app.quit(),
+    openSettings: () => {
+      showWindow();
+      if (win && !win.isDestroyed() && appOrigin) win.webContents.send('durbun:command', 'settings');
+    },
+    openDocs: () => openExternal(`${REPO_URL}#readme`),
+    reportIssue: () => openExternal(`${REPO_URL}/issues/new`),
+    checkForUpdates: () => void runUpdateCheck(),
+    openLicenses: () => {
+      const dir = app.isPackaged ? path.join(process.resourcesPath, 'legal') : path.resolve(app.getAppPath(), '..', '..');
+      shell.openPath(path.join(dir, 'LICENSE')).then((err) => err && log.warn(`open licenses: ${err}`));
+      if (app.isPackaged) shell.showItemInFolder(path.join(dir, 'THIRD_PARTY_NOTICES.txt'));
+    },
   };
+
+  /** Help → Check for Updates…: one request to GitHub, only when the user asks (never in the background). */
+  let updateCheckRunning = false;
+  async function runUpdateCheck(): Promise<void> {
+    if (updateCheckRunning) return;
+    updateCheckRunning = true;
+    try {
+      // A session of its own: the default session lets the window reach only the local server.
+      const ses = session.fromPartition('durbun-update-check');
+      const result = await checkForUpdates(app.getVersion(), async (url) => {
+        const res = await ses.fetch(url, { headers: { accept: 'application/vnd.github+json', 'user-agent': `Durbun/${app.getVersion()}` }, signal: AbortSignal.timeout(10_000) });
+        return { status: res.status, body: res.ok ? await res.json() : null };
+      });
+      log.info(`update check: ${JSON.stringify(result)}`);
+      const parent = win && !win.isDestroyed() && win.isVisible() ? win : undefined;
+      const box = (opts: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts));
+      if (result.kind === 'newer') {
+        const { response } = await box({ type: 'info', message: t.updateAvailableTitle(result.version), detail: t.updateAvailableMessage(app.getVersion()), buttons: [t.download, t.later], defaultId: 0, cancelId: 1 });
+        if (response === 0) openExternal(result.url);
+      } else if (result.kind === 'failed') {
+        await box({ type: 'warning', message: t.updateCheckFailedTitle, detail: t.updateCheckFailedMessage(result.error) });
+      } else {
+        await box({ type: 'info', message: t.upToDateTitle, detail: result.kind === 'none' ? t.noReleaseMessage : t.upToDateMessage(result.version) });
+      }
+    } catch (err) {
+      log.warn(`update check failed: ${(err as Error).message}`);
+    } finally {
+      updateCheckRunning = false;
+    }
+  }
+
+  const applyAboutPanel = () =>
+    app.setAboutPanelOptions({
+      applicationName: 'Dürbün',
+      applicationVersion: app.getVersion(),
+      copyright: 'Copyright © 2026 Muhammed Yusuf Kaynak · MIT License',
+      credits: t === STRINGS.tr ? 'Android ve iOS için canlı log, ağ ve performans izleyici' : 'Live logs, network and performance inspector for Android and iOS',
+    });
 
   const refreshMenus = () => {
     Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(t, handlers, { canOpenInBrowser: appOrigin !== null })));
@@ -231,6 +289,17 @@ function run(): void {
     }
   });
 
+  // Menus, tray and dialogs follow the UI's language (the preload reports <html lang>), so a Turkish UI
+  // never sits next to English menus on a Mac whose first system language is English.
+  ipcMain.on('durbun:language', (event, lang: unknown) => {
+    if (!isTrustedSender(event.sender, event.senderFrame?.url) || (lang !== 'tr' && lang !== 'en')) return;
+    if (t === STRINGS[lang]) return;
+    t = STRINGS[lang];
+    log.info(`menu language follows the UI: ${lang}`);
+    applyAboutPanel();
+    refreshMenus();
+  });
+
   function isTrustedSender(sender: WebContents, frameUrl: string | undefined): boolean {
     return !!win && !win.isDestroyed() && sender === win.webContents && !!appOrigin && !!frameUrl && isAppUrl(frameUrl, appOrigin);
   }
@@ -298,17 +367,45 @@ function run(): void {
     });
 
     const wc = w.webContents;
-    if (selfTestFile) {
-      // The self-test reports what the page logged, e.g. "Refused to …" from the server's CSP.
-      wc.on('console-message', (details) => {
-        if (consoleLog.length < 200) consoleLog.push({ level: details.level, message: details.message.slice(0, 2_000), source: details.sourceId });
-      });
-    }
+    // UI errors (React error boundaries, uncaught errors) reach main.log, so Help → Show Log has them.
+    const rendererErrors = createRateLimiter(30, 60_000);
+    wc.on('console-message', (details) => {
+      if (selfTestFile && consoleLog.length < 200) consoleLog.push({ level: details.level, message: details.message.slice(0, 2_000), source: details.sourceId });
+      if (details.level !== 'error') return;
+      const { allowed, dropped } = rendererErrors();
+      if (!allowed) return;
+      log.warn(`renderer error${dropped ? ` (+${dropped} not logged)` : ''}: ${details.message.slice(0, 4_000)} (${details.sourceId}:${details.lineNumber})`);
+    });
+    // A hung UI (e.g. a pathological search pattern) gets a way out: the renderer is restarted and the
+    // UI drops the saved search it was applying (packages/ui, logs.queryApplying).
+    let unresponsiveAsked = false;
+    w.on('unresponsive', () => {
+      log.warn('UI renderer unresponsive');
+      if (unresponsiveAsked || w.isDestroyed()) return;
+      unresponsiveAsked = true;
+      void dialog
+        .showMessageBox(w, { type: 'warning', message: t.unresponsiveTitle, detail: t.unresponsiveMessage, buttons: [t.wait, t.reload], defaultId: 0, cancelId: 0 })
+        .then(({ response }) => {
+          unresponsiveAsked = false;
+          if (response === 1 && !w.isDestroyed()) {
+            log.warn('restarting the unresponsive UI renderer');
+            wc.forcefullyCrashRenderer();
+          }
+        });
+    });
+    w.on('responsive', () => log.info('UI renderer responsive again'));
+    // Quick retries first (the server is starting or restarting), then a slow retry behind a status page:
+    // the window never stays blank. A successful load starts the count again.
     let retries = 0;
+    wc.on('did-finish-load', () => {
+      if (appOrigin && isAppUrl(wc.getURL(), appOrigin)) retries = 0;
+    });
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
       if (!isMainFrame || !appOrigin || !isAppUrl(url, appOrigin) || code === -3 /* aborted */) return;
       log.warn(`UI load failed (${code} ${description}) for ${url}`);
-      if (retries++ < 10) setTimeout(() => !w.isDestroyed() && w.loadURL(url), 1_000);
+      retries++;
+      if (retries === 11) void w.loadURL(statusPageUrl({ theme: currentTheme(), text: t.uiLoadRetrying, busy: true }));
+      setTimeout(() => !w.isDestroyed() && w.loadURL(url), retries <= 10 ? 1_000 : 10_000);
     });
     const reloads = createReloadGuard();
     wc.on('render-process-gone', (_e, details) => {
@@ -609,11 +706,7 @@ function run(): void {
 
   app.whenReady().then(async () => {
     t = STRINGS[pickLanguage(app.getPreferredSystemLanguages())];
-    app.setAboutPanelOptions({
-      applicationName: 'Dürbün',
-      applicationVersion: app.getVersion(),
-      credits: t === STRINGS.tr ? 'Android ve iOS için canlı log, ağ ve performans izleyici' : 'Live logs, network and performance inspector for Android and iOS',
-    });
+    applyAboutPanel();
     if (!app.isPackaged && process.platform === 'darwin') {
       const icon = devIconPath(app.getAppPath());
       if (existsSync(icon)) app.dock?.setIcon(icon);

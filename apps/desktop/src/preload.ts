@@ -122,8 +122,10 @@ try {
   /* older Electron: the page keeps Chromium's Notification */
 }
 
-// Desktop marker + theme sync (the window background follows the UI theme, no flash on next launch).
+// Desktop marker + theme and language sync (the window background follows the UI theme, no flash on next
+// launch; menus, tray and dialogs follow the UI language).
 let lastTheme: string | null = null;
+let lastLang: string | null = null;
 function syncRoot(): void {
   const root = document.documentElement;
   if (!root) return;
@@ -133,8 +135,17 @@ function syncRoot(): void {
     lastTheme = theme;
     ipcRenderer.send('durbun:theme', theme);
   }
+  const lang = root.getAttribute('lang');
+  if ((lang === 'tr' || lang === 'en') && lang !== lastLang) {
+    lastLang = lang;
+    ipcRenderer.send('durbun:language', lang);
+  }
 }
 window.addEventListener('DOMContentLoaded', () => {
   syncRoot();
-  new MutationObserver(syncRoot).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-desktop'] });
+  new MutationObserver(syncRoot).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-desktop', 'lang'] });
+});
+// Menu commands for the UI (App menu → Settings…): a DOM event the page listens for (packages/ui, globalCommands).
+ipcRenderer.on('durbun:command', (_event, command: unknown) => {
+  if (typeof command === 'string') window.dispatchEvent(new CustomEvent('durbun:command', { detail: command }));
 });

@@ -11,6 +11,12 @@ export interface MenuHandlers {
   openDataDir(): void;
   showLog(): void;
   quit(): void;
+  /** Opens the UI's settings (the window comes forward first). */
+  openSettings(): void;
+  openDocs(): void;
+  reportIssue(): void;
+  checkForUpdates(): void;
+  openLicenses(): void;
 }
 
 export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: { canOpenInBrowser: boolean }): MenuItemConstructorOptions[] {
@@ -19,6 +25,10 @@ export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: { canOpenInBr
       label: t.appName,
       submenu: [
         { role: 'about', label: t.about },
+        { label: t.checkUpdates, click: () => h.checkForUpdates() },
+        { type: 'separator' },
+        // ⌘, is the UI's own shortcut (it works while the window is focused): shown here, not registered.
+        { label: t.settings, accelerator: 'CmdOrCtrl+,', registerAccelerator: false, click: () => h.openSettings() },
         { type: 'separator' },
         { role: 'services', label: t.services },
         { type: 'separator' },
@@ -70,9 +80,14 @@ export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: { canOpenInBr
       role: 'help',
       label: t.help,
       submenu: [
+        { label: t.docs, click: () => h.openDocs() },
+        { label: t.reportIssue, click: () => h.reportIssue() },
+        { type: 'separator' },
         { label: t.openInBrowser, enabled: opts.canOpenInBrowser, click: () => h.openInBrowser() },
         { label: t.openDataDir, click: () => h.openDataDir() },
         { label: t.showLog, click: () => h.showLog() },
+        { type: 'separator' },
+        { label: t.licenses, click: () => h.openLicenses() },
       ],
     },
   ];

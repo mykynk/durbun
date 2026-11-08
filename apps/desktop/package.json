@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Dürbün for macOS — starts the Dürbün server and opens its UI in one window",
-  "author": "Dürbün",
+  "author": "Muhammed Yusuf Kaynak",
   "type": "module",
   "main": "out/main.mjs",
   "scripts": {
@@ -12,10 +12,13 @@
     "dev": "node scripts/dev.mjs",
     "dist": "node scripts/dist.mjs",
     "test": "node ../../node_modules/vitest/vitest.mjs run",
-    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "release": "node scripts/dist.mjs --release"
   },
   "devDependencies": {
     "electron": "45.2.1",
     "electron-builder": "26.18.0"
-  }
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/mykynk/durbun"
 }

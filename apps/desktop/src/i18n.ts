@@ -211,6 +211,24 @@ export interface Strings {
   uiCrashedTitle: string;
   uiCrashedMessage(reason: string): string;
   notificationsUnavailable: string;
+  settings: string;
+  docs: string;
+  reportIssue: string;
+  checkUpdates: string;
+  licenses: string;
+  updateAvailableTitle(version: string): string;
+  updateAvailableMessage(current: string): string;
+  download: string;
+  later: string;
+  upToDateTitle: string;
+  upToDateMessage(version: string): string;
+  noReleaseMessage: string;
+  updateCheckFailedTitle: string;
+  updateCheckFailedMessage(error: string): string;
+  unresponsiveTitle: string;
+  unresponsiveMessage: string;
+  wait: string;
+  uiLoadRetrying: string;
 }
 
 const tr: Strings = {
@@ -303,6 +321,24 @@ const tr: Strings = {
   uiCrashedTitle: 'Arayüz art arda kapandı',
   uiCrashedMessage: (reason) => `Pencerenin içeriği kısa sürede birkaç kez beklenmedik şekilde kapandı (${reason}). Sunucu çalışmaya ve yakalamaya devam ediyor.`,
   notificationsUnavailable: 'macOS bildirimleri bu (imzasız) sürümde gösterilemedi; bunun yerine Dock simgesi işaretlenir.',
+  settings: 'Ayarlar…',
+  docs: 'Dürbün Belgeleri',
+  reportIssue: 'Sorun Bildir…',
+  checkUpdates: 'Güncellemeleri Denetle…',
+  licenses: 'Lisanslar',
+  updateAvailableTitle: (version) => `Dürbün ${version} yayında`,
+  updateAvailableMessage: (current) => `Kullandığınız sürüm ${current}. Yeni sürüm tarayıcıda açılan sayfadan indirilir.`,
+  download: 'İndirme Sayfasını Aç',
+  later: 'Sonra',
+  upToDateTitle: 'Dürbün güncel',
+  upToDateMessage: (version) => `${version} en son sürüm.`,
+  noReleaseMessage: 'Henüz yayınlanmış bir sürüm yok.',
+  updateCheckFailedTitle: 'Güncellemeler denetlenemedi',
+  updateCheckFailedMessage: (error) => `GitHub'a ulaşılamadı (${error}). İnternet bağlantınızı kontrol edip yeniden deneyin.`,
+  unresponsiveTitle: 'Dürbün penceresi yanıt vermiyor',
+  unresponsiveMessage: 'Sunucu çalışmaya ve yakalamaya devam ediyor. Bekleyebilir ya da pencereyi yeniden yükleyebilirsiniz; yeniden yüklemede donmaya yol açmış olabilecek kayıtlı arama sıfırlanır.',
+  wait: 'Bekle',
+  uiLoadRetrying: 'Arayüz yüklenemedi, yeniden deneniyor…',
 };
 
 const en: Strings = {
@@ -395,6 +431,24 @@ const en: Strings = {
   uiCrashedTitle: 'The window content keeps crashing',
   uiCrashedMessage: (reason) => `The window content closed unexpectedly several times in a short while (${reason}). The server keeps running and capturing.`,
   notificationsUnavailable: 'macOS notifications could not be shown by this (unsigned) build; the Dock icon is marked instead.',
+  settings: 'Settings…',
+  docs: 'Dürbün Documentation',
+  reportIssue: 'Report an Issue…',
+  checkUpdates: 'Check for Updates…',
+  licenses: 'Licenses',
+  updateAvailableTitle: (version) => `Dürbün ${version} is available`,
+  updateAvailableMessage: (current) => `You are using ${current}. The new version downloads from the page that opens in your browser.`,
+  download: 'Open Download Page',
+  later: 'Later',
+  upToDateTitle: 'Dürbün is up to date',
+  upToDateMessage: (version) => `${version} is the latest version.`,
+  noReleaseMessage: 'No version has been published yet.',
+  updateCheckFailedTitle: 'Could not check for updates',
+  updateCheckFailedMessage: (error) => `GitHub could not be reached (${error}). Check your internet connection and try again.`,
+  unresponsiveTitle: 'The Dürbün window is not responding',
+  unresponsiveMessage: 'The server keeps running and capturing. You can wait or reload the window; a reload resets the saved search that may have caused the hang.',
+  wait: 'Wait',
+  uiLoadRetrying: 'The UI could not be loaded; retrying…',
 };
 
 export const STRINGS: Record<Lang, Strings> = { tr, en };

@@ -3,7 +3,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { pickLanguage, STRINGS } from '../src/i18n';
 import { appMenuTemplate, serverLabel, trayMenuTemplate, type MenuHandlers } from '../src/menu';
 
-const handlers = (): MenuHandlers => ({ showWindow: vi.fn(), openInBrowser: vi.fn(), openDataDir: vi.fn(), showLog: vi.fn(), quit: vi.fn() });
+const handlers = (): MenuHandlers => ({
+  showWindow: vi.fn(),
+  openInBrowser: vi.fn(),
+  openDataDir: vi.fn(),
+  showLog: vi.fn(),
+  quit: vi.fn(),
+  openSettings: vi.fn(),
+  openDocs: vi.fn(),
+  reportIssue: vi.fn(),
+  checkForUpdates: vi.fn(),
+  openLicenses: vi.fn(),
+});
 
 function flatten(items: MenuItemConstructorOptions[]): MenuItemConstructorOptions[] {
   return items.flatMap((i) => [i, ...(Array.isArray(i.submenu) ? flatten(i.submenu) : [])]);
@@ -36,6 +47,24 @@ describe('app menu', () => {
     const labels = items.map((i) => i.label);
     expect(labels).toEqual(expect.arrayContaining(["Dürbün'den Çık", 'Düzen', 'Kopyala', 'Yapıştır', 'Görünüm', 'Pencere', 'Yardım']));
     expect(items.find((i) => i.label === 'Tarayıcıda Aç')?.enabled).toBe(false);
+  });
+  it('Settings shows ⌘, without taking the key from the UI, and Help links to docs, issues, updates and licenses', () => {
+    const h = handlers();
+    const items = flatten(appMenuTemplate(STRINGS.tr, h, { canOpenInBrowser: true }));
+    const settings = items.find((i) => i.label === 'Ayarlar…')!;
+    expect(settings.accelerator).toBe('CmdOrCtrl+,');
+    expect(settings.registerAccelerator).toBe(false);
+    (settings.click as () => void)();
+    expect(h.openSettings).toHaveBeenCalledOnce();
+    for (const [label, fn] of [
+      ['Dürbün Belgeleri', h.openDocs],
+      ['Sorun Bildir…', h.reportIssue],
+      ['Güncellemeleri Denetle…', h.checkForUpdates],
+      ['Lisanslar', h.openLicenses],
+    ] as const) {
+      (items.find((i) => i.label === label)!.click as () => void)();
+      expect(fn, label).toHaveBeenCalledOnce();
+    }
   });
   it('Quit runs the clean quit handler', () => {
     const h = handlers();
