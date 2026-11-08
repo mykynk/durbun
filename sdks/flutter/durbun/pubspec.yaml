@@ -1,13 +1,17 @@
 name: durbun
 description: >-
-  Dürbün SDK for Flutter. Streams app logs, errors, crashes, custom events,
-  dart:io HTTP traffic (with bodies) and frame/memory metrics to the Dürbün
-  desktop inspector, applies its mock rules and answers its commands. As a
-  plugin it also carries the native Android (Kotlin) and iOS (Swift) cores:
-  native crashes, native logs, OkHttp and URLSession traffic go out over the
-  same connection.
+  Network, log and crash inspector for Flutter apps: an in-app panel on the
+  phone and live streaming to the Dürbün Mac app, with mocks and native capture.
 version: 0.1.0
-publish_to: none
+homepage: https://github.com/mykynk/durbun
+repository: https://github.com/mykynk/durbun/tree/HEAD/sdks/flutter/durbun
+issue_tracker: https://github.com/mykynk/durbun/issues
+topics:
+  - debugging
+  - network
+  - logging
+  - inspector
+  - http
 
 environment:
   # Flutter 3.27: Color.withValues / Color.from, Row(spacing:),
@@ -32,8 +36,9 @@ dev_dependencies:
 flutter:
   plugin:
     platforms:
-      # Native cores: sdks/android/durbun (Gradle sourceSets, no copy) and
-      # sdks/ios/Sources/Durbun (synced copy, see tool/sync_native.dart).
+      # Native cores: synced copies of sdks/android/durbun (android/src/core)
+      # and sdks/ios/Sources/Durbun (ios/durbun/Sources/durbun/Core), see
+      # tool/sync_native.dart.
       android:
         package: dev.durbun.flutter
         pluginClass: DurbunFlutterPlugin
