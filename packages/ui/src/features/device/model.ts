@@ -212,8 +212,16 @@ export const APNS_TEMPLATES = {
 } as const;
 export type PushTemplate = keyof typeof APNS_TEMPLATES;
 
-export function templateText(name: PushTemplate): string {
-  return JSON.stringify(APNS_TEMPLATES[name], null, 2);
+/** The alert template's visible texts per UI language (the payload goes to the user's own app). */
+const ALERT_TEXTS = {
+  tr: { subtitle: 'Test bildirimi', body: 'Merhaba! Bu bildirim Dürbün’den gönderildi.' },
+  en: { subtitle: 'Test notification', body: 'Hello! This notification was sent from Dürbün.' },
+} as const;
+
+export function templateText(name: PushTemplate, lang: 'tr' | 'en' = 'tr'): string {
+  if (name !== 'alert') return JSON.stringify(APNS_TEMPLATES[name], null, 2);
+  const tpl = APNS_TEMPLATES.alert;
+  return JSON.stringify({ ...tpl, aps: { ...tpl.aps, alert: { ...tpl.aps.alert, ...ALERT_TEXTS[lang] } } }, null, 2);
 }
 
 export type PushValidation =

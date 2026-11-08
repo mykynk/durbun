@@ -2075,6 +2075,11 @@ html[data-desktop='mac'] .topbar {
 html[data-desktop='mac'] :is(.sb-header, .topbar) :is(button, a, input, select, textarea, [role='button'], [role='tab'], [role='tablist'], [tabindex]) {
   -webkit-app-region: no-drag;
 }
+/* Overlays (dialogs, menus, popovers, toasts) can reach the top 52 px: without this, a click on a dialog's
+ * title or close button there would drag the window and a double click would zoom it. */
+html[data-desktop='mac'] :is(#durbun-layers, .dialog-overlay) {
+  -webkit-app-region: no-drag;
+}
 html[data-desktop='mac']:not([data-desktop-fullscreen]) .sidebar:not(.is-compact) .sb-header {
   padding-left: 74px;
 }
@@ -2084,4 +2089,21 @@ html[data-desktop='mac']:not([data-desktop-fullscreen]) .sidebar.is-compact .sb-
 }
 html[data-desktop='mac']:not([data-desktop-fullscreen]) .app--compact .topbar {
   padding-left: 26px;
+}
+
+/* ───────────── Crash fallbacks (components/ErrorBoundary.tsx) ───────────── */
+.part-crash {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  color: var(--danger);
+}
+.app-crash {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg-app);
 }

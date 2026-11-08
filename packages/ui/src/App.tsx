@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
 import { useLanguage } from './i18n';
@@ -6,6 +6,7 @@ import { noticeToastParts } from './shell/notices';
 import { onNotice, usePrefs, useUi } from './data';
 import { initHashSync } from './data/stores/ui';
 import { ConfirmHost } from './components/Dialog';
+import { ErrorBoundary, PartBoundary } from './components/ErrorBoundary';
 import { ContextMenuHost } from './components/Menu';
 import { Toaster, toast, type ToastKind } from './components/Toast';
 import { Sidebar } from './shell/Sidebar';
@@ -47,25 +48,48 @@ export function App() {
   return (
     <>
       <div className={clsx('app', compact && 'app--compact', narrow && 'app--narrow', narrow && overlay && 'app--overlay')}>
-        <Sidebar />
+        <PartBoundary name="sidebar">
+          <Sidebar />
+        </PartBoundary>
         <main className="main" aria-label="Dürbün">
-          <TopBar />
-          <ConnectionBanner />
-          <DeviceAttentionBanner />
+          <PartBoundary name="topbar">
+            <TopBar />
+          </PartBoundary>
+          <PartBoundary name="banners">
+            <ConnectionBanner />
+            <DeviceAttentionBanner />
+          </PartBoundary>
           <FeatureHost />
         </main>
-        <StatusBar />
+        <PartBoundary name="statusbar">
+          <StatusBar />
+        </PartBoundary>
       </div>
-      <CommandPalette />
-      <ShortcutsDialog />
-      <SettingsDialog />
-      <DoctorDialog />
-      <SdkGuideDialog />
-      <DataSourcesDialog />
+      <DialogBoundary>
+        <CommandPalette />
+        <ShortcutsDialog />
+        <SettingsDialog />
+        <DoctorDialog />
+        <SdkGuideDialog />
+        <DataSourcesDialog />
+      </DialogBoundary>
       <DropImport />
       <ConfirmHost />
       <ContextMenuHost />
       <Toaster />
     </>
+  );
+}
+
+/**
+ * Global dialogs: one that crashes closes (the error reaches the console and, in the Mac app, its log)
+ * instead of blanking the window, and opening any dialog again retries.
+ */
+function DialogBoundary({ children }: { children: ReactNode }) {
+  const openKey = useUi((s) => `${s.palette}|${s.shortcuts}|${s.settings}|${s.doctor}|${s.sdkGuide}|${s.dataSources}`);
+  return (
+    <ErrorBoundary name="dialogs" resetKey={openKey} fallback={() => null}>
+      {children}
+    </ErrorBoundary>
   );
 }

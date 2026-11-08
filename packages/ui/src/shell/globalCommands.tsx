@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BookOpen, Bookmark, FileDown, FileUp, FlaskConical, Keyboard, Languages, LayoutGrid, Monitor, Moon, PanelLeft, Plug, RefreshCw, Settings, Stethoscope, Sun, Trash } from 'lucide-react';
 import { useT } from '../i18n';
 import { translate } from '../i18n/core';
@@ -175,6 +176,14 @@ export function useGlobalCommands(): void {
   useShortcut('Mod+K', ui.togglePalette, { allowInModal: paletteOpen });
   useShortcut('?', ui.openShortcuts);
   useShortcut('Mod+,', () => ui.openSettings());
+  // The Mac app's menu (Dürbün → Settings…) sends its commands as a DOM event (apps/desktop preload).
+  useEffect(() => {
+    const onCommand = (e: Event) => {
+      if ((e as CustomEvent<unknown>).detail === 'settings') ui.openSettings();
+    };
+    window.addEventListener('durbun:command', onCommand);
+    return () => window.removeEventListener('durbun:command', onCommand);
+  }, []);
   useShortcut('Mod+B', toggleSidebar);
   useShortcut(['Mod+1', 'Mod+2', 'Mod+3', 'Mod+4', 'Mod+5'], (e) => {
     const n = Number(e.code?.startsWith('Digit') ? e.code.slice(5) : e.key) - 1;

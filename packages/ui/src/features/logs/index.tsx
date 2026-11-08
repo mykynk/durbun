@@ -78,6 +78,7 @@ import { Histogram } from './components/Histogram';
 import { CrashBanner, IosScopeNote, NewLinesPill, PausedBar, crashTitle } from './components/Banners';
 import { NoLogsState, NoMatchState, type ActiveFilter } from './components/EmptyStates';
 import { CrashRecordsNote, ExplainEmpty, NotRunningNote, crashReaderText, crashRecordsState, useIosSystemLinesHidden } from '../../sources';
+import { markApplying } from './hangGuard';
 import { HighlightRulesDialog, NoiseRulesDialog, SavedFiltersDialog } from './components/RulesDialogs';
 
 const ALL_SOURCES: SourceToggles = { device: true, app: true, system: true };
@@ -163,7 +164,10 @@ export default function LogsView() {
   /* ───── persisted view state ───── */
   const [queryRaw, setQueryState] = usePersistentState<string>('logs.query', '');
   const query = typeof queryRaw === 'string' ? queryRaw : '';
-  const [appliedQuery, setAppliedQuery] = useState(query);
+  const [appliedQuery, setAppliedQuery] = useState(() => {
+    if (query.trim()) markApplying('query');
+    return query;
+  });
   const [minLevelRaw, setMinLevel] = usePersistentState<LogLevel>('logs.minLevel', 'verbose');
   const minLevel: LogLevel = LOG_LEVELS.includes(minLevelRaw) ? minLevelRaw : 'verbose';
   const [sourcesRaw, setSources] = usePersistentState<SourceToggles>('logs.sources', ALL_SOURCES);
@@ -192,11 +196,15 @@ export default function LogsView() {
   // Debounce typing: parse on every keystroke (highlighting), filter 150 ms after the last one.
   useEffect(() => {
     if (query === appliedQuery) return;
-    const id = setTimeout(() => setAppliedQuery(query), 150);
+    const id = setTimeout(() => {
+      if (query.trim()) markApplying('query');
+      setAppliedQuery(query);
+    }, 150);
     return () => clearTimeout(id);
   }, [query, appliedQuery]);
   const setQueryNow = useCallback(
     (q: string) => {
+      if (q.trim()) markApplying('query');
       setQueryState(q);
       setAppliedQuery(q);
     },
@@ -299,7 +307,10 @@ export default function LogsView() {
   }, []);
 
   /* ───── display options ───── */
-  const hl = useMemo(() => buildHighlighter(compiledQuery.highlights, highlightRules), [compiledQuery, highlightRules]);
+  const hl = useMemo(() => {
+    if (highlightRules.some((r) => r.enabled && r.regex && r.pattern)) markApplying('highlight');
+    return buildHighlighter(compiledQuery.highlights, highlightRules);
+  }, [compiledQuery, highlightRules]);
   const impliedProcesses = useMemo(() => {
     const s = new Set<string>();
     const kind = compiledScope.scope.kind;
@@ -477,6 +488,7 @@ export default function LogsView() {
 
   const submitQuery = useCallback(
     (q: string) => {
+      if (q.trim()) markApplying('query');
       setAppliedQuery(q);
       if (q.trim()) setHistory((h) => pushHistory(Array.isArray(h) ? h : [], q));
     },

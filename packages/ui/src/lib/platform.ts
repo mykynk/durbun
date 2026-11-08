@@ -8,3 +8,12 @@ export const isMac: boolean = (() => {
     return false;
   }
 })();
+
+/** True inside the Dürbün Mac app (its preload marks <html data-desktop="mac">), false in a browser tab. */
+export function isDesktopApp(): boolean {
+  try {
+    return document.documentElement.getAttribute('data-desktop') === 'mac';
+  } catch {
+    return false;
+  }
+}

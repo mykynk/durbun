@@ -1,6 +1,9 @@
 import { setLanguage } from '../i18n/core';
 import { flushPrefs, usePrefs, type UiPrefs } from '../data/stores/prefs';
 import { useUi } from '../data/stores/ui';
+import { recoverFromHang } from '../features/logs/hangGuard';
+import { toast } from '../components/Toast';
+import { t } from '../i18n/core';
 
 const LIGHT_QUERY = '(prefers-color-scheme: light)';
 const NARROW_QUERY = '(max-width: 899px)';
@@ -33,6 +36,14 @@ function applyPrefs(p: UiPrefs): void {
  */
 export function initDocumentEffects(): () => void {
   applyPrefs(usePrefs.getState());
+  const reset = recoverFromHang(() => {
+    const prefs = usePrefs.getState();
+    prefs.setPref('highlightRules', prefs.highlightRules.map((r) => (r.regex ? { ...r, enabled: false } : r)));
+  });
+  if (reset.length > 0) {
+    const what = reset.map((s) => t(s === 'query' ? 'common.hangReset.query' : 'common.hangReset.highlight')).join(' ');
+    setTimeout(() => toast.warn(t('common.hangReset.title'), { description: what, duration: 12_000 }), 0);
+  }
   const unsub = usePrefs.subscribe((s, prev) => {
     if (s.theme !== prev.theme || s.density !== prev.density || s.logFontSize !== prev.logFontSize || s.language !== prev.language) applyPrefs(s);
   });

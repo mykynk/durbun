@@ -2,7 +2,7 @@ import { useId, useMemo, useState } from 'react';
 import { Bell, Braces, ChevronDown, CircleCheck, Send } from 'lucide-react';
 import type { DeviceInfo } from '@durbun/protocol';
 import { Button, DropdownMenu, Input, Textarea, formatNumber, usePersistentState } from '../../components';
-import { useT } from '../../i18n';
+import { useLanguage, useT } from '../../i18n';
 import { APNS_TEMPLATES, templateText, validatePush, type AppRow, type PushTemplate } from './model';
 import { ActionErrorCallout, DeviceCard, useDeviceAction } from './useAction';
 
@@ -12,8 +12,10 @@ export function PushCard({ device, apps, preferredAppId }: { device: DeviceInfo;
   const userApps = apps.filter((a) => !a.system);
   const [appIdInput, setAppId] = useState<string | null>(null);
   const appId = appIdInput ?? (preferredAppId && userApps.some((a) => a.id === preferredAppId) ? preferredAppId : (userApps.find((a) => a.sdk)?.id ?? userApps[0]?.id ?? ''));
-  const [stored, setPayload] = usePersistentState<string>('device.pushPayload', templateText('alert'));
-  const payload = typeof stored === 'string' ? stored : templateText('alert');
+  const lang = useLanguage();
+  // Null until the user edits or picks a template: the untouched default follows the UI language.
+  const [stored, setPayload] = usePersistentState<string | null>('device.pushPayload.v2', null);
+  const payload = typeof stored === 'string' ? stored : templateText('alert', lang);
   const { run, isPending, error, clearError } = useDeviceAction(device.id);
   const validation = useMemo(() => validatePush(payload), [payload]);
 
@@ -67,7 +69,7 @@ export function PushCard({ device, apps, preferredAppId }: { device: DeviceInfo;
         <label htmlFor={`${id}-payload`}>{t('device.push.payload')}</label>
         <span className="grow" />
         <DropdownMenu
-          items={(Object.keys(APNS_TEMPLATES) as PushTemplate[]).map((k) => ({ label: t(`device.push.templates.${k}`), onSelect: () => setPayload(templateText(k)) }))}
+          items={(Object.keys(APNS_TEMPLATES) as PushTemplate[]).map((k) => ({ label: t(`device.push.templates.${k}`), onSelect: () => setPayload(templateText(k, lang)) }))}
           align="end"
         >
           {(p) => (

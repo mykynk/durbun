@@ -38,6 +38,15 @@ registerMessages('common', {
     crash: {
       title: ['{name} görünümü çöktü', 'Bu görünüm çöktü'],
       copyDetails: 'Ayrıntıları kopyala',
+      part: 'Bu bölüm çöktü',
+      app: 'Dürbün arayüzü beklenmedik bir hatayla durdu',
+      appHint: 'Sunucu çalışmaya ve yakalamaya devam ediyor. Sayfayı yeniden yükleyin; tekrar ederse ayrıntıları kopyalayıp sorun bildirin.',
+      reload: 'Yeniden yükle',
+    },
+    hangReset: {
+      title: 'Önceki oturumda arayüz dondu',
+      query: 'Uygulanırken donmaya yol açan kayıtlı log araması temizlendi.',
+      highlight: 'Regex kullanan vurgulama kuralları kapatıldı; Loglar → Vurgulama kuralları’ndan yeniden açabilirsiniz.',
     },
     code: {
       find: 'Bul',
@@ -122,6 +131,15 @@ registerMessages('common', {
     crash: {
       title: ['The {name} view crashed', 'This view crashed'],
       copyDetails: 'Copy details',
+      part: 'This part crashed',
+      app: 'The Dürbün UI stopped on an unexpected error',
+      appHint: 'The server keeps running and capturing. Reload the page; if it happens again, copy the details and report the issue.',
+      reload: 'Reload',
+    },
+    hangReset: {
+      title: 'The UI hung in the previous session',
+      query: 'The saved log search that was being applied when it hung was cleared.',
+      highlight: 'Highlight rules that use a regex were turned off; turn them back on in Logs → Highlight rules.',
     },
     code: {
       find: 'Find',
@@ -337,7 +355,7 @@ registerMessages('shell', {
       lanConfirm: 'Aç',
       hostAddresses: 'Bu Mac’in adresleri:',
       lanSdkHost: 'Uygulamada host olarak bunu verin:',
-      lanRnNote: 'React Native SDK’sı HTTP portunu ({port}) kullanır; bu port ağa yalnızca Dürbün “durbun --lan” ile başlatıldığında açılır.',
+      lanRnNote: 'React Native SDK’sı HTTP portunu ({port}) kullanır; bu port ağa yalnızca yerel ağ modu açıkken açılır (Mac uygulamasında bu ayarı açıp Dürbün’ü yeniden başlatın, komut satırında “durbun --lan”).',
       autoAttachVm: 'Flutter VM Service’e otomatik bağlan',
       autoAttachVmHint: 'Debug modda çalışan Flutter uygulamaları SDK olmadan da görünür.',
       metricsInterval: 'Metrik aralığı',
@@ -446,6 +464,7 @@ registerMessages('shell', {
     unreachable: {
       title: 'Dürbün sunucusuna ulaşılamıyor',
       lead: 'Sunucu çalışmıyor olabilir. Dürbün klasöründe başlatın; bağlantı kurulunca bu sayfa kendiliğinden yenilenir.',
+      leadDesktop: 'Dürbün’ün sunucusu yanıt vermiyor. Dürbün’den çıkıp (⌘Q) yeniden açın; bağlantı kurulunca bu sayfa kendiliğinden yenilenir.',
       demoHint: 'cihazsız denemek için',
     },
     attention: {
@@ -621,6 +640,9 @@ registerMessages('shell', {
         'react-native': 'React Native',
       },
       repoDir: 'Dürbün klasörü',
+      source: 'SDK kaynağı',
+      sourceRegistry: 'Paket deposu',
+      sourceLocal: 'Yerel klasör',
       flutter: {
         zeroTitle: 'SDK olmadan da çok şey görünür',
         zeroBody:
@@ -628,7 +650,8 @@ registerMessages('shell', {
         sourcesLink: 'Veriler nereden gelir?',
         setupTitle: 'Kurulum: iki adım',
         add: 'Paketi ekleyin',
-        addHint: 'Paket pub.dev’de yok; bu depodaki sdks/flutter/durbun klasöründen yol bağımlılığı olarak eklenir. Android ve iOS tarafı pakete dahildir; ayrıca native kurulum gerekmez.',
+        addHint: 'Dürbün deposunun bir kopyasındaki sdks/flutter/durbun klasöründen yol bağımlılığı olarak eklenir. Android ve iOS tarafı pakete dahildir; ayrıca native kurulum gerekmez.',
+        addHintRegistry: 'pub.dev’den eklenir. Android ve iOS tarafı pakete dahildir; ayrıca native kurulum gerekmez.',
         wrap: 'main() içinde başlatın',
         wrapHint:
           'Durbun.run print çıktısını, yakalanmamış hataları ve dart:io HTTP trafiğini (http, Dio’nun varsayılan adaptörü, resimler) yakalar; native katman Dart ile birlikte açılır. Debug ve profile derlemelerinde açık, release’te ve flutter test içinde kapalıdır.',
@@ -653,7 +676,9 @@ registerMessages('shell', {
       },
       android: {
         modules: 'Modülleri projeye ekleyin',
-        modulesHint: 'Modüller bu depodan yerel klasör olarak eklenir. Release derlemeleri aynı API’yi sunan boş (no-op) modülü kullanır.',
+        modulesHint: 'Modüller Dürbün deposunun bir kopyasından yerel klasör olarak eklenir. Release derlemeleri aynı API’yi sunan boş (no-op) modülü kullanır.',
+        deps: 'Bağımlılığı ekleyin',
+        depsHint: 'SDK Maven Central’dan gelir. Release derlemeleri aynı API’yi sunan boş (no-op) modülü kullanır.',
         groovy: 'settings.gradle (Groovy kullanıyorsanız)',
         start: 'Application.onCreate içinde başlatın',
         startHint: 'start() ana thread’i bloklamaz. OkHttp trafiği için interceptor’ı ekleyin; kendi eklediğiniz başlıkları da görmek için en son application interceptor olarak ekleyin.',
@@ -663,6 +688,8 @@ registerMessages('shell', {
       ios: {
         add: 'Swift paketini ekleyin',
         addHint: 'Xcode → File → Add Package Dependencies… → Add Local… ile şu klasörü seçin:',
+        addHintRegistry: 'Xcode → File → Add Package Dependencies… penceresinin arama alanına şu adresi yapıştırın:',
+        podHint: 'CocoaPods kullanıyorsanız:',
         productHint: 'Ardından Durbun ürününü uygulama hedefinize ekleyin.',
         spmHint: 'Başka bir Swift paketinden kullanıyorsanız:',
         start: 'Uygulama açılışında başlatın',
@@ -674,6 +701,7 @@ registerMessages('shell', {
         buildHint: 'npm pack paketi TypeScript kaynaklarından derleyip bir .tgz dosyası üretir.',
         add: 'Uygulamanıza ekleyin',
         metroHint: 'Klasör yerine .tgz dosyasını kurun: Metro, uygulama dışındaki sembolik bağlantılardan react-native’i çözemez. Native kod yoktur; pod install gerekmez.',
+        registryHint: 'Native kod yoktur; pod install gerekmez.',
         start: 'Uygulama girişinde başlatın',
         startHint: 'enabled varsayılanı __DEV__’dir; release derlemelerinde hiçbir şey yapmaz.',
         use: 'Log ve olay gönderin',
@@ -915,7 +943,7 @@ registerMessages('shell', {
       lanConfirm: 'Enable',
       hostAddresses: 'This Mac’s addresses:',
       lanSdkHost: 'Point the app at this Mac:',
-      lanRnNote: 'The React Native SDK uses the HTTP port ({port}); it is only reachable from the network when Dürbün was started with “durbun --lan”.',
+      lanRnNote: 'The React Native SDK uses the HTTP port ({port}); it is only reachable from the network in local network mode (in the Mac app turn this setting on and restart Dürbün; on the command line use “durbun --lan”).',
       autoAttachVm: 'Auto-attach to the Flutter VM Service',
       autoAttachVmHint: 'Flutter apps running in debug mode show up even without the SDK.',
       metricsInterval: 'Metrics interval',
@@ -1024,6 +1052,7 @@ registerMessages('shell', {
     unreachable: {
       title: 'Can’t reach the Dürbün server',
       lead: 'The server may not be running. Start it from the Dürbün folder; this page reconnects on its own once it is up.',
+      leadDesktop: 'Dürbün’s server is not answering. Quit Dürbün (⌘Q) and open it again; this page reconnects on its own once it is up.',
       demoHint: 'to try it without a device',
     },
     attention: {
@@ -1199,6 +1228,9 @@ registerMessages('shell', {
         'react-native': 'React Native',
       },
       repoDir: 'Dürbün folder',
+      source: 'SDK source',
+      sourceRegistry: 'Package registry',
+      sourceLocal: 'Local folder',
       flutter: {
         zeroTitle: 'A lot shows up without the SDK',
         zeroBody:
@@ -1206,7 +1238,8 @@ registerMessages('shell', {
         sourcesLink: 'Where does the data come from?',
         setupTitle: 'Setup: two steps',
         add: 'Add the package',
-        addHint: 'The package is not on pub.dev; it is added as a path dependency from this repository’s sdks/flutter/durbun folder. The Android and iOS parts are included; no separate native setup.',
+        addHint: 'Added as a path dependency from the sdks/flutter/durbun folder of a Dürbün repository clone. The Android and iOS parts are included; no separate native setup.',
+        addHintRegistry: 'Added from pub.dev. The Android and iOS parts are included; no separate native setup.',
         wrap: 'Start it in main()',
         wrapHint:
           'Durbun.run captures print output, uncaught errors and dart:io HTTP traffic (http, Dio’s default adapter, images); the native layer turns on together with Dart. On in debug and profile builds, off in release builds and in flutter test.',
@@ -1230,7 +1263,9 @@ registerMessages('shell', {
       },
       android: {
         modules: 'Add the modules to your project',
-        modulesHint: 'The modules are included as local folders from this repository. Release builds use a no-op module with the same API.',
+        modulesHint: 'The modules are included as local folders from a Dürbün repository clone. Release builds use a no-op module with the same API.',
+        deps: 'Add the dependency',
+        depsHint: 'The SDK comes from Maven Central. Release builds use a no-op module with the same API.',
         groovy: 'settings.gradle (if you use Groovy)',
         start: 'Start it in Application.onCreate',
         startHint: 'start() never blocks the main thread. Add the interceptor for OkHttp traffic, as the last application interceptor to also see headers your own interceptors add.',
@@ -1240,6 +1275,8 @@ registerMessages('shell', {
       ios: {
         add: 'Add the Swift package',
         addHint: 'In Xcode → File → Add Package Dependencies… → Add Local…, choose this folder:',
+        addHintRegistry: 'In Xcode → File → Add Package Dependencies…, paste this address into the search field:',
+        podHint: 'If you use CocoaPods:',
         productHint: 'Then add the Durbun product to your app target.',
         spmHint: 'From another Swift package:',
         start: 'Start it at app launch',
@@ -1251,6 +1288,7 @@ registerMessages('shell', {
         buildHint: 'npm pack compiles the package from its TypeScript sources and writes a .tgz file.',
         add: 'Add it to your app',
         metroHint: 'Install the .tgz rather than the folder: Metro cannot resolve react-native through a symlink outside the app. There is no native code; no pod install needed.',
+        registryHint: 'There is no native code; no pod install needed.',
         start: 'Start it in your entry file',
         startHint: 'enabled defaults to __DEV__, so it does nothing in release builds.',
         use: 'Send logs and events',

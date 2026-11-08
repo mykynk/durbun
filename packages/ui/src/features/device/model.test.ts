@@ -146,6 +146,12 @@ describe('location', () => {
 describe('push notification', () => {
   it('accepts templates and enforces object + aps + 4096 bytes', () => {
     for (const name of Object.keys(APNS_TEMPLATES) as (keyof typeof APNS_TEMPLATES)[]) expect(validatePush(templateText(name)).ok).toBe(true);
+    // The alert's visible texts follow the UI language; the rest of the payload is the same.
+    const en = JSON.parse(templateText('alert', 'en'));
+    const tr = JSON.parse(templateText('alert', 'tr'));
+    expect(en.aps.alert.body).toMatch(/^Hello!/);
+    expect(tr.aps.alert.body).toMatch(/^Merhaba!/);
+    expect({ ...en, aps: { ...en.aps, alert: undefined } }).toEqual({ ...tr, aps: { ...tr.aps, alert: undefined } });
     expect(validatePush('{ nope')).toMatchObject({ ok: false, error: 'json' });
     expect(validatePush('[1]')).toEqual({ ok: false, error: 'notObject' });
     expect(validatePush('{"alert":"x"}')).toEqual({ ok: false, error: 'noAps' });

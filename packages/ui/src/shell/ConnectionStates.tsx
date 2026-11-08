@@ -9,6 +9,7 @@ import { Spinner } from '../components/Spinner';
 import { DurbunMark } from '../components/Icons';
 import { Snippet } from './Snippet';
 import { repoDir } from './repo';
+import { isDesktopApp } from '../lib/platform';
 import { importLabel } from './labels';
 
 /** Full-area state while the server has never been reached. */
@@ -32,8 +33,15 @@ export function ServerUnreachable() {
         ) : (
           <>
             <h1 className="onboarding__title">{t('shell.unreachable.title')}</h1>
-            <p className="onboarding__lead">{t('shell.unreachable.lead')}</p>
-            <Snippet lang="shell" code={`cd "${repoDir()}"\nnpm run build && npm start   # ${t('shell.unreachable.demoHint')}: npm run demo`} />
+            {isDesktopApp() ? (
+              // The Mac app starts its own server: CLI commands would only confuse here.
+              <p className="onboarding__lead">{t('shell.unreachable.leadDesktop')}</p>
+            ) : (
+              <>
+                <p className="onboarding__lead">{t('shell.unreachable.lead')}</p>
+                <Snippet lang="shell" code={`cd "${repoDir()}"\nnpm run build && npm start   # ${t('shell.unreachable.demoHint')}: npm run demo`} />
+              </>
+            )}
             <div className="row gap-2 center">
               <Button variant="primary" icon={RefreshCw} onClick={reconnectNow}>
                 {t('shell.status.retryNow')}
