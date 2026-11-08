@@ -8,6 +8,8 @@ dist/
 .flutter-plugins
 .flutter-plugins-dependencies
 build/
+# The Mac app's build resources (icon, entitlements) are sources, not output.
+!apps/desktop/build/
 pubspec.lock
 # Android / Gradle
 .gradle/

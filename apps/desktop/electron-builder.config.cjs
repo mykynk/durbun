@@ -48,7 +48,10 @@ module.exports = {
       { target: 'zip', arch: ['arm64', 'x64'] },
     ],
     category: 'public.app-category.developer-tools',
-    icon: '../../packages/ui/public/icon-512.png',
+    // The .zip's name; the .dmg sets its own below (there is no top-level zip section in electron-builder).
+    artifactName: 'Durbun-${version}-${arch}-mac.${ext}',
+    // 1024 px on Apple's icon grid (rounded square with margins); scripts/render-icon.cjs draws it from icon.svg.
+    icon: 'build/icon.png',
     identity: signed ? undefined : null,
     hardenedRuntime: signed,
     entitlements: signed ? 'build/entitlements.mac.plist' : undefined,
@@ -71,9 +74,6 @@ module.exports = {
   dmg: {
     title: 'Dürbün ${version}',
     artifactName: 'Durbun-${version}-${arch}.${ext}',
-  },
-  zip: {
-    artifactName: 'Durbun-${version}-${arch}-mac.${ext}',
   },
   electronFuses: {
     runAsNode: false,
