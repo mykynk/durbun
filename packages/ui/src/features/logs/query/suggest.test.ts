@@ -142,7 +142,7 @@ describe('values', () => {
 
   it('process: and app:', () => {
     expect(labels('process:pati')).toEqual(['com.mykynk.pati']);
-    expect(labels('process:pa')).toEqual(['com.mykynk.pati', 'com.mykynk.mahalle']); // contains pa
+    expect(labels('process:a')).toEqual(['com.mykynk.pati', 'com.mykynk.mahalle']); // contains a
     expect(labels('package:sys')).toEqual(['system_server']);
     expect(at('app:')).toMatchObject([
       { label: 'Pati', detail: 'com.mykynk.pati' },
