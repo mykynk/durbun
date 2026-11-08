@@ -21,12 +21,24 @@ enum RequestBody {
         var totalSize: Int
     }
 
-    /// Bodies up to this size are buffered and forwarded as `httpBody`; larger ones are streamed.
-    static let inMemoryLimit = 32 * 1024 * 1024
+    /// Bodies up to this size are buffered and forwarded as `httpBody`; larger ones are streamed:
+    /// only the capture limit plus a margin is ever held in memory (never the whole upload).
+    ///
+    /// Trade-off: a streamed body cannot be rewound, so a 307/308 redirect or an authentication
+    /// retry that must resend it fails (`needNewBodyStream` has no stream to give). Buffered bodies
+    /// (up to this limit) and `httpBody` requests are resent as usual.
+    static func inMemoryLimit(captureLimit: Int) -> Int {
+        max(captureLimit, minimumInMemory) + margin
+    }
+
+    /// Small bodies always stay rewindable, even with body capture off.
+    static let minimumInMemory = 1024 * 1024
+    static let margin = 256 * 1024
     private static let chunkSize = 64 * 1024
 
     /// May block while the app writes into a bound stream pair: call it off the protocol's client thread.
     static func read(_ request: URLRequest, captureLimit: Int) -> Result {
+        let inMemoryLimit = inMemoryLimit(captureLimit: captureLimit)
         if let body = request.httpBody {
             return Result(forward: .data(body), captured: body, totalSize: body.count)
         }
@@ -60,7 +72,7 @@ enum RequestBody {
             return Result(forward: .data(collected), captured: collected, totalSize: collected.count)
         }
         // Too large to buffer: replay what was read, then the remainder, without holding
-        // everything in memory.
+        // everything in memory (the pump releases the prefix once written).
         let declared = request.value(forHTTPHeaderField: "Content-Length").flatMap { Int($0) }
         let captured = collected.prefix(max(0, captureLimit))
         return Result(
@@ -82,22 +94,31 @@ enum ReplayStream {
             remainder.close()
             return InputStream(data: prefix)
         }
+        let box = PrefixBox(prefix)
         let thread = Thread {
-            pump(prefix: prefix, remainder: remainder, into: output)
+            pump(prefix: box, remainder: remainder, into: output)
         }
         thread.name = "dev.durbun.body-replay"
-        thread.qualityOfService = .utility
+        thread.qualityOfService = .userInitiated // feeds the app's upload
         thread.start()
         return input
     }
 
-    private static func pump(prefix: Data, remainder: InputStream, into output: OutputStream) {
+    /// Holds the already-read bytes until they were written, then lets them go.
+    private final class PrefixBox {
+        var data: Data?
+        init(_ data: Data) { self.data = data }
+    }
+
+    private static func pump(prefix: PrefixBox, remainder: InputStream, into output: OutputStream) {
         output.open()
         defer {
             output.close()
             remainder.close()
         }
-        guard write(prefix, to: output) else { return }
+        let head = prefix.data ?? Data()
+        prefix.data = nil
+        guard write(head, to: output) else { return }
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
         while true {
             let n = remainder.read(&buffer, maxLength: buffer.count)

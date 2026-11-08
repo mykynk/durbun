@@ -1,5 +1,9 @@
 ## Unreleased (phase 3)
 
+- The plugin builds from the published package alone: the Android core is now an
+  exact copy in `android/src/core` + `android/core-rules.pro` (like the iOS copy),
+  refreshed by `tool/sync_native.dart`; `android/build.gradle` no longer reads
+  `../../../android`, which does not exist in a pub.dev download.
 - Requires Flutter 3.27 / Dart 3.6 or newer (the panel uses
   `Color.withValues`, `Flex.spacing` and `NavigatorPopHandler.onPopWithResult`);
   the pubspec floor said Flutter 3.24 / Dart 3.5, where it did not compile.

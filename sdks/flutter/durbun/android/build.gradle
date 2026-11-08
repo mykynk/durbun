@@ -1,9 +1,9 @@
 // Android side of package:durbun.
 //
 // The native core (Kotlin + one Java file) lives in sdks/android/durbun, where native-only apps use it too.
-// It is compiled into this plugin straight from there (Gradle sourceSets): nothing is copied, nothing can
-// drift. This works for every way a Flutter app can depend on the plugin from the Dürbün repository
-// (`path:` or `git:` dependency): both keep the whole repository on disk.
+// pub.dev publishes only this package folder, so the plugin compiles an exact copy of it: src/core/kotlin,
+// src/core/java and core-rules.pro. Edit the original and run `dart run tool/sync_native.dart`
+// (test/native_sync_test.dart fails when the copy drifts).
 group = "dev.durbun.flutter"
 version = "0.1.0"
 
@@ -30,15 +30,6 @@ allprojects {
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
 
-def durbunCore = file("../../../android/durbun")
-if (!new File(durbunCore, "src/main/kotlin/dev/durbun/Durbun.kt").exists()) {
-    throw new GradleException(
-        "Dürbün: the native Android core was not found at ${durbunCore}. Depend on package:durbun through " +
-            "the Dürbün repository (a path: or git: dependency on sdks/flutter/durbun), not on a copy of the " +
-            "plugin folder alone."
-    )
-}
-
 android {
     namespace = "dev.durbun.flutter"
 
@@ -56,15 +47,15 @@ android {
     sourceSets {
         main.java.srcDirs += [
             "src/main/kotlin",
-            "${durbunCore}/src/main/kotlin",
-            "${durbunCore}/src/main/java",
+            "src/core/kotlin",
+            "src/core/java",
         ]
     }
 
     defaultConfig {
         minSdk = 21
         // OkHttp is optional for the app (DurbunInterceptor is only loaded when the app uses it).
-        consumerProguardFiles("${durbunCore}/consumer-rules.pro")
+        consumerProguardFiles("core-rules.pro")
     }
 
     buildFeatures {

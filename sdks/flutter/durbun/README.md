@@ -488,7 +488,7 @@ flutter test --concurrency=2
 dart run tool/smoke.dart --dry-run      # masaüstü olmadan uçtan uca kontrol
 dart run tool/smoke.dart                # çalışan Dürbün masaüstüne karşı (127.0.0.1:9751)
 dart run tool/smoke.dart --port 9751 --linger 60   # bağlı kalır: Cihaz sekmesinden smoke.* araçlarını deneyin
-dart run tool/sync_native.dart          # sdks/ios değiştiyse iOS kopyasını tazeler
+dart run tool/sync_native.dart          # sdks/ios veya sdks/android değiştiyse kopyaları tazeler
 ```
 
 `--linger` süresince smoke uygulaması her saniye metrik gönderir ve masaüstünden şu araçlar çalışır:
@@ -496,13 +496,13 @@ dart run tool/sync_native.dart          # sdks/ios değiştiyse iOS kopyasını 
 (`{path, method, body}` ile SDK üzerinden yeni bir istek — Mock'lar sekmesindeki kuralların uygulandığını
 görmek için).
 
-Native çekirdekler kopyalanmadan taşınır: Android derlemesi
-`sdks/android/durbun/src/main`'i Gradle `sourceSets` ile doğrudan derler
-(`android/build.gradle`). CocoaPods ve Swift Package Manager plugin klasörü
-dışındaki dosyaları derleyemediği için iOS çekirdeği
-`ios/durbun/Sources/durbun/Core`'da birebir kopya olarak durur;
-`sdks/ios/Sources/Durbun` değişince `dart run tool/sync_native.dart` çalıştırın.
-`test/native_sync_test.dart` kopya eskidiğinde başarısız olur.
+Native çekirdekler pakette birebir kopya olarak durur, çünkü pub.dev yalnızca bu
+klasörü yayınlar ve CocoaPods, Swift Package Manager ve Gradle plugin klasörü
+dışındaki dosyaları derleyemez: iOS çekirdeği `ios/durbun/Sources/durbun/Core`'da,
+Android çekirdeği `android/src/core` (Kotlin + Java) ve `android/core-rules.pro`'da.
+Asılları `sdks/ios/Sources/Durbun` ve `sdks/android/durbun`'dadır; onları değiştirince
+`dart run tool/sync_native.dart` çalıştırın. `test/native_sync_test.dart` bir kopya
+eskidiğinde başarısız olur.
 
 Örnek uygulama: [`example/`](example/). (Xcode 27 iOS 15 altını kabul etmediği
 için örneğin iOS hedefi 15.0'dır.)
@@ -765,10 +765,10 @@ offers the actions `smoke.ping`, `smoke.verbose` (toggle), `smoke.theme` (select
 and `smoke.request` (`{path, method, body}` — makes one more request through the
 SDK, e.g. to watch a mock rule apply).
 
-The native cores are not copied by hand: Android compiles
-`sdks/android/durbun/src/main` directly through Gradle `sourceSets`
-(`android/build.gradle`). CocoaPods and Swift Package Manager cannot compile
-files outside the plugin folder, so the iOS core is an exact copy in
-`ios/durbun/Sources/durbun/Core`; run `dart run tool/sync_native.dart` after
-changing `sdks/ios/Sources/Durbun` — `test/native_sync_test.dart` fails when the
-copy is stale.
+The package carries exact copies of the native cores, because pub.dev publishes
+only this folder and CocoaPods, Swift Package Manager and Gradle cannot build
+files outside the plugin: the iOS core in `ios/durbun/Sources/durbun/Core`, the
+Android core in `android/src/core` (Kotlin + Java) and `android/core-rules.pro`.
+The originals are `sdks/ios/Sources/Durbun` and `sdks/android/durbun`; run
+`dart run tool/sync_native.dart` after changing them — `test/native_sync_test.dart`
+fails when a copy is stale.

@@ -28,6 +28,9 @@ public struct DurbunOptions: Sendable {
     public var interceptUploadTasks: Bool
     /// Hosts that are never captured, e.g. `["analytics.example.com"]`. Subdomains match too.
     public var ignoredHosts: [String]
+    /// Header names (case-insensitive) whose values are shown as `••••` in captured requests and
+    /// responses, e.g. `["Authorization", "Cookie"]`. The real request is unchanged. Default none.
+    public var redactHeaders: [String]
     /// Outgoing messages kept while the desktop is not connected (oldest dropped first). Default 5000.
     public var maxBufferedMessages: Int
     /// Allow running in builds compiled without `DEBUG`. Default false: release builds stay inert
@@ -45,6 +48,7 @@ public struct DurbunOptions: Sendable {
         collectMetrics: Bool = true,
         interceptUploadTasks: Bool = true,
         ignoredHosts: [String] = [],
+        redactHeaders: [String] = [],
         maxBufferedMessages: Int = 5000,
         allowInReleaseBuilds: Bool = false
     ) {
@@ -58,6 +62,7 @@ public struct DurbunOptions: Sendable {
         self.collectMetrics = collectMetrics
         self.interceptUploadTasks = interceptUploadTasks
         self.ignoredHosts = ignoredHosts
+        self.redactHeaders = redactHeaders
         self.maxBufferedMessages = maxBufferedMessages
         self.allowInReleaseBuilds = allowInReleaseBuilds
     }

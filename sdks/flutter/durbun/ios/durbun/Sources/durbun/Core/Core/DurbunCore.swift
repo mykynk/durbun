@@ -119,7 +119,8 @@ final class DurbunCore {
         }
     }
 
-    /// Headers with the redacted names' values replaced (hosted mode: Flutter's `redactHeaders`).
+    /// Headers with the redacted names' values replaced (`DurbunOptions.redactHeaders`, and in hosted
+    /// mode Flutter's `redactHeaders`). Same marker as the Android and Dart layers.
     func redacting(_ headers: [(String, String)]) -> [(String, String)] {
         let names = lock.withLock { policy.redactedHeaders }
         guard !names.isEmpty else { return headers }
@@ -194,7 +195,8 @@ final class DurbunCore {
             policy = NetworkCapturePolicy(
                 active: options.captureNetwork,
                 interceptUploadTasks: options.interceptUploadTasks,
-                ignoredHosts: options.ignoredHosts.map { $0.lowercased() }
+                ignoredHosts: options.ignoredHosts.map { $0.lowercased() },
+                redactedHeaders: Set(options.redactHeaders.map { $0.lowercased() })
             )
         }
 
@@ -248,7 +250,7 @@ final class DurbunCore {
                 active: options.captureNetwork,
                 interceptUploadTasks: options.interceptUploadTasks,
                 ignoredHosts: options.ignoredHosts.map { $0.lowercased() },
-                redactedHeaders: Set(redactedHeaders.map { $0.lowercased() })
+                redactedHeaders: Set((Array(redactedHeaders) + options.redactHeaders).map { $0.lowercased() })
             )
         }
         if options.captureNetwork { NetworkCapture.install() }

@@ -1,21 +1,38 @@
 import Foundation
 
-/// The internal URLSession that performs intercepted requests for real. One session for all
-/// requests; delegate callbacks (serial queue) are routed to the owning protocol instance.
+/// An internal URLSession that performs intercepted requests for real. There is one per originating
+/// session configuration (see `SessionBinding`): the inner session runs with a copy of the app
+/// session's configuration — its URL cache (or none), cookie storage, credential storage, proxy,
+/// TLS limits, connectivity and cellular/expensive/constrained rules, connection limits — so a
+/// request behaves as it would without Dürbün. `shared` serves `URLSession.shared` and other
+/// requests that reach the globally registered `DurbunURLProtocol` (default configuration).
+/// Delegate callbacks (serial queue) are routed to the owning protocol instance.
 final class ForwardingSession: NSObject, URLSessionDataDelegate {
-    static let shared = ForwardingSession()
+    static let shared = ForwardingSession(configuration: nil)
 
+    /// The forwarding session for a protocol instance's class (`object_getClass`, so the
+    /// per-configuration subclasses are told apart).
+    static func serving(_ protocolClass: AnyClass?) -> ForwardingSession {
+        protocolClass.flatMap(SessionBinding.forwarding(for:)) ?? shared
+    }
+
+    private let template: URLSessionConfiguration?
     private let lock = UnfairLock()
     private var owners: [Int: DurbunURLProtocol] = [:]
     private var session: URLSession?
 
+    /// `configuration`: the app session's settings (already without Dürbün's protocol classes);
+    /// nil = the default configuration.
+    init(configuration: URLSessionConfiguration?) {
+        template = configuration
+        super.init()
+    }
+
     private func currentSession() -> URLSession {
         lock.withLock {
             if let session { return session }
-            let configuration = URLSessionConfiguration.default
-            configuration.protocolClasses = (configuration.protocolClasses ?? []).filter {
-                ObjectIdentifier($0) != ObjectIdentifier(DurbunURLProtocol.self)
-            }
+            let configuration = (template?.copy() as? URLSessionConfiguration) ?? URLSessionConfiguration.default
+            configuration.protocolClasses = SessionBinding.withoutDurbun(configuration.protocolClasses)
             // The app's own task keeps enforcing its real timeouts (verified: both the session's
             // timeoutIntervalForRequest and a request's timeoutInterval fire on the outer task), so
             // the inner task must never time out first.
@@ -24,7 +41,8 @@ final class ForwardingSession: NSObject, URLSessionDataDelegate {
             let queue = OperationQueue()
             queue.name = "dev.durbun.forwarding"
             queue.maxConcurrentOperationCount = 1
-            queue.qualityOfService = .utility
+            // Callbacks feed the app's own task: never run them below the app's priority.
+            queue.qualityOfService = .userInitiated
             let created = URLSession(configuration: configuration, delegate: self, delegateQueue: queue)
             session = created
             return created
@@ -96,7 +114,9 @@ final class ForwardingSession: NSObject, URLSessionDataDelegate {
         willCacheResponse proposedResponse: CachedURLResponse,
         completionHandler: @escaping (CachedURLResponse?) -> Void
     ) {
-        completionHandler(proposedResponse)
+        // The app's own task stores it (DurbunURLProtocol hands it the storage policy), through the
+        // app delegate's willCacheResponse; storing it here as well would bypass that delegate.
+        completionHandler(nil)
     }
 
     func urlSession(

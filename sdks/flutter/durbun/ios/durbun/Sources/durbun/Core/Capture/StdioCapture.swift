@@ -34,7 +34,11 @@ final class StdioCapture {
         }
     }
 
-    private let queue = DispatchQueue(label: "dev.durbun.stdio", qos: .utility)
+    // The app's `print` blocks once the pipe is full, so the reader must not run below the app's
+    // priority (a `.utility` queue behind busy work stalled `print` on the main thread).
+    private let queue = DispatchQueue(label: "dev.durbun.stdio", qos: .userInitiated)
+    /// Bytes read per drain round before they are processed (bounds memory under a print flood).
+    private static let maxDrainBytes = 1024 * 1024
     private let onEntries: ([Entry]) -> Void
     private var redirects: [Redirect] = []
     private let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 64 * 1024)
@@ -127,17 +131,20 @@ final class StdioCapture {
         }
     }
 
-    /// Runs on `queue`.
+    /// Runs on `queue`. Empties the pipe first (so writers blocked on a full pipe resume at once),
+    /// then writes the bytes through to the console and turns them into entries.
     private func drain(_ redirect: Redirect, final: Bool) {
         guard !redirect.finished else { return }
         var reachedEOF = false
+        var pending = Data()
         while true {
             let n = read(redirect.readFd, buffer, 64 * 1024)
             if n > 0 {
-                writeThrough(redirect.originalFd, count: n)
-                ConsoleTail.record(buffer, count: n)
-                let entries = redirect.assembler.push(UnsafeBufferPointer(start: buffer, count: n), now: Clock.nowMs())
-                emit(entries, from: redirect.stream)
+                pending.append(buffer, count: n)
+                if pending.count >= Self.maxDrainBytes {
+                    process(pending, from: redirect)
+                    pending.removeAll(keepingCapacity: true)
+                }
             } else if n == 0 {
                 reachedEOF = true
                 break
@@ -147,6 +154,7 @@ final class StdioCapture {
                 break
             }
         }
+        process(pending, from: redirect)
         if reachedEOF || final {
             redirect.finished = true
             redirect.flushWork?.cancel()
@@ -156,6 +164,17 @@ final class StdioCapture {
             return
         }
         scheduleFlush(redirect)
+    }
+
+    private func process(_ bytes: Data, from redirect: Redirect) {
+        guard !bytes.isEmpty else { return }
+        bytes.withUnsafeBytes { raw in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+            writeThrough(redirect.originalFd, base, count: raw.count)
+            ConsoleTail.record(base, count: raw.count)
+            let entries = redirect.assembler.push(UnsafeBufferPointer(start: base, count: raw.count), now: Clock.nowMs())
+            emit(entries, from: redirect.stream)
+        }
     }
 
     /// Ends the pending (possibly multi-line) entry once no continuation arrived in time.
@@ -175,10 +194,10 @@ final class StdioCapture {
         onEntries(entries.map { Entry(stream: stream, text: $0.lines.joined(separator: "\n"), ts: $0.ts) })
     }
 
-    private func writeThrough(_ fd: Int32, count: Int) {
+    private func writeThrough(_ fd: Int32, _ bytes: UnsafePointer<UInt8>, count: Int) {
         var written = 0
         while written < count {
-            let n = write(fd, buffer + written, count - written)
+            let n = write(fd, bytes + written, count - written)
             if n > 0 {
                 written += n
             } else if n < 0 && errno == EINTR {
