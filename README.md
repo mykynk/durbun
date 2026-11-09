@@ -48,9 +48,7 @@ Download the DMG for your Mac from [GitHub Releases](https://github.com/mykynk/d
 `Durbun-<version>-arm64.dmg` for Apple silicon, `Durbun-<version>-x64.dmg` for Intel. Open it and drag
 Dürbün to Applications. Requires macOS 13 Ventura or later.
 
-Release builds are not notarized yet, so macOS asks once on first launch: right-click Dürbün in Finder →
-**Open** → **Open**. If macOS does not offer that, go to System Settings → Privacy & Security and click
-**Open Anyway** next to Dürbün.
+Release builds are signed with a Developer ID and notarized by Apple, so they open like any other app.
 
 Dürbün never checks for updates on its own. **Dürbün → Check for Updates…** opens the download page when a
 newer release exists.

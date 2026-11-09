@@ -49,9 +49,7 @@ Mac'inize uygun DMG'yi [GitHub Releases](https://github.com/mykynk/durbun/releas
 indirin: Apple silicon için `Durbun-<sürüm>-arm64.dmg`, Intel için `Durbun-<sürüm>-x64.dmg`. Açıp Dürbün'ü
 Uygulamalar klasörüne sürükleyin. macOS 13 Ventura veya üstü gerekir.
 
-Yayın paketleri henüz Apple noter onayından geçmediği için macOS ilk açılışta bir kez sorar: Finder'da
-Dürbün'e sağ tıklayın → **Aç** → **Aç**. macOS bu seçeneği göstermezse Sistem Ayarları → Gizlilik ve
-Güvenlik'te Dürbün'ün yanındaki **Yine de Aç**'a tıklayın.
+Yayın paketleri Developer ID ile imzalı ve Apple onaylıdır (notarized); her uygulama gibi açılır.
 
 Dürbün kendiliğinden güncelleme aramaz. **Dürbün → Güncellemeleri Denetle…** yeni bir sürüm varsa indirme
 sayfasını açar.

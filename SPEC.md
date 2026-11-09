@@ -986,12 +986,13 @@ SurfaceView (Flutter) app never falls back to gfxinfo's decor frames for its fps
 - `durbun_dio` recognizes the dart:io adapter by type (survives `--obfuscate`); its iOS NativeAdapter dedupe is
   name-based, so obfuscated iOS builds may show those requests twice (never lose them).
 
-### 10.7 Mac app (`apps/desktop`, Electron, unsigned for now)
+### 10.7 Mac app (`apps/desktop`, Electron; releases signed with a Developer ID and notarized)
 One click: the app starts the server in-process (programmatic entry built from `startServer`), opens
 the UI window, fixes PATH from the login shell (`$SHELL -ilc env`), single instance, tray/menu-bar item,
 quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.dmg`, arm64).
 - Output: `apps/desktop/release/mac-arm64/Dürbün.app` and `apps/desktop/release/Durbun-<version>-arm64.dmg`
-  (unsigned; ad-hoc signature after the fuses are flipped).
+  (ad-hoc signature after the fuses are flipped). `npm run app:release` with the signing environment
+  (electron-builder.config.cjs) builds the Developer ID signed, notarized release DMGs and ZIPs.
 - Environment variables: `DURBUN_PORT` / `DURBUN_SDK_PORT` (defaults 9750 / 9751; when another program holds
   the HTTP port the app tries 9760, 9770, 9780, then an OS port; an existing Dürbün on the port is reused),
   `DURBUN_DATA_DIR` (default `~/.durbun`), `DURBUN_USER_DATA_DIR` (Electron profile), `DURBUN_DEMO`,
