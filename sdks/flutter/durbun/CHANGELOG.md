@@ -149,12 +149,16 @@
     `DurbunExportProvider`, `${applicationId}.durbun.files`, no androidx;
     iOS: `UIActivityViewController` with the file). Exports older than a day
     are deleted; without a share sheet an export under 512 KB is copied.
-  - Network list **sort**: arrival (default, unchanged), newest on top,
-    slowest, largest response, errors first; kept per store. A sorted list
-    scrolled down holds still and shows "↑ N new" on top.
-  - **Statistics** (Tools): status totals, timeouts, pending, average / p50 /
-    p95 / longest, bytes sent and received, top 10 hosts, methods; live,
-    at most once a second, no body decoding.
+  - Network list **sort**: newest on top (default), arrival, slowest,
+    largest response, errors first; kept per store. A sorted list scrolled
+    down holds still and shows "↑ N new" on top. Rows show when the request
+    started (`HH:mm:ss`) before the host.
+  - **Statistics** (Tools), in swipeable tabs: Summary (status totals,
+    timeouts, pending, methods), Duration (average / p50 / p95 / longest),
+    Data (bytes sent and received), Hosts (top 10); live, at most once a
+    second, no body decoding; reopens on the tab read last.
+  - The tools sheet lists **Mocks** only while the desktop is connected (its
+    rules end with the connection) and no longer shows the shake hint.
   - **Previous run**, opt-in: `DurbunInspector(keepPreviousRun: true)` keeps
     the last launch's requests (headers, bodies up to 16 KB) and logs, masked,
     in `<cache>/durbun-run` (JSONL, written at most once a second, a crash at

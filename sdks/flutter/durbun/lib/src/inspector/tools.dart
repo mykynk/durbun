@@ -1,5 +1,5 @@
-/// The tools sheet: the app and its desktop connection, then Mocks,
-/// Performance, Statistics and Device & SDK (each a page of its own),
+/// The tools sheet: the app and its desktop connection, then Mocks (while
+/// connected), Performance, Statistics and Device & SDK (each a page of its own),
 /// Export session, Previous run (with `keepPreviousRun`) and Clear.
 library;
 
@@ -136,13 +136,15 @@ class _ToolsSheet extends StatelessWidget {
               ]),
               const SizedBox(height: 14),
               _Group(children: <Widget>[
-                _ToolRow(
-                  icon: Icons.theater_comedy_outlined,
-                  tint: c.pickViolet,
-                  label: t.mocks,
-                  value: t.ruleCount(rules),
-                  onTap: () => open(t.mocks, MocksView(store: store)),
-                ),
+                // Rules come from the desktop and end with its connection.
+                if (connected)
+                  _ToolRow(
+                    icon: Icons.theater_comedy_outlined,
+                    tint: c.pickViolet,
+                    label: t.mocks,
+                    value: t.ruleCount(rules),
+                    onTap: () => open(t.mocks, MocksView(store: store)),
+                  ),
                 _ToolRow(
                   icon: Icons.speed_rounded,
                   tint: c.pickGreen,
@@ -214,10 +216,6 @@ class _ToolsSheet extends StatelessWidget {
                   },
                 ),
               ]),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 14, 8, 0),
-                child: Text(t.shakeHint, textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: c.textSubtle)),
-              ),
             ],
           );
         },

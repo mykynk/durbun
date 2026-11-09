@@ -95,20 +95,21 @@ void main() {
     await tester.tap(find.textContaining('Headers').first);
     await tester.pumpAndSettle();
     expect(find.text('Content-Type'), findsOneWidget);
-    expect(_enabled(tester, 'Previous request'), isFalse, reason: 'first in the list');
+    // Newest on top: the first request is last in the list.
+    expect(_enabled(tester, 'Next request'), isFalse, reason: 'last in the list');
 
-    await tester.tap(find.byTooltip('Next request'));
+    await tester.tap(find.byTooltip('Previous request'));
     await tester.pumpAndSettle();
     expect(find.textContaining('/v1/branches'), findsWidgets);
     expect(find.text('Content-Type'), findsOneWidget, reason: 'still on Response → Headers');
 
-    await tester.tap(find.byTooltip('Next request'));
+    await tester.tap(find.byTooltip('Previous request'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Service Unavailable'), findsWidgets);
     expect(find.text('Retry-After'), findsOneWidget);
-    expect(_enabled(tester, 'Next request'), isFalse, reason: 'last in the list');
+    expect(_enabled(tester, 'Previous request'), isFalse, reason: 'first in the list');
 
-    await tester.tap(find.byTooltip('Previous request'));
+    await tester.tap(find.byTooltip('Next request'));
     await tester.pumpAndSettle();
     expect(find.textContaining('/v1/branches'), findsWidgets);
   });

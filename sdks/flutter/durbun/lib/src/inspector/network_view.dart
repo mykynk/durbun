@@ -38,7 +38,7 @@ class NetworkView extends StatefulWidget {
 class _NetworkMemory {
   final NetFilters filters = NetFilters();
   String query = '';
-  NetSort sort = NetSort.arrival;
+  NetSort sort = kDefaultNetSort;
 }
 
 final Expando<_NetworkMemory> _networkMemories = Expando<_NetworkMemory>('durbun.network');
@@ -72,7 +72,7 @@ NetworkListing networkListing(DurbunInspectorStore store) {
           callMatchesQuery(c, clauses, bodies: filters.searchBodies))
         c,
   ];
-  final sort = memory?.sort ?? NetSort.arrival;
+  final sort = memory?.sort ?? kDefaultNetSort;
   return NetworkListing(calls: sortCalls(shown, sort), total: all.length, sort: sort);
 }
 
@@ -297,7 +297,7 @@ class _NetworkViewState extends State<NetworkView> {
     return <Widget>[
       FilterButton(count: f.activeCount, onTap: () => _openFilters(hosts)),
       // The order is not a filter, but it is kept in view the same way.
-      if (sort != NetSort.arrival) ActiveChip(label: t.sortName(sort), onRemove: () => _setSort(NetSort.arrival)),
+      if (sort != kDefaultNetSort) ActiveChip(label: t.sortName(sort), onRemove: () => _setSort(kDefaultNetSort)),
       // Says that requests are left out by the host list, and opens it.
       if (otherHosts > 0) DToggle(label: t.otherHostsHidden(otherHosts), icon: Icons.visibility_off_outlined, selected: false, onTap: () => _openFilters(hosts)),
       ...active,
@@ -378,8 +378,8 @@ class _NetworkViewState extends State<NetworkView> {
                   const SizedBox(width: 4),
                   DIconButton(
                     icon: Icons.sort_rounded,
-                    tooltip: sort == NetSort.arrival ? t.sortTitle : '${t.sortTitle}: ${t.sortName(sort)}',
-                    active: sort != NetSort.arrival,
+                    tooltip: sort == kDefaultNetSort ? t.sortTitle : '${t.sortTitle}: ${t.sortName(sort)}',
+                    active: sort != kDefaultNetSort,
                     size: kMinTapTarget,
                     onTap: _openSort,
                   ),
@@ -707,8 +707,17 @@ class CallRow extends StatelessWidget {
                             runSpacing: 4,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: <Widget>[
-                              // One line: a host broken mid-word is hard to read.
-                              Text.rich(highlightTerms(uri?.host ?? '', terms, meta, c.hlMark),
+                              // When it started, then the host, on one line: a
+                              // host broken mid-word is hard to read, and the
+                              // time stays in view (the host is cut instead).
+                              Text.rich(
+                                  TextSpan(children: <InlineSpan>[
+                                    TextSpan(text: formatTimeOfDay(call.ts), style: meta.copyWith(color: c.textSubtle)),
+                                    if ((uri?.host ?? '').isNotEmpty) ...<InlineSpan>[
+                                      TextSpan(text: '  ', style: meta),
+                                      highlightTerms(uri!.host, terms, meta, c.hlMark),
+                                    ],
+                                  ]),
                                   maxLines: 1,
                                   softWrap: false,
                                   overflow: TextOverflow.ellipsis),

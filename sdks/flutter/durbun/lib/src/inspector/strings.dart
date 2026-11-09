@@ -49,10 +49,6 @@ class InspectorStrings {
     'Logs, requests and samples on this phone are removed. The desktop keeps its copy.',
   );
   String get cancel => _('Vazgeç', 'Cancel');
-  String get shakeHint => _(
-    'Paneli açmak için telefonu sallayın ya da Durbun.showInspector() çağırın.',
-    'Shake the phone or call Durbun.showInspector() to open this panel.',
-  );
   String newItems(int n) => _('$n yeni', '$n new');
   String requestCount(int n) => _('$n istek', n == 1 ? '1 request' : '$n requests');
   String dropped(int n) => _('Yer açmak için en eski $n kayıt silindi.', 'The oldest $n entries were removed to make room.');
@@ -205,6 +201,7 @@ class InspectorStrings {
   /* statistics */
   String get statistics => _('İstatistik', 'Statistics');
   String get statsLive => _('Canlı · saniyede bir güncellenir', 'Live · updates every second');
+  String get statsSummary => _('Özet', 'Summary');
   String get statsSuccess => _('Başarılı', 'Successful');
   String get statsClientErrors => _('İstemci hatası (4xx)', 'Client errors (4xx)');
   String get statsServerErrors => _('Sunucu hatası (5xx)', 'Server errors (5xx)');

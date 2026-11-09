@@ -242,10 +242,14 @@ bool callMatchesFilters(InspectorCall c, NetFilters f, {bool Function(String hos
 
 /* ───────────────────────────── order ───────────────────────────── */
 
-/// Orders of the Network list. [arrival] is the order it has always had:
-/// oldest at the top, newest at the bottom, where the list follows new
-/// requests. The others put their first request at the top.
-enum NetSort { arrival, newest, slowest, largest, status }
+/// Orders of the Network list, as the sort sheet lists them. [newest] is the
+/// default ([kDefaultNetSort]). [arrival] is oldest at the top, newest at the
+/// bottom, where the list follows new requests; the others put their first
+/// request at the top.
+enum NetSort { newest, arrival, slowest, largest, status }
+
+/// The order the Network list opens in: the newest request on top.
+const NetSort kDefaultNetSort = NetSort.newest;
 
 /// [calls] (oldest first, as the store keeps them) in the order of [sort].
 /// A pending request counts as slow as it has waited until [nowMs] (a hung

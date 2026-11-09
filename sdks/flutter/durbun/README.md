@@ -117,8 +117,9 @@ renkleri, açık/koyu tema) ve sekmelerini taşır:
   kapanan veri ağacı, uygulama satırları öne çıkan yığın izi, "yalnızca bu
   etiket / bu etiketi gizle".
 - **Ağ:** dart:io, `package:http`, Dio, OkHttp ve URLSession tek tabloda: durum,
-  metot, yol (sorgu soluk), host, kaynak, boyut, süre (yavaşlar sarı/kırmızı),
-  GraphQL işlemi, mock ve hata etiketi ("DNS çözümlenemedi" gibi). Metot ve
+  metot, yol (sorgu soluk), başlama saati (`SS:dd:ss`), host, kaynak, boyut,
+  süre (yavaşlar sarı/kırmızı), GraphQL işlemi, mock ve hata etiketi ("DNS
+  çözümlenemedi" gibi). Metot ve
   durum düğmeleri, *Sadece hatalar · Yavaş ≥ 1 sn · Mock'lananlar*, host seçimi,
   `status:4xx method:post host:api is:slow` sorguları ve gövdelerde arama.
   Ayrıntıda Genel / İstek / Yanıt / Zamanlama sekmeleri; gövde için aranabilir
@@ -128,21 +129,23 @@ renkleri, açık/koyu tema) ve sekmelerini taşır:
   ekibin Dürbün olmadan okuyabileceği bir rapora çevirir (URL, durum, iz
   kimlikleri, başlıklar, gövdeler, cURL; gizli değerler varsayılan olarak
   `••••`) ve sistem paylaşım sayfasını açar ya da panoya kopyalar. Masaüstü
-  aynı raporu üretir. **Sırala** düğmesi (arama kutusunun yanında): geliş
-  sırası (varsayılan: en yenisi altta, liste yeni istekleri izler), en yeni
-  üstte, en yavaş önce, en büyük yanıt önce, hatalar önce. Sıralı listede de
+  aynı raporu üretir. **Sırala** düğmesi (arama kutusunun yanında): en yeni
+  üstte (varsayılan), geliş sırası (en yenisi altta, liste yeni istekleri
+  izler), en yavaş önce, en büyük yanıt önce, hatalar önce. Sıralı listede
   aşağı kaydırınca okunan satırlar yerinde durur; yeni istekler üstte "↑ N
   yeni" ile bekler.
-- **Mock'lar:** masaüstünden gelen kurallar ve kaç kez uygulandıkları.
+- **Mock'lar:** masaüstünden gelen kurallar ve kaç kez uygulandıkları. Kurallar
+  bağlantıyla bittiği için Araçlar'da yalnızca masaüstü bağlıyken görünür.
 - **Performans:** FPS, takılan kare, build/raster, bellek, heap, CPU kutucukları;
   FPS, kare süresi ve bellek grafikleri.
 - **Cihaz:** uygulama, cihaz, yakalanan katmanlar (Dart / Kotlin / Swift),
   masaüstü bağlantısı ve "Neler görünüyor?": her veri kaynağının açık olup
   olmadığı ve değilse nedeni.
-- **İstatistik** (Araçlar): istek sayısı; başarılı, 4xx, 5xx, bağlantı
-  hatası (zaman aşımları dahil) ve bekleyenler; ortalama, ortanca (p50), p95
-  ve en uzun süre; gönderilen ve alınan gövde boyutları; en çok istek alan 10
-  host ve metotlar. Gövdeler açılmaz; sayfa saniyede en fazla bir kez
+- **İstatistik** (Araçlar), kaydırılabilir sekmeler: *Özet* (istek sayısı;
+  başarılı, 4xx, 5xx, bağlantı hatası (zaman aşımları dahil), bekleyenler ve
+  metotlar), *Süre* (ortalama, ortanca (p50), p95, en uzun), *Veri*
+  (gönderilen ve alınan gövde boyutları), *Hostlar* (en çok istek alan 10
+  host). Gövdeler açılmaz; sayfa saniyede en fazla bir kez
   yenilenir. Ağ listesi filtreliyse *Listedekiler / Tümü* seçilebilir.
 - **Oturumu dışa aktar** (Araçlar): Ağ listesindeki istekler (filtre, arama ve
   sıra uygulanmış) ya da hepsi, **Rapor (.md)** (özet tablo ve her isteğin

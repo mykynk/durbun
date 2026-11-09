@@ -44,12 +44,17 @@ String formatDuration(Duration? d) {
 }
 
 /// `HH:mm:ss.SSS` in local time.
-String formatClock(double epochMs) {
-  final t = DateTime.fromMicrosecondsSinceEpoch((epochMs * 1000).round());
+String formatClock(double epochMs) =>
+    '${formatTimeOfDay(epochMs)}.${_local(epochMs).millisecond.toString().padLeft(3, '0')}';
+
+/// `HH:mm:ss` in local time (the Network list's rows).
+String formatTimeOfDay(double epochMs) {
+  final t = _local(epochMs);
   String two(int v) => v.toString().padLeft(2, '0');
-  return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}.'
-      '${t.millisecond.toString().padLeft(3, '0')}';
+  return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
 }
+
+DateTime _local(double epochMs) => DateTime.fromMicrosecondsSinceEpoch((epochMs * 1000).round());
 
 const JsonEncoder _pretty = JsonEncoder.withIndent('  ');
 

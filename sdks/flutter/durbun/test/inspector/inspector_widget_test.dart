@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:durbun/durbun.dart';
@@ -10,6 +11,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../support/fake_desktop.dart';
 
 PendingBody pending(String text) {
   final bytes = Uint8List.fromList(utf8.encode(text));
@@ -217,12 +220,51 @@ void main() {
     await tester.tap(find.byTooltip('Araçlar').first);
     await tester.pumpAndSettle();
     expect(find.text('Yalnızca telefonda'), findsOneWidget);
-    expect(find.text('Kural yok'), findsOneWidget);
+    expect(find.text('Mock’lar'), findsNothing, reason: 'mock rules come only from a connected desktop');
+    expect(find.textContaining('salla'), findsNothing, reason: 'no shake hint');
     await tester.tap(find.text('Cihaz ve SDK'));
     await tester.pumpAndSettle();
     expect(find.text('Örnek'), findsOneWidget);
     expect(find.text('Kotlin'), findsOneWidget);
     expect(find.text('Neler görünüyor?'), findsOneWidget);
   });
+
+  testWidgets('Mocks is in the tools while the desktop is connected, and leaves when it drops', (tester) async {
+    await phone(tester);
+    late FakeDesktop desktop;
+    await tester.runAsync(() async {
+      desktop = await FakeDesktop.start(appId: 'app:mocks');
+      await Durbun.init(DurbunOptions(
+          enabled: true, port: desktop.port, listenForUsb: false, useBackgroundIsolate: false, metrics: false, captureNetwork: false));
+      await desktop.nextConnection();
+      await _eventually(() => Durbun.isConnected);
+    });
+    await tester.pumpWidget(app(filledStore()));
+    Durbun.showInspector();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Tools').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Mocks'), findsOneWidget);
+    expect(find.text('No rules'), findsOneWidget);
+
+    await tester.runAsync(() async {
+      await desktop.close();
+      await _eventually(() => !Durbun.isConnected);
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Mocks'), findsNothing);
+    expect(find.text('Performance'), findsOneWidget, reason: 'the other tools stay');
+
+    await tester.runAsync(Durbun.dispose);
+    // The panel store batches its listeners behind a short timer: drain it.
+    await tester.pump(const Duration(milliseconds: 250));
+  });
 }
 
+Future<void> _eventually(bool Function() condition, {Duration timeout = const Duration(seconds: 10)}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) throw TimeoutException('condition not met');
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+}

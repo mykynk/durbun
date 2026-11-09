@@ -4,6 +4,7 @@ import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/body.dart' show wireBodyFromPending;
 import 'package:durbun/src/core/protocol.dart';
 import 'package:durbun/src/inspector/filter_ui.dart' show ActiveChip;
+import 'package:durbun/src/inspector/format.dart' show formatTimeOfDay;
 import 'package:durbun/src/inspector/network_model.dart';
 import 'package:durbun/src/inspector/stats.dart';
 import 'package:durbun/src/inspector/store.dart';
@@ -166,13 +167,18 @@ void main() {
       final s = _mixed();
       await _open(tester, s);
       const all = ['/alpha', '/bravo', '/charlie', '/delta', '/echo', '/foxtrot', '/golf'];
-      expect(_onScreen(tester, all), all, reason: 'arrival: oldest on top');
+      final newest = all.reversed.toList();
+      expect(_onScreen(tester, all), newest, reason: 'the default: newest on top');
+      expect(find.byType(ActiveChip), findsNothing, reason: 'the default order is not shown as a chip');
+      expect(find.text('${formatTimeOfDay(1000)}  api.example.com'), findsOneWidget, reason: 'each row says when it started');
 
       await tester.tap(find.byTooltip('Sort').first);
       await tester.pumpAndSettle();
-      for (final name in ['Arrival order', 'Newest on top', 'Slowest first', 'Largest response first', 'Errors first']) {
+      for (final name in ['Newest on top', 'Arrival order', 'Slowest first', 'Largest response first', 'Errors first']) {
         expect(find.text(name), findsOneWidget);
       }
+      expect(tester.getTopLeft(find.text('Newest on top')).dy, lessThan(tester.getTopLeft(find.text('Arrival order')).dy),
+          reason: 'the default first');
       await tester.tap(find.text('Errors first'));
       await tester.pumpAndSettle();
       expect(_onScreen(tester, all), ['/golf', '/charlie', '/bravo', '/echo', '/delta', '/alpha', '/foxtrot']);
@@ -193,10 +199,14 @@ void main() {
       await _sortBy(tester, 'Largest response first');
       expect(_onScreen(tester, all).take(3), ['/bravo', '/alpha', '/echo']);
 
-      // The chip's × goes back to arrival.
+      // Arrival order: oldest on top.
+      await _sortBy(tester, 'Arrival order');
+      expect(_onScreen(tester, all), all);
+
+      // The chip's × goes back to the default.
       await tester.tap(find.byType(ActiveChip).first);
       await tester.pumpAndSettle();
-      expect(_onScreen(tester, all), all);
+      expect(_onScreen(tester, all), newest);
       expect(find.byType(ActiveChip), findsNothing);
     });
 
@@ -238,7 +248,9 @@ void main() {
         _call(s, '$i', '/r$i/', ts: 1000.0 + i, status: 200, ms: 1);
       }
       await _open(tester, s);
+      await _sortBy(tester, 'Arrival order');
       expect(find.textContaining('/r39/').hitTestable(), findsOneWidget);
+      expect(find.textContaining('/r0/').hitTestable(), findsNothing, reason: 'the oldest scrolled away above');
       _call(s, '40', '/r40/', ts: 2000, status: 200, ms: 1);
       await tester.pumpAndSettle();
       expect(find.textContaining('/r40/').hitTestable(), findsOneWidget);
@@ -255,11 +267,40 @@ void main() {
       await tester.tap(find.text('Statistics'));
       await tester.pumpAndSettle();
       expect(find.text('Statistics'), findsOneWidget);
-      for (final label in ['Successful', 'Client errors (4xx)', 'Server errors (5xx)', 'Transport errors', 'Pending', 'Median (p50)', 'p95']) {
+      for (final tab in ['Summary', 'Duration', 'Data', 'Hosts']) {
+        expect(find.byTooltip(tab), findsOneWidget, reason: 'tab $tab');
+      }
+      for (final label in ['Successful', 'Client errors (4xx)', 'Server errors (5xx)', 'Transport errors', 'Pending', 'Methods']) {
         expect(find.text(label), findsOneWidget, reason: label);
       }
+      expect(find.text('Median (p50)').hitTestable(), findsNothing, reason: 'on the Duration tab');
+
+      await tester.tap(find.byTooltip('Duration'));
+      await tester.pumpAndSettle();
+      for (final label in ['Average', 'Median (p50)', 'p95', 'Longest']) {
+        expect(find.text(label).hitTestable(), findsOneWidget, reason: label);
+      }
+      // A swipe moves to the next tab.
+      await tester.fling(find.byType(TabBarView).last, const Offset(-200, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(find.text('Received').hitTestable(), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Hosts'));
+      await tester.pumpAndSettle();
       expect(find.text('Top 2 hosts'), findsOneWidget);
       expect(find.textContaining('api.example.com'), findsWidgets);
+
+      // Back and opened again: the tab read last.
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Tools').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Statistics'));
+      await tester.pumpAndSettle();
+      expect(find.text('Top 2 hosts').hitTestable(), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Summary'));
+      await tester.pumpAndSettle();
 
       _call(s, 'h', '/hotel', ts: 7000, status: 503, ms: 10);
       await tester.pump(const Duration(milliseconds: 1100));

@@ -66,7 +66,8 @@ void main() {
         await tester.tap(row);
         await tester.pumpAndSettle();
       }
-      for (final tool in ['Mocks', 'Performance', 'Statistics', 'Device & SDK']) {
+      // Mocks is listed only while the desktop is connected.
+      for (final tool in ['Performance', 'Statistics', 'Device & SDK']) {
         await tester.tap(find.byTooltip('Tools').first);
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text(tool));
