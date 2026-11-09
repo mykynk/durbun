@@ -33,14 +33,48 @@ class NetworkView extends StatefulWidget {
   State<NetworkView> createState() => _NetworkViewState();
 }
 
-/// What the Network page keeps for one store (one app run): its filters and
-/// search, so closing and opening the panel does not lose them.
+/// What the Network page keeps for one store (one app run): its filters,
+/// search and order, so closing and opening the panel does not lose them.
 class _NetworkMemory {
   final NetFilters filters = NetFilters();
   String query = '';
+  NetSort sort = NetSort.arrival;
 }
 
 final Expando<_NetworkMemory> _networkMemories = Expando<_NetworkMemory>('durbun.network');
+
+/// The requests the Network list shows for a store now, in its order.
+class NetworkListing {
+  const NetworkListing({required this.calls, required this.total, required this.sort});
+
+  /// In the list's order ([sort]; oldest first in arrival order).
+  final List<InspectorCall> calls;
+
+  /// Requests in the store, listed or not.
+  final int total;
+  final NetSort sort;
+
+  /// Filters, the search or the default host list leave requests out.
+  bool get narrowed => calls.length != total;
+}
+
+/// What the Network list of [store] shows now (its filters, search and
+/// order, as last set on the page): the session export and the statistics
+/// read it. Default filters when the page was never opened.
+NetworkListing networkListing(DurbunInspectorStore store) {
+  final memory = _networkMemories[store];
+  final filters = memory?.filters ?? NetFilters();
+  final clauses = parseQuery(memory?.query ?? '');
+  final all = store.calls;
+  final shown = <InspectorCall>[
+    for (final c in all)
+      if (callMatchesFilters(c, filters, isDefaultHost: store.isDefaultHost) &&
+          callMatchesQuery(c, clauses, bodies: filters.searchBodies))
+        c,
+  ];
+  final sort = memory?.sort ?? NetSort.arrival;
+  return NetworkListing(calls: sortCalls(shown, sort), total: all.length, sort: sort);
+}
 
 /// A call's last match result and the revision it was for.
 typedef _Hit = (int revision, bool hit);
@@ -104,6 +138,51 @@ class _NetworkViewState extends State<NetworkView> {
       _filters.reset();
       _clauses = const <QueryClause>[];
     });
+  }
+
+  void _setSort(NetSort sort) => setState(() => _memory.sort = sort);
+
+  /// The orders, each with what it puts on top; the current one ticked.
+  void _openSort() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: DurbunColors.of(context).bgPanel,
+      builder: (routeContext) => DurbunTheme.wrap(
+        routeContext,
+        Builder(builder: (sheet) {
+          final c = DurbunColors.of(sheet);
+          final t = InspectorStrings.of(sheet);
+          return ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.8),
+            child: ListView(
+              shrinkWrap: true,
+              padding: EdgeInsets.only(bottom: 12 + MediaQuery.paddingOf(sheet).bottom),
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(t.sortTitle,
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3, color: c.text)),
+                ),
+                for (final s in NetSort.values)
+                  _SortRow(
+                    label: t.sortName(s),
+                    hint: t.sortHint(s),
+                    selected: s == _memory.sort,
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      _setSort(s);
+                    },
+                  ),
+              ],
+            ),
+          );
+        }),
+      ),
+    );
   }
 
   /// Ticks every host outside the default list.
@@ -214,8 +293,11 @@ class _NetworkViewState extends State<NetworkView> {
         if (!f.statuses.contains(st)) DToggle(label: st, mono: true, color: _statusColor(c, st), selected: false, onTap: () => setState(() => f.statuses.add(st))),
     ];
     final otherHosts = _otherHosts();
+    final sort = _memory.sort;
     return <Widget>[
       FilterButton(count: f.activeCount, onTap: () => _openFilters(hosts)),
+      // The order is not a filter, but it is kept in view the same way.
+      if (sort != NetSort.arrival) ActiveChip(label: t.sortName(sort), onRemove: () => _setSort(NetSort.arrival)),
       // Says that requests are left out by the host list, and opens it.
       if (otherHosts > 0) DToggle(label: t.otherHostsHidden(otherHosts), icon: Icons.visibility_off_outlined, selected: false, onTap: () => _openFilters(hosts)),
       ...active,
@@ -266,7 +348,8 @@ class _NetworkViewState extends State<NetworkView> {
       builder: (context) {
         _syncHits();
         final all = widget.store.calls;
-        final shown = all.where(_matches).toList();
+        final sort = _memory.sort;
+        final shown = sortCalls(all.where(_matches).toList(), sort);
         final hosts = (<String>{for (final x in all) hostOf(x)}..remove('')).toList()..sort();
         final terms = freeTerms(_clauses);
         // Only the filters the user set (the default host list is not one).
@@ -294,12 +377,21 @@ class _NetworkViewState extends State<NetworkView> {
                   ],
                   const SizedBox(width: 4),
                   DIconButton(
-                    icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                    tooltip: _paused ? t.resume : t.pause,
-                    active: _paused,
-                    size: 40,
-                    onTap: () => setState(() => _paused = !_paused),
+                    icon: Icons.sort_rounded,
+                    tooltip: sort == NetSort.arrival ? t.sortTitle : '${t.sortTitle}: ${t.sortName(sort)}',
+                    active: sort != NetSort.arrival,
+                    size: kMinTapTarget,
+                    onTap: _openSort,
                   ),
+                  // A saved run does not change: nothing to pause.
+                  if (!widget.store.readOnly)
+                    DIconButton(
+                      icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                      tooltip: _paused ? t.resume : t.pause,
+                      active: _paused,
+                      size: kMinTapTarget,
+                      onTap: () => setState(() => _paused = !_paused),
+                    ),
                 ],
               ),
             ),
@@ -313,15 +405,17 @@ class _NetworkViewState extends State<NetworkView> {
                       keyOf: (x) => x.key,
                       seqOf: (x) => x.seq,
                       paused: _paused,
-                      filterKey: '${_filters.signature}#${_search.text}',
+                      // A new order goes back to its top (or the live end).
+                      filterKey: '${_filters.signature}#${_search.text}#${sort.name}',
                       epoch: widget.store.clears,
+                      fromTop: sort != NetSort.arrival,
                       newText: t.newItems,
                       itemBuilder: (context, call) => CallRow(
                           call: call,
                           store: widget.store,
                           terms: terms,
                           bodyQuery: _filters.searchBodies && terms.isNotEmpty ? terms.first : null,
-                          siblings: () => widget.store.calls.where(_matches).toList()),
+                          siblings: () => sortCalls(widget.store.calls.where(_matches).toList(), sort)),
                     ),
             ),
             if (widget.store.droppedCalls > 0)
@@ -334,6 +428,54 @@ class _NetworkViewState extends State<NetworkView> {
           ],
         );
       },
+    );
+  }
+}
+
+/// One order in the sort sheet: its name, what it puts on top, a tick.
+class _SortRow extends StatelessWidget {
+  const _SortRow({required this.label, required this.hint, required this.selected, required this.onTap});
+
+  final String label;
+  final String hint;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 52),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(label,
+                          style: TextStyle(
+                              fontSize: 14.5, fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: c.text)),
+                      Text(hint, style: TextStyle(fontSize: 11.5, color: c.textMeta)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 24,
+                  child: selected ? Icon(Icons.check_rounded, size: 20, color: c.accent) : null,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -813,7 +955,8 @@ class _CallDetailPageState extends State<CallDetailPage> {
         final k = call.key;
         // Narrow phones: Replay goes into the menu so the title keeps room.
         // Share stays in the bar; on phones Replay moves into the menu.
-        final replayInMenu = canReplay && mq.size.width < 420;
+        // A saved run's request is not sent again (its secrets are masked).
+        final replayInMenu = canReplay && !widget.store.readOnly && mq.size.width < 420;
         return Scaffold(
           backgroundColor: c.bgPanel,
           appBar: AppBar(
@@ -879,7 +1022,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
                   tooltip: t.share,
                   size: kMinTapTarget,
                   onTap: () => unawaited(showShareSheet(context, call, widget.store))),
-              if (canReplay && !replayInMenu)
+              if (canReplay && !replayInMenu && !widget.store.readOnly)
                 _replaying
                     ? const SizedBox(
                         width: kMinTapTarget,

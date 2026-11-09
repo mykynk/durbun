@@ -7,6 +7,13 @@
 /// applies to what is shown. Rows the store's ring drops from the top while
 /// the list is frozen stay until it follows again, so the row being read
 /// does not slide away.
+///
+/// A sorted list ([LiveList.fromTop]: newest on top, slowest, largest, by
+/// status) follows its top instead. New requests and requests that finish
+/// would move rows anywhere in it, so a frozen sorted list keeps a copy of
+/// the order it showed: rows stay where they were (an evicted or changed
+/// request too) and new ones wait behind a "↑ N new" pill that sorts again
+/// and goes to the top. Scrolling back to the top follows again.
 library;
 
 import 'package:flutter/material.dart';
@@ -24,7 +31,8 @@ class LiveList<T> extends StatefulWidget {
       required this.newText,
       this.paused = false,
       this.filterKey,
-      this.epoch});
+      this.epoch,
+      this.fromTop = false});
 
   /// Oldest first.
   final List<T> items;
@@ -45,6 +53,10 @@ class LiveList<T> extends StatefulWidget {
   /// Changes when the source is cleared: rows kept from before are let go.
   final Object? epoch;
 
+  /// [items] are sorted, first on top (not arrival order): the list follows
+  /// the top and a frozen list keeps its order (see the library comment).
+  final bool fromTop;
+
   @override
   State<LiveList<T>> createState() => _LiveListState<T>();
 }
@@ -61,6 +73,9 @@ class _LiveListState<T> extends State<LiveList<T>> {
   List<T> _retained = <T>[];
   List<T> _lastShown = <T>[];
   static const int _maxRetained = 5000;
+
+  /// [LiveList.fromTop]: the order shown when the list froze.
+  List<T>? _frozenOrder;
 
   bool get _following => _cutoff == null && !widget.paused;
 
@@ -86,8 +101,33 @@ class _LiveListState<T> extends State<LiveList<T>> {
     if (widget.paused && _cutoff == null) _cutoff = _newest(old.items);
     if (!widget.paused && old.paused && _atEnd()) _cutoff = null;
     if (widget.filterKey != old.filterKey && !widget.paused) _cutoff = null;
-    _retainEvicted(old);
+    if (widget.fromTop != old.fromTop) {
+      _retained = <T>[];
+      _frozenOrder = null;
+    }
+    if (widget.fromTop) {
+      _keepOrder(old);
+    } else {
+      _retainEvicted(old);
+    }
     if (_following) _scheduleJump();
+  }
+
+  /// [LiveList.fromTop]: takes the order shown when the list freezes; a
+  /// filter, search or order changed while paused (or a clear) takes it
+  /// again from the new items, up to the cut point.
+  void _keepOrder(LiveList<T> old) {
+    final cut = _cutoff;
+    if (cut == null) {
+      _frozenOrder = null;
+    } else if (_frozenOrder == null && widget.fromTop == old.fromTop) {
+      _frozenOrder = List<T>.of(_lastShown);
+    } else if (_frozenOrder == null || widget.filterKey != old.filterKey || widget.epoch != old.epoch) {
+      _frozenOrder = <T>[
+        for (final x in widget.items)
+          if (widget.seqOf(x) <= cut) x
+      ];
+    }
   }
 
   /// Keeps the rows shown last that are gone from the top of the new items.
@@ -112,20 +152,28 @@ class _LiveListState<T> extends State<LiveList<T>> {
     super.dispose();
   }
 
-  bool _atEnd() =>
-      !_scroll.hasClients ||
-      _scroll.position.maxScrollExtent - _scroll.offset < 40;
+  /// How far the view is from the end the list follows (the bottom, or the
+  /// top of a sorted list).
+  double _fromAnchor() => widget.fromTop
+      ? _scroll.offset - _scroll.position.minScrollExtent
+      : _scroll.position.maxScrollExtent - _scroll.offset;
+
+  bool _atEnd() => !_scroll.hasClients || _fromAnchor() < 40;
 
   void _onScroll() {
     if (!_scroll.hasClients) return;
     if (_cutoff == null &&
         !_atEnd() &&
         _scroll.position.userScrollDirection != ScrollDirection.idle) {
-      setState(() => _cutoff = _newest(widget.items));
-    } else if (_cutoff != null &&
-        !widget.paused &&
-        _scroll.position.maxScrollExtent - _scroll.offset < 4) {
-      setState(() => _cutoff = null);
+      setState(() {
+        _cutoff = _newest(widget.items);
+        if (widget.fromTop) _frozenOrder = List<T>.of(_lastShown);
+      });
+    } else if (_cutoff != null && !widget.paused && _fromAnchor() < 4) {
+      setState(() {
+        _cutoff = null;
+        _frozenOrder = null;
+      });
     }
   }
 
@@ -135,13 +183,18 @@ class _LiveListState<T> extends State<LiveList<T>> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _jumpScheduled = false;
       if (!mounted || !_following || !_scroll.hasClients) return;
-      final max = _scroll.position.maxScrollExtent;
-      if (_scroll.offset != max) _scroll.jumpTo(max);
+      final end = widget.fromTop
+          ? _scroll.position.minScrollExtent
+          : _scroll.position.maxScrollExtent;
+      if (_scroll.offset != end) _scroll.jumpTo(end);
     });
   }
 
   void _resume() {
-    setState(() => _cutoff = null);
+    setState(() {
+      _cutoff = null;
+      _frozenOrder = null;
+    });
     _scheduleJump();
   }
 
@@ -149,15 +202,26 @@ class _LiveListState<T> extends State<LiveList<T>> {
   Widget build(BuildContext context) {
     final cut = _cutoff;
     if (_following) _retained = <T>[];
-    final live = cut == null
-        ? widget.items
-        : <T>[
-            for (final x in widget.items)
-              if (widget.seqOf(x) <= cut) x
-          ];
-    final shown = _retained.isEmpty ? live : <T>[..._retained, ...live];
+    final List<T> shown;
+    final int fresh;
+    final frozen = cut == null ? null : _frozenOrder;
+    if (widget.fromTop && frozen != null) {
+      // The order shown when it froze; what is not in it waits.
+      shown = frozen;
+      final kept = <Object>{for (final x in frozen) widget.keyOf(x)};
+      fresh = widget.items.where((x) => !kept.contains(widget.keyOf(x))).length;
+    } else {
+      final live = cut == null
+          ? widget.items
+          : <T>[
+              for (final x in widget.items)
+                if (widget.seqOf(x) <= cut) x
+            ];
+      shown = _retained.isEmpty ? live : <T>[..._retained, ...live];
+      fresh = widget.items.length - live.length;
+    }
     _lastShown = shown;
-    final fresh = widget.items.length - live.length;
+    final pillAt = MediaQuery.paddingOf(context).bottom + 14;
     return Stack(
       children: <Widget>[
         ListView.builder(
@@ -171,11 +235,15 @@ class _LiveListState<T> extends State<LiveList<T>> {
         ),
         if (fresh > 0 && !widget.paused)
           Positioned(
-            bottom: MediaQuery.paddingOf(context).bottom + 14,
+            top: widget.fromTop ? 10 : null,
+            bottom: widget.fromTop ? null : pillAt,
             left: 0,
             right: 0,
             child: Center(
-                child: NewItemsPill(text: widget.newText(fresh), onTap: _resume)),
+                child: NewItemsPill(
+                    text: widget.newText(fresh),
+                    up: widget.fromTop,
+                    onTap: _resume)),
           ),
       ],
     );

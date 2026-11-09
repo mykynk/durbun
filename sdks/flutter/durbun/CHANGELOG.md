@@ -140,6 +140,27 @@
 - A native `Durbun.start()` does nothing in Flutter apps: the plugin starts the
   native layer from Dart, so no second session opens and `DURBUN=false` keeps
   it off.
+- In-app panel, new:
+  - **Export session** (Tools): the listed requests (filters, search and order
+    applied) or all of them as a Markdown report or a HAR 1.2 file, masked by
+    default (the Share rules), bodies optional. Written in short slices (the panel keeps drawing) to
+    `<cache>/durbun-export` and shared as a file (new native `shareFile` and
+    `cacheDir` methods; Android: a read-only, unexported
+    `DurbunExportProvider`, `${applicationId}.durbun.files`, no androidx;
+    iOS: `UIActivityViewController` with the file). Exports older than a day
+    are deleted; without a share sheet an export under 512 KB is copied.
+  - Network list **sort**: arrival (default, unchanged), newest on top,
+    slowest, largest response, errors first; kept per store. A sorted list
+    scrolled down holds still and shows "↑ N new" on top.
+  - **Statistics** (Tools): status totals, timeouts, pending, average / p50 /
+    p95 / longest, bytes sent and received, top 10 hosts, methods; live,
+    at most once a second, no body decoding.
+  - **Previous run**, opt-in: `DurbunInspector(keepPreviousRun: true)` keeps
+    the last launch's requests (headers, bodies up to 16 KB) and logs, masked,
+    in `<cache>/durbun-run` (JSONL, written at most once a second, a crash at
+    once, rotated at 4 MB, last run only) and opens them read-only from Tools,
+    crash first. Off by default; a no-op on the web.
+  - GraphQL labels read the request body without keeping a decoded copy.
 
 ## 0.1.0
 

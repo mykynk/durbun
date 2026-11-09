@@ -10,6 +10,8 @@ import 'package:flutter/services.dart';
 
 import 'format.dart';
 import 'panel.dart';
+import 'run_file.dart';
+import 'run_log.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
@@ -46,6 +48,7 @@ class DurbunInspector extends StatefulWidget {
     this.maxRequests = DurbunInspectorStore.kDefaultMaxCalls,
     this.maxLogs = DurbunInspectorStore.kDefaultMaxLogs,
     this.maxBodyBytes = DurbunInspectorStore.kDefaultMaxBodyBytes,
+    this.keepPreviousRun = false,
   });
 
   /// For `MaterialApp.builder` / `CupertinoApp.builder`.
@@ -90,6 +93,16 @@ class DurbunInspector extends StatefulWidget {
   /// 24 MB). Past it the oldest bodies are dropped (other hosts' first);
   /// their requests stay in the list.
   final int maxBodyBytes;
+
+  /// Keeps this run's requests, logs and crashes in a file in the app's
+  /// cache directory, so the next launch shows them under Tools → Previous
+  /// run: what happened before a crash, after the app restarts. Off by
+  /// default. Requests are masked like a session export (Authorization,
+  /// cookies, token and password fields); each body keeps its first 16 KB.
+  /// Written asynchronously at most once a second (a crash at once),
+  /// at most two 4 MB files; read only when the page opens. Nothing on the
+  /// web.
+  final bool keepPreviousRun;
 
   static final ValueNotifier<int> _openRequests = ValueNotifier<int>(0);
 
@@ -146,16 +159,41 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
       store.attachedListenable.addListener(_attachedChanged);
       _watched = store;
     }
+    _syncPreviousRun();
+  }
+
+  /// Starts the previous-run log once the SDK feeds the store (it then
+  /// lives as long as the store); turning [DurbunInspector.keepPreviousRun]
+  /// off stops its writing.
+  void _syncPreviousRun() {
+    try {
+      final store = _store;
+      final journal = RunJournal.of(store);
+      if (journal != null) {
+        journal.recording = widget.keepPreviousRun;
+      } else if (widget.keepPreviousRun && _enabled) {
+        startRunJournal(store);
+      }
+    } catch (_) {
+      // The log is a convenience: the app never sees its errors.
+    }
   }
 
   void _attachedChanged() {
     if (!mounted) return;
     setState(() {});
     _syncShake();
+    _syncPreviousRun();
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) => _syncShake(state);
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _syncShake(state);
+    // The process may be killed in the background: what is waiting goes now.
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden || state == AppLifecycleState.detached) {
+      RunJournal.of(_store)?.flushNow();
+    }
+  }
 
   @override
   void dispose() {

@@ -240,6 +240,61 @@ bool callMatchesFilters(InspectorCall c, NetFilters f, {bool Function(String hos
   return true;
 }
 
+/* ───────────────────────────── order ───────────────────────────── */
+
+/// Orders of the Network list. [arrival] is the order it has always had:
+/// oldest at the top, newest at the bottom, where the list follows new
+/// requests. The others put their first request at the top.
+enum NetSort { arrival, newest, slowest, largest, status }
+
+/// [calls] (oldest first, as the store keeps them) in the order of [sort].
+/// A pending request counts as slow as it has waited until [nowMs] (a hung
+/// request is the slowest one); a request without a response size counts
+/// as the smallest. Ties go newest first. [arrival] returns [calls] itself.
+List<InspectorCall> sortCalls(List<InspectorCall> calls, NetSort sort, {double? nowMs}) {
+  if (sort == NetSort.arrival) return calls;
+  final now = nowMs ?? DateTime.now().microsecondsSinceEpoch / 1000;
+  double elapsed(InspectorCall c) => (c.endTs ?? now) - c.ts;
+  int newer(InspectorCall a, InspectorCall b) => b.seq.compareTo(a.seq);
+  final out = List<InspectorCall>.of(calls);
+  switch (sort) {
+    case NetSort.arrival:
+      break;
+    case NetSort.newest:
+      out.sort(newer);
+    case NetSort.slowest:
+      out.sort((a, b) {
+        final d = elapsed(b).compareTo(elapsed(a));
+        return d != 0 ? d : newer(a, b);
+      });
+    case NetSort.largest:
+      out.sort((a, b) {
+        final d = (b.responseSize ?? -1).compareTo(a.responseSize ?? -1);
+        return d != 0 ? d : newer(a, b);
+      });
+    case NetSort.status:
+      out.sort((a, b) {
+        final r = statusRank(a).compareTo(statusRank(b));
+        if (r != 0) return r;
+        final s = (a.status ?? 0).compareTo(b.status ?? 0);
+        return s != 0 ? s : newer(a, b);
+      });
+  }
+  return out;
+}
+
+/// Errors first: transport error 0, 5xx 1, 4xx 2, pending 3, 3xx 4,
+/// 1xx / 2xx 5, cancelled 6.
+int statusRank(InspectorCall c) {
+  if (c.error != null) return c.cancelled ? 6 : 0;
+  final s = c.status;
+  if (s == null) return 3;
+  if (s >= 500) return 1;
+  if (s >= 400) return 2;
+  if (s >= 300) return 4;
+  return 5;
+}
+
 /* ───────────────────────────── errors ───────────────────────────── */
 
 /// timeout · dns · refused · tls · reset · offline · cancelled · generic
@@ -361,7 +416,9 @@ String? _graphql(InspectorCall c) {
       if (p[0] == 'operationName') name ??= p[1];
     }
   } else {
-    final body = c.requestBody;
+    // Peeked: the label is cached, and an export reading every call's label
+    // should not keep every request body decoded.
+    final body = c.peekRequestBody();
     if (body == null || !body.isText || body.data.isEmpty) return null;
     if (ct.contains('application/graphql')) {
       query = body.data;

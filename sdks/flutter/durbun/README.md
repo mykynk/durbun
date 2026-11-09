@@ -128,13 +128,41 @@ renkleri, açık/koyu tema) ve sekmelerini taşır:
   ekibin Dürbün olmadan okuyabileceği bir rapora çevirir (URL, durum, iz
   kimlikleri, başlıklar, gövdeler, cURL; gizli değerler varsayılan olarak
   `••••`) ve sistem paylaşım sayfasını açar ya da panoya kopyalar. Masaüstü
-  aynı raporu üretir.
+  aynı raporu üretir. **Sırala** düğmesi (arama kutusunun yanında): geliş
+  sırası (varsayılan: en yenisi altta, liste yeni istekleri izler), en yeni
+  üstte, en yavaş önce, en büyük yanıt önce, hatalar önce. Sıralı listede de
+  aşağı kaydırınca okunan satırlar yerinde durur; yeni istekler üstte "↑ N
+  yeni" ile bekler.
 - **Mock'lar:** masaüstünden gelen kurallar ve kaç kez uygulandıkları.
 - **Performans:** FPS, takılan kare, build/raster, bellek, heap, CPU kutucukları;
   FPS, kare süresi ve bellek grafikleri.
 - **Cihaz:** uygulama, cihaz, yakalanan katmanlar (Dart / Kotlin / Swift),
   masaüstü bağlantısı ve "Neler görünüyor?": her veri kaynağının açık olup
   olmadığı ve değilse nedeni.
+- **İstatistik** (Araçlar): istek sayısı; başarılı, 4xx, 5xx, bağlantı
+  hatası (zaman aşımları dahil) ve bekleyenler; ortalama, ortanca (p50), p95
+  ve en uzun süre; gönderilen ve alınan gövde boyutları; en çok istek alan 10
+  host ve metotlar. Gövdeler açılmaz; sayfa saniyede en fazla bir kez
+  yenilenir. Ağ listesi filtreliyse *Listedekiler / Tümü* seçilebilir.
+- **Oturumu dışa aktar** (Araçlar): Ağ listesindeki istekler (filtre, arama ve
+  sıra uygulanmış) ya da hepsi, **Rapor (.md)** (özet tablo ve her isteğin
+  ayrıntısı; Slack, Jira, e-posta) ya da **HAR 1.2** (Chrome DevTools,
+  Charles, Proxyman) olarak. Gizli değerler Paylaş'taki kurallarla `••••`
+  olur; maskeleme ve gövdeler ayrı ayrı kapatılabilir. Dosya uygulamanın
+  önbellek klasörüne (`durbun-export`) arka planda yazılır ve sistem paylaşım
+  sayfasıyla dosya olarak gönderilir; bir günden eski dışa aktarımlar sonraki
+  dışa aktarımda silinir. Paylaşım açılamazsa 512 KB'tan küçük bir dışa
+  aktarım panoya kopyalanır.
+- **Önceki çalıştırma** (isteğe bağlı, varsayılan kapalı):
+  `DurbunInspector(keepPreviousRun: true, child: child!)` verilince istekler
+  (başlıklar ve gövdelerin ilk 16 KB'ı) ile loglar dışa aktarımdaki gibi
+  maskelenerek uygulamanın önbellek klasörüne (`durbun-run`) saniyede en fazla
+  bir kez yazılır; çökme hemen yazılır. Sonraki açılışta Araçlar'da **Önceki
+  çalıştırma** belirir: o çalıştırmanın Ağ ve Log sekmeleri salt okunur
+  açılır, çöktüyse üstte yazar ve çökme tek dokunuşla açılır. Yalnızca son
+  çalıştırma tutulur (en fazla 2 × 4 MB). Dosya hataları uygulamaya yansımaz,
+  açılışı geciktirmez (dosya sayfa açılınca okunur); web'de hiçbir şey
+  yazılmaz.
 
 Panel, masaüstünün aldığı mesajların aynısını gösterir. Masaüstü bağlıyken
 ikisi birlikte çalışır. Uygulamanın kendi native logları (Android logcat'i,
@@ -158,6 +186,10 @@ Sınırlar ve ayarlar:
   gerekmez).
 - SDK'yı güncelledikten sonra iOS'ta bir kez `cd ios && pod install` çalıştırın
   (plugin'e yeni dosya eklendiğinde CocoaPods projesi yenilenmeli).
+- Android'de dışa aktarılan dosyayı paylaşmak için eklenti manifestine
+  `${applicationId}.durbun.files` adlı, dışa açık olmayan, salt okunur bir
+  `ContentProvider` ekler (androidx gerekmez). Yalnızca `durbun-export`
+  klasöründeki dosyaları, paylaşım anında verilen tek seferlik izinle açar.
 - Telefonda hiçbir şey tutulmasın istiyorsanız `DurbunOptions(inspector: false)`
   verin.
 - Panelde yalnızca kendi API'lerinizin görünmesi için varsayılan hostları verin:
@@ -175,7 +207,7 @@ Sınırlar ve ayarlar:
   observer'ları (analitik, Sentry) yalnızca `/durbun`'u görür, uygulamanın
   snack bar'larına dokunulmaz. Geri tuşu önce paneldeki sayfayı, sonra paneli
   kapatır. Başka bir navigator için `DurbunInspector(navigatorKey: …)` verin.
-- Filtreler, arama ve son açılan sekme panel kapanıp açılınca korunur. Ağ
+- Filtreler, arama, sıra ve son açılan sekme panel kapanıp açılınca korunur. Ağ
   listesinde **Duraklat** yeni istekleri bekletir; yukarı kaydırılmış listede
   okunan satırlar, eski kayıtlar silinse de yerinden oynamaz. *Kayıtları
   temizle* önce onay ister. Panel açıkken sallama dinlenmez.
@@ -585,9 +617,35 @@ MaterialApp(builder: DurbunInspector.builder, home: const HomePage());
   request into a report the team can read without Dürbün (URL, status, trace
   IDs, headers, bodies, cURL; secret values masked as `••••` by default) and
   opens the system share sheet or copies it. The desktop builds the same
-  report.
+  report. **Sort** (next to search): arrival order (default: newest at the
+  bottom, the list follows new requests), newest on top, slowest first,
+  largest response first, errors first. A sorted list scrolled down holds
+  still too; new requests wait on top behind "↑ N new".
 - **Mocks** from the desktop, **Performance** tiles and charts, **Device** with
   the captured layers and what each data source needs.
+- **Statistics** (Tools): request count; successful, 4xx, 5xx, transport
+  errors (timeouts among them) and pending; average, median (p50), p95 and
+  longest duration; body bytes sent and received; the top 10 hosts and the
+  methods. Bodies are not decoded; the page refreshes at most once a second.
+  With a filtered Network list, *Listed / All* picks what it counts.
+- **Export session** (Tools): the requests the Network list shows (filters,
+  search and order applied) or all of them, as a **Report (.md)** (summary
+  table plus every request in detail; Slack, Jira, e-mail) or **HAR 1.2**
+  (Chrome DevTools, Charles, Proxyman). Secret values are masked as `••••`
+  with the Share rules; masking and bodies can each be turned off. The file is
+  written in the background to the app's cache folder (`durbun-export`) and
+  shared as a file through the system share sheet; exports older than a day
+  are deleted on the next export. If sharing does not open, an export under
+  512 KB is copied to the clipboard.
+- **Previous run** (opt-in, off by default):
+  `DurbunInspector(keepPreviousRun: true, child: child!)` writes requests
+  (headers and the first 16 KB of each body) and logs, masked like an export,
+  to the app's cache folder (`durbun-run`) at most once a second, and a crash
+  at once. On the next launch Tools shows **Previous run**: that run's Network
+  and Logs tabs, read-only; a crash is named on top and opens in one tap. Only
+  the last run is kept (at most 2 × 4 MB). File errors never reach the app and
+  startup is not delayed (the file is read when the page opens); nothing is
+  written on the web.
 
 The panel shows the same messages the desktop receives, plus the app's own
 native logs (Android logcat, iOS 15+ `os_log` / `Logger` / `NSLog`) with or
@@ -604,6 +662,10 @@ Options:
   `openOnShake: false` turns shaking off, `showBubble: true` adds a small
   Dürbün button. The accelerometer is read only while the app is in front.
 - After updating the SDK run `cd ios && pod install` once.
+- To share an export on Android the plugin's manifest adds a read-only,
+  not exported `ContentProvider`, `${applicationId}.durbun.files` (no androidx
+  needed). It serves only files in `durbun-export`, through the one-time grant
+  of the share intent.
 - `DurbunInspector(defaultHosts: ['api.example.com', '*.example.com'], …)`
   lists only your own APIs. Requests to other hosts (analytics, Firebase
   Storage …) are still captured and still reach the desktop; on the phone
@@ -617,7 +679,7 @@ Options:
   `/durbun`, and the app's snack bars are left alone. Back closes the panel's
   page first, then the panel. `DurbunInspector(navigatorKey: …)` picks another
   navigator.
-- Filters, search and the last tab are kept between opens. **Pause** holds new
+- Filters, search, the order and the last tab are kept between opens. **Pause** holds new
   requests on Network; a list scrolled up keeps the rows in view still while
   old entries are evicted. *Clear captured data* asks first. Shaking is not
   listened to while the panel is open.

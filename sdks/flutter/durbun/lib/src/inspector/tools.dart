@@ -1,12 +1,17 @@
 /// The tools sheet: the app and its desktop connection, then Mocks,
-/// Performance and Device & SDK (each a page of its own) and Clear.
+/// Performance, Statistics and Device & SDK (each a page of its own),
+/// Export session, Previous run (with `keepPreviousRun`) and Clear.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../flutter/durbun.dart' show Durbun, durbunInspectorState;
+import 'export_sheet.dart';
 import 'info_view.dart';
 import 'perf_view.dart';
+import 'previous_run_view.dart';
+import 'run_log.dart';
+import 'stats_view.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
@@ -61,11 +66,13 @@ class _ToolsSheet extends StatelessWidget {
       ));
     }
 
+    final journal = RunJournal.of(store);
     return StreamBuilder<Object?>(
       stream: Durbun.connection,
       builder: (context, _) => ListenableBuilder(
-        listenable: store,
+        listenable: Listenable.merge(<Listenable>[store, if (journal != null) journal.previous]),
         builder: (context, _) {
+          final previous = journal?.previous.value;
           final state = durbunInspectorState();
           final hello = (state?['hello'] as Map?) ?? store.hello;
           final app = hello?['app'] as Map?;
@@ -144,12 +151,49 @@ class _ToolsSheet extends StatelessWidget {
                   onTap: () => open(t.performance, PerformanceView(store: store)),
                 ),
                 _ToolRow(
+                  icon: Icons.insights_rounded,
+                  tint: c.pickOrange,
+                  label: t.statistics,
+                  value: t.requestCount(store.calls.length),
+                  onTap: () => open(t.statistics, StatsView(store: store)),
+                ),
+                _ToolRow(
                   icon: Icons.smartphone_rounded,
                   tint: c.pickBlue,
                   label: t.deviceAndSdk,
                   value: os,
                   onTap: () => open(t.deviceAndSdk, InfoView(store: store)),
                 ),
+              ]),
+              const SizedBox(height: 14),
+              _Group(children: <Widget>[
+                _ToolRow(
+                  icon: Icons.file_upload_outlined,
+                  tint: c.accent,
+                  label: t.exportSession,
+                  hint: t.exportSessionHint,
+                  onTap: () {
+                    final nav = Navigator.of(context);
+                    nav.pop();
+                    showExportSheet(nav.context, store);
+                  },
+                ),
+                if (journal != null && previous != null)
+                  _ToolRow(
+                    icon: Icons.history_rounded,
+                    tint: c.pickYellow,
+                    label: t.previousRun,
+                    hint: t.previousRunHint,
+                    value: t.spanAgo(t.spanShort(DateTime.now().difference(previous.savedAt))),
+                    onTap: () {
+                      final nav = Navigator.of(context);
+                      nav.pop();
+                      nav.push(MaterialPageRoute<void>(
+                        builder: (routeContext) =>
+                            DurbunTheme.wrap(routeContext, PreviousRunPage(journal: journal, current: store)),
+                      ));
+                    },
+                  ),
               ]),
               const SizedBox(height: 14),
               _Group(children: <Widget>[

@@ -159,6 +159,18 @@ class InspectorBody {
     }
   }
 
+  /// The first [maxChars] characters of [data] (base64 cut on a whole
+  /// group, a text never inside a surrogate pair), [truncated] when cut.
+  InspectorBody head(int maxChars) {
+    if (data.length <= maxChars) return this;
+    var cut = isText ? maxChars : maxChars - maxChars % 4;
+    if (isText && cut > 0) {
+      final code = data.codeUnitAt(cut - 1);
+      if (code >= 0xd800 && code <= 0xdbff) cut--;
+    }
+    return InspectorBody(encoding: encoding, data: data.substring(0, cut), size: size, truncated: true);
+  }
+
   static InspectorBody? fromWire(Object? wire) {
     if (wire is! Map) return null;
     final data = wire['data'];
@@ -282,13 +294,67 @@ class InspectorCall {
   /// The response body's size without decoding it (list rows): the
   /// resolved body's, else the size the capture reported (for a body still
   /// compressed, the compressed size).
-  int? get responseSize {
-    final b = _responseBody;
-    if (b != null) return b.size;
-    final raw = _rawResponseBody;
+  int? get responseSize => _sizeOf(_responseBody, _rawResponseBody);
+
+  /// The request body's size without decoding it (statistics), as
+  /// [responseSize].
+  int? get requestSize => _sizeOf(_requestBody, _rawRequestBody);
+
+  static int? _sizeOf(InspectorBody? resolved, Object? raw) {
+    if (resolved != null) return resolved.size;
     if (raw is! Map) return null;
     final size = raw['size'];
     return size is num ? size.toInt() : null;
+  }
+
+  /// The request body without keeping a decoded copy: an export or the
+  /// previous-run log reads every body once, and keeping them all would
+  /// grow the store past its byte budget (and drop other bodies).
+  InspectorBody? peekRequestBody() => _requestResolved ? _requestBody : _decode(_rawRequestBody);
+
+  /// The response body without keeping a decoded copy ([peekRequestBody]).
+  InspectorBody? peekResponseBody() => _responseResolved ? _responseBody : _decode(_rawResponseBody);
+
+  /// The start of the request body (at most [maxBytes]) without keeping
+  /// anything: the previous-run log keeps only that much. A captured body
+  /// that is not compressed decodes only its start.
+  InspectorBody? peekRequestStart(int maxBytes) =>
+      _peekStart(_requestResolved, _requestBody, _rawRequestBody, maxBytes);
+
+  /// The start of the response body ([peekRequestStart]).
+  InspectorBody? peekResponseStart(int maxBytes) =>
+      _peekStart(_responseResolved, _responseBody, _rawResponseBody, maxBytes);
+
+  InspectorBody? _peekStart(bool resolved, InspectorBody? body, Object? raw, int maxBytes) {
+    if (resolved) return body?.head(maxBytes);
+    var source = raw;
+    if (raw is Map && raw[kPendingBodyMarker] == true) {
+      final bytes = raw['bytes'];
+      final encoding = '${raw['contentEncoding'] ?? ''}'.trim().toLowerCase();
+      final plain = encoding.isEmpty || encoding == 'identity';
+      source = <Object?, Object?>{
+        ...raw,
+        // A compressed body keeps only this much once inflated.
+        'limit': maxBytes,
+        if (plain && bytes is Uint8List && bytes.length > maxBytes) ...<Object?, Object?>{
+          'bytes': Uint8List.sublistView(bytes, 0, maxBytes),
+          'truncated': true,
+        },
+      };
+    }
+    return _decode(source)?.head(maxBytes);
+  }
+
+  InspectorBody? _decode(Object? raw) {
+    if (raw is! Map) return null;
+    if (raw[kPendingBodyMarker] != true) return InspectorBody.fromWire(raw);
+    final resolver = _resolver;
+    if (resolver == null) return null;
+    try {
+      return InspectorBody.fromWire(resolver(raw));
+    } catch (_) {
+      return null;
+    }
   }
 
   String? header(List<List<String>> headers, String name) {
@@ -303,19 +369,7 @@ class InspectorCall {
   String? get responseContentType => header(responseHeaders, 'content-type');
 
   InspectorBody? _resolve(Object? raw, {required bool request}) {
-    if (raw is! Map) return null;
-    InspectorBody? body;
-    if (raw[kPendingBodyMarker] == true) {
-      final resolver = _resolver;
-      if (resolver == null) return null;
-      try {
-        body = InspectorBody.fromWire(resolver(raw));
-      } catch (_) {
-        return null;
-      }
-    } else {
-      body = InspectorBody.fromWire(raw);
-    }
+    final body = _decode(raw);
     if (body == null) return null;
     // Only the resolved copy stays; the budget counts what is kept.
     final cost = body.data.length;
@@ -466,6 +520,10 @@ class DurbunInspectorStore extends ChangeNotifier {
   final Duration notifyDelay;
 
   InspectorBodyResolver? bodyResolver;
+
+  /// A store rebuilt from a saved run (the previous run): the panel shows
+  /// it without the live controls (Pause, Replay, Clear).
+  bool readOnly = false;
 
   /// Whether the SDK feeds this store (false: off, or a release build).
   /// [attachedListenable] says when it changes: `Durbun.init()` may run
@@ -661,6 +719,17 @@ class DurbunInspectorStore extends ChangeNotifier {
       _take(message, native: false);
     } catch (_) {
       // A malformed message must never reach the app.
+    }
+  }
+
+  /// Takes one wire message as the [native] or Dart layer sent it: a saved
+  /// run is rebuilt this way (`run_log.dart`). Never throws.
+  void restore(Map<String, Object?> message, {required bool native}) {
+    if (_disposed) return;
+    try {
+      _take(message, native: native);
+    } catch (_) {
+      // A damaged record is skipped.
     }
   }
 

@@ -97,8 +97,12 @@ class ShareOptions {
 }
 
 /// The report input for [c]; [app] and [device] as the General tab shows them.
-ShareInput shareInputForCall(InspectorCall c, {String? app, String? device}) {
+/// [peek] reads the bodies without keeping their decoded copies (a session
+/// export reads every body once).
+ShareInput shareInputForCall(InspectorCall c, {String? app, String? device, bool peek = false}) {
   final ms = c.duration?.inMicroseconds;
+  final requestBody = peek ? c.peekRequestBody() : c.requestBody;
+  final responseBody = peek ? c.peekResponseBody() : c.responseBody;
   return ShareInput(
     method: c.method,
     url: c.url,
@@ -122,10 +126,10 @@ ShareInput shareInputForCall(InspectorCall c, {String? app, String? device}) {
     responseHeaders: c.responseHeaders,
     requestContentType: c.requestContentType,
     responseContentType: c.responseContentType,
-    requestBody: c.requestBody,
-    responseBody: c.responseBody,
-    requestBodyMissing: c.hasRequestBody && c.requestBody == null,
-    responseBodyMissing: c.hasResponseBody && c.responseBody == null,
+    requestBody: requestBody,
+    responseBody: responseBody,
+    requestBodyMissing: c.hasRequestBody && requestBody == null,
+    responseBodyMissing: c.hasResponseBody && responseBody == null,
   );
 }
 
@@ -175,8 +179,12 @@ String _decodeKey(String key) {
 
 final RegExp _jsonPair = RegExp(r'"((?:[^"\\]|\\.)*)"(\s*:\s*)"((?:[^"\\]|\\.)*)"');
 
-class _Masker {
-  _Masker(this.on);
+/// Masks secret values in headers, URLs, query strings and text bodies
+/// (JSON string values, form fields) when [on]; [count] says how many it
+/// masked. Shared by the share report, the session export and the previous
+/// run's log.
+class ShareMasker {
+  ShareMasker(this.on);
 
   final bool on;
   int count = 0;
@@ -216,6 +224,13 @@ class _Masker {
     if (q >= 0) out = out.substring(0, q + 1) + query(out.substring(q + 1));
     return out + frag;
   }
+
+  /// A query or form value named [name] (decoded).
+  String queryValue(String name, String value) =>
+      !on || !isSecretName(name) || value.isEmpty || value == kShareMask ? value : _hit(kShareMask);
+
+  /// [text] of a body with [contentType] (JSON when it looks like JSON).
+  String bodyText(String text, String contentType) => body(text, contentType, looksJson(contentType, text));
 
   String body(String text, String contentType, bool json) {
     if (!on) return text;
@@ -327,7 +342,8 @@ String reindentJson(String text) {
   return out.toString();
 }
 
-bool _looksJson(String contentType, String text) {
+/// JSON by its content type, or by its first and last characters.
+bool looksJson(String contentType, String text) {
   if (contentType.toLowerCase().contains('json')) return true;
   final t = text.trim();
   return (t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'));
@@ -358,7 +374,7 @@ int _base64Size(String b64) {
   return n < 0 ? 0 : n;
 }
 
-void _bodySection(List<String> out, String label, InspectorBody? body, bool missing, String? contentType, _Masker m, InspectorStrings t) {
+void _bodySection(List<String> out, String label, InspectorBody? body, bool missing, String? contentType, ShareMasker m, InspectorStrings t) {
   if (body == null || body.data.isEmpty) {
     if (missing || (body != null && body.size > 0)) out.addAll(<String>['$label: ${t.reportNotCaptured}', '']);
     return;
@@ -371,7 +387,7 @@ void _bodySection(List<String> out, String label, InspectorBody? body, bool miss
     out.addAll(<String>['$head: ${t.reportBinary}', '']);
     return;
   }
-  final json = _looksJson(ct, body.data);
+  final json = looksJson(ct, body.data);
   var text = m.body(body.data, ct, json);
   if (json) text = reindentJson(text);
   var rest = 0;
@@ -387,7 +403,7 @@ void _bodySection(List<String> out, String label, InspectorBody? body, bool miss
   if (rest > 0) out.addAll(<String>[t.reportMore(rest), '']);
 }
 
-void _headerSection(List<String> out, String label, List<List<String>> headers, _Masker m) {
+void _headerSection(List<String> out, String label, List<List<String>> headers, ShareMasker m) {
   if (headers.isEmpty) return;
   out.add('$label (${headers.length}):');
   _fenced(out, 'http', m.headers(headers).map((h) => '${h[0]}: ${h[1]}').join('\n'));
@@ -422,7 +438,15 @@ List<String> _traceIds(List<List<String>> headers) {
 }
 
 String buildShareReport(ShareInput input, ShareOptions options, InspectorStrings t) {
-  final m = _Masker(options.mask);
+  final m = ShareMasker(options.mask);
+  final out = shareReportLines(input, options, t, m);
+  if (m.count > 0) out.add(t.reportMasked);
+  return out.join('\n').trimRight();
+}
+
+/// The lines of one request's report, masked by [m]; no closing "masked"
+/// note (a session export adds one at its end).
+List<String> shareReportLines(ShareInput input, ShareOptions options, InspectorStrings t, ShareMasker m) {
   final method = (input.method.isNotEmpty && input.method != '?' ? input.method : 'GET').toUpperCase();
   final url = m.url(input.url);
   final out = <String>['$method $url', '→ ${_outcome(input, t)}', ''];
@@ -455,12 +479,11 @@ String buildShareReport(ShareInput input, ShareOptions options, InspectorStrings
     final body = tooLong
         ? null
         : b != null && b.isText && b.data.isNotEmpty
-            ? InspectorBody(encoding: 'utf8', data: m.body(b.data, ct, _looksJson(ct, b.data)), size: b.size, truncated: b.truncated)
+            ? InspectorBody(encoding: 'utf8', data: m.body(b.data, ct, looksJson(ct, b.data)), size: b.size, truncated: b.truncated)
             : b;
     out.add('cURL:');
     _fenced(out, 'bash', curlCommand(method, url, m.headers(input.requestHeaders), body));
     if (tooLong) out.addAll(<String>[t.reportCurlNoBody, '']);
   }
-  if (m.count > 0) out.add(t.reportMasked);
-  return out.join('\n').trimRight();
+  return out;
 }

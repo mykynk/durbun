@@ -58,6 +58,13 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
             // The in-app panel's "Share…": the system share sheet with the report text.
             let args = call.arguments as? [String: Any]
             result(share(text: args?["text"] as? String, subject: args?["subject"] as? String))
+        case "shareFile":
+            // The panel's session export: the share sheet with a file from Caches/durbun-export.
+            let args = call.arguments as? [String: Any]
+            result(shareFile(path: args?["path"] as? String, subject: args?["subject"] as? String))
+        case "cacheDir":
+            // Where the panel writes exports (and its previous-run log).
+            result(Self.cachesDirectory?.path)
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -68,6 +75,33 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
         guard let text, !text.isEmpty, let top = Self.topViewController() else { return false }
         let sheet = UIActivityViewController(activityItems: [ShareText(text: text, subject: subject ?? "")],
                                              applicationActivities: nil)
+        Self.present(sheet, from: top)
+        return true
+    }
+
+    /// Presents the share sheet with an export file; false when [path] is not a file directly in
+    /// Caches/durbun-export (the panel writes nowhere else) or there is no screen to present it from.
+    private func shareFile(path: String?, subject: String?) -> Bool {
+        guard let path, !path.isEmpty, let caches = Self.cachesDirectory else { return false }
+        let folder = caches.appendingPathComponent("durbun-export", isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL
+        let file = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard file.deletingLastPathComponent().standardizedFileURL.path == folder.path,
+              FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory), !isDirectory.boolValue,
+              let top = Self.topViewController()
+        else { return false }
+        let sheet = UIActivityViewController(activityItems: [ShareFile(url: file, subject: subject ?? "")],
+                                             applicationActivities: nil)
+        Self.present(sheet, from: top)
+        return true
+    }
+
+    private static var cachesDirectory: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+    }
+
+    private static func present(_ sheet: UIActivityViewController, from top: UIViewController) {
         if let popover = sheet.popoverPresentationController {
             // iPad shows the sheet as a popover: anchor it at the bottom centre, without an arrow.
             popover.sourceView = top.view
@@ -75,7 +109,6 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
             popover.permittedArrowDirections = []
         }
         top.present(sheet, animated: true)
-        return true
     }
 
     private static func topViewController() -> UIViewController? {
@@ -283,5 +316,31 @@ private final class ShareText: NSObject, UIActivityItemSource {
         let metadata = LPLinkMetadata()
         metadata.title = subject
         return metadata
+    }
+}
+
+/// The share sheet's file, with a subject for Mail and similar targets; the sheet shows the file itself
+/// (name, type, size) in its header.
+private final class ShareFile: NSObject, UIActivityItemSource {
+    private let url: URL
+    private let subject: String
+
+    init(url: URL, subject: String) {
+        self.url = url
+        self.subject = subject
+    }
+
+    func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any {
+        url
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController,
+                                itemForActivityType activityType: UIActivity.ActivityType?) -> Any? {
+        url
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController,
+                                subjectForActivityType activityType: UIActivity.ActivityType?) -> String {
+        subject
     }
 }

@@ -6,6 +6,7 @@ library;
 import 'package:flutter/widgets.dart';
 
 import 'format.dart' show formatBytes;
+import 'network_model.dart' show NetSort;
 
 class InspectorStrings {
   const InspectorStrings._(this.tr);
@@ -53,6 +54,7 @@ class InspectorStrings {
     'Shake the phone or call Durbun.showInspector() to open this panel.',
   );
   String newItems(int n) => _('$n yeni', '$n new');
+  String requestCount(int n) => _('$n istek', n == 1 ? '1 request' : '$n requests');
   String dropped(int n) => _('Yer açmak için en eski $n kayıt silindi.', 'The oldest $n entries were removed to make room.');
   String get pause => _('Duraklat', 'Pause');
   String get resume => _('Devam et', 'Resume');
@@ -140,6 +142,110 @@ class InspectorStrings {
   /* network */
   String get netSearchHint => _('Endpoint, host ya da hata ara', 'Search endpoints, hosts, errors');
   String get netFilters => _('İstek filtreleri', 'Request filters');
+
+  /* order of the Network list */
+  String get sortTitle => _('Sırala', 'Sort');
+  String sortName(NetSort s) => switch (s) {
+    NetSort.arrival => _('Geliş sırası', 'Arrival order'),
+    NetSort.newest => _('En yeni üstte', 'Newest on top'),
+    NetSort.slowest => _('En yavaş önce', 'Slowest first'),
+    NetSort.largest => _('En büyük yanıt önce', 'Largest response first'),
+    NetSort.status => _('Hatalar önce', 'Errors first'),
+  };
+  String sortHint(NetSort s) => switch (s) {
+    NetSort.arrival => _('En yeni altta; liste yeni istekleri izler', 'Newest at the bottom; the list follows new requests'),
+    NetSort.newest => _('Yeni istekler en üstte belirir', 'New requests appear at the top'),
+    NetSort.slowest => _('Süreye göre; bekleyen istek beklediği kadar sayılır', 'By duration; a pending request counts as long as it has waited'),
+    NetSort.largest => _('Yanıt gövdesinin boyutuna göre', 'By the size of the response body'),
+    NetSort.status => _('Bağlantı hataları, 5xx, 4xx, bekleyenler, sonra diğerleri', 'Transport errors, 5xx, 4xx, pending, then the rest'),
+  };
+
+  /* session export */
+  String get exportSession => _('Oturumu dışa aktar', 'Export session');
+  String get exportSessionHint => _('Rapor ya da HAR dosyası', 'A report or a HAR file');
+  String get exportDescription => _(
+    'İstekleri dosya olarak paylaşın: ekibin okuyacağı bir rapor ya da tarayıcı araçlarının açtığı HAR.',
+    'Share the requests as a file: a report your team can read, or a HAR that browser tools open.',
+  );
+  String get exportScope => _('İstekler', 'Requests');
+  String get exportListed => _('Listedekiler', 'Listed');
+  String get exportAll => _('Tümü', 'All');
+  String get exportListedHint => _('Ağ sekmesindeki filtreler, arama ve sıra uygulanır.', 'The Network tab’s filters, search and order apply.');
+  String get exportAllHint => _('Telefonda tutulan bütün istekler, geliş sırasıyla.', 'Every request kept on the phone, in arrival order.');
+  String get exportFormat => _('Biçim', 'Format');
+  String get exportMarkdown => _('Rapor (.md)', 'Report (.md)');
+  String get exportHar => 'HAR (.har)';
+  String get exportMarkdownHint => _(
+    'Özet tablo ve her isteğin ayrıntısı; Slack, Jira ve e-postada okunur.',
+    'A summary table and every request in detail; reads well in Slack, Jira and e-mail.',
+  );
+  String get exportHarHint => _(
+    'Chrome DevTools, Charles, Proxyman ve HAR görüntüleyicileri açar.',
+    'Opens in Chrome DevTools, Charles, Proxyman and HAR viewers.',
+  );
+  String get exportBodiesHint => _('Kapalıyken gövde içerikleri dosyaya girmez', 'Off: no body content goes into the file');
+  String get exportSend => _('Dışa aktar…', 'Export…');
+  String get exportPreparing => _('Hazırlanıyor…', 'Preparing…');
+  String get exportNothing => _('Dışa aktarılacak istek yok', 'No requests to export');
+  String get exportCopied => _('Paylaşım açılamadı; dışa aktarım panoya kopyalandı', 'Sharing did not open; the export was copied');
+  String exportTooLarge(String size) => _(
+    'Paylaşım açılamadı ve dışa aktarım ($size) panoya sığmıyor. Gövdeleri kapatıp yeniden deneyin.',
+    'Sharing did not open, and the export ($size) is too large to copy. Turn bodies off and try again.',
+  );
+  String get exportFailed => _('Dışa aktarılamadı. Yeniden deneyin.', 'The export could not be made. Try again.');
+  String exportSubject(String? app, int n) => app == null ? 'Dürbün · ${requestCount(n)}' : 'Dürbün · $app · ${requestCount(n)}';
+  String get exportReportTitle => _('Dürbün · Ağ oturumu', 'Dürbün · Network session');
+  String get exportedAt => _('Dışa aktarıldı', 'Exported');
+  String get exportScopeListedNote => _('Ağ listesindekiler (filtre, arama ve sıra uygulandı)', 'as listed on the Network tab (filters, search and order applied)');
+  String get exportScopeAllNote => _('telefonda tutulan bütün istekler', 'every request kept on the phone');
+  String exportOfTotal(int total) => _('$total istekten', 'of $total');
+  String get exportSummary => _('Özet', 'Summary');
+  String get exportDetails => _('Ayrıntılar', 'Details');
+
+  /* statistics */
+  String get statistics => _('İstatistik', 'Statistics');
+  String get statsLive => _('Canlı · saniyede bir güncellenir', 'Live · updates every second');
+  String get statsSuccess => _('Başarılı', 'Successful');
+  String get statsClientErrors => _('İstemci hatası (4xx)', 'Client errors (4xx)');
+  String get statsServerErrors => _('Sunucu hatası (5xx)', 'Server errors (5xx)');
+  String get statsFailed => _('Bağlantı hatası', 'Transport errors');
+  String statsTimeouts(int n) => _('$n zaman aşımı', '$n timed out');
+  String get statsPending => _('Bekleyen', 'Pending');
+  String statsCancelled(int n) => _('$n iptal', '$n cancelled');
+  String get statsAverage => _('Ortalama', 'Average');
+  String get statsMedian => _('Ortanca (p50)', 'Median (p50)');
+  String get statsP95 => 'p95';
+  String get statsLongest => _('En uzun', 'Longest');
+  String statsOverResponses(int n) => _('Yanıt gelen $n istek üzerinden', n == 1 ? 'Over 1 response' : 'Over $n responses');
+  String get statsSent => _('Gönderilen', 'Sent');
+  String get statsReceived => _('Alınan', 'Received');
+  String get statsBytesHint => _('İstek ve yanıt gövdelerinin boyutu (başlıklar hariç).', 'Request and response body sizes (headers not counted).');
+  String get statsMethods => _('Metotlar', 'Methods');
+  String statsTopHosts(int n) => _('En çok istek alan $n host', 'Top $n hosts');
+  String statsMoreHosts(int n) => _('ve $n host daha', 'and $n more hosts');
+  String statsFailures(int n) => _('$n hata', '$n failed');
+  String statsSummaryLine(int ok, int client, int server, int failed, int pending) => _(
+    '$ok başarılı · $client istemci hatası (4xx) · $server sunucu hatası (5xx) · $failed bağlantı hatası · $pending bekleyen',
+    '$ok successful · $client client errors (4xx) · $server server errors (5xx) · $failed transport errors · $pending pending',
+  );
+  String statsDurationLine(String avg, String p50, String p95) => _('ortalama $avg · p50 $p50 · p95 $p95', 'average $avg · p50 $p50 · p95 $p95');
+
+  /* previous run */
+  String get previousRun => _('Önceki çalıştırma', 'Previous run');
+  String get previousRunHint => _('Son açılıştaki istekler ve loglar', 'Requests and logs of the last launch');
+  String get previousRunReading => _('Okunuyor…', 'Reading…');
+  String get previousRunEmptyTitle => _('Önceki çalıştırmadan kayıt yok', 'Nothing saved from the previous run');
+  String get previousRunEmptyBody => _(
+    'keepPreviousRun açıkken uygulama bir sonraki açılışta önceki çalıştırmayı burada gösterir.',
+    'With keepPreviousRun on, the next launch shows the run before it here.',
+  );
+  String previousRunCrashes(int n) => _(n == 1 ? 'Bu çalıştırmada çökme var' : 'Bu çalıştırmada $n çökme var', n == 1 ? 'This run crashed' : 'This run crashed $n times');
+  String get previousRunOpenCrash => _('Çökmeyi aç', 'Open the crash');
+  String previousRunStarted(String time) => _('Başlangıç $time', 'Started $time');
+  String get previousRunNote => _(
+    'Salt okunur · gizli değerler maskeli · gövdelerin ilk 16 KB’ı',
+    'Read-only · secrets masked · first 16 KB of each body',
+  );
 
   /* compare (desktop: network.compare.*) */
   String get compare => _('Karşılaştır', 'Compare');

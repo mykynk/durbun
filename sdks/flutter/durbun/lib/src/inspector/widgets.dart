@@ -549,6 +549,73 @@ class DSegmented extends StatelessWidget {
   }
 }
 
+/// A segmented choice that fills its row (sheets, pages): every option
+/// gets an equal share and at least a [kMinTapTarget] tap target, and a
+/// label wraps onto a second line instead of overflowing (small phones,
+/// large text). [onChanged] null: shown, not changeable.
+class ChoiceSegments extends StatelessWidget {
+  const ChoiceSegments({super.key, required this.labels, required this.index, required this.onChanged, this.counts});
+
+  final List<String> labels;
+
+  /// Shown after a label, dimmed ("Listed 12").
+  final List<Object?>? counts;
+  final int index;
+  final ValueChanged<int>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+          color: c.trackBg,
+          borderRadius: BorderRadius.circular(DurbunRadius.md + 1),
+          border: c.isDark ? Border.all(color: c.border.withValues(alpha: 0.6)) : null),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            for (var i = 0; i < labels.length; i++)
+              Expanded(
+                child: Segment(
+                  selected: i == index,
+                  onTap: () => onChanged?.call(i),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: kMinTapTarget - 6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      child: Center(
+                        child: Text.rich(
+                          TextSpan(children: <InlineSpan>[
+                            TextSpan(text: labels[i]),
+                            if (counts?[i] != null)
+                              TextSpan(
+                                  text: ' ${counts![i]}',
+                                  style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle, weight: FontWeight.w500, height: 1.2)),
+                          ]),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: i == index ? FontWeight.w600 : FontWeight.w500,
+                            color: i == index ? c.text : c.textMuted,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Status of a request as a tinted pill: `200`, `404`, `FAIL`, `···`.
 class StatusPill extends StatelessWidget {
   const StatusPill({super.key, required this.text, required this.color, this.width = 42});
@@ -879,10 +946,13 @@ class EmptyState extends StatelessWidget {
 
 /// "↓ 12 new" pill shown while the list is paused away from the live end.
 class NewItemsPill extends StatelessWidget {
-  const NewItemsPill({super.key, required this.text, required this.onTap});
+  const NewItemsPill({super.key, required this.text, required this.onTap, this.up = false});
 
   final String text;
   final VoidCallback onTap;
+
+  /// Points up: the new rows are at the top (a sorted list).
+  final bool up;
 
   @override
   Widget build(BuildContext context) {
@@ -900,7 +970,7 @@ class NewItemsPill extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const Icon(Icons.arrow_downward, size: 14, color: Colors.white),
+              Icon(up ? Icons.arrow_upward : Icons.arrow_downward, size: 14, color: Colors.white),
               const SizedBox(width: 4),
               Text(text,
                   style: const TextStyle(

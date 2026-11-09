@@ -20,8 +20,10 @@ import 'widgets.dart';
 final Expando<int> _lastTab = Expando<int>('durbun.tab');
 
 class InspectorHome extends StatefulWidget {
-  const InspectorHome({super.key, required this.store, this.initialTab, this.onClose});
+  const InspectorHome({super.key, required this.store, this.initialTab, this.onClose, this.banner});
 
+  /// A [DurbunInspectorStore.readOnly] store (a saved run) gets no tools and
+  /// no live controls.
   final DurbunInspectorStore store;
 
   /// 0: Network, 1: Logs; null: the tab last shown with [store].
@@ -29,6 +31,9 @@ class InspectorHome extends StatefulWidget {
 
   /// Closes the panel (default: pops this page's route).
   final VoidCallback? onClose;
+
+  /// Shown between the header and the tabs (the previous run's crash).
+  final Widget? banner;
 
   @override
   State<InspectorHome> createState() => _InspectorHomeState();
@@ -67,11 +72,12 @@ class _InspectorHomeState extends State<InspectorHome> with SingleTickerProvider
               child: _Header(
                 store: store,
                 tabs: _tabs,
-                onTools: () => showToolsSheet(context, store),
+                onTools: store.readOnly ? null : () => showToolsSheet(context, store),
                 onClose: widget.onClose ?? () => Navigator.of(context).maybePop(),
               ),
             ),
           ),
+          if (widget.banner != null) widget.banner!,
           Expanded(
             child: SafeArea(
               top: false,
@@ -96,19 +102,32 @@ class _Header extends StatelessWidget {
 
   final DurbunInspectorStore store;
   final TabController tabs;
-  final VoidCallback onTools;
+
+  /// Null for a saved run: no tools sheet.
+  final VoidCallback? onTools;
   final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
+    final onTools = this.onTools;
     return Container(
       decoration: BoxDecoration(color: c.bgPanel, border: Border(bottom: BorderSide(color: c.border))),
       padding: const EdgeInsets.fromLTRB(6, 3, 4, 5),
       child: Row(
         children: <Widget>[
-          _BrandMark(onTap: onTools),
+          if (onTools != null)
+            _BrandMark(onTap: onTools)
+          else
+            // A saved run: a history mark, not the live connection.
+            Semantics(
+              label: t.previousRun,
+              child: SizedBox.square(
+                dimension: kMinTapTarget,
+                child: Icon(Icons.history_rounded, size: 24, color: c.textMuted),
+              ),
+            ),
           const SizedBox(width: 4),
           Expanded(
             child: ListenableBuilder(
@@ -135,7 +154,7 @@ class _Header extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 4),
-          DIconButton(icon: Icons.grid_view_rounded, tooltip: t.tools, size: kMinTapTarget, onTap: onTools),
+          if (onTools != null) DIconButton(icon: Icons.grid_view_rounded, tooltip: t.tools, size: kMinTapTarget, onTap: onTools),
           DIconButton(icon: Icons.close_rounded, tooltip: t.close, size: kMinTapTarget, onTap: onClose),
         ],
       ),

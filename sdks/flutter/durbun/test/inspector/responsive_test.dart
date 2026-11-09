@@ -55,7 +55,18 @@ void main() {
       }
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      for (final tool in ['Mocks', 'Performance', 'Device & SDK']) {
+      // The order sheet, every order picked.
+      for (final order in ['Slowest first', 'Errors first', 'Arrival order']) {
+        await tester.tap(find.byTooltip(RegExp(r'^Sort')).first);
+        await tester.pumpAndSettle();
+        // The sheet's list builds lazily (large text): scroll it to the row.
+        final row = find.descendant(of: find.byType(BottomSheet), matching: find.text(order));
+        await tester.scrollUntilVisible(row, 80, scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first);
+        await tester.pumpAndSettle();
+        await tester.tap(row);
+        await tester.pumpAndSettle();
+      }
+      for (final tool in ['Mocks', 'Performance', 'Statistics', 'Device & SDK']) {
         await tester.tap(find.byTooltip('Tools').first);
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text(tool));

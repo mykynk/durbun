@@ -71,6 +71,19 @@ Future<bool> shareTextNatively(String text, {String? subject}) async {
   }
 }
 
+/// Opens the system share sheet with the file at [path] (a session export
+/// in the cache directory's `durbun-export` folder; the plugin refuses any
+/// other path); false when it could not open (no plugin, web, tests).
+/// A file, not text: Android cannot pass more than about 1 MB of text.
+Future<bool> shareFileNatively(String path, {required String mime, String? subject}) async {
+  try {
+    return await _native.invokeMethod<bool>('shareFile', <String, Object?>{'path': path, 'mime': mime, 'subject': subject}) ??
+        false;
+  } catch (_) {
+    return false;
+  }
+}
+
 Future<void> showShareSheet(BuildContext context, InspectorCall call, DurbunInspectorStore store) {
   FocusManager.instance.primaryFocus?.unfocus();
   return showModalBottomSheet<void>(

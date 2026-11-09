@@ -1,6 +1,7 @@
 package dev.durbun.flutter
 
 import android.app.Activity
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.os.Handler
@@ -22,6 +23,7 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 /**
  * Android side of `package:durbun`. Registering the plugin does nothing by itself: no thread, no hook, no
@@ -120,6 +122,17 @@ class DurbunFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCa
                 }
                 // The in-app panel's "Share…": the system share sheet with the report text.
                 "share" -> result.success(share(call.argument<String>("text"), call.argument<String>("subject")))
+                // The panel's session export: the share sheet with a file from cacheDir/durbun-export.
+                "shareFile" ->
+                    result.success(
+                        shareFile(
+                            call.argument<String>("path"),
+                            call.argument<String>("mime"),
+                            call.argument<String>("subject"),
+                        ),
+                    )
+                // Where the panel writes exports (and its previous-run log).
+                "cacheDir" -> result.success(context?.cacheDir?.absolutePath)
                 else -> result.notImplemented()
             }
         } catch (t: Throwable) {
@@ -140,6 +153,32 @@ class DurbunFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCa
             putExtra(Intent.EXTRA_TEXT, text)
             if (!subject.isNullOrEmpty()) putExtra(Intent.EXTRA_SUBJECT, subject)
         }
+        return openChooser(send)
+    }
+
+    /**
+     * Opens the system share sheet with an export file through [DurbunExportProvider]; false when [path] is not
+     * a file in `cacheDir/durbun-export` (the provider serves nothing else) or there is nowhere to open it.
+     */
+    private fun shareFile(path: String?, mime: String?, subject: String?): Boolean {
+        val ctx = context ?: return false
+        if (path.isNullOrEmpty()) return false
+        val requested = File(path).canonicalFile
+        val file = DurbunExportProvider.exportFile(ctx, requested.name) ?: return false
+        if (file != requested) return false
+        val uri = DurbunExportProvider.uriFor(ctx, file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = if (mime.isNullOrEmpty()) DurbunExportProvider.mimeOf(file.name) else mime
+            putExtra(Intent.EXTRA_STREAM, uri)
+            if (!subject.isNullOrEmpty()) putExtra(Intent.EXTRA_SUBJECT, subject)
+            // The chooser carries the grant and the clip (its preview) over to the app picked.
+            clipData = ClipData.newRawUri(file.name, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return openChooser(send)
+    }
+
+    private fun openChooser(send: Intent): Boolean {
         val chooser = Intent.createChooser(send, null)
         val host = activity
         if (host != null) {
