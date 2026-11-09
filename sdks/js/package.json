@@ -33,6 +33,9 @@
     "./package.json": "./package.json"
   },
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "files": ["dist", "README.md", "LICENSE"],
   "keywords": ["react-native", "logging", "network", "debugger", "inspector", "durbun"],
   "engines": {
