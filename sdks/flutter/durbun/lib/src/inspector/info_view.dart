@@ -245,12 +245,12 @@ class InfoView extends StatelessWidget {
                 children: <Widget>[
                   for (var i = 0; i < rows.length; i++)
                     Container(
-                      padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                       decoration: BoxDecoration(border: i == 0 ? null : Border(top: BorderSide(color: c.border))),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          Icon(rows[i].$3 ? Icons.check_circle : Icons.remove_circle_outline, size: 16, color: rows[i].$3 ? c.success : c.textSubtle),
+                          Icon(rows[i].$3 ? Icons.check_circle_outline_rounded : Icons.remove_circle_outline_rounded, size: 16, color: rows[i].$3 ? c.success : c.textSubtle),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Column(
@@ -332,7 +332,7 @@ class _LayerChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     height: 20,
-    padding: const EdgeInsets.symmetric(horizontal: 7),
+    padding: const EdgeInsets.symmetric(horizontal: 6),
     decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(DurbunRadius.sm)),
     child: Text(label, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600, height: 1.7)),
   );

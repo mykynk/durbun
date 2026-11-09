@@ -179,11 +179,11 @@ class _CrashCallout extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: kMinTapTarget),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 9, 8, 9),
+              padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
               child: Row(
                 children: <Widget>[
-                  Icon(Icons.error_outline, size: 18, color: c.danger),
-                  const SizedBox(width: 9),
+                  Icon(Icons.error_outline_rounded, size: 18, color: c.danger),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,

@@ -254,7 +254,7 @@ class _JsonTreeViewState extends State<JsonTreeView> {
       buildLines: (folded) => _build(folded, c),
       actions: <Widget>[
         DIconButton(
-          icon: Icons.unfold_more,
+          icon: Icons.unfold_more_rounded,
           tooltip: t.expandAll,
           onTap: () => setState(() {
             _rev++;
@@ -263,7 +263,7 @@ class _JsonTreeViewState extends State<JsonTreeView> {
           }),
         ),
         DIconButton(
-          icon: Icons.unfold_less,
+          icon: Icons.unfold_less_rounded,
           tooltip: t.collapseAll,
           onTap: () => setState(() {
             _rev++;
@@ -296,7 +296,7 @@ class _JsonTreeViewState extends State<JsonTreeView> {
             children: <Widget>[
               SizedBox(
                 width: 14,
-                child: Icon(l.expanded ? Icons.arrow_drop_down : Icons.arrow_right, size: 16, color: c.textSubtle),
+                child: Icon(l.expanded ? Icons.arrow_drop_down_rounded : Icons.arrow_right_rounded, size: 16, color: c.textSubtle),
               ),
               Expanded(child: text),
             ],

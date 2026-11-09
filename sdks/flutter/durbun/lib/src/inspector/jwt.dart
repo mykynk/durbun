@@ -114,7 +114,7 @@ class _JwtSheet extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Text('JWT', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3, color: c.text)),
+                Text('JWT', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: c.text)),
                 const SizedBox(width: 10),
                 if (exp != null)
                   Flexible(

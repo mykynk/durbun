@@ -246,6 +246,7 @@ void main() {
     await tester.scrollUntilVisible(find.text('Search bodies too'), 120,
         scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first);
     await tester.ensureVisible(find.text('Search bodies too'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Search bodies too'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));

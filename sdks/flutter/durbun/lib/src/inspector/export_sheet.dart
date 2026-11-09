@@ -247,8 +247,8 @@ class _ExportSheetState extends State<_ExportSheet> {
     final bottom = MediaQuery.paddingOf(context).bottom;
     final calls = _calls;
     Widget label(String text) => Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-          child: Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.text, letterSpacing: -0.1)),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.text)),
         );
     Widget hint(String text) => Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
@@ -272,7 +272,7 @@ class _ExportSheetState extends State<_ExportSheet> {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
                       child: Text(t.exportSession,
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3, color: c.text)),
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: c.text)),
                     ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),

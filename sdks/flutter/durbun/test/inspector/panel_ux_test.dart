@@ -208,6 +208,9 @@ void main() {
       await _open(tester, s);
       await tester.tap(find.text('Filters'));
       await tester.pumpAndSettle();
+      // The last row of the sheet: below the fold on a 844 pt phone.
+      await tester.ensureVisible(find.text('Search bodies too'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Search bodies too'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Done'));

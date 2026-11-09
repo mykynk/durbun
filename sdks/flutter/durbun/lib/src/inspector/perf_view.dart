@@ -27,7 +27,7 @@ class PerformanceView extends StatelessWidget {
         final m = store.lastMetric;
         if (m == null) {
           return EmptyState(
-              icon: Icons.speed,
+              icon: Icons.speed_rounded,
               title: t.noMetricsTitle,
               body: t.noMetricsBody);
         }
@@ -38,11 +38,10 @@ class PerformanceView extends StatelessWidget {
 
         final jankTotal =
             samples.fold<int>(0, (s, x) => s + (x.jankyFrames ?? 0));
-        final fpsColor = m.fps == null
+        // Color only when the frame rate drops.
+        final fpsColor = m.fps == null || m.fps! >= 55
             ? null
-            : (m.fps! >= 55
-                ? c.success
-                : m.fps! >= 40
+            : (m.fps! >= 40
                     ? c.warning
                     : c.danger);
         String ms(double? v) => v == null ? '—' : v.toStringAsFixed(1);
@@ -110,7 +109,7 @@ class PerformanceView extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             ChartCard(
               title: 'FPS',
               series: <ChartSeries>[
@@ -122,33 +121,34 @@ class PerformanceView extends StatelessWidget {
               guide: 60,
               minTop: 60,
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             ChartCard(
               title: t.frameTimes,
               unit: 'ms',
               series: <ChartSeries>[
                 ChartSeries(t.buildTime, c.info,
                     <double?>[for (final s in samples) s.frameBuildMs]),
-                ChartSeries(t.rasterTime, c.pickViolet,
+                // One series leads in color; the other is a neutral step.
+                ChartSeries(t.rasterTime, c.textSubtle,
                     <double?>[for (final s in samples) s.frameRasterMs]),
               ],
               guide: 16.7,
               minTop: 20,
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             ChartCard(
               title: t.memory,
               unit: 'MB',
               series: <ChartSeries>[
                 ChartSeries(t.memory, c.pickOrange,
                     <double?>[for (final s in samples) s.memoryMB]),
-                ChartSeries(t.heap, c.sdkDart,
+                ChartSeries(t.heap, c.textSubtle,
                     <double?>[for (final s in samples) s.heapMB]),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Text(t.perfWindow(samples.length),
-                style: TextStyle(fontSize: 11.5, color: c.textMeta)),
+                style: TextStyle(fontSize: 12, color: c.textMeta)),
           ],
         );
       },
@@ -178,7 +178,7 @@ class StatTile extends StatelessWidget {
     final c = DurbunColors.of(context);
     return Container(
       width: width,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
           color: c.bgPanel,
           borderRadius: BorderRadius.circular(DurbunRadius.lg),
@@ -198,8 +198,8 @@ class StatTile extends StatelessWidget {
                 TextSpan(
                     text: value,
                     style: DurbunType.monoStyle(
-                        size: 21,
-                        weight: FontWeight.w600,
+                        size: 24,
+                        weight: FontWeight.w500,
                         color: color ?? c.text,
                         height: 1.1)),
                 if (unit != null)
@@ -210,7 +210,7 @@ class StatTile extends StatelessWidget {
             ),
           ),
           if (sub != null) ...<Widget>[
-            const SizedBox(height: 3),
+            const SizedBox(height: 4),
             Text(sub!, style: TextStyle(fontSize: 11, color: c.textMeta)),
           ],
         ],
@@ -250,7 +250,7 @@ class ChartCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
           color: c.bgPanel,
           borderRadius: BorderRadius.circular(DurbunRadius.lg),

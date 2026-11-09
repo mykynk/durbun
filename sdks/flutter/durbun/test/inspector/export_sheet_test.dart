@@ -134,7 +134,7 @@ void main() {
     expect(find.text('All 2'), findsOneWidget);
     await tester.tap(find.text('HAR (.har)'));
     await tester.pumpAndSettle();
-    expect(find.text('Opens in Chrome DevTools, Charles, Proxyman and HAR viewers.'), findsOneWidget);
+    expect(find.text('Opens in Chrome DevTools, Charles, Proxyman and HAR viewers'), findsOneWidget);
     await _export(tester);
 
     expect(out.names.single, matches(RegExp(r'^durbun-shop-\d{8}-\d{6}\.har$')));

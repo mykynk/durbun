@@ -378,7 +378,7 @@ class InspectorBubble extends StatelessWidget {
                       key: const ValueKey<String>('durbun-bubble-badge'),
                       constraints: const BoxConstraints(minWidth: 20),
                       height: 20,
-                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
                       decoration: BoxDecoration(
                         color: const Color(0xFFFF6369),
                         borderRadius: BorderRadius.circular(10),
@@ -390,7 +390,7 @@ class InspectorBubble extends StatelessWidget {
                         style: const TextStyle(
                             color: Colors.white,
                             fontSize: 11,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w600,
                             decoration: TextDecoration.none),
                       ),
                     ),

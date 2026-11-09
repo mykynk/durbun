@@ -97,7 +97,7 @@ class _StatsViewState extends State<StatsView> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (scope != null) Padding(padding: const EdgeInsets.fromLTRB(12, 12, 12, 0), child: scope),
-          Expanded(child: EmptyState(icon: Icons.insights_rounded, title: t.noRequestsTitle, body: t.noRequestsBody)),
+          Expanded(child: EmptyState(icon: Icons.bar_chart_rounded, title: t.noRequestsTitle, body: t.noRequestsBody)),
         ],
       );
     }
@@ -132,7 +132,7 @@ class _StatsViewState extends State<StatsView> {
                 children: <Widget>[
                   _Tiles(children: <Widget Function(double)>[
                     (w) => StatTile(width: w, label: t.requests, value: '${s.requests}'),
-                    (w) => StatTile(width: w, label: t.statsSuccess, value: '${s.success}', color: s.success > 0 ? c.success : null),
+                    (w) => StatTile(width: w, label: t.statsSuccess, value: '${s.success}'),
                     (w) => StatTile(width: w, label: t.statsClientErrors, value: '${s.clientErrors}', color: s.clientErrors > 0 ? c.st4xx : null),
                     (w) => StatTile(width: w, label: t.statsServerErrors, value: '${s.serverErrors}', color: s.serverErrors > 0 ? c.st5xx : null),
                     (w) => StatTile(
@@ -149,20 +149,20 @@ class _StatsViewState extends State<StatsView> {
                   ]),
                   SectionTitle(t.statsMethods),
                   Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
+                    spacing: 8,
+                    runSpacing: 8,
                     children: <Widget>[
                       for (final (method, n) in s.methods)
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
                               color: c.bgPanel,
-                              borderRadius: BorderRadius.circular(DurbunRadius.pill),
+                              borderRadius: BorderRadius.circular(DurbunRadius.md),
                               border: Border.all(color: c.border)),
                           child: Text.rich(TextSpan(children: <InlineSpan>[
                             TextSpan(
                                 text: method,
-                                style: DurbunType.monoStyle(size: 12, color: c.method(method), weight: FontWeight.w700, height: 1.2)),
+                                style: DurbunType.monoStyle(size: 12, color: c.method(method), weight: FontWeight.w600, height: 1.2)),
                             TextSpan(text: '  $n', style: DurbunType.monoStyle(size: 12, color: c.text, height: 1.2)),
                           ])),
                         ),
@@ -262,7 +262,7 @@ class _HostRow extends StatelessWidget {
     final avg = host.averageMs;
     final meta = DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.3);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -278,7 +278,7 @@ class _HostRow extends StatelessWidget {
               Text('${host.requests}', style: DurbunType.monoStyle(size: 12.5, color: c.text, weight: FontWeight.w600, height: 1.3)),
             ],
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 4),
           ClipRRect(
             borderRadius: BorderRadius.circular(2),
             child: LinearProgressIndicator(
@@ -288,7 +288,7 @@ class _HostRow extends StatelessWidget {
               color: host.failures > 0 ? c.st4xx : c.accent,
             ),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 4),
           Wrap(
             spacing: 10,
             children: <Widget>[

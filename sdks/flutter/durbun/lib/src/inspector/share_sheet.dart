@@ -175,7 +175,7 @@ class _ShareSheetState extends State<_ShareSheet> {
                   children: <Widget>[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                      child: Text(t.shareTitle, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3, color: c.text)),
+                      child: Text(t.shareTitle, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: c.text)),
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),

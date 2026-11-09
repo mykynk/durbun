@@ -165,7 +165,7 @@ class _NetworkViewState extends State<NetworkView> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                   child: Text(t.sortTitle,
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3, color: c.text)),
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: c.text)),
                 ),
                 for (final s in NetSort.values)
                   _SortRow(
@@ -250,7 +250,7 @@ class _NetworkViewState extends State<NetworkView> {
             _filters.errorsOnly = v;
             changed();
           }),
-          SheetSwitch(label: t.slowOnly, icon: Icons.schedule, value: _filters.slowOnly, onChanged: (v) {
+          SheetSwitch(label: t.slowOnly, icon: Icons.schedule_rounded, value: _filters.slowOnly, onChanged: (v) {
             _filters.slowOnly = v;
             changed();
           }),
@@ -258,7 +258,7 @@ class _NetworkViewState extends State<NetworkView> {
             _filters.mockedOnly = v;
             changed();
           }),
-          SheetSwitch(label: t.searchBodies, hint: t.searchBodiesHint, icon: Icons.data_object, value: _filters.searchBodies, onChanged: (v) {
+          SheetSwitch(label: t.searchBodies, hint: t.searchBodiesHint, icon: Icons.data_object_rounded, value: _filters.searchBodies, onChanged: (v) {
             _filters.searchBodies = v;
             changed();
           }),
@@ -288,7 +288,7 @@ class _NetworkViewState extends State<NetworkView> {
     ];
     final quick = <Widget>[
       if (!f.errorsOnly) DToggle(label: t.errorsOnly, icon: Icons.warning_amber_rounded, selected: false, onTap: () => setState(() => f.errorsOnly = true)),
-      if (!f.slowOnly) DToggle(label: t.slowOnly, icon: Icons.schedule, selected: false, onTap: () => setState(() => f.slowOnly = true)),
+      if (!f.slowOnly) DToggle(label: t.slowOnly, icon: Icons.schedule_rounded, selected: false, onTap: () => setState(() => f.slowOnly = true)),
       for (final st in const <String>['4xx', '5xx'])
         if (!f.statuses.contains(st)) DToggle(label: st, mono: true, color: _statusColor(c, st), selected: false, onTap: () => setState(() => f.statuses.add(st))),
     ];
@@ -318,7 +318,7 @@ class _NetworkViewState extends State<NetworkView> {
   /// outside the default list (then "Clear filters" would not bring it).
   Widget _empty(InspectorStrings t, List<InspectorCall> all, bool filtered) {
     if (all.isEmpty) {
-      return EmptyState(icon: Icons.swap_horiz, title: t.noRequestsTitle, body: t.noRequestsBody);
+      return EmptyState(icon: Icons.swap_horiz_rounded, title: t.noRequestsTitle, body: t.noRequestsBody);
     }
     final hiddenByHost = _otherHosts();
     if (!filtered && hiddenByHost > 0) {
@@ -331,7 +331,7 @@ class _NetworkViewState extends State<NetworkView> {
       );
     }
     return EmptyState(
-      icon: Icons.swap_horiz,
+      icon: Icons.swap_horiz_rounded,
       title: t.noMatchTitle,
       body: hiddenByHost > 0 ? '${t.noMatchBody} ${t.alsoOtherHosts(hiddenByHost)}' : t.noMatchBody,
       actionLabel: t.clearFilters,
@@ -422,8 +422,8 @@ class _NetworkViewState extends State<NetworkView> {
               Container(
                 width: double.infinity,
                 color: c.bgPanel,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                child: Text(t.dropped(widget.store.droppedCalls), style: TextStyle(fontSize: 11, color: c.textMeta)),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Text(t.dropped(widget.store.droppedCalls), style: TextStyle(fontSize: 12, color: c.textMeta)),
               ),
           ],
         );
@@ -515,7 +515,7 @@ class _HostsSection extends StatelessWidget {
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 14, 8, 0),
+      padding: const EdgeInsets.fromLTRB(4, 16, 8, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -527,9 +527,10 @@ class _HostsSection extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text(t.hostsTitle, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.textMuted, letterSpacing: 0.2)),
+                      // Same title and hint as the sheet's other sections.
+                      Text(t.hostsTitle, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: c.text)),
                       const SizedBox(height: 2),
-                      Text(t.hostsHint, style: TextStyle(fontSize: 11.5, color: c.textMeta)),
+                      Text(t.hostsHint, style: TextStyle(fontSize: 12, color: c.textMeta)),
                     ],
                   ),
                 ),
@@ -651,7 +652,8 @@ class CallRow extends StatelessWidget {
                       call: call, store: store, bodyQuery: bodyQuery, siblings: siblings))));
         },
         child: Container(
-          padding: const EdgeInsets.fromLTRB(11, 9, 14, 9),
+          // The 3 pt edge plus 9 puts the content on the toolbar's 12 pt line.
+          padding: const EdgeInsets.fromLTRB(9, 8, 12, 8),
           decoration: BoxDecoration(
               border: Border(
                   left: BorderSide(color: edge, width: 3),
@@ -673,13 +675,13 @@ class CallRow extends StatelessWidget {
                           style: DurbunType.monoStyle(
                               size: 10.5,
                               color: c.method(call.method),
-                              weight: FontWeight.w700,
+                              weight: FontWeight.w600,
                               height: 1.2)),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 11),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -750,7 +752,7 @@ class CallRow extends StatelessWidget {
                                 color: timeColor,
                                 height: 1.3,
                                 weight: ms != null && ms >= kSlowMs
-                                    ? FontWeight.w700
+                                    ? FontWeight.w600
                                     : FontWeight.w500),
                           ),
                         ),
@@ -782,8 +784,8 @@ class _SourceBadge extends StatelessWidget {
             ? c.sdkIos
             : c.sdkDart;
     return Container(
-      height: 17,
-      padding: const EdgeInsets.symmetric(horizontal: 5),
+      height: 18,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
       decoration: BoxDecoration(
           color: color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(DurbunRadius.sm)),
@@ -986,7 +988,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
                           child: Row(
                             children: <Widget>[
                               Text('${call.method} ',
-                                  style: DurbunType.monoStyle(size: 14.5, color: c.method(call.method), weight: FontWeight.w700, height: 1.2)),
+                                  style: DurbunType.monoStyle(size: 14.5, color: c.method(call.method), weight: FontWeight.w600, height: 1.2)),
                               StatusPill(text: statusText, color: statusColor, width: null),
                             ],
                           ),
@@ -1091,7 +1093,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
                       _GeneralTab(key: ValueKey<String>('g$k'), call: call, store: widget.store),
                       _HttpTab(key: ValueKey<String>('q$k'), call: call, request: true, memory: _memory, bodyQuery: _bodyQuery),
                       call.state == InspectorCallState.pending
-                          ? EmptyState(icon: Icons.hourglass_empty, title: t.pending, body: t.waitingResponse)
+                          ? EmptyState(icon: Icons.hourglass_empty_rounded, title: t.pending, body: t.waitingResponse)
                           : call.error != null
                               ? _ErrorTab(key: ValueKey<String>('e$k'), call: call)
                               : _HttpTab(key: ValueKey<String>('r$k'), call: call, request: false, memory: _memory, bodyQuery: _bodyQuery),
@@ -1127,7 +1129,7 @@ class _Summary extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 9, 4, 10),
+        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
         decoration: BoxDecoration(
             color: c.cardBg,
             borderRadius: BorderRadius.circular(DurbunRadius.lg),
@@ -1164,7 +1166,7 @@ class _Summary extends StatelessWidget {
                 DIconButton(icon: Icons.copy_rounded, tooltip: t.copyUrl, size: 40, onTap: onCopyUrl),
               ],
             ),
-            const SizedBox(height: 9),
+            const SizedBox(height: 8),
             // One row that scrolls: wrapped chips pushed the tabs off short
             // screens.
             SingleChildScrollView(
@@ -1210,11 +1212,11 @@ class _Stat extends StatelessWidget {
       height: 24,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-          color: c.trackBg, borderRadius: BorderRadius.circular(DurbunRadius.pill)),
+          color: c.trackBg, borderRadius: BorderRadius.circular(DurbunRadius.sm)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, size: 13, color: fg),
+          Icon(icon, size: 14, color: fg),
           const SizedBox(width: 4),
           Flexible(
             child: Text(text,
@@ -1229,7 +1231,7 @@ class _Stat extends StatelessWidget {
 }
 
 EdgeInsets _pagePadding(BuildContext context) =>
-    EdgeInsets.fromLTRB(14, 12, 14, 20 + MediaQuery.paddingOf(context).bottom);
+    EdgeInsets.fromLTRB(16, 12, 16, 20 + MediaQuery.paddingOf(context).bottom);
 
 /// The row over a Request / Response part: the part switch on the left,
 /// the body's view and copy on the right. One height for every part, so
@@ -1538,7 +1540,7 @@ class _PairsList extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
-    if (pairs.isEmpty) return EmptyState(icon: Icons.list_alt, title: empty);
+    if (pairs.isEmpty) return EmptyState(icon: Icons.list_alt_rounded, title: empty);
     return ListView(
       padding: _pagePadding(context).copyWith(top: 2),
       children: <Widget>[
@@ -1621,7 +1623,7 @@ class _PairRowState extends State<_PairRow> {
       onTapDown: (d) => _tapAt = d.globalPosition,
       onTap: _menu,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -1637,7 +1639,7 @@ class _PairRowState extends State<_PairRow> {
                 ],
               ],
             ),
-            const SizedBox(height: 3),
+            const SizedBox(height: 4),
             Text(widget.value,
                 maxLines: _maxLines,
                 overflow: TextOverflow.ellipsis,
@@ -1679,7 +1681,7 @@ Future<void> _showValue(BuildContext context, String name, String value) {
                 children: <Widget>[
                   Expanded(
                     child: Text(name,
-                        style: DurbunType.monoStyle(size: 14, color: c.jsonKey, weight: FontWeight.w700)),
+                        style: DurbunType.monoStyle(size: 14, color: c.jsonKey, weight: FontWeight.w600)),
                   ),
                   TextButton.icon(
                     onPressed: () => copyText(sheet, value),
@@ -1871,13 +1873,16 @@ class _BodyPaneState extends State<BodyPane> {
       ],
       child: Container(
         height: 30,
-        padding: const EdgeInsets.only(left: 9, right: 6),
-        decoration: ShapeDecoration(color: c.cardBg, shape: StadiumBorder(side: BorderSide(color: c.border))),
+        padding: const EdgeInsets.only(left: 8, right: 6),
+        decoration: ShapeDecoration(
+            color: c.cardBg,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(DurbunRadius.md), side: BorderSide(color: c.border))),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Icon(modes[mode].$2, size: 15, color: c.text),
-            const SizedBox(width: 5),
+            const SizedBox(width: 4),
             Text(modes[mode].$1, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.text, height: 1.2)),
             Icon(Icons.expand_more_rounded, size: 16, color: c.textMuted),
           ],
@@ -2058,7 +2063,7 @@ class _TimingTab extends StatelessWidget {
       padding: _pagePadding(context).copyWith(top: 2),
       children: <Widget>[
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           decoration: BoxDecoration(
               color: c.cardBg,
               border: Border.all(color: c.border),
@@ -2072,7 +2077,7 @@ class _TimingTab extends StatelessWidget {
                   style: DurbunType.monoStyle(
                       size: 24,
                       color: ms >= 3000 ? c.danger : ms >= kSlowMs ? c.warning : c.text,
-                      weight: FontWeight.w700,
+                      weight: FontWeight.w600,
                       height: 1.2)),
               if (phases) ...<Widget>[
                 const SizedBox(height: 12),
@@ -2099,7 +2104,7 @@ class _TimingTab extends StatelessWidget {
         const SizedBox(height: 10),
         if (phases)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
                 color: c.cardBg,
                 border: Border.all(color: c.border),
@@ -2132,7 +2137,7 @@ class _TimingTab extends StatelessWidget {
                                 style: DurbunType.monoStyle(size: 11.5, color: c.text)),
                           ],
                         ),
-                        const SizedBox(height: 5),
+                        const SizedBox(height: 4),
                         LayoutBuilder(
                           builder: (context, box) {
                             final width = (box.maxWidth * (s.ms / total)).clamp(3.0, box.maxWidth);

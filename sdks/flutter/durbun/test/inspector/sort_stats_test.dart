@@ -234,7 +234,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.getTopLeft(find.textContaining(anchor)), before, reason: 'the row being read stays put');
       expect(find.text('3 new'), findsOneWidget);
-      expect(find.byIcon(Icons.arrow_upward), findsOneWidget, reason: 'they are above');
+      expect(find.byIcon(Icons.arrow_upward_rounded), findsOneWidget, reason: 'they are above');
 
       await tester.tap(find.text('3 new'));
       await tester.pumpAndSettle();
@@ -316,7 +316,7 @@ void main() {
       await tester.tap(find.text('Statistics'));
       await tester.pumpAndSettle();
       expect(find.text('Successful'), findsNothing);
-      expect(find.byIcon(Icons.insights_rounded), findsWidgets);
+      expect(find.byIcon(Icons.bar_chart_rounded), findsWidgets);
     });
   });
 }

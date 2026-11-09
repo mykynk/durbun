@@ -54,15 +54,15 @@ class LevelBadge extends StatelessWidget {
       label: InspectorStrings.of(context).levelName(level),
       excludeSemantics: true,
       child: Container(
-        width: 17,
-        height: 17,
+        width: 16,
+        height: 16,
         alignment: Alignment.center,
         decoration: BoxDecoration(
             color: color.withValues(alpha: 0.16),
             borderRadius: BorderRadius.circular(DurbunRadius.sm)),
         child: Text(letter(level),
             style: DurbunType.monoStyle(
-                size: 10, color: color, weight: FontWeight.w700, height: 1)),
+                size: 10, color: color, weight: FontWeight.w600, height: 1)),
       ),
     );
   }
@@ -136,8 +136,8 @@ class DBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           if (icon != null) ...<Widget>[
-            Icon(icon, size: 11, color: fg),
-            const SizedBox(width: 3)
+            Icon(icon, size: 12, color: fg),
+            const SizedBox(width: 4)
           ],
           Flexible(
               child: Text(text,
@@ -179,18 +179,20 @@ class DToggle extends StatelessWidget {
             color: fg,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             height: 1.2);
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(DurbunRadius.md),
+      side: BorderSide(color: selected ? tone.withValues(alpha: 0.5) : c.border),
+    );
     return Material(
       color: selected ? tone.withValues(alpha: 0.14) : Colors.transparent,
-      shape: StadiumBorder(
-        side: BorderSide(color: selected ? tone.withValues(alpha: 0.5) : c.border),
-      ),
+      shape: shape,
       child: InkWell(
-        customBorder: const StadiumBorder(),
+        customBorder: shape,
         onTap: onTap,
         // No alignment: an aligned Container would stretch to the full width
         // inside a Wrap (the filter sheet).
         child: Container(
-          height: 30,
+          height: 32,
           padding: const EdgeInsets.symmetric(horizontal: 10),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -259,14 +261,14 @@ class _DSearchFieldState extends State<DSearchField> {
       height: 40,
       decoration: BoxDecoration(
         color: c.fieldBg,
-        borderRadius: BorderRadius.circular(DurbunRadius.md + 1),
+        borderRadius: BorderRadius.circular(DurbunRadius.md),
         border: c.isDark ? Border.all(color: c.border) : null,
       ),
       child: Row(
         children: <Widget>[
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Icon(Icons.search_rounded, size: 18, color: c.textSubtle),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: controller,
@@ -315,7 +317,7 @@ class _DSearchFieldState extends State<DSearchField> {
                 size: 40,
                 onTap: widget.onHelp),
           if (widget.trailing != null) widget.trailing!,
-          const SizedBox(width: 3),
+          const SizedBox(width: 4),
         ],
       ),
     );
@@ -389,9 +391,9 @@ class DButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    final fg = primary ? Colors.white : (onTap == null ? c.textSubtle : c.text);
+    final fg = primary ? c.onPrimaryFill : (onTap == null ? c.textSubtle : c.text);
     return Material(
-      color: primary ? c.accent : c.cardBg,
+      color: primary ? c.primaryFill : c.cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(large ? DurbunRadius.lg : DurbunRadius.md),
         side: primary ? BorderSide.none : BorderSide(color: c.border),
@@ -400,15 +402,15 @@ class DButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(large ? DurbunRadius.lg : DurbunRadius.md),
         onTap: onTap,
         child: Container(
-          height: large ? 48 : 34,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          height: large ? 48 : 36,
+          padding: EdgeInsets.symmetric(horizontal: large ? 16 : 12),
           child: Row(
             mainAxisSize: large ? MainAxisSize.max : MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
               if (icon != null) ...<Widget>[
                 Icon(icon, size: 16, color: primary ? fg : c.textMuted),
-                const SizedBox(width: 6)
+                const SizedBox(width: 8)
               ],
               // Shrinks with an ellipsis (two sheet buttons, large text).
               Flexible(
@@ -418,11 +420,11 @@ class DButton extends StatelessWidget {
                     style: TextStyle(
                         fontSize: large ? 15 : 13,
                         color: fg,
-                        fontWeight: large ? FontWeight.w600 : FontWeight.w500)),
+                        fontWeight: FontWeight.w500)),
               ),
               if (trailingIcon != null) ...<Widget>[
                 const SizedBox(width: 4),
-                Icon(trailingIcon, size: 15, color: c.textMuted)
+                Icon(trailingIcon, size: 16, color: c.textMuted)
               ],
             ],
           ),
@@ -444,10 +446,10 @@ class SegmentTrack extends StatelessWidget {
     final c = DurbunColors.of(context);
     return Container(
       height: height,
-      padding: const EdgeInsets.all(3),
+      padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
           color: c.trackBg,
-          borderRadius: BorderRadius.circular(DurbunRadius.md + 1),
+          borderRadius: BorderRadius.circular(DurbunRadius.md),
           border: c.isDark ? Border.all(color: c.border.withValues(alpha: 0.6)) : null),
       child: Row(mainAxisSize: MainAxisSize.min, children: children),
     );
@@ -485,6 +487,7 @@ class Segment extends StatelessWidget {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: selected ? c.thumbBg : Colors.transparent,
+            // The track's radius minus its 2 pt inset.
             borderRadius: BorderRadius.circular(DurbunRadius.md - 2),
             boxShadow: selected ? c.raised : null,
           ),
@@ -567,10 +570,10 @@ class ChoiceSegments extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     return Container(
-      padding: const EdgeInsets.all(3),
+      padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
           color: c.trackBg,
-          borderRadius: BorderRadius.circular(DurbunRadius.md + 1),
+          borderRadius: BorderRadius.circular(DurbunRadius.md),
           border: c.isDark ? Border.all(color: c.border.withValues(alpha: 0.6)) : null),
       child: IntrinsicHeight(
         child: Row(
@@ -582,9 +585,9 @@ class ChoiceSegments extends StatelessWidget {
                   selected: i == index,
                   onTap: () => onChanged?.call(i),
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: kMinTapTarget - 6),
+                    constraints: const BoxConstraints(minHeight: kMinTapTarget - 4),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Center(
                         child: Text.rich(
                           TextSpan(children: <InlineSpan>[
@@ -631,7 +634,7 @@ class StatusPill extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 6),
         decoration: BoxDecoration(
             color: color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(DurbunRadius.sm + 1)),
+            borderRadius: BorderRadius.circular(DurbunRadius.sm)),
         // widthFactor 1: without a width the pill hugs its text (a Wrap
         // would stretch an aligned box to the full row).
         child: Center(
@@ -640,7 +643,7 @@ class StatusPill extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text(text,
                 maxLines: 1,
-                style: DurbunType.monoStyle(size: 11.5, color: color, weight: FontWeight.w700, height: 1.1)),
+                style: DurbunType.monoStyle(size: 11.5, color: color, weight: FontWeight.w600, height: 1.1)),
           ),
         ),
       );
@@ -709,7 +712,7 @@ class _KeyValueRowState extends State<_KeyValueRow> {
       onTapDown: (d) => _tapAt = d.globalPosition,
       onTap: _menu,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -755,8 +758,8 @@ class MenuRow extends StatelessWidget {
     final c = DurbunColors.of(context);
     return Row(
       children: <Widget>[
-        Icon(icon, size: 17, color: c.textMuted),
-        const SizedBox(width: 10),
+        Icon(icon, size: 18, color: c.textMuted),
+        const SizedBox(width: 12),
         Flexible(child: Text(label, style: TextStyle(fontSize: 14, color: c.text))),
       ],
     );
@@ -813,16 +816,16 @@ class Callout extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final (fg, bg, icon) = switch (tone) {
-      CalloutTone.info => (c.info, c.infoSoft, Icons.info_outline),
+      CalloutTone.info => (c.info, c.infoSoft, Icons.info_outline_rounded),
       CalloutTone.warning => (
           c.warning,
           c.warningSoft,
           Icons.warning_amber_rounded
         ),
-      CalloutTone.danger => (c.danger, c.dangerSoft, Icons.error_outline),
+      CalloutTone.danger => (c.danger, c.dangerSoft, Icons.error_outline_rounded),
     };
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(DurbunRadius.lg),
@@ -830,8 +833,8 @@ class Callout extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(icon, size: 17, color: fg),
-          const SizedBox(width: 9),
+          Icon(icon, size: 18, color: fg),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -884,42 +887,22 @@ class EmptyState extends StatelessWidget {
               minHeight: box.maxHeight.isFinite ? box.maxHeight : 0),
           child: Center(
             child: Padding(
-              padding: const EdgeInsets.all(28),
+              padding: const EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  // The icon on a soft accent disc, in a faint halo.
                   Container(
-                    width: 76,
-                    height: 76,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(colors: <Color>[
-                        c.accent.withValues(alpha: c.isDark ? 0.16 : 0.10),
-                        c.accent.withValues(alpha: 0),
-                      ]),
-                    ),
-                    alignment: Alignment.center,
-                    child: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                          color: c.accentSoft,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: c.accent.withValues(alpha: 0.25))),
-                      child: Icon(icon, size: 23, color: c.badgeAccent),
-                    ),
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(color: c.bgActive, shape: BoxShape.circle),
+                    child: Icon(icon, size: 24, color: c.textMuted),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   Text(title,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -0.2,
-                          color: c.text)),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: c.text)),
                   if (body != null) ...<Widget>[
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 300),
                       child: Text(body!,
@@ -928,10 +911,10 @@ class EmptyState extends StatelessWidget {
                     ),
                   ],
                   if (actionLabel != null && onAction != null) ...<Widget>[
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 16),
                     DButton(
                         label: actionLabel!,
-                        icon: Icons.filter_alt_off_outlined,
+                        icon: Icons.filter_alt_off_rounded,
                         onTap: onAction),
                   ],
                 ],
@@ -958,25 +941,25 @@ class NewItemsPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     return Material(
-      color: c.accent,
+      color: c.primaryFill,
       borderRadius: BorderRadius.circular(DurbunRadius.pill),
-      elevation: 6,
-      shadowColor: c.accent.withValues(alpha: 0.6),
+      elevation: 3,
+      shadowColor: Colors.black.withValues(alpha: c.isDark ? 0.5 : 0.25),
       child: InkWell(
         borderRadius: BorderRadius.circular(DurbunRadius.pill),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(up ? Icons.arrow_upward : Icons.arrow_downward, size: 14, color: Colors.white),
+              Icon(up ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 14, color: c.onPrimaryFill),
               const SizedBox(width: 4),
               Text(text,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600)),
+                      color: c.onPrimaryFill,
+                      fontWeight: FontWeight.w500)),
             ],
           ),
         ),
@@ -996,16 +979,15 @@ class SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 6),
+      padding: const EdgeInsets.only(top: 16, bottom: 8),
       child: Row(
         children: <Widget>[
           Expanded(
               child: Text(text,
                   style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: c.textMuted,
-                      letterSpacing: 0.2))),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: c.textMuted))),
           if (trailing != null) trailing!,
         ],
       ),
@@ -1096,7 +1078,7 @@ class DTab {
 /// Segmented tabs driven by a [TabController]: the raised segment follows a
 /// swipe of the [TabBarView] under it (the panel, the detail pages).
 class DTabBar extends StatelessWidget {
-  const DTabBar({super.key, required this.controller, required this.tabs, this.height = 38});
+  const DTabBar({super.key, required this.controller, required this.tabs, this.height = 40});
 
   final TabController controller;
   final List<DTab> tabs;
@@ -1107,17 +1089,17 @@ class DTabBar extends StatelessWidget {
     final c = DurbunColors.of(context);
     return Container(
       height: height,
-      padding: const EdgeInsets.all(3),
+      padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
         color: c.trackBg,
-        borderRadius: BorderRadius.circular(DurbunRadius.lg - 1),
+        borderRadius: BorderRadius.circular(DurbunRadius.md),
         border: c.isDark ? Border.all(color: c.border.withValues(alpha: 0.6)) : null,
       ),
       child: TabBar(
         controller: controller,
         indicator: BoxDecoration(
           color: c.thumbBg,
-          borderRadius: BorderRadius.circular(DurbunRadius.md),
+          borderRadius: BorderRadius.circular(DurbunRadius.md - 2),
           boxShadow: c.raised,
         ),
         indicatorSize: TabBarIndicatorSize.tab,
@@ -1127,14 +1109,14 @@ class DTabBar extends StatelessWidget {
         overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
         labelColor: c.text,
         unselectedLabelColor: c.textMuted,
-        labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, height: 1.2),
-        unselectedLabelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, height: 1.2),
+        labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.2),
+        unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, height: 1.2),
         tabs: <Widget>[
           for (final tab in tabs)
             Tooltip(
               message: tab.label,
               child: Tab(
-                height: height - 6,
+                height: height - 4,
                 // Tabs share the width; a long label shrinks instead of
                 // pushing the others off a narrow phone.
                 child: FittedBox(
@@ -1153,7 +1135,7 @@ class DTabBar extends StatelessWidget {
                           const SizedBox(width: 6),
                           _TabCount(count: tab.count!, alert: tab.alert),
                         ] else if (tab.alert) ...<Widget>[
-                          const SizedBox(width: 5),
+                          const SizedBox(width: 6),
                           Container(width: 7, height: 7, decoration: BoxDecoration(color: c.danger, shape: BoxShape.circle)),
                         ],
                       ],
@@ -1180,14 +1162,14 @@ class _TabCount extends StatelessWidget {
     return Container(
       height: 18,
       constraints: const BoxConstraints(minWidth: 18),
-      padding: const EdgeInsets.symmetric(horizontal: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       alignment: Alignment.center,
       decoration: BoxDecoration(
           color: alert ? c.danger : c.bgActive, borderRadius: BorderRadius.circular(DurbunRadius.pill)),
       child: Text(
         count > 999 ? '999+' : '$count',
         style: DurbunType.monoStyle(
-            size: 10.5, color: alert ? Colors.white : c.textMuted, weight: FontWeight.w700, height: 1.1),
+            size: 10.5, color: alert ? Colors.white : c.textMuted, weight: FontWeight.w600, height: 1.1),
       ),
     );
   }

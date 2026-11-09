@@ -276,15 +276,15 @@ class _LogsViewState extends State<LogsView> {
             _f.errorsOnly = v;
             changed();
           }),
-          SheetSwitch(label: t.crashes, hint: t.crashesHint, icon: Icons.bolt, value: _f.crashes, onChanged: (v) {
+          SheetSwitch(label: t.crashes, hint: t.crashesHint, icon: Icons.bolt_rounded, value: _f.crashes, onChanged: (v) {
             _f.crashes = v;
             changed();
           }),
-          SheetSwitch(label: t.events, hint: t.eventsHint, icon: Icons.auto_awesome, value: _f.events, onChanged: (v) {
+          SheetSwitch(label: t.events, hint: t.eventsHint, icon: Icons.outlined_flag_rounded, value: _f.events, onChanged: (v) {
             _f.events = v;
             changed();
           }),
-          SheetSwitch(label: t.showRequests, hint: t.showRequestsHint, icon: Icons.swap_horiz, value: _f.network, onChanged: (v) {
+          SheetSwitch(label: t.showRequests, hint: t.showRequestsHint, icon: Icons.swap_horiz_rounded, value: _f.network, onChanged: (v) {
             _f.network = v;
             changed();
           }),
@@ -325,7 +325,7 @@ class _LogsViewState extends State<LogsView> {
               Container(width: 8, height: 8, decoration: BoxDecoration(color: l == 'verbose' ? c.textSubtle : c.level(l), shape: BoxShape.circle)),
               const SizedBox(width: 10),
               Text(l == 'verbose' ? t.allLevels : t.levelAtLeast(t.levelName(l)),
-                  style: TextStyle(fontSize: 14, color: c.text, fontWeight: _f.minLevel == l ? FontWeight.w700 : FontWeight.w400)),
+                  style: TextStyle(fontSize: 14, color: c.text, fontWeight: _f.minLevel == l ? FontWeight.w600 : FontWeight.w400)),
             ]),
           ),
       ],
@@ -342,8 +342,8 @@ class _LogsViewState extends State<LogsView> {
         ? active.add(ActiveChip(label: label, onRemove: () => setState(() => set(false))))
         : quick.add(DToggle(label: label, icon: icon, selected: false, onTap: () => setState(() => set(true))));
     toggle(t.errorsOnly, Icons.warning_amber_rounded, _f.errorsOnly, (v) => _f.errorsOnly = v);
-    toggle(t.crashes, Icons.bolt, _f.crashes, (v) => _f.crashes = v);
-    toggle(t.events, Icons.auto_awesome, _f.events, (v) => _f.events = v);
+    toggle(t.crashes, Icons.bolt_rounded, _f.crashes, (v) => _f.crashes = v);
+    toggle(t.events, Icons.outlined_flag_rounded, _f.events, (v) => _f.events = v);
     if (_f.source != 'all') active.add(ActiveChip(label: _f.source == 'native' ? t.nativeSource : t.flutterSource, onRemove: () => setState(() => _f.source = 'all')));
     if (!_f.network) active.add(ActiveChip(label: t.requestsHidden, onRemove: () => setState(() => _f.network = true)));
     if (_f.hiddenTags.isNotEmpty) active.add(ActiveChip(label: t.hiddenTags(_f.hiddenTags.length), onRemove: () => setState(_f.hiddenTags.clear)));
@@ -404,7 +404,7 @@ class _LogsViewState extends State<LogsView> {
             Expanded(
               child: items.isEmpty
                   ? EmptyState(
-                      icon: _f.errorsOnly || _f.crashes ? Icons.verified_outlined : Icons.notes,
+                      icon: _f.errorsOnly || _f.crashes ? Icons.verified_outlined : Icons.notes_rounded,
                       title: nothing ? t.noLogsTitle : t.noMatchTitle,
                       body: nothing ? t.noLogsBody : t.noMatchBody,
                       actionLabel: nothing ? null : t.clearFilters,
@@ -427,7 +427,7 @@ class _LogsViewState extends State<LogsView> {
               Container(
                 width: double.infinity,
                 color: c.bgPanel,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 child: Text(t.dropped(widget.store.droppedLogs), style: TextStyle(fontSize: 11, color: c.textMeta)),
               ),
           ],
@@ -517,7 +517,8 @@ class LogRow extends StatelessWidget {
           if (action != null) onTagAction?.call(action.$1, action.$2);
         },
         child: Container(
-          padding: const EdgeInsets.fromLTRB(11, 7, 12, 7),
+          // The 3 pt edge plus 9 puts the text on the toolbar's 12 pt line.
+          padding: const EdgeInsets.fromLTRB(9, 8, 12, 8),
           decoration: BoxDecoration(
             border: Border(
               left: BorderSide(color: l.isCrash ? c.lvFatal : (tint != null ? c.level(l.level) : Colors.transparent), width: 3),
@@ -534,13 +535,13 @@ class LogRow extends StatelessWidget {
                 children: <Widget>[
                   Text(formatClock(l.ts), style: DurbunType.monoStyle(size: 11, color: c.textSubtle, height: 1.2)),
                   if (l.isEvent)
-                    DBadge(t.event, tone: BadgeTone.accent, icon: Icons.auto_awesome)
+                    DBadge(t.event, tone: BadgeTone.accent, icon: Icons.outlined_flag_rounded)
                   else
                     LevelBadge(l.level),
                   if (l.tag != null) TagChip(l.tag!, maxWidth: 150),
-                  if (l.isCrash) DBadge(t.crash, tone: BadgeTone.danger, icon: Icons.bolt),
+                  if (l.isCrash) DBadge(t.crash, tone: BadgeTone.danger, icon: Icons.bolt_rounded),
                   if (l.kind == 'flutter-error') DBadge('Flutter', tone: BadgeTone.danger),
-                  if (l.native) DBadge(t.native, icon: Icons.memory),
+                  if (l.native) DBadge(t.native, icon: Icons.memory_rounded),
                   if (item.repeats > 1) DBadge('×${item.repeats}', tone: BadgeTone.info, mono: true),
                 ],
               ),
@@ -548,7 +549,7 @@ class LogRow extends StatelessWidget {
               Text.rich(
                 TextSpan(
                   children: <InlineSpan>[
-                    highlightTerms(rowPreview(l.message), terms, l.isEvent ? mono.copyWith(fontWeight: FontWeight.w700) : mono, c.hlMark),
+                    highlightTerms(rowPreview(l.message), terms, l.isEvent ? mono.copyWith(fontWeight: FontWeight.w600) : mono, c.hlMark),
                     if (l.data != null) TextSpan(text: '  ${dataPreview(l.data)}', style: mono.copyWith(color: c.textMuted, fontSize: 11.5)),
                   ],
                 ),
@@ -595,7 +596,7 @@ class _NetLogRow extends StatelessWidget {
                   routeContext, CallDetailPage(call: call, store: store))));
         },
         child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 7, 12, 7),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
           decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.hairline))),
           // Wraps instead of overflowing on narrow phones and large text.
           child: Column(
@@ -607,7 +608,7 @@ class _NetLogRow extends StatelessWidget {
                 children: <Widget>[
                   Text(formatClock(call.ts), style: DurbunType.monoStyle(size: 11, color: c.textSubtle, height: 1.2)),
                   Icon(Icons.swap_vert_rounded, size: 15, color: c.textSubtle),
-                  Text(call.method, style: DurbunType.monoStyle(size: 12, color: c.method(call.method), weight: FontWeight.w700, height: 1.3)),
+                  Text(call.method, style: DurbunType.monoStyle(size: 12, color: c.method(call.method), weight: FontWeight.w600, height: 1.3)),
                   StatusPill(text: status, color: call.cancelled ? c.textSubtle : c.status(call.status, failed: failed), width: null),
                   if (call.state != InspectorCallState.pending)
                     Text(formatDuration(call.duration), style: DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.3)),
@@ -649,7 +650,7 @@ class _LogDetailPageState extends State<LogDetailPage> {
     final head = e == null ? '' : errorHead(e);
     final hasData = l.data != null;
     final tabs = <String>[t.message, if (hasData) t.data, if (stack.isNotEmpty) t.stack];
-    final pad = EdgeInsets.fromLTRB(14, 12, 14, 20 + MediaQuery.paddingOf(context).bottom);
+    final pad = EdgeInsets.fromLTRB(16, 12, 16, 20 + MediaQuery.paddingOf(context).bottom);
     return Scaffold(
       backgroundColor: c.bgPanel,
       appBar: AppBar(
@@ -659,10 +660,10 @@ class _LogDetailPageState extends State<LogDetailPage> {
         titleSpacing: 0,
         title: Row(
           children: <Widget>[
-            if (l.isEvent) DBadge(t.event, tone: BadgeTone.accent, icon: Icons.auto_awesome) else LevelBadge(l.level),
+            if (l.isEvent) DBadge(t.event, tone: BadgeTone.accent, icon: Icons.outlined_flag_rounded) else LevelBadge(l.level),
             const SizedBox(width: 8),
             if (l.tag != null) Flexible(child: TagChip(l.tag!, maxWidth: 180)),
-            if (l.isCrash) ...<Widget>[const SizedBox(width: 6), DBadge(t.crash, tone: BadgeTone.danger, icon: Icons.bolt)],
+            if (l.isCrash) ...<Widget>[const SizedBox(width: 6), DBadge(t.crash, tone: BadgeTone.danger, icon: Icons.bolt_rounded)],
           ],
         ),
         actions: <Widget>[
@@ -687,7 +688,7 @@ class _LogDetailPageState extends State<LogDetailPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
               <String>[
                 formatClock(l.ts),
@@ -720,7 +721,7 @@ class _LogDetailPageState extends State<LogDetailPage> {
       return swipeSafeSelection(ListView(padding: pad, children: <Widget>[Text(prettyValue(l.data), style: DurbunType.monoStyle(color: c.text))]));
     }
     if (name == t.stack) return swipeSafeSelection(ListView(padding: pad, children: <Widget>[StackTraceView(stack: stack)]));
-    final msgStyle = DurbunType.monoStyle(size: 13, color: c.text, weight: l.isEvent ? FontWeight.w700 : null);
+    final msgStyle = DurbunType.monoStyle(size: 13, color: c.text, weight: l.isEvent ? FontWeight.w600 : null);
     // Plain text: a SelectableText takes horizontal drags and the tabs would
     // not swipe.
     return swipeSafeSelection(

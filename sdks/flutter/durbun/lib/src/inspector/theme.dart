@@ -112,13 +112,19 @@ class DurbunColors {
   /// Hairline between rows of a list.
   Color get hairline => border.withValues(alpha: isDark ? 0.7 : 0.9);
 
-  /// Soft shadow under raised segments, pills and sheets.
-  List<BoxShadow> get raised => <BoxShadow>[
-        BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
-            blurRadius: 6,
-            offset: const Offset(0, 1)),
-      ];
+  /// Soft shadow under raised segments on light; on dark the surface step
+  /// alone lifts them.
+  List<BoxShadow> get raised => isDark
+      ? const <BoxShadow>[]
+      : <BoxShadow>[
+          BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 4, offset: const Offset(0, 1)),
+        ];
+
+  /// The one filled button of a sheet ("Done", "Export"): off-white on dark,
+  /// ink on light. The accent stays for selection (switches, checkboxes,
+  /// chosen chips).
+  Color get primaryFill => text;
+  Color get onPrimaryFill => isDark ? bgApp : bgPanel;
 
   static const DurbunColors dark = DurbunColors(
     brightness: Brightness.dark,
@@ -376,11 +382,13 @@ abstract final class DurbunType {
 }
 
 /// Radii. Rounder than the desktop's (4 / 6 / 10): on a phone the panel
-/// sits among the system's own rounded controls.
+/// sits among the system's own rounded controls. Tags and badges [sm],
+/// rows, fields, chips and buttons [md], cards [lg], sheets [xl]; a part
+/// inside another takes the outer radius minus the gap between them.
 abstract final class DurbunRadius {
-  static const double sm = 5;
-  static const double md = 9;
-  static const double lg = 13;
+  static const double sm = 6;
+  static const double md = 10;
+  static const double lg = 14;
   static const double xl = 20;
   static const double pill = 999;
 }
@@ -445,7 +453,7 @@ class DurbunTheme extends InheritedWidget {
             elevation: 0,
             scrolledUnderElevation: 0,
             toolbarHeight: 50,
-            titleTextStyle: TextStyle(color: c.text, fontSize: 15.5, fontWeight: FontWeight.w600),
+            titleTextStyle: TextStyle(color: c.text, fontSize: 16, fontWeight: FontWeight.w600),
             iconTheme: IconThemeData(color: c.text, size: 20),
             actionsIconTheme: IconThemeData(color: c.textMuted, size: 20),
           ),
@@ -500,8 +508,8 @@ class DurbunTheme extends InheritedWidget {
           ),
           textButtonTheme: TextButtonThemeData(
             style: TextButton.styleFrom(
-              foregroundColor: c.accent,
-              textStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+              foregroundColor: c.text,
+              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.md)),
             ),
           ),

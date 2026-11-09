@@ -41,7 +41,7 @@ class InspectorStrings {
   String ruleCount(int n) => n == 0 ? _('Kural yok', 'No rules') : _('$n kural', n == 1 ? '1 rule' : '$n rules');
   String get noSamplesShort => _('Ölçüm yok', 'No samples');
   String get clearAll => _('Kayıtları temizle', 'Clear captured data');
-  String get clearAllHint => _('Loglar, istekler ve ölçümler silinir.', 'Removes logs, requests and samples.');
+  String get clearAllHint => _('Loglar, istekler ve ölçümler silinir', 'Removes logs, requests and samples');
   String get cleared => _('Temizlendi', 'Cleared');
   String get clearConfirmTitle => _('Kayıtlar temizlensin mi?', 'Clear captured data?');
   String get clearConfirmBody => _(
@@ -51,11 +51,11 @@ class InspectorStrings {
   String get cancel => _('Vazgeç', 'Cancel');
   String newItems(int n) => _('$n yeni', '$n new');
   String requestCount(int n) => _('$n istek', n == 1 ? '1 request' : '$n requests');
-  String dropped(int n) => _('Yer açmak için en eski $n kayıt silindi.', 'The oldest $n entries were removed to make room.');
+  String dropped(int n) => _('Yer açmak için en eski $n kayıt silindi', 'The oldest $n entries were removed to make room');
   String get pause => _('Duraklat', 'Pause');
   String get resume => _('Devam et', 'Resume');
   String get noMatchTitle => _('Filtreye uyan kayıt yok', 'Nothing matches the filter');
-  String get noMatchBody => _('Aramayı ya da filtreleri değiştirin.', 'Change the search or the filters.');
+  String get noMatchBody => _('Aramayı ya da filtreleri değiştirin', 'Change the search or the filters');
   String get copied => _('Kopyalandı', 'Copied');
   String get copy => _('Kopyala', 'Copy');
   String get on => _('Açık', 'On');
@@ -72,7 +72,7 @@ class InspectorStrings {
   String get off => _('Kapalı', 'Off');
 
   /* logs */
-  String get logSearchHint => _('Mesaj, etiket ya da hata ara', 'Search messages, tags, errors');
+  String get logSearchHint => _('Loglarda ara', 'Search logs');
   String get logFilters => _('Log filtreleri', 'Log filters');
   List<(String, String)> get logQueryHints => <(String, String)>[
     ('tag:auth', _('Etiketi “auth” içerenler', 'Tag contains “auth”')),
@@ -86,7 +86,7 @@ class InspectorStrings {
     ('"tam ifade"', _('Boşluklu ifadeyi bir arada ara', 'Search a phrase with spaces')),
   ];
   String get level => _('Seviye', 'Level');
-  String get levelHint => _('Seçilen seviye ve üstü gösterilir.', 'The chosen level and above are shown.');
+  String get levelHint => _('Seçilen seviye ve üstü gösterilir', 'The chosen level and above are shown');
   String get allLevels => _('Tümü', 'All');
   String levelAtLeast(String name) => _('$name+', '$name+');
   String levelName(String level) => switch (level) {
@@ -102,10 +102,10 @@ class InspectorStrings {
   String get flutterSource => _('Flutter (Dart)', 'Flutter (Dart)');
   String get nativeSource => _('Native (Kotlin/Swift)', 'Native (Kotlin/Swift)');
   String get showRequests => _('İstekleri akışta göster', 'Show requests in the stream');
-  String get showRequestsHint => _('Ağ istekleri loglarla aynı zaman sırasında görünür.', 'Requests appear between the logs, in time order.');
+  String get showRequestsHint => _('Ağ istekleri loglarla aynı zaman sırasında görünür', 'Requests appear between the logs, in time order');
   String get requestsHidden => _('İstekler gizli', 'Requests hidden');
   String get hiddenTagsTitle => _('Gizli etiketler', 'Hidden tags');
-  String get hiddenTagsHint => _('Dokunun: yeniden gösterilir.', 'Tap one to show it again.');
+  String get hiddenTagsHint => _('Dokunun: yeniden gösterilir', 'Tap one to show it again');
   String get onlyErrorsHint => _('Hata, ölümcül ve çökme kayıtları', 'Error, fatal and crash lines');
   String get crashesHint => _('Yakalanmamış hatalar ve Flutter hata kutuları', 'Uncaught errors and Flutter error boxes');
   String get eventsHint => _('Durbun.event ile gönderilenler', 'Sent with Durbun.event');
@@ -117,13 +117,13 @@ class InspectorStrings {
   String hiddenTags(int n) => _('$n etiket gizli', '$n tags hidden');
   String get noLogsTitle => _('Henüz log yok', 'No logs yet');
   String get noLogsBody => _(
-    'Durbun.log, print, debugPrint, Flutter hataları, olaylar ve Kotlin/Swift logları burada akar.',
-    'Durbun.log, print, debugPrint, Flutter errors, events and Kotlin/Swift logs stream here.',
+    'Durbun.log, print, debugPrint, Flutter hataları, olaylar ve Kotlin/Swift logları burada akar',
+    'Durbun.log, print, debugPrint, Flutter errors, events and Kotlin/Swift logs stream here',
   );
   String get event => _('Olay', 'Event');
   String messageCut(int n) => _(
-    'Mesajın son $n karakteri telefonda tutulmadı (masaüstüne tamamı gider).',
-    'The last $n characters are not kept on the phone (the desktop gets all of it).',
+    'Mesajın son $n karakteri telefonda tutulmadı (masaüstüne tamamı gider)',
+    'The last $n characters are not kept on the phone (the desktop gets all of it)',
   );
   String get crash => _('Çökme', 'Crash');
   String get message => _('Mesaj', 'Message');
@@ -136,7 +136,7 @@ class InspectorStrings {
   String hideThisTag(String tag) => _('“$tag” etiketini gizle', 'Hide “$tag”');
 
   /* network */
-  String get netSearchHint => _('Endpoint, host ya da hata ara', 'Search endpoints, hosts, errors');
+  String get netSearchHint => _('İsteklerde ara', 'Search requests');
   String get netFilters => _('İstek filtreleri', 'Request filters');
 
   /* order of the Network list */
@@ -160,24 +160,24 @@ class InspectorStrings {
   String get exportSession => _('Oturumu dışa aktar', 'Export session');
   String get exportSessionHint => _('Rapor ya da HAR dosyası', 'A report or a HAR file');
   String get exportDescription => _(
-    'İstekleri dosya olarak paylaşın: ekibin okuyacağı bir rapor ya da tarayıcı araçlarının açtığı HAR.',
-    'Share the requests as a file: a report your team can read, or a HAR that browser tools open.',
+    'İstekleri dosya olarak paylaşın: ekibin okuyacağı bir rapor ya da tarayıcı araçlarının açtığı HAR',
+    'Share the requests as a file: a report your team can read, or a HAR that browser tools open',
   );
   String get exportScope => _('İstekler', 'Requests');
   String get exportListed => _('Listedekiler', 'Listed');
   String get exportAll => _('Tümü', 'All');
-  String get exportListedHint => _('Ağ sekmesindeki filtreler, arama ve sıra uygulanır.', 'The Network tab’s filters, search and order apply.');
-  String get exportAllHint => _('Telefonda tutulan bütün istekler, geliş sırasıyla.', 'Every request kept on the phone, in arrival order.');
+  String get exportListedHint => _('Ağ sekmesindeki filtreler, arama ve sıra uygulanır', 'The Network tab’s filters, search and order apply');
+  String get exportAllHint => _('Telefonda tutulan bütün istekler, geliş sırasıyla', 'Every request kept on the phone, in arrival order');
   String get exportFormat => _('Biçim', 'Format');
   String get exportMarkdown => _('Rapor (.md)', 'Report (.md)');
   String get exportHar => 'HAR (.har)';
   String get exportMarkdownHint => _(
-    'Özet tablo ve her isteğin ayrıntısı; Slack, Jira ve e-postada okunur.',
-    'A summary table and every request in detail; reads well in Slack, Jira and e-mail.',
+    'Özet tablo ve her isteğin ayrıntısı; Slack, Jira ve e-postada okunur',
+    'A summary table and every request in detail; reads well in Slack, Jira and e-mail',
   );
   String get exportHarHint => _(
-    'Chrome DevTools, Charles, Proxyman ve HAR görüntüleyicileri açar.',
-    'Opens in Chrome DevTools, Charles, Proxyman and HAR viewers.',
+    'Chrome DevTools, Charles, Proxyman ve HAR görüntüleyicileri açar',
+    'Opens in Chrome DevTools, Charles, Proxyman and HAR viewers',
   );
   String get exportBodiesHint => _('Kapalıyken gövde içerikleri dosyaya girmez', 'Off: no body content goes into the file');
   String get exportSend => _('Dışa aktar…', 'Export…');
@@ -216,7 +216,7 @@ class InspectorStrings {
   String statsOverResponses(int n) => _('Yanıt gelen $n istek üzerinden', n == 1 ? 'Over 1 response' : 'Over $n responses');
   String get statsSent => _('Gönderilen', 'Sent');
   String get statsReceived => _('Alınan', 'Received');
-  String get statsBytesHint => _('İstek ve yanıt gövdelerinin boyutu (başlıklar hariç).', 'Request and response body sizes (headers not counted).');
+  String get statsBytesHint => _('İstek ve yanıt gövdelerinin boyutu (başlıklar hariç)', 'Request and response body sizes (headers not counted)');
   String get statsMethods => _('Metotlar', 'Methods');
   String statsTopHosts(int n) => _('En çok istek alan $n host', 'Top $n hosts');
   String statsMoreHosts(int n) => _('ve $n host daha', 'and $n more hosts');
@@ -233,8 +233,8 @@ class InspectorStrings {
   String get previousRunReading => _('Okunuyor…', 'Reading…');
   String get previousRunEmptyTitle => _('Önceki çalıştırmadan kayıt yok', 'Nothing saved from the previous run');
   String get previousRunEmptyBody => _(
-    'keepPreviousRun açıkken uygulama bir sonraki açılışta önceki çalıştırmayı burada gösterir.',
-    'With keepPreviousRun on, the next launch shows the run before it here.',
+    'keepPreviousRun açıkken uygulama bir sonraki açılışta önceki çalıştırmayı burada gösterir',
+    'With keepPreviousRun on, the next launch shows the run before it here',
   );
   String previousRunCrashes(int n) => _(n == 1 ? 'Bu çalıştırmada çökme var' : 'Bu çalıştırmada $n çökme var', n == 1 ? 'This run crashed' : 'This run crashed $n times');
   String get previousRunOpenCrash => _('Çökmeyi aç', 'Open the crash');
@@ -253,7 +253,7 @@ class InspectorStrings {
   String get sameEndpoint => _('Aynı endpoint', 'Same endpoint');
   String get otherRequests => _('Diğer istekler', 'Other requests');
   String get noOtherRequests => _('Karşılaştıracak başka istek yok', 'No other request to compare with');
-  String get noOtherRequestsBody => _('Aynı isteği uygulamada bir kez daha tetikleyin; burada görünür.', 'Trigger the request once more in the app; it shows up here.');
+  String get noOtherRequestsBody => _('Aynı isteği uygulamada bir kez daha tetikleyin; burada görünür', 'Trigger the request once more in the app; it shows up here');
   String get swap => _('Yer değiştir', 'Swap');
   String get responseBody => _('Yanıt gövdesi', 'Response body');
   String get requestBody => _('İstek gövdesi', 'Request body');
@@ -264,8 +264,8 @@ class InspectorStrings {
   String get requestHeaders => _('İstek başlıkları', 'Request headers');
   String get responseHeaders => _('Yanıt başlıkları', 'Response headers');
   String headerStats(int changed, int total) => _('$changed / $total farklı', '$changed / $total differ');
-  String get headersSame => _('Başlıklar aynı.', 'Headers are the same.');
-  String get fieldsSame => _('Tüm alanlar aynı.', 'All fields are the same.');
+  String get headersSame => _('Başlıklar aynı', 'Headers are the same');
+  String get fieldsSame => _('Tüm alanlar aynı', 'All fields are the same');
   String get identicalBodies => _('Gövdeler aynı', 'Bodies are identical');
   String get linesChanged => _('satır değişti', 'lines changed');
   String get diffApproximate => _('Çok büyük olduğu için bazı bölümler kaba karşılaştırıldı', 'Some parts were compared coarsely because they are very large');
@@ -298,13 +298,13 @@ class InspectorStrings {
     ('-host:analytics', _('Bu host’u hariç tut', 'Leave this host out')),
   ];
   String get searchBodies => _('Gövdelerde de ara', 'Search bodies too');
-  String get searchBodiesHint => _('Arama, istek ve yanıt gövdelerinin içine de bakar.', 'The search also looks inside request and response bodies.');
+  String get searchBodiesHint => _('Arama, istek ve yanıt gövdelerinin içine de bakar', 'The search also looks inside request and response bodies');
   String get inBodies => _('Gövdede ara', 'In bodies');
   String get statusTitle => _('Durum', 'Status');
   String get host => 'Host';
   String get flags => _('Diğer', 'Other');
   String get hostsTitle => _('Hostlar', 'Hosts');
-  String get hostsHint => _('İşaretli hostların istekleri listelenir.', 'Requests to the ticked hosts are listed.');
+  String get hostsHint => _('İşaretli hostların istekleri listelenir', 'Requests to the ticked hosts are listed');
   String get defaultHost => _('varsayılan', 'default');
   String get showAllHosts => _('Tümünü göster', 'Show all');
   String get defaultHostsOnly => _('Yalnızca varsayılanlar', 'Defaults only');
@@ -327,8 +327,8 @@ class InspectorStrings {
   String get resetFilters => _('Filtreleri sıfırla', 'Reset filters');
   String get noRequestsTitle => _('Henüz istek yok', 'No requests yet');
   String get noRequestsBody => _(
-    'dart:io, package:http, Dio, OkHttp ve URLSession istekleri burada görünür.',
-    'dart:io, package:http, Dio, OkHttp and URLSession requests show up here.',
+    'dart:io, package:http, Dio, OkHttp ve URLSession istekleri burada görünür',
+    'dart:io, package:http, Dio, OkHttp and URLSession requests show up here',
   );
   String get mock => 'Mock';
   String get cancelledShort => _('İPTAL', 'CANCEL');
@@ -336,7 +336,7 @@ class InspectorStrings {
   String get failShort => _('HATA', 'FAIL');
   String get cancelled => _('İptal edildi', 'Cancelled');
   String get pending => _('Bekliyor', 'Pending');
-  String get waitingResponse => _('Yanıt henüz gelmedi.', 'The response has not arrived yet.');
+  String get waitingResponse => _('Yanıt henüz gelmedi', 'The response has not arrived yet');
   String shortError(String key) => switch (key) {
     'timeout' => _('Zaman aşımı', 'Timed out'),
     'dns' => _('DNS çözümlenemedi', 'DNS lookup failed'),
@@ -371,27 +371,27 @@ class InspectorStrings {
   String get expandAll => _('Tümünü aç', 'Expand all');
   String get collapseAll => _('Tümünü kapat', 'Collapse all');
   String get noBody => _('Gövde yok', 'No body');
-  String get noBodyHint => _('Bu istekte gövde gönderilmedi ya da boş geldi.', 'No body was sent, or it was empty.');
+  String get noBodyHint => _('Bu istekte gövde gönderilmedi ya da boş geldi', 'No body was sent, or it was empty');
   String get bodyNotCaptured => _('Gövde kaydedilmedi', 'Body not captured');
   String get bodyNotCapturedHint => _(
-    'Masaüstünde gövde kaydı kapalı ya da gövde boyut sınırını aştı; yalnızca boyutu biliniyor.',
-    'Body capture is off on the desktop or the body was over the size limit; only its size is known.',
+    'Masaüstünde gövde kaydı kapalı ya da gövde boyut sınırını aştı; yalnızca boyutu biliniyor',
+    'Body capture is off on the desktop or the body was over the size limit; only its size is known',
   );
-  String get bodiesDropped => _('Bu isteğin gövdesi telefondaki bellek sınırı yüzünden silindi.', 'This request’s body was removed to stay within the memory limit on the phone.');
+  String get bodiesDropped => _('Bu isteğin gövdesi telefondaki bellek sınırı yüzünden silindi', 'This request’s body was removed to stay within the memory limit on the phone');
   String matchBeyondShown(String shown) => _(
     'Eşleşme gövdenin gösterilmeyen kısmında (ilk $shown gösteriliyor). Tamamı için gövdeyi kopyalayın.',
     'The match is past the shown part of the body (the first $shown is shown). Copy the body to see all of it.',
   );
-  String truncated(String size) => _('Gövde kısaltıldı (toplam $size).', 'Body truncated (total $size).');
+  String truncated(String size) => _('Gövde kısaltıldı (toplam $size)', 'Body truncated (total $size)');
   String get imageUnreadable => _('Görsel açılamadı', 'The image could not be decoded');
-  String get noResponseBody => _('Yanıt gelmedi; gösterilecek başlık ya da gövde yok.', 'No response arrived; there are no headers or body to show.');
+  String get noResponseBody => _('Yanıt gelmedi; gösterilecek başlık ya da gövde yok', 'No response arrived; there are no headers or body to show');
 
   /* share (the report labels match the desktop's network.share.report.*) */
   String get share => _('Paylaş', 'Share');
   String get shareTitle => _('İsteği paylaş', 'Share request');
   String get shareDescription => _(
-    'Ekibinizin Dürbün olmadan okuyabileceği bir rapor: URL, durum, başlıklar, gövdeler ve cURL.',
-    'A report your team can read without Dürbün: URL, status, headers, bodies and cURL.',
+    'Ekibinizin Dürbün olmadan okuyabileceği bir rapor: URL, durum, başlıklar, gövdeler ve cURL',
+    'A report your team can read without Dürbün: URL, status, headers, bodies and cURL',
   );
   String get shareMask => _('Gizli değerleri maskele', 'Mask secret values');
   String get shareMaskHint => _('Authorization, çerezler, token ve parola alanları •••• olur', 'Authorization, cookies, token and password fields become ••••');
@@ -435,7 +435,7 @@ class InspectorStrings {
   String get decodeJwt => _('JWT’yi çöz', 'Decode JWT');
   String get jwtClaims => _('İçerik (claims)', 'Claims');
   String get jwtHeader => _('JWT başlığı', 'JWT header');
-  String get jwtNotVerified => _('İmza doğrulanmaz; yalnızca içerik çözülür.', 'The signature is not verified; only the content is decoded.');
+  String get jwtNotVerified => _('İmza doğrulanmaz; yalnızca içerik çözülür', 'The signature is not verified; only the content is decoded');
   String get copyJson => _('JSON olarak kopyala', 'Copy as JSON');
   String expiresIn(String span) => _('$span sonra bitiyor', 'Expires in $span');
   String expiredAgo(String span) => _('$span önce bitti', 'Expired $span ago');
@@ -462,10 +462,10 @@ class InspectorStrings {
   String get responseSize => _('Yanıt boyutu', 'Response size');
   String get contentType => _('İçerik türü', 'Content type');
   String get mockedTitle => _('Bu yanıtı bir mock kuralı üretti', 'A mock rule produced this response');
-  String get mockedBody => _('İstek sunucuya gitmedi; kural masaüstünün Mock’lar sekmesinden geliyor.', 'The request did not reach the server; the rule comes from the desktop’s Mocks tab.');
+  String get mockedBody => _('İstek sunucuya gitmedi; kural masaüstünün Mock’lar sekmesinden geliyor', 'The request did not reach the server; the rule comes from the desktop’s Mocks tab');
   String get replay => _('Tekrar gönder', 'Replay');
   String get replaying => _('Gönderiliyor…', 'Sending…');
-  String get replaySent => _('İstek yeniden gönderildi; listede yeni satır olarak görünür.', 'Request sent again; it shows up as a new row.');
+  String get replaySent => _('İstek yeniden gönderildi; listede yeni satır olarak görünür', 'Request sent again; it shows up as a new row');
   String replayFailed(String e) => _('Yeniden gönderilen istek başarısız oldu: $e', 'The replayed request failed: $e');
   String get copyAs => _('Farklı kopyala', 'Copy as');
   String copyAsFormat(String f) => switch (f) {
@@ -494,20 +494,20 @@ class InspectorStrings {
     _ => _('Yanıtın indirilmesi', 'Content download'),
   };
   String get noPhasesTitle => _('Aşama süreleri yok', 'No phase timings');
-  String get noPhasesPending => _('İstek bitince zamanlama görünür.', 'Timing shows once the request finishes.');
+  String get noPhasesPending => _('İstek bitince zamanlama görünür', 'Timing shows once the request finishes');
   String get noPhasesFailed => _(
     'İstek yanıt gelmeden bitti; aşama süreleri yalnızca yanıtı gelen isteklerde ölçülür. Toplam süre, hataya kadar geçen süredir.',
     'The request ended without a response; phase times are measured only when a response arrives. The total is the time until the error.',
   );
   String noPhasesBody(String source) => _(
-    '“$source” kaynağı DNS, bağlantı ve bekleme sürelerini ayrı bildirmiyor; yalnızca toplam süre biliniyor.',
-    'The “$source” source does not report DNS, connection and waiting times separately; only the total is known.',
+    '“$source” kaynağı DNS, bağlantı ve bekleme sürelerini ayrı bildirmiyor; yalnızca toplam süre biliniyor',
+    'The “$source” source does not report DNS, connection and waiting times separately; only the total is known',
   );
 
   /* mocks */
   String get noMocksTitle => _('Etkin mock kuralı yok', 'No active mock rules');
-  String get noMocksConnected => _('Masaüstünün Mock’lar sekmesinde kural eklediğinizde burada görünür ve bu uygulamaya hemen uygulanır.', 'Rules you add in the desktop’s Mocks tab show up here and apply to this app at once.');
-  String get noMocksOffline => _('Mock kuralları masaüstünden gelir ve yalnızca masaüstü bağlıyken geçerlidir.', 'Mock rules come from the desktop and hold only while it is connected.');
+  String get noMocksConnected => _('Masaüstünün Mock’lar sekmesinde kural eklediğinizde burada görünür ve bu uygulamaya hemen uygulanır', 'Rules you add in the desktop’s Mocks tab show up here and apply to this app at once');
+  String get noMocksOffline => _('Mock kuralları masaüstünden gelir ve yalnızca masaüstü bağlıyken geçerlidir', 'Mock rules come from the desktop and hold only while it is connected');
   String get mocksFromDesktop => _('Kurallar masaüstünden geliyor', 'Rules come from the desktop');
   String get mocksFromDesktopBody => _('Düzenlemek için Mac’teki Dürbün’ün Mock’lar sekmesini kullanın. Bağlantı koparsa kurallar devre dışı kalır.', 'Edit them in the Mocks tab of Dürbün on the Mac. They stop applying when the connection drops.');
   String mockRespond(String status, int delay) => delay > 0 ? _('$status ile yanıtla · $delay ms', 'Respond $status · $delay ms') : _('$status ile yanıtla', 'Respond $status');
@@ -517,7 +517,7 @@ class InspectorStrings {
 
   /* performance */
   String get noMetricsTitle => _('Henüz ölçüm yok', 'No samples yet');
-  String get noMetricsBody => _('Kare süreleri ve bellek, uygulama çizim yaptıkça saniyede bir gelir.', 'Frame timings and memory arrive every second while the app draws.');
+  String get noMetricsBody => _('Kare süreleri ve bellek, uygulama çizim yaptıkça saniyede bir gelir', 'Frame timings and memory arrive every second while the app draws');
   String get jank => _('Takılan kare', 'Janky frames');
   String get buildTime => 'Build';
   String get rasterTime => 'Raster';
@@ -544,24 +544,24 @@ class InspectorStrings {
   );
   String get whatYouSee => _('Neler görünüyor?', 'What is captured?');
   String get srcDartHttp => _('Dart HTTP istekleri', 'Dart HTTP requests');
-  String get srcNetworkOff => _('DurbunOptions(captureNetwork: false) ile kapatılmış.', 'Turned off with DurbunOptions(captureNetwork: false).');
+  String get srcNetworkOff => _('DurbunOptions(captureNetwork: false) ile kapatılmış', 'Turned off with DurbunOptions(captureNetwork: false)');
   String get srcDio => _('Dio (NativeAdapter dahil)', 'Dio (NativeAdapter included)');
   String get srcDioHint => _('Varsayılan Dio, dart:io üzerinden zaten yakalanır. NativeAdapter için durbun_dio ekleyin.', 'Plain Dio is captured through dart:io. Add durbun_dio for NativeAdapter.');
   String get srcOkHttp => _('Android OkHttp', 'Android OkHttp');
-  String get srcOkHttpHint => _('Native kodunuzdaki istemciye DurbunInterceptor() eklenince görünür.', 'Shows once DurbunInterceptor() is added to your native client.');
+  String get srcOkHttpHint => _('Native kodunuzdaki istemciye DurbunInterceptor() eklenince görünür', 'Shows once DurbunInterceptor() is added to your native client');
   String get srcUrlSession => _('iOS URLSession', 'iOS URLSession');
   String get srcAutomatic => _('otomatik', 'automatic');
-  String get srcNoNative => _('Native katman başlamadı (plugin kayıtlı değil ya da bu platform değil).', 'The native layer did not start (plugin not registered, or another platform).');
+  String get srcNoNative => _('Native katman başlamadı (plugin kayıtlı değil ya da bu platform değil)', 'The native layer did not start (plugin not registered, or another platform)');
   String get srcAppLogs => _('Uygulama logları', 'App logs');
   String get srcNativeLogs => _('Native loglar', 'Native logs');
-  String get srcOsLogNeedsIos15 => _('os_log / Logger satırlarını okumak iOS 15 ister; print ve Durbun.log gelir.', 'Reading os_log / Logger lines needs iOS 15; print and Durbun.log come through.');
-  String get srcDeviceLogsOff => _('capturePrint: never ile kapatılmış; Durbun.log gelir.', 'Turned off with capturePrint: never; Durbun.log comes through.');
+  String get srcOsLogNeedsIos15 => _('os_log / Logger satırlarını okumak iOS 15 ister; print ve Durbun.log gelir', 'Reading os_log / Logger lines needs iOS 15; print and Durbun.log come through');
+  String get srcDeviceLogsOff => _('capturePrint: never ile kapatılmış; Durbun.log gelir', 'Turned off with capturePrint: never; Durbun.log comes through');
   String get srcCrashes => _('Hatalar ve çökmeler', 'Errors and crashes');
   String get srcCrashesDetail => _('Flutter hataları · Dart · Kotlin · Swift', 'Flutter errors · Dart · Kotlin · Swift');
-  String get srcCrashesHint => _('Native çökmeler bir sonraki açılışta gelir.', 'Native crashes arrive on the next launch.');
-  String get srcErrorsOff => _('DurbunOptions(captureErrors: false) ile kapatılmış.', 'Turned off with DurbunOptions(captureErrors: false).');
+  String get srcCrashesHint => _('Native çökmeler bir sonraki açılışta gelir', 'Native crashes arrive on the next launch');
+  String get srcErrorsOff => _('DurbunOptions(captureErrors: false) ile kapatılmış', 'Turned off with DurbunOptions(captureErrors: false)');
   String get srcMetrics => _('Performans ölçümleri', 'Performance samples');
-  String get srcMetricsOff => _('DurbunOptions(metrics: false) ile kapatılmış.', 'Turned off with DurbunOptions(metrics: false).');
+  String get srcMetricsOff => _('DurbunOptions(metrics: false) ile kapatılmış', 'Turned off with DurbunOptions(metrics: false)');
 
   String get disabled => _(
     'Dürbün bu derlemede kapalı. Açmak için --dart-define=DURBUN=true ya da DurbunOptions(enabled: true).',

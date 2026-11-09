@@ -48,7 +48,7 @@ class _SideTag extends StatelessWidget {
       height: 20,
       alignment: Alignment.center,
       decoration: BoxDecoration(color: color.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(DurbunRadius.sm)),
-      child: Text(label, style: DurbunType.monoStyle(size: 11.5, color: color, weight: FontWeight.w700, height: 1)),
+      child: Text(label, style: DurbunType.monoStyle(size: 11.5, color: color, weight: FontWeight.w600, height: 1)),
     );
   }
 }
@@ -79,7 +79,7 @@ class _SideSummary extends StatelessWidget {
                   spacing: 6,
                   children: <Widget>[
                     Text(call.method, style: DurbunType.monoStyle(size: 12, color: c.method(call.method), weight: FontWeight.w600, height: 1.3)),
-                    Text(_statusText(call, t), style: DurbunType.monoStyle(size: 12, color: call.cancelled ? c.textSubtle : c.status(call.status, failed: failed), weight: FontWeight.w700, height: 1.3)),
+                    Text(_statusText(call, t), style: DurbunType.monoStyle(size: 12, color: call.cancelled ? c.textSubtle : c.status(call.status, failed: failed), weight: FontWeight.w600, height: 1.3)),
                     Text('${formatClock(call.ts)} · ${formatDuration(call.duration)}', style: DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.3)),
                   ],
                 ),
@@ -156,9 +156,9 @@ class _ComparePickerPageState extends State<ComparePickerPage> {
               Divider(height: 1, color: c.border),
               Expanded(
                 child: all.isEmpty
-                    ? EmptyState(icon: Icons.compare_arrows, title: t.noOtherRequests, body: t.noOtherRequestsBody)
+                    ? EmptyState(icon: Icons.compare_arrows_rounded, title: t.noOtherRequests, body: t.noOtherRequestsBody)
                     : shown.isEmpty
-                        ? EmptyState(icon: Icons.compare_arrows, title: t.noMatchTitle, body: t.noMatchBody)
+                        ? EmptyState(icon: Icons.compare_arrows_rounded, title: t.noMatchTitle, body: t.noMatchBody)
                         : ListView(
                             padding: EdgeInsets.only(bottom: 16 + MediaQuery.paddingOf(context).bottom),
                             children: <Widget>[
@@ -192,7 +192,7 @@ class _GroupTitle extends StatelessWidget {
     return Container(
       width: double.infinity,
       color: c.bgSunken,
-      padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.textMuted)),
     );
   }
@@ -235,7 +235,7 @@ class _CompareCallsPageState extends State<CompareCallsPage> {
         titleSpacing: 0,
         title: Text(t.compareTitle, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: c.text)),
         actions: <Widget>[
-          DIconButton(icon: Icons.swap_vert, tooltip: t.swap, size: 40, onTap: () => setState(() => _swapped = !_swapped)),
+          DIconButton(icon: Icons.swap_vert_rounded, tooltip: t.swap, size: 40, onTap: () => setState(() => _swapped = !_swapped)),
           const SizedBox(width: 6),
         ],
       ),
@@ -306,14 +306,14 @@ class _FieldBlock extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: v == null
-                    ? Text(t.missing, style: TextStyle(fontSize: 12.5, color: c.textSubtle, fontStyle: FontStyle.italic))
+                    ? Text(t.missing, style: TextStyle(fontSize: 12.5, color: c.textSubtle))
                     : Text(v, style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.35)),
               ),
             ],
           ),
         );
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(
         color: changed ? c.warningSoft : null,
         border: Border(
@@ -412,7 +412,7 @@ class _HeadersDiff extends StatelessWidget {
       final shown = onlyChanges ? rows.where((r) => r.state != HeaderDiffState.same).toList() : rows;
       return <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 14, 12, 6),
+          padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
           child: Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
             Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.text)),
             Text(t.headerStats(diff, rows.length), style: DurbunType.monoStyle(size: 11.5, color: c.textMeta)),
@@ -496,18 +496,18 @@ class _BodyDiffState extends State<_BodyDiff> {
     if (_la.kind == BodyKind.binary || _lb.kind == BodyKind.binary) {
       final same = _la.kind == _lb.kind && _la.raw == _lb.raw;
       return EmptyState(
-          icon: Icons.data_object,
+          icon: Icons.data_object_rounded,
           title: same ? t.binarySame : t.binaryDifferent,
           body: t.binarySizes(formatBytes(_la.size), formatBytes(_lb.size)));
     }
     if (_la.kind == BodyKind.none && _lb.kind == BodyKind.none) {
-      return EmptyState(icon: Icons.data_object, title: widget.request ? t.noRequestBodies : t.noResponseBodies);
+      return EmptyState(icon: Icons.data_object_rounded, title: widget.request ? t.noRequestBodies : t.noResponseBodies);
     }
     return Column(
       children: <Widget>[
         _OptionsBar(children: <Widget>[
           DToggle(label: t.onlyChanges, icon: Icons.difference_outlined, selected: widget.onlyChanges, onTap: () => widget.onOnlyChanges(!widget.onlyChanges)),
-          DToggle(label: t.sortKeys, icon: Icons.sort_by_alpha, selected: widget.sortKeys, onTap: () => widget.onSortKeys(!widget.sortKeys)),
+          DToggle(label: t.sortKeys, icon: Icons.sort_by_alpha_rounded, selected: widget.sortKeys, onTap: () => widget.onSortKeys(!widget.sortKeys)),
         ]),
         Divider(height: 1, color: c.border),
         Expanded(
@@ -535,7 +535,7 @@ class _BodyDiffState extends State<_BodyDiff> {
                       onTap: () => setState(() => _expanded.add(row.from)),
                       child: Container(
                         color: c.bgSunken,
-                        padding: const EdgeInsets.symmetric(vertical: 7),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         alignment: Alignment.center,
                         child: Text(t.showHidden(row.hidden), style: TextStyle(fontSize: 12, color: c.accent, fontWeight: FontWeight.w600)),
                       ),
@@ -569,14 +569,14 @@ class _DiffStats extends StatelessWidget {
         children: <Widget>[
           if (result.identical)
             Row(children: <Widget>[
-              Icon(Icons.check_circle_outline, size: 16, color: c.success),
+              Icon(Icons.check_circle_outline_rounded, size: 16, color: c.success),
               const SizedBox(width: 6),
               Text(t.identicalBodies, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.success)),
             ])
           else
             Wrap(spacing: 8, children: <Widget>[
-              Text('+${result.added}', style: DurbunType.monoStyle(size: 13, color: c.success, weight: FontWeight.w700)),
-              Text('−${result.removed}', style: DurbunType.monoStyle(size: 13, color: c.danger, weight: FontWeight.w700)),
+              Text('+${result.added}', style: DurbunType.monoStyle(size: 13, color: c.success, weight: FontWeight.w600)),
+              Text('−${result.removed}', style: DurbunType.monoStyle(size: 13, color: c.danger, weight: FontWeight.w600)),
               Text(t.linesChanged, style: TextStyle(fontSize: 12.5, color: c.textMuted)),
             ]),
           for (final n in notes)
@@ -611,7 +611,7 @@ class _DiffLine extends StatelessWidget {
         children: <Widget>[
           SizedBox(width: 30, child: Text(op.a == null ? '' : '${op.a! + 1}', textAlign: TextAlign.right, style: num)),
           SizedBox(width: 30, child: Text(op.b == null ? '' : '${op.b! + 1}', textAlign: TextAlign.right, style: num)),
-          SizedBox(width: 16, child: Text(sign, textAlign: TextAlign.center, style: DurbunType.monoStyle(size: 12, color: fg, weight: FontWeight.w700, height: 1.35))),
+          SizedBox(width: 16, child: Text(sign, textAlign: TextAlign.center, style: DurbunType.monoStyle(size: 12, color: fg, weight: FontWeight.w600, height: 1.35))),
           Expanded(
             child: Text(
               // A huge single line (minified JSON) is cut: the row is a view,

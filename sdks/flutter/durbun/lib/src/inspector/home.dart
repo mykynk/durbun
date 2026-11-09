@@ -114,7 +114,7 @@ class _Header extends StatelessWidget {
     final onTools = this.onTools;
     return Container(
       decoration: BoxDecoration(color: c.bgPanel, border: Border(bottom: BorderSide(color: c.border))),
-      padding: const EdgeInsets.fromLTRB(6, 3, 4, 5),
+      padding: const EdgeInsets.all(4),
       child: Row(
         children: <Widget>[
           if (onTools != null)
@@ -154,7 +154,7 @@ class _Header extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 4),
-          if (onTools != null) DIconButton(icon: Icons.grid_view_rounded, tooltip: t.tools, size: kMinTapTarget, onTap: onTools),
+          if (onTools != null) DIconButton(icon: Icons.grid_view_outlined, tooltip: t.tools, size: kMinTapTarget, onTap: onTools),
           DIconButton(icon: Icons.close_rounded, tooltip: t.close, size: kMinTapTarget, onTap: onClose),
         ],
       ),
