@@ -1,5 +1,5 @@
 /* eslint-disable */
-// Fake `adb` for android-phase3Driver.test.ts. State lives in $DURBUN_FAKE_ADB_DIR/state.json; every
+// Fake `adb` for android-fakeAdbDriver.test.ts. State lives in $DURBUN_FAKE_ADB_DIR/state.json; every
 // invocation is appended to calls.txt. `adb shell '<a>; <b>; …'` is answered part by part, like the
 // device's sh would. Device clock = UTC.
 const fs = require('fs');

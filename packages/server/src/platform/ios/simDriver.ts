@@ -1,7 +1,7 @@
 /**
  * iOS simulator driver: polls `xcrun simctl list devices booted -j` every 3 s; per booted simulator
  * streams `log stream --style ndjson` (restarted when the scope/level settings change) and offers
- * simctl actions + host-ps metrics. Phase 3 (SPEC §10): DeviceApps (simctl listapps + host ps) and
+ * simctl actions + host-ps metrics. SPEC §10: DeviceApps (simctl listapps + host ps) and
  * crash reports (~/Library/Logs/DiagnosticReports, matched to the simulator's UDID, copied to
  * <tempDir>/crash/<udid>/ for download); `readers` says whether the report folder can be read.
  */

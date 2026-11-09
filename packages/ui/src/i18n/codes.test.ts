@@ -275,7 +275,7 @@ describe('server codes → i18n', () => {
     expect(driverStatusText({ id: 'flutter-vm', detail: 'Waiting for Flutter debug apps (auto-attach on)' })).toBe(
       'Flutter debug uygulamaları bekleniyor (otomatik bağlanma açık)',
     );
-    // The server says "3 virtual devices" since phase 3; the text names no count, so it cannot go stale again.
+    // The server says "3 virtual devices"; the text names no count, so it cannot go stale again.
     expect(driverStatusText({ id: 'demo', detail: 'Generating demo data for 3 virtual devices', code: 'demo.active' })).toBe('Demo cihazlarında örnek veri üretiliyor');
     expect(driverStatusText({ id: 'android', detail: 'something odd' })).toBe('something odd');
     expect(deviceDisplayName({ id: 'desktop', name: 'Desktop' })).toBe('Masaüstü · yeniden gönderilenler');

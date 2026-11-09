@@ -61,7 +61,7 @@ interface ServerModule {
     },
     extras?: { logger?: ScopedLogger },
   ): Promise<EmbeddedServer>;
-  /** "Is a Dürbün answering on this port?" (absent in bundles older than phase 3). */
+  /** "Is a Dürbün answering on this port?" (absent in older bundles). */
   probeServer?(port: number): Promise<DurbunProbe | undefined>;
   /** The bundled server's version (absent in older bundles: the app's own version stands in). */
   SERVER_VERSION?: string;

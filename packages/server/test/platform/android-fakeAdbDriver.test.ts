@@ -18,7 +18,7 @@ const SERIAL = '1A2B3C4D5E6F';
 const ID = `android:${SERIAL}`;
 const FAKE = fileURLToPath(new URL('./android-fixtures/fake-adb.cjs', import.meta.url));
 
-describe('AndroidDriver phase 3 (DeviceApps, dropbox, frame stats) with a fake adb', () => {
+describe('AndroidDriver with a fake adb (DeviceApps, dropbox, frame stats)', () => {
   let dir: string;
   let ctx: FakeCtx;
   let driver: ReturnType<typeof createPlatform>['drivers'][number];

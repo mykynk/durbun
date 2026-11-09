@@ -1,5 +1,5 @@
 /**
- * "Is this one of the team's own apps?" (lead decision, phase 3). Build advice — run a debug build, turn the SDK
+ * "Is this one of the team's own apps?" Build advice — run a debug build, turn the SDK
  * on with the DURBUN flag, set up the SDK — only makes sense for apps whose source the team has. A tester's phone
  * is full of other apps (WhatsApp, Instagram, a bank…): those get the plain "what the device shows from outside"
  * explanation instead. Pure; the UI computes the index from the hub and passes `ExplainInput.own`.

@@ -346,7 +346,7 @@ describe('removal, disconnect, clear and export / import', () => {
     expect(pati()).toMatchObject({ running: false, pids: [] });
   });
 
-  it('clearing logs resets the crash counts of the device apps in the cleared scope (lead decision, phase 3)', async () => {
+  it('clearing logs resets the crash counts of the device apps in the cleared scope', async () => {
     vi.useFakeTimers({ now: new Date('2026-11-02T09:00:00Z') });
     const h = newHub();
     h.upsertDevice(device('ios:A', { platform: 'ios' }));

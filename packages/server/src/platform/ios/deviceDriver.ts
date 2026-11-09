@@ -2,7 +2,7 @@
  * Physical iOS devices over usbmux: a persistent Listen connection for Attached/Detached/Paired,
  * lockdown GetValue (no session) for name/model/OS (devicectl enrichment), idevicesyslog for logs,
  * SDK tunnels to on-device ports 9752–9755, devicectl actions and a usbmux port bridge.
- * Phase 3 (SPEC §10): DeviceApps (devicectl apps/processes + syslog process names) and crash reports
+ * SPEC §10: DeviceApps (devicectl apps/processes + syslog process names) and crash reports
  * (devicectl systemCrashLogs) for every build, with or without the SDK. `readers` tells the UI whether crash
  * reports can be read (frame stats: never on iOS); reports a live crash row already showed are marked
  * `duplicateOf` (crashDedupe.ts). `iosDeviceLogScope` 'apps' (default) drops system daemons' lines that do

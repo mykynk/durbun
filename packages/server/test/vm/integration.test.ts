@@ -15,12 +15,19 @@ import { connectVmService } from '../../src/platform/flutterVm/rpc';
 import { normalizeVmServiceUrl } from '../../src/platform/flutterVm/url';
 import { createFakeContext, waitFor } from './helpers';
 
-const DART =
-  process.env.DURBUN_TEST_DART ?? '/Users/alexandramontgomery/fvm/versions/3.38.5/bin/cache/dart-sdk/bin/dart';
+/** `DURBUN_TEST_DART`, else the first `dart` on PATH; without one the suite is skipped. */
+const DART = process.env.DURBUN_TEST_DART ?? findOnPath('dart');
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'app.dart');
 const hasDart = fs.existsSync(DART);
 
 const children: ChildProcess[] = [];
+
+function findOnPath(name: string): string {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (dir && fs.existsSync(path.join(dir, name))) return path.join(dir, name);
+  }
+  return name;
+}
 
 function spawnTracked(cmd: string, args: string[]): { child: ChildProcess; output: () => string } {
   const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
