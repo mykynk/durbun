@@ -1,178 +1,28 @@
-## Unreleased (phase 3)
-
-- The plugin builds from the published package alone: the Android core is now an
-  exact copy in `android/src/core` + `android/core-rules.pro` (like the iOS copy),
-  refreshed by `tool/sync_native.dart`; `android/build.gradle` no longer reads
-  `../../../android`, which does not exist in a pub.dev download.
-- Requires Flutter 3.27 / Dart 3.6 or newer (the panel uses
-  `Color.withValues`, `Flex.spacing` and `NavigatorPopHandler.onPopWithResult`);
-  the pubspec floor said Flutter 3.24 / Dart 3.5, where it did not compile.
-- In-app panel hardening (it must never red-screen or touch the host app):
-  - Works under `MaterialApp`, `MaterialApp.router` (go_router), `CupertinoApp`
-    and `WidgetsApp`. It opens as one `/durbun` route; its pages, sheets,
-    menus, dialogs and toasts live on its own navigator, `ScaffoldMessenger`
-    and localizations, so app route observers (analytics, Sentry) see only
-    `/durbun` and app snack bars are untouched. Back closes the panel's page
-    first. `Durbun.init()` after `runApp` enables shaking without a restart;
-    shaking is not listened to while the panel is open, and Android reads the
-    accelerometer at the UI rate instead of the game rate.
-  - URLs and form bodies with escapes that are not UTF-8 (`%FF`, Latin-1
-    `%E7`, a cut `%E2%82`, `discount=50%`) no longer throw in the Request
-    tab, search, GraphQL labels, compare or share; the bad escape is shown as
-    written. A JWT with `exp: 1e20` or `1e400` decodes; JSON nested thousands
-    deep is shown to 200 levels instead of overflowing the stack, without
-    overflowing the screen.
-  - Body search in the list folds each body once and re-matches only calls
-    that changed, after typing stops (250 ms). Rows read the body size
-    without decoding it; a decoded body frees its captured bytes and the
-    budget counts what is kept. Images decode at display width.
-  - 1000 requests by default (was 300); `DurbunInspector(maxRequests:,
-    maxLogs:, maxBodyBytes:)`; requests and bodies of hosts outside
-    `defaultHosts` are evicted first. Filters, search and the last tab are
-    kept between opens; logs with the same time keep arrival order; a frozen
-    list keeps the rows in view still when old entries are evicted.
-  - Network: Pause, an empty state when all requests are on hidden hosts
-    ("Show other hosts"), "Clear captured data" asks first. Find in a body
-    cut at 200 KB says when the match is past the shown part. CJK and emoji
-    wrap by their width. The share sheet scrolls in landscape and at large
-    text with its buttons pinned. Android text selection no longer blocks
-    tab swipes. 44 pt tap targets, spoken level names, 4.5:1 subtle text,
-    chart labels follow the text size, long tag chips ellipsize, "FAIL" and
-    level names translated.
-
-- In-app panel fixes: pages opened from a list row (request, log, compare,
-  filter sheets) build their theme from their own route context, so a row
-  removed while the page is open no longer throws "Looking up a deactivated
-  widget's ancestor" when MediaQuery changes (keyboard, theme). Find in body
-  is fast on large bodies: the detail page rebuilds for its own call only
-  (not on every app log), the query is debounced (200 ms) and needs 2
-  letters, lines and matches are cached, the JSON tree is indexed once, rows
-  have one height (long lines cut by screen width, one selection area) so a
-  match is reached with one jump.
-
-- In-app panel: find in request and response bodies (JSON preview and code
-  view, now with line numbers) with a match count, previous / next, the
-  current match in its own colour and scrolled into view; the find text is
-  kept between Preview and Code. A body search in the list opens the detail
-  on that body with the match found.
-- `DurbunInspector(defaultHosts: [...])`: the panel lists only these hosts
-  (exact or `*.domain`); other hosts are counted ("N on other hosts") and
-  can be ticked in under Network → Filters → Hosts. Capture and the desktop
-  are unchanged.
-
-- In-app panel: compare two requests, as on the desktop. "Compare…" on a
-  request's detail lists the same method and path first; General, Headers,
-  Response body and Request body tabs, with the desktop's line diff (LCS with
-  patience anchors), only-changes folding and sorted JSON keys, in one column.
-  Replay now sends captured headers once (no second `Accept-Encoding`, no
-  added `User-Agent`).
-
-- In-app panel fixes from a device run: `print` / `debugPrint` lines reach
-  the panel locally (they were dropped when the desktop read logcat, or held
-  while no desktop connected); logger PrettyPrinter boxes are one entry with
-  the level from the emoji and the tag from `[Tag]`; filters and search apply
-  while the list is frozen (scrolled up or paused); search ignores case,
-  Turkish letters and %-encoding and marks every word; a logged HTML page on
-  one line no longer freezes the panel (messages kept up to 64 KB on the
-  phone, rows show a preview). Toolbars: Filters sheet, removable active
-  chips first, minimum-level menu, clear button, tappable query help, "Clear
-  filters" on empty results.
-
-- The in-app panel opens by shaking the phone and draws nothing over the app by
-  default (`showBubble: false`, `openOnShake: true`). Android reads the
-  accelerometer (Seismic-like detection, 13 m/s², 0.5 s window) and iOS uses the
-  system shake gesture (UIWindow `motionEnded`), both through the
-  `dev.durbun/shake` channel and only while the app is in the foreground.
-
-- In-app inspector redesigned after the desktop UI: the same tokens (colors,
-  level / method / status / JSON colors, FNV-1a tag hues), logo, top bar and
-  status bar. Logs: live stream with pause, level toggles, quick filters, query
-  language, merged repeats, request rows, tag actions. Network: table rows,
-  method / status / slow / mocked chips, host picker, query and body search,
-  General / Request / Response / Timing detail with a searchable JSON tree,
-  code / hex views, cookies and query, phase bars, Replay and Copy as cURL /
-  fetch / dio / Swift / Kotlin (ported from the desktop). Mocks, Performance
-  (tiles and charts) and Device ("what is captured") tabs. Tested at 320 px,
-  landscape, tablet and 2× text.
-
-- In-app inspector: `MaterialApp(builder: DurbunInspector.builder)` adds a
-  draggable bubble and a panel on the phone. The panel has network (dart:io,
-  Dio, OkHttp, URLSession, with cURL, pretty JSON and image preview), logs,
-  errors, performance and info tabs, and works without the desktop. It is fed
-  by every outgoing SDK message (`DurbunClient.outgoingTap`), native-encoded
-  lines included. The store is bounded (2,000 logs, 300 requests, 24 MB of
-  bodies). Pending bodies are decoded only when viewed.
-  `DurbunOptions.inspector` (default `true`) and `Durbun.showInspector()`.
-
-- `durbun` is now a Flutter plugin (Android `dev.durbun.flutter.DurbunFlutterPlugin`,
-  iOS `DurbunFlutterPlugin`) that carries the native cores: Android compiles
-  `sdks/android/durbun` through Gradle sourceSets, iOS carries an exact copy of
-  `sdks/ios/Sources/Durbun` (`tool/sync_native.dart`, drift test).
-- The Dart side starts the native layer over the `dev.durbun/native` method
-  channel (no native init call). Native crashes, Kotlin/Swift logs, OkHttp
-  (`DurbunInterceptor`) and iOS URLSession traffic go out over the Dart
-  connection (one app session, merged capabilities/actions, native app
-  version/build in `hello`).
-- Enablement: debug/profile on; release only with `--dart-define=DURBUN=true`;
-  `DURBUN=false` turns it off; `enabled:` still wins. The native layer follows.
-  The SDK does not look at where the app was installed from: a `DURBUN=true`
-  release runs from Firebase, ad-hoc, TestFlight, Google Play or the App Store
-  alike, so each project decides which builds run Dürbün. README: release
-  commands (`--export-method ad-hoc` for Firebase / ad-hoc), the
-  `ios/Flutter/Generated.xcconfig` note for Xcode Archive, and a security note
-  (the SDK talks to whatever answers on its device loopback port; no pairing
-  yet).
-- `DurbunNetwork.capturesUrlSession` (used by durbun_dio to avoid duplicates).
-- `hello.sdk.layers`: `['dart']`, plus `'android'` / `'ios'` while the plugin's
-  native core is attached, so the desktop can say which layers feed the session.
-- iOS USB listener: binds only once the hello is ready. A desktop that connected
-  in the first moments after start used to be accepted and dropped without a
-  hello (now it is refused and connects on its next try).
-- durbun_dio: the dart:io adapter is recognized by type instead of its class
-  name, so `--obfuscate` builds no longer report those requests twice.
-- Mock rules end with the connection that pushed them, in every layer (Dart,
-  Kotlin, Swift, hosted and standalone): the peer is not authenticated yet.
-- Android honours `captureNetwork: false`: no OkHttp capture or mocks, and
-  network/mocks are no longer announced.
-- The first hello waits up to 3 s (was 1.5 s) for the native layer, as long as
-  the native start itself.
-- OkHttp shows redacted header values as `••••`, like dart:io and URLSession.
-- A native `Durbun.start()` does nothing in Flutter apps: the plugin starts the
-  native layer from Dart, so no second session opens and `DURBUN=false` keeps
-  it off.
-- In-app panel, new:
-  - **Export session** (Tools): the listed requests (filters, search and order
-    applied) or all of them as a Markdown report or a HAR 1.2 file, masked by
-    default (the Share rules), bodies optional. Written in short slices (the panel keeps drawing) to
-    `<cache>/durbun-export` and shared as a file (new native `shareFile` and
-    `cacheDir` methods; Android: a read-only, unexported
-    `DurbunExportProvider`, `${applicationId}.durbun.files`, no androidx;
-    iOS: `UIActivityViewController` with the file). Exports older than a day
-    are deleted; without a share sheet an export under 512 KB is copied.
-  - Network list **sort**: newest on top (default), arrival, slowest,
-    largest response, errors first; kept per store. A sorted list scrolled
-    down holds still and shows "↑ N new" on top. Rows show when the request
-    started (`HH:mm:ss`) before the host.
-  - **Statistics** (Tools), in swipeable tabs: Summary (status totals,
-    timeouts, pending, methods), Duration (average / p50 / p95 / longest),
-    Data (bytes sent and received), Hosts (top 10); live, at most once a
-    second, no body decoding; reopens on the tab read last.
-  - The tools sheet lists **Mocks** only while the desktop is connected (its
-    rules end with the connection) and no longer shows the shake hint.
-  - **Previous run**, opt-in: `DurbunInspector(keepPreviousRun: true)` keeps
-    the last launch's requests (headers, bodies up to 16 KB) and logs, masked,
-    in `<cache>/durbun-run` (JSONL, written at most once a second, a crash at
-    once, rotated at 4 MB, last run only) and opens them read-only from Tools,
-    crash first. Off by default; a no-op on the web.
-  - GraphQL labels read the request body without keeping a decoded copy.
-
 ## 0.1.0
 
-- First version of the Dürbün Flutter SDK: `Durbun.run` / `Durbun.init`, app
-  logs (`log`, `v/d/i/w/e/f`), events, print capture, Flutter errors and crashes,
-  dart:io HTTP capture with bodies and mock rules, frame/memory/CPU metrics,
-  `flutter.*` desktop commands and custom `DurbunAction`s.
-- NDJSON transport on a background isolate: 127.0.0.1:9751 (adb reverse /
-  simulators), optional Wi-Fi host, usbmux listener on iOS devices
-  (127.0.0.1:9752–9755), reconnect with backoff and a 5 000-message buffer.
-- Pure-Dart core (`package:durbun/durbun_core.dart`) and `tool/smoke.dart`.
+First public release.
+
+- A Flutter plugin with native Android (Kotlin) and iOS (Swift) layers: one
+  dependency covers Dart, Android and iOS code. Requires Flutter 3.27 /
+  Dart 3.6 or newer.
+- `Durbun.run` / `Durbun.init`; logs (`log`, `v`/`d`/`i`/`w`/`e`/`f`) with
+  tags and structured data, events, `print` / `debugPrint` capture, Flutter
+  errors and uncaught errors, native Android and iOS logs.
+- HTTP capture for dart:io (`HttpClient`, `package:http`'s `IOClient`, Dio's
+  default adapter, `Image.network`) with headers, bodies and timings, plus
+  URLSession and OkHttp through the native layers. Dio's native adapters are
+  covered by [`durbun_dio`](https://pub.dev/packages/durbun_dio).
+- Mock rules from the Dürbün desktop app (`respond`, `delay`, `fail`),
+  applied inside the app.
+- Frame, memory and CPU metrics; desktop device commands and custom
+  `DurbunAction` buttons.
+- In-app inspector (`DurbunInspector`) that works without a Mac: network list
+  and request details, logs, mocks, performance and device tabs, request
+  comparison, find in bodies, session export and shareable reports. Opens by
+  shaking the phone; English and Turkish.
+- Transport on a background isolate: `127.0.0.1:9751` (adb reverse,
+  simulators), a usbmux listener on iOS devices (`127.0.0.1:9752`–`9755`), an
+  optional Wi-Fi host, reconnects with backoff and a bounded buffer.
+- On in debug and profile builds; in release builds only with
+  `--dart-define=DURBUN=true`. `DurbunOptions.enabled` overrides both.
+- Pure-Dart core for non-Flutter programs: `package:durbun/durbun_core.dart`.

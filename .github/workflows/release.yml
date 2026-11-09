@@ -1,0 +1,52 @@
+# A `vX.Y.Z` tag: check that every part carries that version, build the Mac app for Apple silicon and Intel,
+# and draft a GitHub release with the DMG and ZIP files and the matching CHANGELOG.md section. Publishing the
+# draft and the SDK packages stays a manual step (see CONTRIBUTING.md, "Releasing").
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  mac-app:
+    name: Mac app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/desktop/package-lock.json
+      - name: Every part carries the tag's version
+        run: node scripts/check-versions.mjs --tag "$GITHUB_REF_NAME"
+      - run: npm ci
+      - run: npm ci
+        working-directory: apps/desktop
+      # Ad-hoc signed unless signing secrets are added (see apps/desktop/electron-builder.config.cjs).
+      - name: Build the DMG and ZIP (Apple silicon and Intel)
+        run: npm run app:release
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on && /^\[[^]]+\]: / { next }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md
+      - name: Draft the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Dürbün ${GITHUB_REF_NAME#v}" --notes-file notes.md \
+            apps/desktop/release/*.dmg apps/desktop/release/*.zip
