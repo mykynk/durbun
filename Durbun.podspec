@@ -20,8 +20,10 @@ mock rules and runs its in-app actions.
   s.author           = { 'Muhammed Yusuf Kaynak' => 'https://github.com/mykynk' }
   s.source           = { :git => 'https://github.com/mykynk/durbun.git', :tag => "v#{s.version}" }
 
-  s.ios.deployment_target = '13.0'
-  s.osx.deployment_target = '11.0'
+  # CocoaPods builds pods for these targets, and Xcode 27 builds nothing older. Swift Package Manager keeps
+  # iOS 13 / macOS 11 (Package.swift).
+  s.ios.deployment_target = '15.0'
+  s.osx.deployment_target = '12.0'
   s.swift_versions   = ['5.9']
 
   s.source_files     = 'sdks/ios/Sources/Durbun/**/*.swift'
