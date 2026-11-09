@@ -9,7 +9,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mykynk/durbun/actions/workflows/ci.yml"><img src="https://github.com/mykynk/durbun/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pub.dev/packages/durbun"><img src="https://img.shields.io/pub/v/durbun?label=pub.dev" alt="pub.dev"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
