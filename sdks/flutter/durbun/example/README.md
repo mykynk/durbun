@@ -1,12 +1,10 @@
-# Dürbün — örnek uygulama / example app
+# Dürbün example app
 
 ```bash
 cd sdks/flutter/durbun/example
-flutter run          # USB'deki cihaz, simülatör veya emülatör
+flutter run          # a device on USB, a simulator or an emulator
 ```
 
-Dürbün masaüstü açıkken butonlara dokunun: loglar, hatalar, HTTP istekleri ve
-"Sepeti temizle" aksiyonu canlı olarak masaüstünde görünür.
-
-Tap the buttons while the Dürbün desktop is running: logs, errors, HTTP requests
-and the custom "Sepeti temizle" (clear cart) action show up live on the desktop.
+Tap the buttons while the Dürbün desktop app is running: logs, errors, HTTP
+requests and the custom "Clear cart" action show up live on the
+desktop.

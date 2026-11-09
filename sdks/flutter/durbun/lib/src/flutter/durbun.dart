@@ -18,8 +18,8 @@ import 'backend_stub.dart'
 ///   });
 /// }
 ///
-/// Durbun.log('Kullanıcı giriş yaptı', tag: 'auth', data: {'userId': 42});
-/// Durbun.e('Ödeme başarısız', error: e, stackTrace: st);
+/// Durbun.log('User signed in', tag: 'auth', data: {'userId': 42});
+/// Durbun.e('Payment failed', error: e, stackTrace: st);
 /// Durbun.event('purchase', {'amount': 49.9});
 /// ```
 ///

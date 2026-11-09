@@ -1,5 +1,5 @@
 // Dürbün SDK example: every button produces something you can watch live in
-// the Dürbün desktop (Loglar / Ağ / Performans / Cihaz tabs).
+// the Dürbün desktop app (Logs, Network, Performance and Device tabs).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -18,11 +18,11 @@ Future<void> main() async {
       Durbun.addAction(
         DurbunAction.button(
           id: 'example.clearCart',
-          label: 'Sepeti temizle',
+          label: 'Clear cart',
           group: 'example',
           onPressed: (_) {
             cartItems.value = 0;
-            Durbun.i('Sepet masaüstünden temizlendi', tag: 'cart');
+            Durbun.i('Cart cleared from the desktop', tag: 'cart');
             return {'cartItems': 0};
           },
         ),
@@ -71,7 +71,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late final HttpClient _http = HttpClient();
-  String _result = 'Bir butona dokunun, sonucu Dürbün masaüstünde izleyin.';
+  String _result = 'Tap a button and watch the result in the Dürbün desktop app.';
   bool _overflow = false;
   String? _imageUrl;
 
@@ -86,13 +86,13 @@ class _HomePageState extends State<HomePage> {
   /* ─────────────── logs ─────────────── */
 
   void _logAllLevels() {
-    Durbun.v('Önbellek kontrol edildi', tag: 'cache');
-    Durbun.d('HomePage oluşturuldu', tag: 'ui', data: {'items': 24});
-    Durbun.i('Kullanıcı giriş yaptı', tag: 'auth', data: {'userId': 42});
-    Durbun.w('Token 30 sn içinde sona eriyor', tag: 'auth');
-    Durbun.e('Ödeme başarısız', tag: 'payment', error: const HttpException('402 Payment Required'));
-    Durbun.f('Veritabanı açılamadı', tag: 'db');
-    _show('6 log gönderildi (verbose → fatal)');
+    Durbun.v('Cache checked', tag: 'cache');
+    Durbun.d('HomePage built', tag: 'ui', data: {'items': 24});
+    Durbun.i('User signed in', tag: 'auth', data: {'userId': 42});
+    Durbun.w('Token expires in 30 s', tag: 'auth');
+    Durbun.e('Payment failed', tag: 'payment', error: const HttpException('402 Payment Required'));
+    Durbun.f('Could not open the database', tag: 'db');
+    _show('Sent 6 logs (verbose → fatal)');
   }
 
   void _logJson() {
@@ -104,43 +104,43 @@ class _HomePageState extends State<HomePage> {
       ],
       'total': 628.8,
     }, tag: 'cart');
-    _show('JSON log gönderildi (masaüstünde ağaç olarak açılır)');
+    _show('Sent a JSON log (opens as a tree on the desktop)');
   }
 
   void _print() {
     // Captured automatically when the desktop cannot see device logs.
     // ignore: avoid_print
-    print('print() satırı');
-    debugPrint('debugPrint() satırı\nikinci satır');
-    _show('print ve debugPrint çağrıldı');
+    print('a print() line');
+    debugPrint('a debugPrint() line\nsecond line');
+    _show('Called print and debugPrint');
   }
 
   void _event() {
-    Durbun.event('purchase', {'amount': 49.9, 'currency': 'TRY', 'items': cartItems.value});
-    _show('Event gönderildi: purchase');
+    Durbun.event('purchase', {'amount': 49.9, 'currency': 'USD', 'items': cartItems.value});
+    _show('Sent event: purchase');
   }
 
   /* ─────────────── errors ─────────────── */
 
   void _caughtError() {
     try {
-      jsonDecode('{"bozuk": ');
+      jsonDecode('{"broken": ');
     } catch (e, st) {
-      Durbun.e('Yanıt çözümlenemedi', tag: 'api', error: e, stackTrace: st);
+      Durbun.e('Could not parse the response', tag: 'api', error: e, stackTrace: st);
     }
-    _show('Yakalanan hata stack trace ile gönderildi');
+    _show('Sent a caught error with its stack trace');
   }
 
   void _flutterError() {
     setState(() => _overflow = !_overflow);
-    _show(_overflow ? 'Taşan Row çizildi → FlutterError' : 'Taşma kaldırıldı');
+    _show(_overflow ? 'Drew an overflowing Row → FlutterError' : 'Removed the overflow');
   }
 
   void _zoneCrash() {
     Future<void>.delayed(Duration.zero, () {
-      throw StateError('Örnek: yakalanmamış asenkron hata');
+      throw StateError('Example: uncaught async error');
     });
-    _show('Yakalanmamış hata fırlatıldı → crash');
+    _show('Threw an uncaught error → crash');
   }
 
   /* ─────────────── network (dart:io HttpClient) ─────────────── */
@@ -155,7 +155,7 @@ class _HomePageState extends State<HomePage> {
       }
       final res = await req.close();
       final text = await utf8.decoder.bind(res).join();
-      _show('$label → ${res.statusCode} · ${sw.elapsedMilliseconds} ms · ${text.length} karakter');
+      _show('$label → ${res.statusCode} · ${sw.elapsedMilliseconds} ms · ${text.length} characters');
     } catch (e) {
       _show('$label → ${e.runtimeType}: $e');
     }
@@ -169,16 +169,16 @@ class _HomePageState extends State<HomePage> {
   void _postJson() => _request(
     'POST /posts',
     () => _http.postUrl(Uri.parse('https://jsonplaceholder.typicode.com/posts')),
-    jsonEncode({'title': 'Dürbün', 'body': 'Merhaba!', 'userId': 1}),
+    jsonEncode({'title': 'Dürbün', 'body': 'Hello!', 'userId': 1}),
   );
 
   void _notFound() => _request(
     'GET 404',
-    () => _http.getUrl(Uri.parse('https://jsonplaceholder.typicode.com/bulunamadi')),
+    () => _http.getUrl(Uri.parse('https://jsonplaceholder.typicode.com/not-found')),
   );
 
   void _failing() => _request(
-    'GET (DNS hatası)',
+    'GET (DNS error)',
     () => _http.getUrl(Uri.parse('https://api.durbun.invalid/health')),
   );
 
@@ -186,7 +186,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _imageUrl = 'https://picsum.photos/seed/durbun${DateTime.now().millisecond}/600/300';
     });
-    _show('Image.network yükleniyor (NetworkImage → dart:io)');
+    _show('Loading Image.network (NetworkImage → dart:io)');
   }
 
   @override
@@ -194,7 +194,7 @@ class _HomePageState extends State<HomePage> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Dürbün örneği'),
+        title: const Text('Dürbün example'),
         actions: const [Padding(padding: EdgeInsets.only(right: 12), child: _ConnectionChip())],
       ),
       body: ListView(
@@ -210,27 +210,27 @@ class _HomePageState extends State<HomePage> {
             valueListenable: cartItems,
             builder: (context, value, _) => ListTile(
               leading: const Icon(Icons.shopping_cart_outlined),
-              title: Text('Sepette $value ürün'),
-              subtitle: const Text('Masaüstünden "Sepeti temizle" ile sıfırlanır'),
+              title: Text('$value items in the cart'),
+              subtitle: const Text('Reset it from the desktop with "Clear cart"'),
             ),
           ),
-          _Section(title: 'Loglar', children: [
-            FilledButton.tonal(onPressed: _logAllLevels, child: const Text('Tüm seviyeler')),
+          _Section(title: 'Logs', children: [
+            FilledButton.tonal(onPressed: _logAllLevels, child: const Text('All levels')),
             FilledButton.tonal(onPressed: _logJson, child: const Text('JSON log')),
             FilledButton.tonal(onPressed: _print, child: const Text('print / debugPrint')),
             FilledButton.tonal(onPressed: _event, child: const Text('Event')),
           ]),
-          _Section(title: 'Hatalar', children: [
+          _Section(title: 'Errors', children: [
             FilledButton.tonal(onPressed: _caughtError, child: const Text('Durbun.e + stack')),
-            FilledButton.tonal(onPressed: _flutterError, child: const Text('FlutterError (taşma)')),
+            FilledButton.tonal(onPressed: _flutterError, child: const Text('FlutterError (overflow)')),
             FilledButton.tonal(onPressed: _zoneCrash, child: const Text('Crash (zone)')),
           ]),
-          _Section(title: 'Ağ', children: [
+          _Section(title: 'Network', children: [
             FilledButton.tonal(onPressed: _getJson, child: const Text('GET JSON')),
             FilledButton.tonal(onPressed: _postJson, child: const Text('POST JSON')),
             FilledButton.tonal(onPressed: _notFound, child: const Text('404')),
-            FilledButton.tonal(onPressed: _failing, child: const Text('Başarısız istek')),
-            FilledButton.tonal(onPressed: _image, child: const Text('Resim')),
+            FilledButton.tonal(onPressed: _failing, child: const Text('Failing request')),
+            FilledButton.tonal(onPressed: _image, child: const Text('Image')),
           ]),
           if (_overflow)
             // Deliberately too wide: Flutter reports a RenderFlex overflow.
@@ -291,7 +291,7 @@ class _ConnectionChip extends StatelessWidget {
             size: 18,
             color: connected ? Colors.green : Colors.grey,
           ),
-          label: Text(connected ? 'Bağlı' : (Durbun.isEnabled ? 'Bekleniyor' : 'Kapalı')),
+          label: Text(connected ? 'Connected' : (Durbun.isEnabled ? 'Waiting' : 'Off')),
         );
       },
     );
