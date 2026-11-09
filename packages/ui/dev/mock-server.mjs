@@ -10,7 +10,7 @@
  * history logs → live batches (logs, network, metrics, device apps, occasional device/app changes). Every
  * command gets {ok: true} with plausible data. REST: /api/health, /api/doctor, /api/network/:id (+ bodies),
  * /api/network/search, /api/export, /api/import, /api/har, /api/upload, /api/files/crash/:udid/:name.
- * Phase 3 (SPEC §10): apps without the SDK (`snapshot.deviceApps`: a Play build, a Firebase build, an APK
+ * SPEC §10: apps without the SDK (`snapshot.deviceApps`: a Play build, a Firebase build, an APK
  * installed by hand, a TestFlight build next to an Xcode build — both "Runner" — on a USB iPhone), exact
  * log origins, dropbox / .ips crash records (one marked `duplicateOf`, one with a downloadable .ips),
  * device readers (frame stats without data on the Pixel, dropbox refused on the Galaxy) and SDK layers.
@@ -118,7 +118,7 @@ function baseDevices() {
       id: IPHONE,
       platform: 'ios',
       kind: 'physical',
-      name: 'Ayşe’nin iPhone’u',
+      name: 'Jane’s iPhone',
       model: 'iPhone14,5',
       manufacturer: 'Apple',
       osVersion: '18.1',
@@ -242,8 +242,8 @@ let devices = empty ? [] : baseDevices();
 let apps = empty ? [] : baseApps();
 let deviceApps = empty ? [] : baseDeviceApps();
 let mocks = [
-  { id: 'm1', enabled: true, name: 'Ödeme hatası', method: 'POST', url: '/v1/payments', match: 'contains', action: { type: 'respond', status: 502, headers: [['Content-Type', 'application/json']], body: '{"error":"gateway"}' }, createdAt: startedAt - 90_000 },
-  { id: 'm2', enabled: false, name: 'Yavaş akış', method: 'GET', url: 'https://api.pati.app/v1/feed*', match: 'glob', action: { type: 'delay', delayMs: 2500 }, createdAt: startedAt - 60_000 },
+  { id: 'm1', enabled: true, name: 'Payment error', method: 'POST', url: '/v1/payments', match: 'contains', action: { type: 'respond', status: 502, headers: [['Content-Type', 'application/json']], body: '{"error":"gateway"}' }, createdAt: startedAt - 90_000 },
+  { id: 'm2', enabled: false, name: 'Slow feed', method: 'GET', url: 'https://api.pati.app/v1/feed*', match: 'glob', action: { type: 'delay', delayMs: 2500 }, createdAt: startedAt - 60_000 },
 ];
 const drivers = () => [
   { id: 'android', available: true, active: true, detail: 'adb 1.0.41 (35.0.2)' },
@@ -289,7 +289,7 @@ const FLUTTER_LINES = [
   ['[auth] access token refreshed (expires in 3600s)', 'info'],
   ['[cart] item added: {"sku":"MAMA-2KG","qty":2,"price":349.9}', 'debug'],
   ['[api] GET /v1/pets?page=2 → 200 (124 ms)', 'debug'],
-  ['Kullanıcı ana sayfayı açtı', 'info'],
+  ['User opened the home page', 'info'],
   ['[db] migration v12 → v13 completed in 48 ms', 'info'],
   ['[push] FCM token: dJ8xQ2kT7… (truncated)', 'debug'],
   ['Image cache size: 38.4 MB (412 entries)', 'verbose'],
@@ -341,8 +341,8 @@ function genDeviceOnlyLog(ts) {
   if (chance(0.5)) {
     const pid = pick([14210, 14210, 14388]);
     const [tag, message, level] = pick([
-      ['flutter', 'Kumbara: sepet güncellendi (3 ürün)', 'info'],
-      ['flutter', 'Kumbara: hedef ilerlemesi %42', 'info'],
+      ['flutter', 'Kumbara: savings updated (3 goals)', 'info'],
+      ['flutter', 'Kumbara: goal progress 42%', 'info'],
       ['ActivityTaskManager', 'Displayed com.mykynk.kumbara/.MainActivity: +412ms', 'info'],
       ['KumbaraWidget', 'Widget refreshed (2 goals)', 'debug'],
       ['FirebaseMessaging', 'Token refreshed', 'debug'],
@@ -350,7 +350,7 @@ function genDeviceOnlyLog(ts) {
     return logEntry({ ts, deviceId: PIXEL, source: 'device', level, tag, message, pid, tid: pid, process: pid === 14388 ? 'com.mykynk.kumbara:widget' : 'com.mykynk.kumbara' });
   }
   const [tag, message, level] = pick([
-    ['flutter', 'Kumbara: hedef kaydedildi', 'info'],
+    ['flutter', 'Kumbara: goal saved', 'info'],
     ['Runner', 'nw_connection_copy_connected_local_endpoint_block_invoke [C3] Connection has no local endpoint', 'debug'],
     ['UIKitCore', 'Snapshotting a view that has not been rendered', 'warn'],
   ]);
@@ -379,8 +379,8 @@ function genLog(ts) {
     const tag = pick(APP_TAGS);
     const level = pick(['debug', 'info', 'info', 'info', 'warn', 'verbose']);
     const msgs = {
-      auth: ['Kullanıcı giriş yaptı', 'Oturum yenilendi', 'Biyometrik doğrulama iptal edildi'],
-      cart: ['Sepete ürün eklendi', 'Kupon uygulandı: PATI10', 'Sepet senkronize edildi'],
+      auth: ['User signed in', 'Session refreshed', 'Biometric authentication cancelled'],
+      cart: ['Item added to cart', 'Coupon applied: PATI10', 'Cart synced'],
       api: ['Retrying request (attempt 2/3)', 'Cache hit for /v1/pets', 'Rate limit remaining: 412'],
       router: ['→ /pets/42', '← /home', 'Deep link handled: pati://pets/42'],
       push: ['Notification received while in foreground', 'Permission status: granted'],
@@ -394,7 +394,7 @@ function genLog(ts) {
   }
   if (r < 0.9) {
     const appId = pick(['app:2', 'app:4']);
-    return logEntry({ ts, deviceId: appId === 'app:4' ? SIM : PIXEL, appId, source: 'app', level: 'info', tag: 'event', kind: 'event', message: pick(['purchase', 'add_to_cart', 'login', 'share_pet']), data: { amount: 49.9, currency: 'TRY', items: 2 } });
+    return logEntry({ ts, deviceId: appId === 'app:4' ? SIM : PIXEL, appId, source: 'app', level: 'info', tag: 'event', kind: 'event', message: pick(['purchase', 'add_to_cart', 'login', 'share_pet']), data: { amount: 49.9, currency: 'USD', items: 2 } });
   }
   if (r < 0.93) {
     return logEntry({ ts, deviceId: PIXEL, appId: 'app:2', source: 'app', level: 'error', tag: 'pets', message: 'Pet list failed to load', error: { type: 'StateError', message: 'Bad state: Stream has already been listened to.', stack: DART_STACK } });
@@ -419,9 +419,9 @@ const ENDPOINTS = [
   { method: 'GET', url: 'https://api.pati.app/v1/pets?page=2&limit=20', status: 200, ct: 'application/json', body: () => JSON.stringify({ page: 2, total: 148, items: Array.from({ length: 20 }, (_, i) => ({ id: 20 + i, name: pick(['Karabaş', 'Pamuk', 'Boncuk', 'Duman', 'Zeytin']), species: pick(['dog', 'cat']), ageMonths: int(2, 120), vaccinated: chance(0.8), owner: { id: int(1, 900), city: pick(['İstanbul', 'Ankara', 'İzmir']) } })) }) },
   { method: 'GET', url: 'https://api.pati.app/v1/pets/42', status: 200, ct: 'application/json', body: () => JSON.stringify({ id: 42, name: 'Karabaş', tags: ['friendly', 'trained'], photos: ['https://cdn.pati.app/p/42/1.jpg'], health: { weightKg: 18.4, lastVisit: '2026-10-21' } }) },
   { method: 'POST', url: 'https://api.pati.app/v1/auth/refresh', status: 200, ct: 'application/json', req: '{"refreshToken":"rt_9f…"}', body: () => '{"accessToken":"eyJhbGciOi…","expiresIn":3600}' },
-  { method: 'POST', url: 'https://api.pati.app/graphql', status: 200, ct: 'application/json', req: '{"operationName":"PetFeed","query":"query PetFeed($first:Int){ feed(first:$first){ id title } }","variables":{"first":10}}', graphql: { operationName: 'PetFeed', operationType: 'query' }, body: () => '{"data":{"feed":[{"id":"1","title":"Parkta ilk gün"}]}}' },
+  { method: 'POST', url: 'https://api.pati.app/graphql', status: 200, ct: 'application/json', req: '{"operationName":"PetFeed","query":"query PetFeed($first:Int){ feed(first:$first){ id title } }","variables":{"first":10}}', graphql: { operationName: 'PetFeed', operationType: 'query' }, body: () => '{"data":{"feed":[{"id":"1","title":"First day at the park"}]}}' },
   { method: 'GET', url: 'https://cdn.pati.app/p/42/1.jpg?w=640', status: 200, ct: 'image/jpeg', body: null, size: 84_211 },
-  { method: 'PUT', url: 'https://api.pati.app/v1/profile', status: 204, ct: 'application/json', req: '{"displayName":"Yusuf","city":"İstanbul"}', body: () => '' },
+  { method: 'PUT', url: 'https://api.pati.app/v1/profile', status: 204, ct: 'application/json', req: '{"displayName":"Jane","city":"İstanbul"}', body: () => '' },
   { method: 'DELETE', url: 'https://api.pati.app/v1/cart/items/77', status: 404, ct: 'application/json', body: () => '{"error":"not_found","message":"Cart item 77 does not exist"}' },
   { method: 'GET', url: 'https://api.kasa.app/v2/balance', status: 500, ct: 'application/json', body: () => '{"error":"internal","traceId":"a1b2c3d4"}' },
   { method: 'PATCH', url: 'https://api.kasa.app/v2/settings', status: 200, ct: 'application/json', req: '{"notifications":false}', body: () => '{"ok":true}' },
@@ -602,7 +602,7 @@ function seedHistory() {
       logs.push(logEntry({ ts: ts + 10, deviceId: PIXEL, source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'process.died', params: { process: 'com.mykynk.pati', pid: 11873 }, message: 'Process died: com.mykynk.pati (pid 11873)' }));
       logs.push(logEntry({ ts: ts + 1500, deviceId: PIXEL, appId: 'app:2', source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'app.connected', params: { app: 'Pati', bundleId: 'com.mykynk.pati', version: '1.4.2', sdk: 'flutter', transport: 'adb-reverse', device: 'Pixel 8' }, message: 'Pati 1.4.2 connected (flutter SDK via adb-reverse)' }));
     }
-    if (i === 1500) logs.push(logEntry({ ts, deviceId: PIXEL, source: 'system', level: 'info', tag: 'durbun', kind: 'marker', code: 'marker', params: { label: 'Ödeme akışı testi', n: 1 }, message: 'Ödeme akışı testi' }));
+    if (i === 1500) logs.push(logEntry({ ts, deviceId: PIXEL, source: 'system', level: 'info', tag: 'durbun', kind: 'marker', code: 'marker', params: { label: 'Payment flow test', n: 1 }, message: 'Payment flow test' }));
     if (i === 1200) logs.push(...kumbaraCrash(ts));
     if (i === 1700) logs.push(kumbaraIpsCrash(ts));
   }
