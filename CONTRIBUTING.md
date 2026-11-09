@@ -44,7 +44,7 @@ npm --prefix apps/desktop install
 A real server (even with `--demo`) starts device drivers for any phone that is plugged in. For interface
 work, the mock server is the safer choice.
 
-CI runs all of the above on every pull request.
+Run the checks for every part you changed before you open a pull request, and say in it which ones you ran.
 
 ## Rules that keep the parts in sync
 
@@ -78,13 +78,22 @@ CI runs all of the above on every pull request.
 
 ## Releasing (maintainers)
 
-All parts share one version and are released together.
+All parts share one version and are released together, by hand from a maintainer's Mac.
 
 1. Update the version everywhere `node scripts/check-versions.mjs` lists, and move the changelog entries
-   under a new `## [X.Y.Z] - YYYY-MM-DD` heading (and `## X.Y.Z` in the Flutter changelogs).
+   under a new `## [X.Y.Z] - YYYY-MM-DD` heading (and `## X.Y.Z` in the Flutter changelogs). Run the checks
+   above.
 2. Merge to `main`, then tag and push: `git tag -a vX.Y.Z -m "Dürbün X.Y.Z"` and `git push origin vX.Y.Z`.
-3. The release workflow checks the versions, builds the Mac app (Apple silicon and Intel) and drafts a
-   GitHub release with the DMG and ZIP files. Review the notes and publish it.
-4. Publish the packages: `dart pub publish` in `sdks/flutter/durbun`, then in `sdks/flutter/durbun_dio`;
-   Maven Central from `sdks/android` (see `gradle/publish.gradle.kts`); `pod trunk push Durbun.podspec`;
-   `npm publish` in `sdks/js`.
+3. Build the Mac app for Apple silicon and Intel with `npm run app:release`. Set the Developer ID and
+   notarization variables first (see `apps/desktop/electron-builder.config.cjs`), then write the checksums:
+   `shasum -a 256 *.dmg *.zip > SHA256SUMS.txt` in `apps/desktop/release`.
+4. Draft the GitHub release with the version's `CHANGELOG.md` section as notes, attach the DMG, ZIP and
+   `SHA256SUMS.txt` files, review it and publish it:
+   `gh release create vX.Y.Z --draft --verify-tag --title "Dürbün X.Y.Z" --notes-file notes.md …`.
+5. Publish the packages:
+   - pub.dev: `dart pub publish` in `sdks/flutter/durbun`, then in `sdks/flutter/durbun_dio`.
+   - npm: `npm publish` in `sdks/js`.
+   - Maven Central: in `sdks/android`, `./gradlew publishReleasePublicationToStagingRepository` with the
+     signing key set (see `gradle/publish.gradle.kts`), zip `build/staging-deploy` and upload it on the
+     Central Portal.
+   - CocoaPods: `pod trunk push Durbun.podspec` from the repository root.

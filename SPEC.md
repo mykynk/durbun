@@ -1,10 +1,10 @@
 # Dürbün — Product & Engineering Spec (v0.1)
 
 > "Dürbün" = binoculars (Turkish). Identifier in code/packages: `durbun`. Display name: **Dürbün**.
-> This spec is the contract every contributor (human or agent) builds against. Data shapes live in
+> This spec is the contract every contributor builds against. Data shapes live in
 > `packages/protocol/src/index.ts` (source of truth). Server-internal contracts live in
 > `packages/server/src/types.ts`. Do not change either file's existing signatures; if you truly need
-> something extra, add an OPTIONAL member and say so in your report.
+> something extra, add an OPTIONAL member and say so in the pull request.
 
 ---
 
