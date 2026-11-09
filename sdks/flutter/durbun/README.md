@@ -1,29 +1,60 @@
-# Dürbün — Flutter SDK (`durbun`)
+# Dürbün for Flutter (`durbun`)
 
-> 🇹🇷 Türkçe aşağıda · 🇬🇧 [English below](#english)
+Dürbün is a desktop tool that shows **all logs, errors and network traffic** of
+an app in one live view while the device is plugged into your Mac (or the app
+runs in a simulator or emulator). This package sends the data from inside the
+app. It is a **Flutter plugin**: besides the Dart SDK it carries the native
+Android (Kotlin) and iOS (Swift) layers, so a single install covers Flutter and
+native code. You do not need a separate SDK per layer.
 
-Dürbün, cihaz Mac'e takılıyken (veya simülatör/emülatörde) uygulamanın **tüm
-loglarını, hatalarını ve ağ trafiğini** tek bir canlı ekranda gösteren masaüstü
-aracıdır. Bu paket uygulamanın içinden Dürbün'e veri gönderir. Bir **Flutter
-plugin'idir**: Dart tarafının yanında Android (Kotlin) ve iOS (Swift) native
-katmanlarını da taşır. Tek kurulum hem Flutter hem native katmanı kapsar;
-katman başına ayrı SDK kurmanız gerekmez.
+The Mac app and the SDKs for other platforms live in the
+[Dürbün repository](https://github.com/mykynk/durbun#readme).
 
-## Kurulum: 2 adım
+The package also ships an in-app inspector, so you can read everything on the
+phone itself, with or without a Mac. The inspector UI is available in English
+and Turkish and follows the app's (or the phone's) language.
 
-**1. `pubspec.yaml`**
+- [Installation](#installation)
+- [In-app inspector](#in-app-inspector-no-mac-needed)
+- [Release, Firebase and store builds](#release-firebase-and-store-builds)
+- [Where the data comes from](#where-the-data-comes-from)
+- [Logs and events from code (Dart)](#logs-and-events-from-code-dart)
+- [What the Dart side captures](#what-the-dart-side-captures)
+- [USB or Wi-Fi](#usb-or-wi-fi)
+- [Safety and security](#safety-and-security)
+- [Options (`DurbunOptions`)](#options-durbunoptions)
+- [Limitations](#limitations)
+- [Pure Dart (without Flutter)](#pure-dart-without-flutter)
+- [Development](#development)
+
+## Installation
+
+Two steps.
+
+**1. Add the dependency**
+
+```bash
+flutter pub add durbun
+```
+
+or in `pubspec.yaml`:
+
+```yaml
+dependencies:
+  durbun: ^0.1.0
+```
+
+To use the latest unreleased code, depend on the repository instead:
 
 ```yaml
 dependencies:
   durbun:
-    path: ../durbun/sdks/flutter/durbun   # Dürbün reposunun bulunduğu yere göre
-    # veya git ile:
-    # git:
-    #   url: <dürbün-repo-adresi>
-    #   path: sdks/flutter/durbun
+    git:
+      url: https://github.com/mykynk/durbun
+      path: sdks/flutter/durbun
 ```
 
-**2. `main.dart`**
+**2. Wrap `main` in `Durbun.run`**
 
 ```dart
 import 'package:durbun/durbun.dart';
@@ -31,35 +62,36 @@ import 'package:flutter/material.dart';
 
 Future<void> main() async {
   await Durbun.run(() async {
-    WidgetsFlutterBinding.ensureInitialized(); // zone içinde çağırın
+    WidgetsFlutterBinding.ensureInitialized(); // call it inside the zone
     runApp(const MyApp());
   });
 }
 ```
 
-Bu kadar. Native tarafta başlatma kodu yok: Dart tarafı çalıştığında Android
-ve iOS katmanlarını kendisi başlatır, kapalıyken onlar da kapalı kalır.
-`Durbun.start()` gibi native bir çağrı gerekmez; kodunuzda kalmışsa Flutter
-uygulamasında hiçbir şey yapmaz (plugin'i görür, işi Dart tarafına bırakır).
-Böylece ayrı bir native oturum açılmaz ve `DURBUN=false` native katmanı da
-kapalı tutar.
+That is all. There is no native initialization code: when the Dart side runs, it
+starts the Android and iOS layers itself, and when it is off, they stay off. A
+native `Durbun.start()` call is not needed. If one is left in your code, it does
+nothing in a Flutter app (it detects the plugin and leaves the work to the Dart
+side). This way no separate native session is opened, and `DURBUN=false` keeps
+the native layer off as well.
 
-**İsteğe bağlı, Android'de OkHttp kullanan native kodunuz varsa tek satır:**
+**Optional, one line on Android if your native code uses OkHttp:**
 
 ```kotlin
 import dev.durbun.DurbunInterceptor
 
 val client = OkHttpClient.Builder()
-    .addInterceptor(DurbunInterceptor())   // ← bu satır
+    .addInterceptor(DurbunInterceptor())   // <- this line
     .build()
 ```
 
-Dürbün kapalıyken (release) bu interceptor isteği hiç dokunmadan geçirir.
-iOS'ta URLSession trafiği (paylaşılan ve kendi oturumlarınız, Alamofire,
-cupertino_http) **otomatik** yakalanır, ek satır gerekmez.
+While Dürbün is off (release builds), this interceptor passes requests through
+untouched. On iOS, URLSession traffic (the shared session, your own sessions,
+Alamofire, cupertino_http) is captured **automatically**; no extra line is
+needed.
 
-`Durbun.run` bir zone açar: `print` çıktılarını ve yakalanmamış hataları da alır.
-Zone istemiyorsanız:
+`Durbun.run` opens a zone, so it also captures `print` output and uncaught
+errors. If you do not want a zone:
 
 ```dart
 Future<void> main() async {
@@ -68,18 +100,20 @@ Future<void> main() async {
 }
 ```
 
-Bu durumda yalnızca `debugPrint` yakalanır, zone hataları `PlatformDispatcher.onError`
-üzerinden gelir. Kendi `HttpOverrides.global`'ınız varsa onu `Durbun.init()`'ten
-**önce** atayın: sonradan atanan override ~2 sn içinde zincirlenir, o arada
-oluşturulan `HttpClient`'lar (ör. Dio'nun ilk istekte sakladığı istemci) yakalanmaz.
-`Durbun.run` içinde bu sınırlama yoktur: zone içindeki her `HttpClient`, o anki
-global override'ı sorup sarılır.
+In that case only `debugPrint` is captured, and zone errors arrive through
+`PlatformDispatcher.onError`. If you have your own `HttpOverrides.global`, assign
+it **before** `Durbun.init()`: an override assigned later is chained within
+about 2 seconds, and `HttpClient`s created in the meantime (for example the one
+Dio caches on its first request) are not captured. Inside `Durbun.run` there is
+no such gap: every `HttpClient` created in the zone asks the current global
+override and is wrapped.
 
-`ensureInitialized()` zone'un **dışında** çağrıldıysa (ör. `Durbun.run`'dan önce
-`await Firebase.initializeApp()` için), `Durbun.run` zone açmaz — Flutter'ın
-"Zone mismatch" hatası çıkmasın diye — ve `init` gibi çalışır: `print` yakalanmaz
-(yalnızca `debugPrint`), konsola bir kez not düşülür. `print` de yakalansın
-istiyorsanız Firebase dahil her şeyi gövdenin içine alın:
+If `ensureInitialized()` was called **outside** the zone (for example before
+`Durbun.run`, to run `await Firebase.initializeApp()`), `Durbun.run` does not
+open a zone, to avoid Flutter's "Zone mismatch" error. It then behaves like
+`init`: `print` is not captured (only `debugPrint`), and a note is printed to the
+console once. To capture `print` as well, move everything, Firebase included,
+into the body:
 
 ```dart
 Future<void> main() async {
@@ -91,230 +125,240 @@ Future<void> main() async {
 }
 ```
 
-## Uygulama içi panel (Mac'siz)
+## In-app inspector (no Mac needed)
 
-Telefonun kendisinde de her şeyi görmek için `MaterialApp`'e tek satır ekleyin
-(`MaterialApp.router` / go_router, `CupertinoApp` ve `WidgetsApp` için de aynı satır):
+To see everything on the phone itself, add one line to `MaterialApp`. The same
+line works for `MaterialApp.router` / go_router, `CupertinoApp` and
+`WidgetsApp`:
 
 ```dart
 MaterialApp(
-  builder: DurbunInspector.builder,   // ← bu satır
+  builder: DurbunInspector.builder,   // <- this line
   home: const HomePage(),
 );
 ```
 
-Uygulamanın üstüne hiçbir şey çizilmez: **telefonu sallayınca** panel açılır
-(iOS simülatörde *Device → Shake*, Android emülatörde *Extended controls →
-Virtual sensors → Shake*). Mac'e bağlı olmak gerekmez, testçi telefonda kendi başına bakabilir. Panel
-masaüstü Dürbün'ün tasarımını (aynı renkler, seviye ve durum renkleri, etiket
-renkleri, açık/koyu tema) ve sekmelerini taşır:
+Nothing is drawn over your app. **Shake the phone** to open the panel (iOS
+simulator: *Device → Shake*; Android emulator: *Extended controls → Virtual
+sensors → Shake*). No Mac connection is required, so a tester can inspect the
+app on their own phone. The panel carries the desktop's design (colors, level
+and status colors, tag colors, light and dark theme) and its tabs:
 
-- **Loglar:** canlı akış (en yenisi altta, yukarı kaydırınca durur, "↓ N yeni"
-  ile döner), V D I W E seviye düğmeleri, *Sadece hatalar · Çökmeler · Ağ ·
-  Olaylar · Flutter · Native* hızlı filtreleri, masaüstündeki sorgu dili
-  (`tag:auth -tag:frame level:warn is:crash`), art arda aynı satırların `×N`
-  olarak birleşmesi, akış içinde istek satırları. Ayrıntıda mesaj, açılıp
-  kapanan veri ağacı, uygulama satırları öne çıkan yığın izi, "yalnızca bu
-  etiket / bu etiketi gizle".
-- **Ağ:** dart:io, `package:http`, Dio, OkHttp ve URLSession tek tabloda: durum,
-  metot, yol (sorgu soluk), başlama saati (`SS:dd:ss`), host, kaynak, boyut,
-  süre (yavaşlar sarı/kırmızı), GraphQL işlemi, mock ve hata etiketi ("DNS
-  çözümlenemedi" gibi). Metot ve
-  durum düğmeleri, *Sadece hatalar · Yavaş ≥ 1 sn · Mock'lananlar*, host seçimi,
-  `status:4xx method:post host:api is:slow` sorguları ve gövdelerde arama.
-  Ayrıntıda Genel / İstek / Yanıt / Zamanlama sekmeleri; gövde için aranabilir
-  JSON ağacı, Kod ve Hex görünümü, görsel önizleme; başlıklar, çerezler ve sorgu
-  parametreleri; DNS, bağlantı, TLS, TTFB çubukları; **Tekrar gönder** ve
-  **Farklı kopyala** (cURL, fetch, Dart dio, Swift, Kotlin). **Paylaş** isteği
-  ekibin Dürbün olmadan okuyabileceği bir rapora çevirir (URL, durum, iz
-  kimlikleri, başlıklar, gövdeler, cURL; gizli değerler varsayılan olarak
-  `••••`) ve sistem paylaşım sayfasını açar ya da panoya kopyalar. Masaüstü
-  aynı raporu üretir. **Sırala** düğmesi (arama kutusunun yanında): en yeni
-  üstte (varsayılan), geliş sırası (en yenisi altta, liste yeni istekleri
-  izler), en yavaş önce, en büyük yanıt önce, hatalar önce. Sıralı listede
-  aşağı kaydırınca okunan satırlar yerinde durur; yeni istekler üstte "↑ N
-  yeni" ile bekler.
-- **Mock'lar:** masaüstünden gelen kurallar ve kaç kez uygulandıkları. Kurallar
-  bağlantıyla bittiği için Araçlar'da yalnızca masaüstü bağlıyken görünür.
-- **Performans:** FPS, takılan kare, build/raster, bellek, heap, CPU kutucukları;
-  FPS, kare süresi ve bellek grafikleri.
-- **Cihaz:** uygulama, cihaz, yakalanan katmanlar (Dart / Kotlin / Swift),
-  masaüstü bağlantısı ve "Neler görünüyor?": her veri kaynağının açık olup
-  olmadığı ve değilse nedeni.
-- **İstatistik** (Araçlar), kaydırılabilir sekmeler: *Özet* (istek sayısı;
-  başarılı, 4xx, 5xx, bağlantı hatası (zaman aşımları dahil), bekleyenler ve
-  metotlar), *Süre* (ortalama, ortanca (p50), p95, en uzun), *Veri*
-  (gönderilen ve alınan gövde boyutları), *Hostlar* (en çok istek alan 10
-  host). Gövdeler açılmaz; sayfa saniyede en fazla bir kez
-  yenilenir. Ağ listesi filtreliyse *Listedekiler / Tümü* seçilebilir.
-- **Oturumu dışa aktar** (Araçlar): Ağ listesindeki istekler (filtre, arama ve
-  sıra uygulanmış) ya da hepsi, **Rapor (.md)** (özet tablo ve her isteğin
-  ayrıntısı; Slack, Jira, e-posta) ya da **HAR 1.2** (Chrome DevTools,
-  Charles, Proxyman) olarak. Gizli değerler Paylaş'taki kurallarla `••••`
-  olur; maskeleme ve gövdeler ayrı ayrı kapatılabilir. Dosya uygulamanın
-  önbellek klasörüne (`durbun-export`) arka planda yazılır ve sistem paylaşım
-  sayfasıyla dosya olarak gönderilir; bir günden eski dışa aktarımlar sonraki
-  dışa aktarımda silinir. Paylaşım açılamazsa 512 KB'tan küçük bir dışa
-  aktarım panoya kopyalanır.
-- **Önceki çalıştırma** (isteğe bağlı, varsayılan kapalı):
-  `DurbunInspector(keepPreviousRun: true, child: child!)` verilince istekler
-  (başlıklar ve gövdelerin ilk 16 KB'ı) ile loglar dışa aktarımdaki gibi
-  maskelenerek uygulamanın önbellek klasörüne (`durbun-run`) saniyede en fazla
-  bir kez yazılır; çökme hemen yazılır. Sonraki açılışta Araçlar'da **Önceki
-  çalıştırma** belirir: o çalıştırmanın Ağ ve Log sekmeleri salt okunur
-  açılır, çöktüyse üstte yazar ve çökme tek dokunuşla açılır. Yalnızca son
-  çalıştırma tutulur (en fazla 2 × 4 MB). Dosya hataları uygulamaya yansımaz,
-  açılışı geciktirmez (dosya sayfa açılınca okunur); web'de hiçbir şey
-  yazılmaz.
+- **Logs:** a live stream (newest at the bottom; it stops following when you
+  scroll up and resumes with "↓ N new"), V D I W E level toggles, the quick
+  filters *Errors only · Crashes · Network · Events · Flutter · Native*, the
+  desktop's query language (`tag:auth -tag:frame level:warn is:crash`),
+  consecutive identical lines merged into `×N`, and request rows inside the
+  stream. The detail view shows the message, a collapsible data tree, a stack
+  trace that highlights app frames, and "Only this tag" / hide-this-tag actions.
+- **Network:** dart:io, `package:http`, Dio, OkHttp and URLSession in one table
+  with status, method, path (query dimmed), start time (`HH:mm:ss`), host,
+  source, size, duration (slow requests in yellow or red), GraphQL operation,
+  mock and error labels (such as "could not resolve DNS"). It offers method and
+  status toggles, the quick filters *Errors only · Slow ≥ 1 s · Mocked*, a host
+  picker, queries such as `status:4xx method:post host:api is:slow`, and search
+  inside bodies. The detail view has General / Request / Response / Timing
+  tabs: a searchable JSON tree for bodies, Code and Hex views, image preview,
+  headers, cookies and query parameters, DNS / connect / TLS / TTFB bars, and
+  **Replay** and **Copy as** (cURL, fetch, Dart dio, Swift, Kotlin).
+  **Share** turns a request into a report your team can read without Dürbün
+  (URL, status, trace IDs, headers, bodies, cURL; secret values are masked as
+  `••••` by default) and opens the system share sheet or copies the report. The
+  desktop produces the same report. The **Sort** button (next to the search
+  box) offers: newest on top (default), arrival order (newest at the bottom, the
+  list follows new requests), slowest first, largest response first, and errors
+  first. In a sorted list, rows you are reading stay in place while you scroll
+  down; new requests wait on top behind "↑ N new".
+- **Mocks:** the rules that come from the desktop and how many times each was
+  applied. Rules last only as long as the connection, so on the phone the tab
+  has content only while the desktop is connected.
+- **Performance:** tiles for FPS, janky frames, build/raster time, memory, heap
+  and CPU, plus charts for FPS, frame time and memory.
+- **Device:** the app, the device, the captured layers (Dart / Kotlin / Swift),
+  the desktop connection, and "What is captured?": whether each data source is
+  on and, if not, why.
+- **Statistics** (under Tools), in scrollable tabs: *Summary* (request count;
+  successful, 4xx, 5xx, connection errors (timeouts included) and pending
+  requests; methods), *Duration* (average, median (p50), p95, longest), *Data*
+  (sizes of the bodies sent and received) and *Hosts* (the 10 hosts that
+  received the most requests). Bodies are not decoded, and the page refreshes at
+  most once a second. If the Network list is filtered, you can choose between
+  *Listed* and *All*.
+- **Export session** (under Tools): the requests in the Network list (with
+  filters, search and sort order applied) or all of them, as a **Report (.md)**
+  (a summary table plus every request in detail; for Slack, Jira, e-mail) or
+  **HAR 1.2** (Chrome DevTools, Charles, Proxyman). Secret values are masked as
+  `••••` with the same rules as Share; masking and bodies can each be turned
+  off. The file is written in the background to the app's cache folder
+  (`durbun-export`) and sent as a file through the system share sheet. Exports
+  older than a day are deleted on the next export. If the share sheet cannot be
+  opened, an export smaller than 512 KB is copied to the clipboard.
+- **Previous run** (opt-in, off by default): with
+  `DurbunInspector(keepPreviousRun: true, child: child!)`, requests (headers and
+  the first 16 KB of each body) and logs are written, masked as in an export, to
+  the app's cache folder (`durbun-run`) at most once a second; a crash is written
+  immediately. On the next launch, Tools shows **Previous run**: the Network and
+  Logs tabs of that run, read-only. If it crashed, this is stated at the top and
+  the crash opens with one tap. Only the last run is kept (at most 2 × 4 MB).
+  File errors never reach the app, startup is not delayed (the file is read when
+  the page opens), and nothing is written on the web.
 
-Panel, masaüstünün aldığı mesajların aynısını gösterir. Masaüstü bağlıyken
-ikisi birlikte çalışır. Uygulamanın kendi native logları (Android logcat'i,
-iOS 15+ `os_log` / `Logger` / `NSLog`) Mac'e bağlı olmasa da panelde görünür;
-host uygulamada ayar gerekmez. Masaüstü bunları USB'de cihazdan kendisi okur,
-satırlar iki kez gelmez. Alttaki durum çubuğu bağlantıyı ve log, hata, istek
-sayılarını gösterir.
+The panel shows the same messages the desktop receives. When the desktop is
+connected, both work side by side. The app's own native logs (Android logcat,
+iOS 15+ `os_log` / `Logger` / `NSLog`) appear in the panel even without a Mac
+connection, and the host app needs no setup. The desktop reads these from the
+device itself over USB, so lines are not delivered twice. The status bar at the
+bottom shows the connection and the log, error and request counts.
 
-Sınırlar ve ayarlar:
+Limits and settings:
 
-- Telefonda son 2.000 log satırı, 1.000 istek ve toplam 24 MB gövde tutulur.
-  Sınır dolunca en eskiler silinir ve panel bunu söyler. `defaultHosts`
-  verildiyse önce panelde gizli hostlara giden istekler (ve gövdeleri) silinir.
-  Sınırları değiştirmek için:
+- The phone keeps the last 2,000 log lines, 1,000 requests and 24 MB of bodies
+  in total. When a limit is reached, the oldest entries are removed and the
+  panel says so. If `defaultHosts` is set, requests to hosts hidden in the
+  panel (and their bodies) are removed first. To change the limits:
   `DurbunInspector(maxRequests: 2000, maxLogs: 5000, maxBodyBytes: 48 << 20, child: child!)`.
-- Paneli kendi debug menünüzden ya da bir düğmeden de açabilirsiniz:
-  `Durbun.showInspector()`. Sallamayı kapatmak için `openOnShake: false`,
-  ekranda küçük bir Dürbün düğmesi istiyorsanız `showBubble: true` verin.
-- Sallama algılama yalnızca uygulama öndeyken çalışır. Android'de ivme sensörü
-  okunur (izin gerekmez), iOS'ta sistemin sallama hareketi kullanılır (izin
-  gerekmez).
-- SDK'yı güncelledikten sonra iOS'ta bir kez `cd ios && pod install` çalıştırın
-  (plugin'e yeni dosya eklendiğinde CocoaPods projesi yenilenmeli).
-- Android'de dışa aktarılan dosyayı paylaşmak için eklenti manifestine
-  `${applicationId}.durbun.files` adlı, dışa açık olmayan, salt okunur bir
-  `ContentProvider` ekler (androidx gerekmez). Yalnızca `durbun-export`
-  klasöründeki dosyaları, paylaşım anında verilen tek seferlik izinle açar.
-- Telefonda hiçbir şey tutulmasın istiyorsanız `DurbunOptions(inspector: false)`
-  verin.
-- Panelde yalnızca kendi API'lerinizin görünmesi için varsayılan hostları verin:
-  `DurbunInspector(defaultHosts: ['api.ornek.com', '*.ornek.com'], child: child!)`.
-  Başka hostlara giden istekler (analitik, Firebase Storage …) yine yakalanır ve
-  masaüstüne gider; panelde gizlenir, filtre satırında "N istek başka hostta"
-  yazar ve Ağ → Filtreler → Hostlar'dan işaretlenince görünür. Liste boşsa
-  bütün hostlar gösterilir.
-- İstek ve yanıt gövdesinde (önizleme ve kod) **Gövdede bul**: eşleşme sayısı,
-  önceki/sonraki ve eşleşmeye kaydırma. Ağ listesinde "Gövdelerde de ara"
-  açıkken bir isteğe girince arama gövdede dolu açılır.
-- Panel uygulamanın navigator'ında tek bir `/durbun` rotası olarak açılır.
-  Ayrıntı sayfaları, alt sayfalar, menüler ve "Kopyalandı" bildirimleri panelin
-  kendi navigator'ında ve `ScaffoldMessenger`'ında kalır: uygulamanın route
-  observer'ları (analitik, Sentry) yalnızca `/durbun`'u görür, uygulamanın
-  snack bar'larına dokunulmaz. Geri tuşu önce paneldeki sayfayı, sonra paneli
-  kapatır. Başka bir navigator için `DurbunInspector(navigatorKey: …)` verin.
-- Filtreler, arama, sıra ve son açılan sekme panel kapanıp açılınca korunur. Ağ
-  listesinde **Duraklat** yeni istekleri bekletir; yukarı kaydırılmış listede
-  okunan satırlar, eski kayıtlar silinse de yerinden oynamaz. *Kayıtları
-  temizle* önce onay ister. Panel açıkken sallama dinlenmez.
-- Dürbün'ün kapalı olduğu derlemelerde (`DURBUN=false`, ya da define verilmemiş
-  bir release) panel açılmaz, sallama dinlenmez; widget yalnızca uygulamayı çizer.
+- You can also open the panel from your own debug menu or a button with
+  `Durbun.showInspector()`. Use `openOnShake: false` to turn shake detection
+  off, or `showBubble: true` to show a small Dürbün button on screen.
+- Shake detection works only while the app is in the foreground. On Android it
+  reads the accelerometer (no permission needed); on iOS it uses the system's
+  shake gesture (no permission needed).
+- After updating the SDK, run `cd ios && pod install` once on iOS (CocoaPods
+  must refresh the project when files are added to the plugin).
+- To share an exported file on Android, the plugin's manifest adds a read-only
+  `ContentProvider` named `${applicationId}.durbun.files`, which is not exported
+  (androidx is not required). It serves only files in the `durbun-export`
+  folder, through the one-time grant of the share intent.
+- If you do not want anything stored on the phone, pass
+  `DurbunOptions(inspector: false)`.
+- To show only your own APIs in the panel, set default hosts:
+  `DurbunInspector(defaultHosts: ['api.example.com', '*.example.com'], child: child!)`.
+  Requests to other hosts (analytics, Firebase Storage, and so on) are still
+  captured and still reach the desktop. In the panel they are hidden, the filter
+  row says "N on other hosts", and they become visible once ticked under
+  Network → Filters → Hosts. If the list is empty, all hosts are shown.
+- **Find in body…** works in request and response bodies (preview and code),
+  with a match count, previous/next buttons and scrolling to the match. When
+  "Search bodies too" is on in the Network list, the search opens pre-filled
+  after you enter a request.
+- The panel opens as a single `/durbun` route on the app's navigator. Detail
+  pages, sheets, menus and "Copied" toasts stay on the panel's own navigator and
+  `ScaffoldMessenger`: the app's route observers (analytics, Sentry) see only
+  `/durbun`, and the app's snack bars are left alone. The back button closes the
+  page inside the panel first, then the panel. To use another navigator, pass
+  `DurbunInspector(navigatorKey: ...)`.
+- Filters, search, sort order and the last open tab are kept when the panel is
+  closed and reopened. **Pause** on the Network list holds back new requests.
+  In a list scrolled up, rows you are reading do not move even if old entries
+  are evicted. *Clear captured data* asks for confirmation first. Shake
+  detection is paused while the panel is open.
+- In builds where Dürbün is off (`DURBUN=false`, or a release build without the
+  define), the panel does not open and shaking is not listened to; the widget
+  only draws the app.
 
-## Release, Firebase ve mağaza derlemeleri
+## Release, Firebase and store builds
 
-Bir derlemenin Dürbün'ü çalıştırıp çalıştırmayacağına proje karar verir; mağaza
-derlemeleri de buna dahildir. SDK uygulamanın nereden kurulduğuna bakmaz.
+Each project decides whether a build runs Dürbün, store builds included. The SDK
+does not look at where the app was installed from.
 
-| Derleme | Dürbün |
+| Build | Dürbün |
 |---|---|
-| `flutter run` (debug), profile | **Açık**, kendiliğinden |
-| Release | **Kapalı.** Soket açılmaz, kanca kurulmaz, native katman başlatılmaz. Dart kodu derleyicinin ağaç sarsmasıyla (tree shaking) neredeyse tamamen düşer |
-| Release + `--dart-define=DURBUN=true` | **Açık**, nereden kurulursa kurulsun (Firebase, ad-hoc, TestFlight, Google Play, App Store…) |
-| `--dart-define=DURBUN=false` | Her modda kapalı (ör. profile ölçümü) |
-| `DurbunOptions(enabled: true/false)` | Her şeyin önüne geçer |
+| `flutter run` (debug), profile | **On**, automatically |
+| Release | **Off.** No socket is opened, no hooks are installed, and the native layer is never started. The Dart code is almost entirely removed by the compiler's tree shaking |
+| Release + `--dart-define=DURBUN=true` | **On**, wherever the build is installed from (Firebase, ad-hoc, TestFlight, Google Play, App Store, and so on) |
+| `--dart-define=DURBUN=false` | Off in every mode (for example profile measurements) |
+| `DurbunOptions(enabled: true/false)` | Overrides everything |
 
 ```bash
-# Dürbün açık release:
+# Release with Dürbün on:
 flutter build apk --release --dart-define=DURBUN=true
 flutter build ipa --release --dart-define=DURBUN=true
-# Firebase App Distribution / ad-hoc dağıtımı için .ipa:
+# .ipa for Firebase App Distribution / ad-hoc distribution:
 flutter build ipa --release --export-method ad-hoc --dart-define=DURBUN=true
-# Dürbün kapalı release (define yok):
+# Release with Dürbün off (no define):
 flutter build appbundle --release
 flutter build ipa --release
 ```
 
-- Aynı define `flutter build appbundle` ve `flutter run --release` ile de verilir.
-- iOS: Flutter define'ları `ios/Flutter/Generated.xcconfig` dosyasına yazar ve
-  Xcode Archive bu dosyayı kullanır. `--dart-define=DURBUN=true` ile yapılan bir
-  `flutter build`'den sonra Xcode'da alınan Archive, define'sız bir sonraki
-  `flutter build`'e kadar `DURBUN=true` ile derlenir.
-- Firebase ve mağaza aynı binary'yi alıyorsa define o binary'nin her kurulumunda
-  Dürbün'ü açar. Define'sız bir binary'de de Dürbün masaüstü cihazın verdiği her
-  şeyi gösterir (cihaz logları, çökme kayıtları, Android süreç/kare
-  istatistikleri) ve ağ/mock'un neden görünmediğini açıklar.
-- Flavor başına karar için define'ı ilgili flavor'ın derleme komutuna ekleyin ya da
-  `DurbunOptions(enabled: appFlavor == 'qa')` yazın.
-- Android: release'de Dürbün açıkken ana manifestte `INTERNET` izni gerekir (ağ
-  kullanan her uygulamada zaten vardır; plugin kendisi izin eklemez).
-- Boyut (Flutter 3.38, sayaç uygulaması, başka bir plugin'i zaten olan uygulamaya
-  eklenince, DURBUN kapalı release): Android arm64 APK **+34 KB**; iOS `.app`
-  **+868 KB** sıkıştırılmamış / **+278 KB** zip (`durbun.framework`; mağaza
-  dağıtımında semboller ayıklanınca küçülür).
+- The same define works with `flutter build appbundle` and
+  `flutter run --release`.
+- iOS: Flutter writes defines to `ios/Flutter/Generated.xcconfig`, and an Xcode
+  Archive uses that file. An Archive made in Xcode after a `flutter build` with
+  `--dart-define=DURBUN=true` is built with `DURBUN=true` until the next
+  `flutter build` without the define.
+- If Firebase and the store receive the same binary, the define turns Dürbün on
+  in every install of that binary. Even in a binary without the define, the
+  desktop shows everything the device exposes (device logs, crash records,
+  Android process and frame statistics) and explains why network traffic and
+  mocks are not visible.
+- To decide per flavor, add the define to that flavor's build command or write
+  `DurbunOptions(enabled: appFlavor == 'qa')`.
+- Android: with Dürbün on in release, the main manifest needs the `INTERNET`
+  permission (every networked app already has it; the plugin does not add any
+  permission itself).
+- Size (Flutter 3.38 counter app that already includes another plugin, release
+  build with DURBUN off): Android arm64 APK **+34 KB**; iOS `.app` **+868 KB**
+  uncompressed / **+278 KB** zipped (`durbun.framework`; smaller once symbols
+  are stripped for store distribution).
 
-## Veriler nereden gelir?
+## Where the data comes from
 
-Hepsi uygulamanın içinden ve **tek bağlantıdan** gider; masaüstünde tek bir
-uygulama oturumu ("SDK" rozeti) olarak görünür. Araya proxy girmez, bu yüzden
-SSL pinning'e dokunulmaz.
+Everything leaves the app over **one connection** and appears on the desktop as
+a single app session (with an "SDK" badge). No proxy is involved, so SSL pinning
+is left untouched.
 
-| Kaynak | Ne gönderir | Ne zaman |
+| Source | What it sends | When |
 |---|---|---|
-| Dart SDK (bu paket) | Dart logları, `print`, Flutter hataları, Dart çökmeleri, dart:io HTTP (package:http, Dio varsayılan adaptörü, `NetworkImage`), FPS/jank/bellek, `flutter.*` araçları | Dürbün açıkken |
-| Android native katmanı (bu plugin içinde) | Kotlin/Java `Durbun.log`, yakalanmamış Kotlin/Java çökmeleri, OkHttp (`DurbunInterceptor` ile), uygulamanın kendi logcat'i (`Log.d` vb.; panelde her zaman, masaüstüne yalnızca adb yokken, ör. Wi-Fi), `android.dumpThreads` / `android.gc` araçları | Dart tarafı başlatınca |
-| iOS native katmanı (bu plugin içinde) | URLSession trafiği (otomatik), Objective-C istisnaları ve Swift çökmeleri, Swift `print`/stdout/stderr, `Durbun.log` (Swift), iOS 15+ `os_log` / `Logger` / `NSLog` (panelde her zaman, masaüstüne yalnızca cihaz loglarını okuyamıyorsa, ör. Wi-Fi), `ios.*` araçları | Dart tarafı başlatınca |
-| SDK'sız (eski build, Dürbün kapalı release) | Cihaz logları, sistem çökme kayıtları, Android süreç/kare istatistikleri — masaüstü bunları cihazdan okur | Her zaman |
+| Dart SDK (this package) | Dart logs, `print`, Flutter errors, Dart crashes, dart:io HTTP (package:http, Dio's default adapter, `NetworkImage`), FPS/jank/memory, `flutter.*` tools | While Dürbün is on |
+| Android native layer (in this plugin) | Kotlin/Java `Durbun.log`, uncaught Kotlin/Java crashes, OkHttp (with `DurbunInterceptor`), the app's own logcat (`Log.d` and so on; always in the panel, on the desktop only when adb is not available, for example over Wi-Fi), `android.dumpThreads` / `android.gc` tools | Once the Dart side starts it |
+| iOS native layer (in this plugin) | URLSession traffic (automatic), Objective-C exceptions and Swift crashes, Swift `print`/stdout/stderr, `Durbun.log` (Swift), iOS 15+ `os_log` / `Logger` / `NSLog` (always in the panel, on the desktop only when it cannot read device logs, for example over Wi-Fi), `ios.*` tools | Once the Dart side starts it |
+| No SDK (old builds, release builds with Dürbün off) | Device logs, system crash records, Android process and frame statistics; the desktop reads these from the device | Always |
 
-Native çökmeler: Android'de çökme anında doğrudan masaüstüne gider; masaüstüne
-o an ulaşılamazsa bir sonraki açılışta **"Previous launch crashed — …"** olarak
-gelir. iOS'ta ana thread dışındaki istisnalar anında, ana thread'deki istisnalar
-ve sinyal çökmeleri (force-unwrap, EXC_BAD_ACCESS) bir sonraki açılışta
-**"Crash in previous launch: …"** olarak gelir.
+Native crashes: on Android, a crash goes straight to the desktop at crash time;
+if the desktop cannot be reached at that moment, it arrives on the next launch
+as **"Previous launch crashed — …"**. On iOS, exceptions off the main thread
+arrive immediately; main-thread exceptions and signal crashes (force unwrap,
+EXC_BAD_ACCESS) arrive on the next launch as **"Crash in previous launch: …"**.
 
-Native koddan log:
+Logging from native code:
 
 ```kotlin
 import dev.durbun.Durbun
-Durbun.i("payment", "3DS tamamlandı", data = mapOf("orderId" to 42))
+Durbun.i("payment", "3DS completed", data = mapOf("orderId" to 42))
 ```
 
 ```swift
 import durbun
-Durbun.info("3DS tamamlandı", tag: "payment", data: ["orderId": 42])
+Durbun.info("3DS completed", tag: "payment", data: ["orderId": 42])
 ```
 
-## Kod içinden log ve event (Dart)
+## Logs and events from code (Dart)
 
 ```dart
-Durbun.log('Kullanıcı giriş yaptı', tag: 'auth', data: {'userId': 42});
-Durbun.d('Önbellek ısındı');            // v / d / i / w / e / f
-Durbun.e('Ödeme başarısız', error: e, stackTrace: st);
-Durbun.i({'sepet': [1, 2, 3]});         // Map/List → JSON (masaüstünde ağaç)
+Durbun.log('User signed in', tag: 'auth', data: {'userId': 42});
+Durbun.d('Cache warmed up');            // v / d / i / w / e / f
+Durbun.e('Payment failed', error: e, stackTrace: st);
+Durbun.i({'cart': [1, 2, 3]});          // Map/List -> JSON (a tree on the desktop)
 Durbun.event('purchase', {'amount': 49.9});
 ```
 
-Bağlantı durumu: `Durbun.isConnected`, `Durbun.connectionState`,
-`Durbun.connection` (stream). Masaüstüne kendi butonunuzu ekleyin:
+Connection state is available through `Durbun.isConnected`,
+`Durbun.connectionState` and `Durbun.connection` (a stream). To add your own
+button to the desktop, register an action (`DurbunAction.button`, `toggle` or
+`select`):
 
 ```dart
 Durbun.addAction(DurbunAction.button(
   id: 'app.clearCache',
-  label: 'Önbelleği temizle',
+  label: 'Clear cache',
   onPressed: (_) async => cache.clear(),
 ));
 ```
 
-### Mevcut log paketiniz varsa
+### If you already use a logging package
 
-`print` ile yazan paketler zaten yakalanır. Seviye ve tag'lerin korunması için
-`package:logging` kayıtlarını doğrudan iletin:
+Packages that write with `print` are captured already. To keep levels and tags,
+forward `package:logging` records directly:
 
 ```dart
 Logger.root.level = Level.ALL;
@@ -332,128 +376,139 @@ Logger.root.onRecord.listen((r) => Durbun.log(
 ));
 ```
 
-## Dart tarafında neler yakalanır?
+## What the Dart side captures
 
-| Kaynak | Nasıl | Masaüstünde |
+| Source | How | On the desktop |
 |---|---|---|
-| `Durbun.log/v/d/i/w/e/f` | doğrudan | seviye, tag, `data` (JSON), hata + stack trace |
-| `print` / `debugPrint` | zone (`run`) veya `debugPrint` kancası (`init`) | `flutter` tag'li info log — **yalnızca** masaüstü cihaz loglarını göremiyorsa (`capturePrint: auto`), böylece satırlar iki kez görünmez |
-| `FlutterError.onError` | önceki handler korunarak zincirlenir | `flutter-error`: hata kutusunun tamamı (`══╡ EXCEPTION CAUGHT BY …`) |
-| Yakalanmamış hatalar | zone + `PlatformDispatcher.onError` | `crash` (fatal), stack trace ile; hata ayrıca eski yerine iletilir |
-| HTTP (dart:io) | `HttpOverrides.global` sarmalayıcısı (önceki override zincirlenir) | istek/yanıt, başlıklar, gövdeler (gzip çözülmüş), süreler, redirect (her adım ayrı satır, URLSession'daki gibi), iptal, hata. `package:http`, Dio'nun varsayılan adaptörü, `NetworkImage`, WebSocket el sıkışması dahil |
-| Event'ler | `Durbun.event` | log akışında event satırı |
-| Metrikler | `SchedulerBinding.addTimingsCallback`, `ProcessInfo.currentRss`, `getrusage` | FPS (çizim sırasında), janky frame, ortalama build/raster ms, bellek MB, CPU %, thread (Android) |
-| Komutlar | masaüstü → uygulama | `flutter.debugPaint`, `repaintRainbow`, `slowAnimations`, `performanceOverlay`, `invertOversizedImages`, `brightness`, `platform`, `dumpWidgetTree`, `dumpRenderTree` + sizin `DurbunAction`'larınız |
+| `Durbun.log/v/d/i/w/e/f` | Directly | Level, tag, `data` (JSON), error and stack trace |
+| `print` / `debugPrint` | The zone (`run`) or a `debugPrint` hook (`init`) | An info log with the `flutter` tag, **only** when the desktop cannot see device logs (`capturePrint: auto`), so lines are not shown twice |
+| `FlutterError.onError` | Chained, preserving the previous handler | `flutter-error`: the whole error box (`══╡ EXCEPTION CAUGHT BY …`) |
+| Uncaught errors | Zone and `PlatformDispatcher.onError` | `crash` (fatal), with a stack trace; the error is also forwarded to the previous handler |
+| HTTP (dart:io) | An `HttpOverrides.global` wrapper (a previous override is chained) | Request and response, headers, bodies (gzip decoded), timings, redirects (one entry per hop, as with URLSession), cancellations and errors. Includes `package:http`, Dio's default adapter, `NetworkImage` and WebSocket handshakes |
+| Events | `Durbun.event` | An event line in the log stream |
+| Metrics | `SchedulerBinding.addTimingsCallback`, `ProcessInfo.currentRss`, `getrusage` | FPS (while rendering), janky frames, average build/raster ms, memory MB, CPU %, threads (Android) |
+| Commands | Desktop to app | `flutter.debugPaint`, `repaintRainbow`, `slowAnimations`, `performanceOverlay`, `invertOversizedImages`, `brightness`, `platform`, `dumpWidgetTree`, `dumpRenderTree`, plus your own `DurbunAction`s |
 
-Mock kuralları (masaüstünde **Mock'lar** sekmesi): `respond` → ağa hiç çıkmadan
-sahte yanıt (yanıtta `x-durbun-mock` başlığı), `delay` → bekleyip gerçek isteği
-yapar, `fail` → platformun doğal hatası (`SocketException` "Connection refused" /
-"Failed host lookup", `HandshakeException`, "timed out" — Dio bunu
-`connectionTimeout` olarak tanır).
+Mock rules (the **Mocks** tab on the desktop): `respond` returns a synthesized
+response without touching the network (the response carries an `x-durbun-mock`
+header); `delay` waits and then makes the real request; `fail` produces the
+platform's natural error (`SocketException` "Connection refused" / "Failed host
+lookup", `HandshakeException`, "timed out"; Dio recognizes the latter as
+`connectionTimeout`).
 
-## USB mi, Wi-Fi mı?
+## USB or Wi-Fi
 
-- **Android (USB/emülatör):** hiçbir ayar gerekmez. Masaüstü `adb reverse tcp:9751`
-  kurar, SDK `127.0.0.1:9751`'e bağlanır (emülatörde yedek olarak `10.0.2.2`).
-- **iOS simülatör:** ayar gerekmez (simülatör Mac'in `127.0.0.1`'ini kullanır).
-- **iOS fiziksel cihaz (USB):** ayar gerekmez. SDK cihazda `127.0.0.1:9752–9755`
-  portlarından birini dinler, masaüstü usbmux üzerinden bağlanır.
-- **Wi-Fi:** Mac'in IP adresini verin:
-  `DurbunOptions(host: '192.168.1.20')` veya
+- **Android (USB or emulator):** no setup. The desktop runs
+  `adb reverse tcp:9751` and the SDK connects to `127.0.0.1:9751` (on emulators,
+  `10.0.2.2` is the fallback).
+- **iOS simulator:** no setup (the simulator uses the Mac's `127.0.0.1`).
+- **iOS physical device (USB):** no setup. The SDK listens on one of the device's
+  `127.0.0.1:9752–9755` ports, and the desktop connects through usbmux.
+- **Wi-Fi:** provide the Mac's IP address with
+  `DurbunOptions(host: '192.168.1.20')` or
   `flutter run --dart-define=DURBUN_HOST=192.168.1.20`.
-  Masaüstünde LAN erişimini açın (`durbun --lan`). iOS 14+ için
-  `ios/Runner/Info.plist` dosyasına yerel ağ izni metni ekleyin:
+  Turn on LAN access on the desktop (`durbun --lan`). On iOS 14+, add a local
+  network usage description to `ios/Runner/Info.plist`:
 
   ```xml
   <key>NSLocalNetworkUsageDescription</key>
-  <string>Dürbün geliştirici aracına bağlanmak için</string>
+  <string>To connect to the Dürbün developer tool</string>
   ```
 
-Bağlantı yoksa SDK son 5 000 mesajı bekletir, 0,5 sn → 3 sn aralıklarla yeniden
-dener, bağlanınca sırayla gönderir (taşan mesaj sayısını bir uyarı satırıyla bildirir).
-Masaüstü hiç bağlanmadıysa ya da 30 sn'den uzun süredir yoksa bekleyen mesajlar
-en fazla ~8 MB yer tutar: aşınca en eski gövdeler atılır (istek satırları ve
-loglar kalır, gövde "kesildi" görünür). Uygulama içi panelin kendi kopyası
-bundan etkilenmez.
-Masaüstü yokken istekler beklemez; yalnızca bir masaüstü bağlantıyı kabul etmiş
-ve el sıkışma sürerken (mock kuralları yoldayken) en fazla 0,8 sn bekler.
+While there is no connection, the SDK buffers the last 5,000 messages, retries
+with a backoff from 0.5 s to 3 s, and sends the buffered messages in order once
+connected (a warning line reports how many overflowed). If no desktop has ever
+connected, or none has been present for more than 30 seconds, the waiting
+messages take up at most about 8 MB: past that, the oldest bodies are dropped
+(request rows and logs stay, and the body is shown as truncated). The in-app
+panel keeps its own copy and is not affected.
 
-## Release güvenliği
+Without a desktop, requests do not wait. They wait for at most 0.8 s only when a
+desktop has accepted the connection and the handshake is still in progress (mock
+rules are on their way).
 
-- Varsayılanlar yukarıdaki tabloda. `flutter test` içinde de kapalıdır
-  (`enabled: true` ile açılır).
-- SDK uygulamaya asla hata fırlatmaz; tüm iç hatalar yutulur (native katman dahil).
-- JSON kodlama, gövde base64/gzip işlemleri ve soket I/O arka plan isolate'ta
-  çalışır; kuyruklar sınırlıdır (5 000 mesaj, ~48 MB; masaüstü yokken gövdeler için ~8 MB),
-  gövdeler `maxBodyBytes` (varsayılan 1 MB, en fazla 10 MB) ile kesilir; gzip
-  gövdeler de bu sınırda açılmayı bırakır. Native katmanın mesajları Dart'a küçük paketler
-  hâlinde, sınırlı bir tamponla iletilir.
-- Web'de ve masaüstü platformlarda native katman yoktur; Dart tarafı çalışır.
-- Hot restart: native katman yeni oturumla yeniden başlar.
-- Bağlantı koptuğunda o bağlantının gönderdiği mock kuralları her katmanda
-  (Dart, OkHttp, URLSession) hemen silinir; masaüstü yeniden bağlanınca
-  kurallarını tekrar gönderir. Bağlantı yokken yapılan istekler gerçek sunucuya
-  gider.
-- **Güvenlik notu:** masaüstü ile SDK arasında henüz eşleştirme (pairing) yok.
-  Dürbün açık bir derleme, cihazın loopback portunda karşısına çıkan eşle konuşur
-  (Android: `127.0.0.1:9751`'e bağlanır; iOS cihaz: `127.0.0.1:9752–9755`'i
-  dinler). O eş, adb reverse / usbmux üzerinden masaüstü ya da cihazdaki başka bir
-  uygulama olabilir; loglar ve ağ trafiği ona gider, bağlı kaldığı sürece
-  gönderdiği mock kuralları uygulanır.
+## Safety and security
 
-## Seçenekler (`DurbunOptions`)
+- The defaults are in the table above. Dürbün is also off under `flutter test`
+  (turn it on with `enabled: true`).
+- The SDK never throws into the app; all internal errors are swallowed (the
+  native layer included).
+- JSON encoding, body base64/gzip work and socket I/O run in a background
+  isolate. Queues are bounded (5,000 messages, about 48 MB; about 8 MB for bodies
+  while no desktop is connected). Bodies are truncated at `maxBodyBytes`
+  (default 1 MB, at most 10 MB), and gzip bodies also stop inflating at that
+  limit. Messages from the native layer reach Dart in small batches through a
+  bounded buffer.
+- There is no native layer on the web or on desktop platforms; the Dart side
+  still works.
+- Hot restart: the native layer restarts with a new session.
+- When a connection drops, the mock rules that connection sent are dropped at
+  once in every layer (Dart, OkHttp, URLSession); the desktop sends them again
+  when it reconnects. Requests made while there is no connection go to the real
+  server.
+- **Security note:** there is no pairing between the desktop and the SDK yet. A
+  build with Dürbün on talks to whatever peer it meets on the device's loopback
+  port (Android: it connects to `127.0.0.1:9751`; iOS device: it listens on
+  `127.0.0.1:9752–9755`). That peer may be the desktop (through adb reverse or
+  usbmux) or another app on the device. Logs and network traffic go to it, and
+  the mock rules it sends apply for as long as it stays connected.
 
-| Seçenek | Varsayılan | Açıklama |
+## Options (`DurbunOptions`)
+
+| Option | Default | Description |
 |---|---|---|
-| `enabled` | `null` | `null`: debug/profile açık, release yalnızca `--dart-define=DURBUN=true` ile; `true`/`false` her şeyi ezer |
-| `host` / `port` | `null` / `9751` | Wi-Fi için masaüstü adresi (`'ip'` veya `'ip:port'`) |
-| `captureNetwork` | `true` | dart:io HTTP yakalama + mock'lar (iOS'ta URLSession, Android'de OkHttp yakalamayı da açar/kapatır) |
-| `capturePrint` | `auto` | `auto` / `always` / `never` (`never` native stdout'u ve logcat / `os_log` okumayı da kapatır; panelde de görünmezler) |
-| `captureErrors` | `true` | Flutter hataları ve çökmeler (native çökmeler dahil) |
-| `metrics` | `true` | FPS, jank, bellek, CPU |
-| `maxBufferedMessages` | `5000` | bağlantı yokken tutulan mesaj sayısı |
-| `redactHeaders` | `[]` | değeri gizlenecek başlıklar, ör. `['authorization']` — OkHttp ve URLSession istekleri dahil; değer her katmanda `••••` görünür |
-| `appId` / `appName` / `appVersion` | otomatik | Android'de sürüm/derleme numarasını artık native katman okur; yalnızca ezmek için verin |
-| `waitForDesktop` | `0` | `run` uygulamayı başlatmadan önce bu kadar bekler (açılıştaki isteklere mock uygulansın diye); verilmezse istekler masaüstünü beklemez |
-| `listenForUsb` | `true` | iOS cihazda usbmux dinleyicisi |
-| `useBackgroundIsolate` | `true` | taşıma katmanı arka plan isolate'ta |
-| `inspector` | `true` | uygulama içi panel için son logları, istekleri ve ölçümleri telefonda tutar (`DurbunInspector`) |
+| `enabled` | `null` | `null`: on in debug/profile, in release only with `--dart-define=DURBUN=true`; `true`/`false` overrides everything |
+| `host` / `port` | `null` / `9751` | Desktop address for Wi-Fi (`'ip'` or `'ip:port'`) |
+| `captureNetwork` | `true` | dart:io HTTP capture and mocks (also turns URLSession capture on iOS and OkHttp capture on Android on or off) |
+| `capturePrint` | `auto` | `auto` / `always` / `never` (`never` also turns off native stdout and logcat / `os_log` reading; they do not appear in the panel either) |
+| `captureErrors` | `true` | Flutter errors and crashes (native crashes included) |
+| `metrics` | `true` | FPS, jank, memory, CPU |
+| `maxBufferedMessages` | `5000` | Number of messages kept while there is no connection |
+| `redactHeaders` | `[]` | Headers whose values are hidden, for example `['authorization']`; applies to OkHttp and URLSession requests too, and the value shows as `••••` in every layer |
+| `appId` / `appName` / `appVersion` | automatic | On Android the native layer now reads the version and build number; set these only to override |
+| `waitForDesktop` | `0` | `run` waits this long before starting the app (so mocks apply to requests made at launch); when not set, requests do not wait for the desktop |
+| `listenForUsb` | `true` | The usbmux listener on iOS devices |
+| `useBackgroundIsolate` | `true` | Runs the transport layer in a background isolate |
+| `inspector` | `true` | Keeps recent logs, requests and metrics on the phone for the in-app panel (`DurbunInspector`) |
 
-## Sınırlar
+## Limitations
 
-- Android'de **cronet_http / Dio `NativeAdapter`** dart:io'yu ve OkHttp'yi
-  kullanmaz → Dio için `durbun_dio` paketindeki
-  `DurbunDioInterceptor(dio: dio)`'yu **en son** interceptor olarak ekleyin. iOS'ta
-  bunlar URLSession üzerinden native katmanca yakalanır (`DurbunDioInterceptor`
-  o istekleri ikinci kez bildirmez).
-- **Yakalanmayanlar:** Android'de package:http'nin `CronetClient`'ı ve
-  `package:ok_http` (kendi OkHttp istemcisini kurar, `DurbunInterceptor`
-  eklenemez); her platformda gRPC (`package:grpc`, HTTP/2'yi kendi soketiyle
-  konuşur) ve doğrudan `Socket` kullanan kod. Bunları `DurbunNetwork.begin` ile
-  kendiniz raporlayabilirsiniz (aşağıdaki örnek).
-- dart:io'nun kendiliğinden izlediği redirect'lerde ara adımların yalnızca durum
-  kodu ve `location` başlığı bilinir; mock kuralları ara adımlara uygulanmaz.
-- Arka plan isolate'larındaki (`compute`, `Isolate.run`) Dart HTTP istekleri ve
-  loglar yakalanmaz (her isolate'ın kendi `HttpOverrides`'ı vardır).
-- `Durbun.run/init`'ten **önce** oluşturulmuş `HttpClient`'lar sarılmaz.
-- WebSocket: yalnızca el sıkışma (101) görünür, mesajlar görünmez.
-- `dart:developer` `log()` çağrıları SDK'dan değil, masaüstünün Dart VM Service
-  bağlantısından (debug) gelir.
-- FPS yalnızca çizim yapılırken raporlanır (boşta bekleyen uygulama "0 FPS" görünmez).
-- iOS `os_log` / `Logger` / `NSLog` satırları uygulamanın kendi log deposundan
-  birkaç saniyede bir okunur (panel açıkken ya da masaüstüne giderken saniyede bir).
-  iOS `debug` seviyesini depoda tutmaz, bu satırlar panelde görünmez; iOS 13–14'te
-  bu kaynak yoktur. `com.apple.*` sistem satırları atlanır.
-- Aynı süreçte birden fazla Flutter engine varsa native katmanı yalnızca ilk
-  başlatan engine kullanır.
-- Native-only (Flutter'sız) uygulamalar `sdks/android` ve `sdks/ios` SDK'larını
-  kullanır; Flutter uygulamasına ikisini ayrıca eklemeyin (sınıflar çakışır).
+- On Android, **cronet_http / Dio's `NativeAdapter`** use neither dart:io nor
+  OkHttp. For Dio, add `DurbunDioInterceptor(dio: dio)` from the
+  [`durbun_dio`](https://pub.dev/packages/durbun_dio) package as the **last** interceptor. On iOS these run on URLSession and are
+  captured by the native layer (`DurbunDioInterceptor` does not report those
+  requests a second time).
+- **Not captured:** on Android, package:http's `CronetClient` and
+  `package:ok_http` (it builds its own OkHttp client, so `DurbunInterceptor`
+  cannot be added); on every platform, gRPC (`package:grpc` speaks HTTP/2 over
+  its own sockets) and code that uses `Socket` directly. You can report these
+  yourself with `DurbunNetwork.begin` (see the example below).
+- For redirects that dart:io follows by itself, only the status code and the
+  `location` header of the intermediate hops are known; mock rules do not apply
+  to intermediate hops.
+- Dart HTTP requests and logs in background isolates (`compute`,
+  `Isolate.run`) are not captured (each isolate has its own `HttpOverrides`).
+- `HttpClient`s created **before** `Durbun.run/init` are not wrapped.
+- WebSocket: only the handshake (101) is visible, not the messages.
+- `dart:developer` `log()` calls come not from the SDK but from the desktop's Dart
+  VM Service connection (debug).
+- FPS is reported only while frames are drawn (an idle app does not show "0 FPS").
+- iOS `os_log` / `Logger` / `NSLog` lines are read from the app's own log store
+  every few seconds (every second while the panel is open or the lines are going
+  to the desktop). iOS does not keep `debug` entries in that store, so those
+  lines do not appear in the panel; on iOS 13–14 this source does not exist.
+  `com.apple.*` system lines are skipped.
+- If a process has more than one Flutter engine, only the engine that starts the
+  native layer first uses it.
+- Native-only (non-Flutter) apps use the SDKs in `sdks/android` and `sdks/ios`.
+  Do not add them to a Flutter app as well (the classes would clash).
 
-### Yakalanmayan istemcileri elle raporlamak
+### Reporting uncaptured clients manually
 
-package:http istemcileri (ör. `CronetClient`, `OkHttpClient`) için küçük bir
-sarmalayıcı yeter (Dürbün kapalıyken `begin` null döner ve hiçbir şey yapmaz).
-Yanıt gövdesini bir kez belleğe alır; büyük indirmelerde kullanmayın:
+For package:http clients (for example `CronetClient`, `OkHttpClient`), a small
+wrapper is enough. While Dürbün is off, `begin` returns null and nothing
+happens. The wrapper reads the response body into memory once, so do not use it
+for large downloads:
 
 ```dart
 import 'package:durbun/durbun.dart';
@@ -506,334 +561,40 @@ class DurbunReportingClient extends http.BaseClient {
 }
 ```
 
-gRPC ve diğer protokoller için aynı `DurbunNetwork.begin` → `call.response(...)`
-/ `call.error(...)` çağrılarını kendi katmanınızda yapın.
+For gRPC and other protocols, make the same `DurbunNetwork.begin` →
+`call.response(...)` / `call.error(...)` calls in your own layer.
 
-## Saf Dart (Flutter'sız)
+## Pure Dart (without Flutter)
 
-`package:durbun/durbun_core.dart` (`DurbunClient.start(...)`) Flutter'sız Dart
-programlarında aynen çalışır; plugin'in native tarafı onlar için devreye girmez.
+`package:durbun/durbun_core.dart` (`DurbunClient.start(...)`) works as is in Dart
+programs without Flutter; the plugin's native side is not involved for them.
 
-## Geliştirme
+## Development
 
 ```bash
 flutter pub get --offline
 flutter analyze
 flutter test --concurrency=2
-dart run tool/smoke.dart --dry-run      # masaüstü olmadan uçtan uca kontrol
-dart run tool/smoke.dart                # çalışan Dürbün masaüstüne karşı (127.0.0.1:9751)
-dart run tool/smoke.dart --port 9751 --linger 60   # bağlı kalır: Cihaz sekmesinden smoke.* araçlarını deneyin
-dart run tool/sync_native.dart          # sdks/ios veya sdks/android değiştiyse kopyaları tazeler
+dart run tool/smoke.dart --dry-run      # end-to-end check without the desktop
+dart run tool/smoke.dart                # against a running Dürbün desktop (127.0.0.1:9751)
+dart run tool/smoke.dart --port 9751 --linger 60   # stays connected: try the smoke.* tools from the Device tab
+dart run tool/sync_native.dart          # refreshes the copies after sdks/ios or sdks/android changed
 ```
 
-`--linger` süresince smoke uygulaması her saniye metrik gönderir ve masaüstünden şu araçlar çalışır:
-`smoke.ping` (buton), `smoke.verbose` (anahtar), `smoke.theme` (seçim) ve `smoke.request`
-(`{path, method, body}` ile SDK üzerinden yeni bir istek — Mock'lar sekmesindeki kuralların uygulandığını
-görmek için).
+During `--linger`, the smoke app sends metrics every second, and these tools
+work from the desktop: `smoke.ping` (button), `smoke.verbose` (toggle),
+`smoke.theme` (select) and `smoke.request` (makes one more request through the
+SDK with `{path, method, body}`, for example to watch a rule in the Mocks tab
+apply).
 
-Native çekirdekler pakette birebir kopya olarak durur, çünkü pub.dev yalnızca bu
-klasörü yayınlar ve CocoaPods, Swift Package Manager ve Gradle plugin klasörü
-dışındaki dosyaları derleyemez: iOS çekirdeği `ios/durbun/Sources/durbun/Core`'da,
-Android çekirdeği `android/src/core` (Kotlin + Java) ve `android/core-rules.pro`'da.
-Asılları `sdks/ios/Sources/Durbun` ve `sdks/android/durbun`'dadır; onları değiştirince
-`dart run tool/sync_native.dart` çalıştırın. `test/native_sync_test.dart` bir kopya
-eskidiğinde başarısız olur.
+The native cores live in the package as exact copies, because pub.dev publishes
+only this folder, and CocoaPods, Swift Package Manager and Gradle cannot build
+files outside the plugin folder. The iOS core is in
+`ios/durbun/Sources/durbun/Core`; the Android core is in `android/src/core`
+(Kotlin + Java) and `android/core-rules.pro`. The originals are in
+`sdks/ios/Sources/Durbun` and `sdks/android/durbun`; after changing them, run
+`dart run tool/sync_native.dart`. `test/native_sync_test.dart` fails when a copy
+is stale.
 
-Örnek uygulama: [`example/`](example/). (Xcode 27 iOS 15 altını kabul etmediği
-için örneğin iOS hedefi 15.0'dır.)
-
----
-
-<a id="english"></a>
-
-# 🇬🇧 English
-
-Dürbün is a desktop tool that shows **all logs, errors and network traffic** of
-an app running on a device plugged into the Mac (or a simulator/emulator) in one
-live view. This package is a **Flutter plugin**: besides the Dart SDK it carries
-the native Android (Kotlin) and iOS (Swift) layers, so one install covers both
-Flutter and native code.
-
-## Setup: 2 steps
-
-```yaml
-dependencies:
-  durbun:
-    path: ../durbun/sdks/flutter/durbun   # or a git: dependency with path: sdks/flutter/durbun
-```
-
-```dart
-Future<void> main() async {
-  await Durbun.run(() async {
-    WidgetsFlutterBinding.ensureInitialized();
-    runApp(const MyApp());
-  });
-}
-```
-
-No native init call: the Dart side starts the Android/iOS layers when it runs
-and leaves them off otherwise. A native `Durbun.start()` is not needed; if one
-is left in your code it does nothing in a Flutter app (it sees the plugin and
-leaves the work to Dart), so no separate native session opens and `DURBUN=false`
-keeps the native layer off too. Optional on Android, if your native code uses OkHttp:
-`.addInterceptor(DurbunInterceptor())` (`import dev.durbun.DurbunInterceptor`) —
-a pass-through while Dürbün is off. iOS URLSession traffic (shared and custom
-sessions, Alamofire, cupertino_http) is captured automatically.
-
-Without a zone: `Future<void> main() async { await Durbun.init(); runApp(const MyApp()); }`
-(then only `debugPrint` is captured). Set your own `HttpOverrides.global`, if
-any, **before** `Durbun.init()`: one set later is chained within ~2 s, and
-`HttpClient`s created in between (e.g. the one Dio's adapter caches on its
-first request) are not captured. Inside `Durbun.run` there is no such gap:
-every `HttpClient` created in the zone asks the current global overrides and
-is wrapped. If `ensureInitialized()` already ran outside the zone (e.g. before
-`await Firebase.initializeApp()`), `Durbun.run` opens no zone — that would
-print Flutter's "Zone mismatch" error — and works like `init` (no `print`
-capture, only `debugPrint`; one console note). Move `ensureInitialized()` and
-`Firebase.initializeApp()` into the body to capture `print` too. API: `Durbun.log(message, tag:, data:, error:, stackTrace:)`,
-`Durbun.v/d/i/w/e/f`, `Durbun.event(name, props)`, `Durbun.isConnected`,
-`Durbun.connection` (stream), `Durbun.addAction(DurbunAction.button/toggle/select)`.
-Native logs: Kotlin `Durbun.i("tag", "message", data = …)` (`dev.durbun.Durbun`),
-Swift `Durbun.info("message", tag: "tag")` (`import durbun`).
-
-## In-app inspector (no Mac needed)
-
-One line in `MaterialApp` adds the panel (the same line for
-`MaterialApp.router` / go_router, `CupertinoApp` and `WidgetsApp`); nothing is
-drawn over the app.
-**Shake the phone** to open it (simulator: Device → Shake; Android emulator:
-Virtual sensors → Shake). It opens a panel with the desktop's design and tabs, on the phone, with or
-without a Mac:
-
-```dart
-MaterialApp(builder: DurbunInspector.builder, home: const HomePage());
-```
-
-- **Logs:** live stream with pause, V D I W E level toggles, quick filters, the
-  desktop query language, merged repeats, request rows, data tree, stack traces
-  and tag actions.
-- **Network:** dart:io, Dio, OkHttp and URLSession in one table with method and
-  status chips, slow / mocked / failed filters, host picker, query and body
-  search. Detail tabs General / Request / Response / Timing: searchable JSON
-  tree, code and hex views, image preview, headers, cookies, query, phase bars,
-  Replay and Copy as cURL / fetch / dio / Swift / Kotlin. **Share** turns a
-  request into a report the team can read without Dürbün (URL, status, trace
-  IDs, headers, bodies, cURL; secret values masked as `••••` by default) and
-  opens the system share sheet or copies it. The desktop builds the same
-  report. **Sort** (next to search): arrival order (default: newest at the
-  bottom, the list follows new requests), newest on top, slowest first,
-  largest response first, errors first. A sorted list scrolled down holds
-  still too; new requests wait on top behind "↑ N new".
-- **Mocks** from the desktop, **Performance** tiles and charts, **Device** with
-  the captured layers and what each data source needs.
-- **Statistics** (Tools): request count; successful, 4xx, 5xx, transport
-  errors (timeouts among them) and pending; average, median (p50), p95 and
-  longest duration; body bytes sent and received; the top 10 hosts and the
-  methods. Bodies are not decoded; the page refreshes at most once a second.
-  With a filtered Network list, *Listed / All* picks what it counts.
-- **Export session** (Tools): the requests the Network list shows (filters,
-  search and order applied) or all of them, as a **Report (.md)** (summary
-  table plus every request in detail; Slack, Jira, e-mail) or **HAR 1.2**
-  (Chrome DevTools, Charles, Proxyman). Secret values are masked as `••••`
-  with the Share rules; masking and bodies can each be turned off. The file is
-  written in the background to the app's cache folder (`durbun-export`) and
-  shared as a file through the system share sheet; exports older than a day
-  are deleted on the next export. If sharing does not open, an export under
-  512 KB is copied to the clipboard.
-- **Previous run** (opt-in, off by default):
-  `DurbunInspector(keepPreviousRun: true, child: child!)` writes requests
-  (headers and the first 16 KB of each body) and logs, masked like an export,
-  to the app's cache folder (`durbun-run`) at most once a second, and a crash
-  at once. On the next launch Tools shows **Previous run**: that run's Network
-  and Logs tabs, read-only; a crash is named on top and opens in one tap. Only
-  the last run is kept (at most 2 × 4 MB). File errors never reach the app and
-  startup is not delayed (the file is read when the page opens); nothing is
-  written on the web.
-
-The panel shows the same messages the desktop receives, plus the app's own
-native logs (Android logcat, iOS 15+ `os_log` / `Logger` / `NSLog`) with or
-without a Mac and with no setup in the host app (`capturePrint: never` turns
-them off). On the phone it keeps the last 2,000 log lines, 1,000 requests and
-24 MB of bodies, and says when the oldest entries were removed. With
-`defaultHosts`, requests to hidden hosts (and their bodies) go first.
-`DurbunInspector(maxRequests: …, maxLogs: …, maxBodyBytes: …)` changes the
-limits.
-
-Options:
-
-- `Durbun.showInspector()` opens it from your own debug menu;
-  `openOnShake: false` turns shaking off, `showBubble: true` adds a small
-  Dürbün button. The accelerometer is read only while the app is in front.
-- After updating the SDK run `cd ios && pod install` once.
-- To share an export on Android the plugin's manifest adds a read-only,
-  not exported `ContentProvider`, `${applicationId}.durbun.files` (no androidx
-  needed). It serves only files in `durbun-export`, through the one-time grant
-  of the share intent.
-- `DurbunInspector(defaultHosts: ['api.example.com', '*.example.com'], …)`
-  lists only your own APIs. Requests to other hosts (analytics, Firebase
-  Storage …) are still captured and still reach the desktop; on the phone
-  they are hidden, counted ("N on other hosts") and listed once ticked under
-  Network → Filters → Hosts. Empty: every host.
-- Find in the request and response bodies (preview and code): a match count,
-  previous / next, and the match scrolled into view.
-- The panel is one `/durbun` route on the app's navigator. Its detail pages,
-  sheets, menus and "Copied" toasts live on its own navigator and
-  `ScaffoldMessenger`: the app's route observers (analytics, Sentry) see only
-  `/durbun`, and the app's snack bars are left alone. Back closes the panel's
-  page first, then the panel. `DurbunInspector(navigatorKey: …)` picks another
-  navigator.
-- Filters, search, the order and the last tab are kept between opens. **Pause** holds new
-  requests on Network; a list scrolled up keeps the rows in view still while
-  old entries are evicted. *Clear captured data* asks first. Shaking is not
-  listened to while the panel is open.
-- `DurbunOptions(inspector: false)` keeps nothing on the device.
-- In builds where Dürbün is off, only the app is drawn.
-
-## Release, Firebase and store builds
-
-- debug / profile: **on** automatically;
-- release: **off** — no socket, no hooks, the native layer is never started, and
-  the Dart code is almost entirely tree-shaken away;
-- release + `--dart-define=DURBUN=true`: **on**, wherever the build is installed
-  from (Firebase, ad-hoc, TestFlight, Google Play, App Store, …);
-- `--dart-define=DURBUN=false`: off in every mode;
-- `DurbunOptions(enabled: …)` overrides everything (e.g. `enabled: appFlavor == 'qa'`).
-
-Each project decides per build whether it runs Dürbün, store builds included;
-the SDK does not look at where the app was installed from.
-
-```bash
-# Release with Dürbün on:
-flutter build apk --release --dart-define=DURBUN=true
-flutter build ipa --release --dart-define=DURBUN=true
-# .ipa for Firebase App Distribution / ad-hoc:
-flutter build ipa --release --export-method ad-hoc --dart-define=DURBUN=true
-# Release with Dürbün off (no define):
-flutter build appbundle --release
-flutter build ipa --release
-```
-
-The same define works with `flutter build appbundle` and `flutter run --release`.
-iOS: Flutter writes the defines into `ios/Flutter/Generated.xcconfig`, which an
-Xcode Archive uses, so an Archive made after a `flutter build` with
-`--dart-define=DURBUN=true` keeps `DURBUN=true` until the next `flutter build`
-without it. If Firebase and the store get the same binary, the define turns
-Dürbün on in every install of it; without the define the desktop still shows
-what the device exposes (device logs, crash records, Android process/frame
-stats) and explains why network/mocks are missing.
-Release builds with Dürbün on need `INTERNET` in the main Android manifest
-(every networked app has it; the plugin adds no permission).
-Size (Flutter 3.38 counter app that already has another plugin, release, DURBUN
-off): Android arm64 APK **+34 KB**; iOS `.app` **+868 KB** uncompressed /
-**+278 KB** zipped (`durbun.framework`, smaller once symbols are stripped for
-distribution).
-
-## Where the data comes from
-
-Everything leaves the app over **one connection** and shows up as one app
-session ("SDK" badge). No proxy is involved, so SSL pinning is untouched.
-
-| Source | Sends | When |
-|---|---|---|
-| Dart SDK | Dart logs, `print`, Flutter errors, Dart crashes, dart:io HTTP, FPS/jank/memory, `flutter.*` tools | while Dürbün is on |
-| Android layer (in this plugin) | Kotlin/Java `Durbun.log`, uncaught Kotlin/Java crashes, OkHttp (with `DurbunInterceptor`), the app's own logcat (`Log.d` …; always in the panel, to the desktop only without adb, e.g. Wi-Fi), `android.*` tools | once Dart starts it |
-| iOS layer (in this plugin) | URLSession traffic (automatic), Objective-C exceptions and Swift crashes, Swift `print`/stdout/stderr, Swift `Durbun.log`, iOS 15+ `os_log` / `Logger` / `NSLog` (always in the panel, to the desktop only when it cannot read device logs, e.g. Wi-Fi), `ios.*` tools | once Dart starts it |
-| No SDK (old builds, release builds with Dürbün off) | device logs, system crash records, Android process/frame stats, read by the desktop | always |
-
-Native crashes: Android sends them to the desktop at crash time; if the desktop
-cannot be reached they arrive on the next launch as **"Previous launch crashed —
-…"**. iOS: exceptions off the main thread arrive live; main-thread exceptions
-and signal crashes (force unwrap, EXC_BAD_ACCESS) arrive on the next launch as
-**"Crash in previous launch: …"**.
-
-## What the Dart side captures
-
-App logs; `print`/`debugPrint` (only when the desktop cannot see device logs, so
-lines are never duplicated — `capturePrint: auto`); `FlutterError.onError`
-(`flutter-error`, full error box) and uncaught zone/platform errors (`crash`),
-always chaining the previous handlers; every dart:io `HttpClient` request through
-an `HttpOverrides.global` wrapper that chains previous overrides (package:http,
-Dio's default adapter, `NetworkImage`, WebSocket handshakes) with headers, bodies
-(gzip decoded, capped at `maxBodyBytes`), timings, redirects (one entry per hop,
-like URLSession), cancellations and errors; events; metrics (FPS while rendering, janky frames, avg build/raster ms,
-memory, CPU, threads); desktop commands `flutter.*` plus your own actions.
-Mocks: `respond` (synthesized, never hits the network, `x-durbun-mock` header),
-`delay`, `fail` (natural dart:io exceptions).
-
-## USB vs Wi-Fi
-
-Android USB/emulator: automatic (`adb reverse`; `10.0.2.2` fallback on
-emulators). iOS simulator: automatic. iOS device over USB: automatic (the SDK
-listens on device `127.0.0.1:9752–9755`, the desktop connects via usbmux).
-Wi-Fi: `DurbunOptions(host: '192.168.1.20')` or
-`--dart-define=DURBUN_HOST=192.168.1.20`, run the desktop with `--lan`, and on
-iOS 14+ add `NSLocalNetworkUsageDescription` to `Info.plist`. While offline the
-SDK keeps the last 5 000 messages and reconnects with 0.5 s → 3 s backoff.
-Before the first connection, or once the desktop has been gone for 30 s, the
-waiting messages hold at most ~8 MB: past it the oldest bodies are stripped
-(requests and logs stay, bodies marked truncated; the in-app panel keeps its
-own copy). Requests never
-wait for a missing desktop: only while a desktop has accepted the connection
-and its mock rules are on the way, for at most 0.8 s (`waitForDesktop` waits
-longer on purpose).
-
-## Limits
-
-On Android, cronet_http / Dio `NativeAdapter` bypass both dart:io and OkHttp:
-add `DurbunDioInterceptor(dio: dio)` from `durbun_dio` as Dio's **last**
-interceptor. On iOS they run on URLSession and are captured by the native layer
-(`DurbunDioInterceptor` does not report them twice). **Not captured:** on
-Android package:http's `CronetClient` and `package:ok_http` (it builds its own
-OkHttp client, so `DurbunInterceptor` cannot be added); on every platform gRPC
-(`package:grpc` speaks HTTP/2 over its own sockets) and raw `Socket` code.
-Report those yourself with `DurbunNetwork.begin(...)` → `call.response(...)` /
-`call.error(...)`; for package:http clients a small `http.BaseClient` wrapper is
-enough (the Turkish section above has a ready one, `DurbunReportingClient`).
-Redirects dart:io follows by itself expose only each hop's status and
-`location`; mock rules do not apply to those hops. Traffic in background isolates is not captured.
-`HttpClient`s created before `Durbun.run/init` are not wrapped. WebSockets:
-handshake only. `dart:developer` `log()` comes from the desktop's VM-service
-bridge (debug). iOS `os_log` / `Logger` / `NSLog` lines are read from the app's
-own log store every few seconds (every second while the panel is open or they
-go to the desktop); iOS does not keep `debug` entries, iOS 13–14 has no such
-store, and `com.apple.*` lines are skipped. With several Flutter engines in one process only the first one
-that starts Dürbün gets the native layer. Native-only apps use `sdks/android` /
-`sdks/ios`; do not add those to a Flutter app as well (duplicate classes).
-
-## Security notes
-
-- When the connection drops, the mock rules it pushed are dropped at once in
-  every layer (Dart, OkHttp, URLSession); the desktop sends them again when it
-  reconnects. Requests made in between go to the real server.
-- **Connection:** the link between the desktop and the SDK has no pairing yet. A
-  build with Dürbün on talks to whatever answers on its device loopback port
-  (Android: it connects to `127.0.0.1:9751`; iOS device: it listens on
-  `127.0.0.1:9752–9755`). That peer can be the desktop (through adb reverse /
-  usbmux) or another app on the device; the logs and network traffic go to it,
-  and the mock rules it pushes apply while it stays connected.
-- Header values listed in `redactHeaders` show up as `••••` in every layer.
-- A peer cannot raise the body limit past 10 MiB, and gzip bodies stop
-  inflating at the limit.
-  `captureNetwork: false` also keeps OkHttp (Android) and URLSession (iOS) out.
-
-## Pure Dart
-
-`package:durbun/durbun_core.dart` (`DurbunClient.start(...)`) keeps working in
-Dart programs without Flutter; the plugin's native side is not involved.
-
-## Development
-
-`flutter test --concurrency=2`, `dart run tool/smoke.dart --dry-run` (no desktop
-needed) or `dart run tool/smoke.dart` against a running desktop
-(`--port 9751 --linger 60` keeps it connected: it sends metrics every second and
-offers the actions `smoke.ping`, `smoke.verbose` (toggle), `smoke.theme` (select)
-and `smoke.request` (`{path, method, body}` — makes one more request through the
-SDK, e.g. to watch a mock rule apply).
-
-The package carries exact copies of the native cores, because pub.dev publishes
-only this folder and CocoaPods, Swift Package Manager and Gradle cannot build
-files outside the plugin: the iOS core in `ios/durbun/Sources/durbun/Core`, the
-Android core in `android/src/core` (Kotlin + Java) and `android/core-rules.pro`.
-The originals are `sdks/ios/Sources/Durbun` and `sdks/android/durbun`; run
-`dart run tool/sync_native.dart` after changing them — `test/native_sync_test.dart`
-fails when a copy is stale.
+Example app: [`example/`](example/). (The example's iOS target is 15.0, because
+Xcode 27 does not accept anything below iOS 15.)
