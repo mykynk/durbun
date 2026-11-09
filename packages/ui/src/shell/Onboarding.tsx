@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { Apple, BookOpen, CircleCheck, CircleMinus, FlaskConical, MonitorSmartphone, ShieldCheck, Stethoscope, TriangleAlert, Zap } from 'lucide-react';
+import { Apple, BookOpen, CircleCheck, CircleMinus, FlaskConical, MonitorSmartphone, Plug, ShieldCheck, Stethoscope, TriangleAlert } from 'lucide-react';
 import '../sources/text';
 import type { DriverStatus, ToolCheck } from '@durbun/protocol';
 import { useT } from '../i18n';
@@ -49,7 +49,6 @@ function OnbCard({
   title,
   children,
   footer,
-  accent,
   wide,
 }: {
   icon?: IconType;
@@ -57,11 +56,10 @@ function OnbCard({
   title: string;
   children: ReactNode;
   footer?: ReactNode;
-  accent?: boolean;
   wide?: boolean;
 }) {
   return (
-    <section className={clsx('onb-card', accent && 'onb-card--accent', wide && 'onb-card--wide')} aria-label={title}>
+    <section className={clsx('onb-card', wide && 'onb-card--wide')} aria-label={title}>
       <header className="onb-card__header">
         <span className="onb-card__icon">{iconNode ?? (Icon ? <Icon size={18} aria-hidden /> : null)}</span>
         <h3 className="onb-card__title">{title}</h3>
@@ -159,14 +157,13 @@ export function Onboarding() {
             <ToolStatus state={adbState} label={t('shell.onboarding.emulatorNote')} />
           </OnbCard>
 
-          <OnbCard icon={Zap} wide title={t('shell.onboarding.flutter.title')}>
+          <OnbCard icon={Plug} wide title={t('shell.onboarding.flutter.title')}>
             <p className="onb-p">{t('shell.onboarding.flutter.body')}</p>
             <ToolStatus state={vm ? (vm.available ? 'ok' : 'missing') : 'unknown'} label={t('shell.onboarding.flutter.status')} detail={statusOf(vm)} />
           </OnbCard>
 
           <OnbCard
             icon={FlaskConical}
-            accent
             wide
             title={t('shell.onboarding.demo.title')}
             footer={

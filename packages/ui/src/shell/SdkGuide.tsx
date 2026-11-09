@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Archive, BookOpen, Cable, FolderOpen, Plug, ShieldCheck, Wifi, Zap } from 'lucide-react';
+import { Archive, BookOpen, Cable, FolderOpen, Plug, ShieldCheck, Wifi } from 'lucide-react';
 import { DEFAULT_PORTS } from '@durbun/protocol';
 import { useLanguage, useT } from '../i18n';
 import { isConnected, ui, updateServerSettings, useConnection, useDevices, useServerSettings, useUi, type SdkGuideSection, type SdkGuideTab } from '../data';
@@ -146,7 +146,7 @@ function FlutterGuide({ repo }: { repo?: string }) {
     <>
       <Callout
         tone="info"
-        icon={Zap}
+        icon={Cable}
         title={t('shell.sdk.flutter.zeroTitle')}
         className="sdk-zero"
         actions={

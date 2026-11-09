@@ -870,7 +870,7 @@
   flex: 1 1 auto;
   display: flex;
   justify-content: center;
-  padding: 40px 28px 32px;
+  padding: 40px 32px 32px;
   overflow: auto;
 }
 .onboarding--center {
@@ -881,20 +881,19 @@
   max-width: 1000px;
   display: flex;
   flex-direction: column;
-  gap: 26px;
+  gap: 24px;
 }
 .onboarding__hero {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   text-align: center;
 }
 .onboarding__title {
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.016em;
+  font-weight: 500;
 }
 .onboarding__lead {
   max-width: 600px;
@@ -935,7 +934,7 @@
 .onboarding__foot {
   text-align: center;
   font-size: var(--fs-sm);
-  margin-top: -14px;
+  margin-top: -12px;
 }
 .onb-card {
   display: flex;
@@ -945,10 +944,6 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg-elevated);
-}
-.onb-card--accent {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-  background: color-mix(in srgb, var(--accent) 6%, var(--bg-elevated));
 }
 .onb-card__header {
   display: flex;
@@ -961,23 +956,19 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--bg-active);
-  color: var(--text);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
-.onb-card--accent .onb-card__icon {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
 .onb-card__title {
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 .onb-card__body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   flex: 1;
 }
 .onb-card__footer {
@@ -986,7 +977,7 @@
 .onb-steps {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   counter-reset: onb;
 }
 .onb-steps li {
@@ -1007,8 +998,9 @@
   border-radius: 50%;
   background: var(--bg-active);
   color: var(--text-muted);
+  font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 650;
+  font-weight: 500;
   line-height: 16px;
   text-align: center;
 }
@@ -1020,8 +1012,8 @@
 .onb-tool {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 8px 10px;
+  gap: 4px;
+  padding: 8px 12px;
   border-radius: 8px;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
@@ -1029,7 +1021,7 @@
 .onb-tool__row {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-size: var(--fs-sm);
   font-weight: 500;
 }
@@ -1402,7 +1394,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 0;
 }
 .host-chip {
@@ -1745,8 +1737,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 18px;
-  padding: 6px 6px 6px 10px;
+  margin-bottom: 16px;
+  padding: 4px 4px 4px 12px;
   border-radius: 8px;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
@@ -1763,7 +1755,7 @@
 .sdk-steps {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 24px;
 }
 .sdk-step {
   display: flex;
@@ -1773,14 +1765,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin-top: 1px;
+  /* A quiet counter on the title's 24px line; the snippets carry the page. */
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 11.5px;
-  font-weight: 700;
+  background: var(--bg-active);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 500;
   flex-shrink: 0;
 }
 .sdk-step__body {
@@ -1791,20 +1784,20 @@
   gap: 8px;
 }
 .sdk-step__title {
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   line-height: 24px;
 }
 .sdk-p {
   color: var(--text-muted);
-  font-size: 12.5px;
-  line-height: 1.55;
+  font-size: var(--fs-md);
+  line-height: 20px;
 }
 .sdk-path {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 4px 4px 10px;
+  gap: 8px;
+  padding: 4px 4px 4px 12px;
   border-radius: var(--radius);
   background: var(--bg-sunken);
   border: 1px solid var(--border);
@@ -1825,26 +1818,26 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 14px;
+  padding: 12px 16px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--bg-panel);
 }
 .sdk-note__title {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  font-weight: 600;
+  gap: 8px;
+  font-size: var(--fs-md);
+  font-weight: 500;
 }
 .sdk-zero {
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 .sdk-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 0 18px;
+  gap: 12px;
+  padding: 16px 0 20px;
   border-top: 1px solid var(--border);
   border-radius: var(--radius);
   transition: background var(--dur) var(--ease);
@@ -1862,7 +1855,8 @@
   color: var(--text);
 }
 .sdk-done {
-  padding-left: 34px;
+  /* Under the step text: the 24px counter plus the 12px gap. */
+  padding-left: 36px;
   color: var(--success);
 }
 .sdk-steps--plain {
@@ -1892,7 +1886,7 @@
 .vm-attach {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
