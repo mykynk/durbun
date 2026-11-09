@@ -1,0 +1,65 @@
+name: Bug report
+description: Something in the Mac app, the server or an SDK does not work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please search the existing issues first.
+        Security problems go to a private report instead, see [SECURITY.md](https://github.com/mykynk/durbun/blob/main/SECURITY.md).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Mac app
+        - Command line / server
+        - Flutter SDK (durbun)
+        - durbun_dio
+        - Android SDK
+        - iOS SDK
+        - React Native / JavaScript SDK
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Dürbün version
+      description: "Mac app: Dürbün → About Dürbün. SDKs: the package version."
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: macOS version, the device or simulator and its OS version, and your Flutter, Xcode or Android Gradle Plugin version when it matters.
+      placeholder: macOS 15.1, Pixel 8 (Android 15), Flutter 3.38
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Mac app: Help → Show Diagnostic Log. Remove tokens, cookies and personal data before pasting."
+      render: text
