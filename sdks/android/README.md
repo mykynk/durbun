@@ -25,10 +25,25 @@ The desktop renders every line legibly: level colors, tag colors, collapsible st
 
 ## 1. Add the dependency
 
-The build files are configured to publish to Maven Central under the coordinates below
-(`io.github.mykynk:durbun` and `io.github.mykynk:durbun-noop`, version `0.1.0`), but the artifacts are not
-published there yet. Until they are, use one of the two options that work today: a local path, or your local
-Maven repository.
+The SDK is on Maven Central as `io.github.mykynk:durbun` (the real SDK) and `io.github.mykynk:durbun-noop` (the
+same API with empty bodies, for release builds). `mavenCentral()` is declared by default in Android projects.
+
+`app/build.gradle.kts`:
+
+```kotlin
+dependencies {
+    debugImplementation("io.github.mykynk:durbun:0.1.0")        // the real SDK, debug builds only
+    releaseImplementation("io.github.mykynk:durbun-noop:0.1.0") // same API with empty bodies in release
+    // Flutter host apps also have a "profile" build type:
+    // "profileImplementation"("io.github.mykynk:durbun-noop:0.1.0")
+}
+```
+
+The published AARs are compiled with Kotlin 1.9 API and metadata and depend on `kotlin-stdlib` 1.9.24, so they
+work in apps on Kotlin 1.9 and newer.
+
+To try changes that are not released yet, build the SDK from a clone of the Dürbün repository with one of the
+two options below.
 
 ### Option A: from a local path
 
@@ -73,19 +88,7 @@ cd sdks/android
 ./gradlew publishToMavenLocal   # into ~/.m2
 ```
 
-Then add `mavenLocal()` to your repositories and use the coordinates:
-
-```kotlin
-dependencies {
-    debugImplementation("io.github.mykynk:durbun:0.1.0")        // the real SDK, debug builds only
-    releaseImplementation("io.github.mykynk:durbun-noop:0.1.0") // same API with empty bodies in release
-    // Flutter host apps also have a "profile" build type:
-    // "profileImplementation"("io.github.mykynk:durbun-noop:0.1.0")
-}
-```
-
-The AARs built this way are compiled with Kotlin 1.9 API and metadata and depend on `kotlin-stdlib` 1.9.24, so
-they work in apps on Kotlin 1.9 and newer.
+Then add `mavenLocal()` to your repositories (before `mavenCentral()`) and use the same coordinates as above.
 
 ### Requirements
 

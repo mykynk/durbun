@@ -11,8 +11,18 @@ applies Dürbün's mock rules (fake responses, latency, failures) inside the app
 
 ## Install
 
-The package is not on npm yet. Install it from a clone of the Dürbün repository, using the **packed `.tgz`, not
-the folder** (Metro cannot resolve `react-native` through a symlinked folder outside the app):
+```sh
+npm install @durbun/react-native
+# or: yarn add @durbun/react-native
+```
+
+There is no native code: no `pod install` and no Gradle changes, so it also works in Expo projects (dev client
+and Expo Go).
+
+### Unreleased changes from a clone
+
+To try changes that are not released yet, install from a clone of the Dürbün repository using the **packed `.tgz`,
+not the folder** (Metro cannot resolve `react-native` through a symlinked folder outside the app):
 
 ```sh
 # 1) In your clone of the Dürbün repository: build the package (prepack builds it automatically)
@@ -23,9 +33,6 @@ npm pack                      # → durbun-react-native-0.1.0.tgz
 npm install /path/to/durbun/sdks/js/durbun-react-native-0.1.0.tgz
 # or: yarn add file:/path/to/durbun/sdks/js/durbun-react-native-0.1.0.tgz
 ```
-
-There is no native code: no `pod install` and no Gradle changes, so it also works in Expo projects (dev client
-and Expo Go).
 
 ## Start it in `index.js`
 
