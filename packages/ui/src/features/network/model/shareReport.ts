@@ -290,7 +290,7 @@ function fenceLanguage(contentType: string, json: boolean): string {
 }
 
 /** A fence longer than any backtick run in [text], so the block never closes early. */
-function fenced(out: string[], language: string, text: string): void {
+export function fenced(out: string[], language: string, text: string): void {
   let longest = 0;
   for (const run of text.match(/`{3,}/g) ?? []) longest = Math.max(longest, run.length);
   const f = '`'.repeat(Math.max(3, longest + 1));

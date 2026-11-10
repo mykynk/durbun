@@ -2,14 +2,14 @@ import { useMemo } from 'react';
 import { Copy, FileDown, Share2 } from 'lucide-react';
 import type { NetworkEntry } from '@durbun/protocol';
 import { useApp, useDevice, useMocks } from '../../../data';
-import { Button, Callout, CodeView, Dialog, Spinner, Toggle, copyText, downloadText, formatBytes, toast, usePersistentState, useShortcut } from '../../../components';
+import { Button, Callout, CodeView, Dialog, SlackButton, Spinner, Toggle, copyText, downloadText, formatBytes, toast, usePersistentState, useShortcut } from '../../../components';
 import { useLanguage, useT } from '../../../i18n';
 import { ruleLabel } from '../../mocks/model/rules';
 import { useNetworkDetail } from '../detailCache';
 import { DEFAULT_SHARE_OPTIONS, buildShareReport, type ShareOptions } from '../model/shareReport';
 import { shareFileName, shareInputFor, shareLabels } from '../share';
 
-/** "Share request": the share report (same text as the in-app Flutter panel) with its options and a preview. */
+/** "Share request": the share report (same text as the in-app Flutter panel) with its options, a preview, Copy and Send to Slack. */
 export function ShareDialog({ entry, gone, onClose }: { entry: NetworkEntry; gone?: boolean; onClose: () => void }) {
   const t = useT();
   const lang = useLanguage();
@@ -57,6 +57,7 @@ export function ShareDialog({ entry, gone, onClose }: { entry: NetworkEntry; gon
           <Button variant="ghost" icon={FileDown} disabled={waiting} onClick={() => downloadText(report, shareFileName(entry), 'text/markdown;charset=utf-8')}>
             {t('network.share.save')}
           </Button>
+          <SlackButton report={report} disabled={waiting} onSent={onClose} onConnect={onClose} />
           <Button variant="primary" icon={Copy} disabled={waiting} onClick={() => void copy()} kbd="Mod+Enter">
             {t('network.share.copy')}
           </Button>

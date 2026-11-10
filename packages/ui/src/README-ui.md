@@ -278,6 +278,7 @@ with `tCode(code, data, fallback)`. Default timeouts: 15 s; `device.action` 30 s
 | `api.doctor()` | `GET /api/doctor` → `ToolCheck[]` |
 | `api.upload(file, { name?, onProgress?, signal? })` | `POST /api/upload` → `{ file }` (pass to `app-install`); errors keep the server `code` (`upload.tooLarge`…) |
 | `api.fileUrl(name)`, `api.health()` | `/api/files/:name`, `/api/health` |
+| `api.slackStatus()`, `api.updateSlack(patch)`, `api.sendToSlack(text)` | `/api/slack` (Send to Slack; never returns the webhook URL). Prefer `useSlackStatus()` / `updateSlack()` from `data` and the `SlackButton` component, which converts a share report with `toSlackText` (`lib/slack.ts`) |
 
 Also: `downloadUrl(url, name?)`, `downloadBlob(blob, name)`, `downloadText(text, name)`,
 `pickFiles({ accept, multiple })`, `copyText(text)` in `components`.

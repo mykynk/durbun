@@ -152,6 +152,28 @@ export function doctor(signal?: AbortSignal): Promise<ToolCheck[]> {
   return json('/api/doctor', { signal });
 }
 
+/** Send to Slack (`/api/slack`): whether a webhook is set; the server never sends the URL itself back. */
+export interface SlackStatus {
+  configured: boolean;
+  /** "hooks.slack.com · …wxyz" */
+  hint?: string;
+  sender?: string;
+}
+
+export function slackStatus(signal?: AbortSignal): Promise<SlackStatus> {
+  return json('/api/slack', { signal });
+}
+
+/** `webhookUrl: null` disconnects, `sender: null` clears the name; a missing key keeps the value. */
+export function updateSlack(patch: { webhookUrl?: string | null; sender?: string | null }): Promise<SlackStatus> {
+  return json('/api/slack', { ...postJson(patch), method: 'PUT' });
+}
+
+/** Posts Slack mrkdwn text (`toSlackText`) to the connected channel. */
+export async function sendToSlack(text: string, signal?: AbortSignal): Promise<void> {
+  await fetchOk('/api/slack/send', postJson({ text }, signal));
+}
+
 /** URL of a file saved by the server (screenshots, recordings). */
 export function fileUrl(name: string): string {
   return `/api/files/${enc(name)}`;

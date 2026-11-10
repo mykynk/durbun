@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { Bell, Check, Info, Network, Palette, RotateCcw, ScrollText, Settings, Wifi } from 'lucide-react';
+import { Bell, Check, ExternalLink, Info, Network, Palette, RotateCcw, ScrollText, Send, Settings, Unplug, Wifi } from 'lucide-react';
 import { DEFAULT_PORTS, type ServerSettings } from '@durbun/protocol';
-import { useT } from '../i18n';
+import { errorText, useLanguage, useT } from '../i18n';
 import {
   DEFAULT_NOISE_RULES,
+  api,
   isConnected,
   ui,
   updateServerSettings,
+  updateSlack,
   useConnection,
   usePrefs,
   useServerSettings,
+  useSlackStatus,
   useUi,
   type SettingsSection,
 } from '../data';
@@ -27,6 +30,8 @@ import { notificationPermission, requestNotificationPermission } from '../lib/no
 import { errorMessage } from './actions';
 import { DurbunMark } from '../components/Icons';
 import { sdkHostLines } from './sdkHosts';
+import { Snippet } from './Snippet';
+import { SLACK_ADD_URL, toSlackText } from '../lib/slack';
 
 /** Inclusive ranges the server accepts (packages/server/src/config.ts SETTINGS_LIMITS); KB for bodies. */
 const LIMITS = {
@@ -43,6 +48,7 @@ const SECTIONS: { id: SettingsSection; icon: typeof Palette }[] = [
   { id: 'logs', icon: ScrollText },
   { id: 'network', icon: Network },
   { id: 'connection', icon: Wifi },
+  { id: 'slack', icon: Send },
   { id: 'about', icon: Info },
 ];
 
@@ -72,6 +78,7 @@ export function SettingsDialog() {
             {section === 'logs' ? <LogsSection /> : null}
             {section === 'network' ? <NetworkSection /> : null}
             {section === 'connection' ? <ConnectionSection /> : null}
+            {section === 'slack' ? <SlackSection /> : null}
             {section === 'about' ? <AboutSection /> : null}
           </div>
         </div>
@@ -605,6 +612,128 @@ function ConnectionSection() {
             onCommit={(v) => void save('idevicesyslogPath', { idevicesyslogPath: v })}
           />
         </Row>
+      </Group>
+    </>
+  );
+}
+
+/* ───────────── Slack ───────────── */
+
+/**
+ * Send to Slack: one incoming webhook, kept by the server in its data directory (never in settings.json,
+ * never shown again: the field only takes a new URL). Messages go only when someone clicks Send.
+ */
+function SlackSection() {
+  const t = useT();
+  const lang = useLanguage();
+  const status = useSlackStatus();
+  const connected = isConnected(useConnection((x) => x.status));
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState<'save' | 'test' | 'remove' | null>(null);
+  const [savedKey, setSavedKey] = useState<string | null>(null);
+  const linked = !!status?.configured;
+
+  const run = async (kind: 'save' | 'test' | 'remove', job: () => Promise<void>) => {
+    setBusy(kind);
+    try {
+      await job();
+    } catch (err) {
+      toast.error(kind === 'test' ? t('common.slack.failed') : t('shell.settings.saveFailed'), { description: errorText(err) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const save = () =>
+    run('save', async () => {
+      if (!draft.trim()) return;
+      await updateSlack({ webhookUrl: draft.trim() });
+      setDraft('');
+      toast.success(t('shell.settings.slackLinked'));
+    });
+  const test = () =>
+    run('test', async () => {
+      const footer = status?.sender ? t('common.slack.footerFrom', { sender: status.sender }) : t('common.slack.footer');
+      await api.sendToSlack(toSlackText(t('shell.settings.slackTestText'), { cutNote: t('common.slack.cutNote'), footer }));
+      toast.success(t('common.slack.sent'));
+    });
+  const remove = async () => {
+    const ok = await confirm({ title: t('shell.settings.slackRemoveTitle'), message: t('shell.settings.slackRemoveMessage'), confirmLabel: t('shell.settings.slackRemove'), danger: true });
+    if (ok) await run('remove', async () => void (await updateSlack({ webhookUrl: null })));
+  };
+  // Not through `run`: the name commits on blur, which must not disable the button being clicked.
+  const saveSender = async (v: string) => {
+    try {
+      await updateSlack({ sender: v || null });
+      setSavedKey('sender');
+      setTimeout(() => setSavedKey(null), 1600);
+    } catch (err) {
+      toast.error(t('shell.settings.saveFailed'), { description: errorText(err) });
+    }
+  };
+
+  return (
+    <>
+      <SectionHeader title={t('shell.settings.sections.slack')} description={t('shell.settings.slackDesc')} />
+      <Group>
+        <OfflineNote />
+        {linked ? null : (
+          <Row label={t('shell.settings.slackApp')} hint={t('shell.settings.slackAppHint')}>
+            {/* Opens in the browser: Slack's sign-in and the page's exchange never run inside Dürbün. */}
+            <a className="btn btn--primary btn--sm" href={`${SLACK_ADD_URL}?lang=${lang}`} target="_blank" rel="noopener noreferrer">
+              <ExternalLink size={14} aria-hidden />
+              <span className="btn__label">{t('shell.settings.slackAppAdd')}</span>
+            </a>
+          </Row>
+        )}
+        <Row label={t('shell.settings.slackWebhook')} hint={linked ? t('shell.settings.slackLinkedTo', { hint: status?.hint ?? '' }) : t('shell.settings.slackWebhookHint')}>
+          {linked ? (
+            <Button size="sm" variant="ghost" icon={Unplug} loading={busy === 'remove'} disabled={!connected || busy !== null} onClick={() => void remove()}>
+              {t('shell.settings.slackRemove')}
+            </Button>
+          ) : (
+            <form
+              className="slack-link"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void save();
+              }}
+            >
+              {/* A password field: the URL is the secret, and settings get shown in screen shares. */}
+              <Input
+                size="sm"
+                mono
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                className="setting-text"
+                value={draft}
+                placeholder="https://hooks.slack.com/services/…"
+                disabled={!connected}
+                aria-label={t('shell.settings.slackWebhook')}
+                onChange={(e) => setDraft(e.target.value)}
+              />
+              <Button size="sm" type="submit" loading={busy === 'save'} disabled={!connected || !draft.trim() || busy !== null}>
+                {t('shell.settings.slackLink')}
+              </Button>
+            </form>
+          )}
+        </Row>
+        {linked ? (
+          <Row label={t('shell.settings.slackTest')} hint={t('shell.settings.slackTestHint')}>
+            <Button size="sm" icon={Send} loading={busy === 'test'} disabled={!connected || busy !== null} onClick={() => void test()}>
+              {t('shell.settings.slackTestSend')}
+            </Button>
+          </Row>
+        ) : null}
+        <Row label={t('shell.settings.slackSender')} hint={t('shell.settings.slackSenderHint')} saved={savedKey === 'sender'}>
+          <TextField label={t('shell.settings.slackSender')} value={status?.sender ?? ''} placeholder={t('shell.settings.slackSenderPlaceholder')} disabled={!connected || status === null} onCommit={(v) => void saveSender(v)} />
+        </Row>
+      </Group>
+      <Group title={t('shell.settings.slackPanel')}>
+        <div className="slack-panel">
+          <p className="setting-row__hint">{t('shell.settings.slackPanelHint')}</p>
+          <Snippet lang="shell" code={'export DURBUN_SLACK_WEBHOOK=https://hooks.slack.com/services/…   # ~/.zshrc, never the repo\nflutter run --dart-define=DURBUN_SLACK_WEBHOOK=$DURBUN_SLACK_WEBHOOK'} />
+        </div>
       </Group>
     </>
   );

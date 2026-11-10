@@ -68,6 +68,18 @@ function platformName(d: DeviceInfo): string {
   }
 }
 
+/** "Shop 2.4.1 (com.example.shop)" */
+export function shareAppLabel(app: AppSession | undefined): string | undefined {
+  return app ? `${app.app.name}${app.app.version ? ` ${app.app.version}` : ''} (${app.app.id})` : undefined;
+}
+
+/** "iPhone 16 Pro (iPhone17,1) · iOS 18.2": the name reads better than a model identifier. None for the desktop. */
+export function shareDeviceLabel(device: DeviceInfo | undefined): string | undefined {
+  if (!device || device.id === 'desktop') return undefined;
+  const os = [platformName(device), device.osVersion].filter(Boolean).join(' ');
+  return [device.model && device.model !== device.name ? `${device.name} (${device.model})` : device.name, os].filter(Boolean).join(' · ');
+}
+
 /** The report input for [entry]; [detail] carries the bodies when they were loaded. */
 export function shareInputFor(
   entry: NetworkEntry,
@@ -75,7 +87,6 @@ export function shareInputFor(
   context: { app?: AppSession; device?: DeviceInfo; rule?: string } = {},
 ): ShareInput {
   const { app, device } = context;
-  const os = device ? [platformName(device), device.osVersion].filter(Boolean).join(' ') : '';
   return {
     method: entry.method,
     url: entry.url,
@@ -87,12 +98,8 @@ export function shareInputFor(
     duration: entry.duration,
     source: entry.source,
     graphql: entry.graphql ? [entry.graphql.operationType ?? 'query', entry.graphql.operationName].filter(Boolean).join(' ') : undefined,
-    app: app ? `${app.app.name}${app.app.version ? ` ${app.app.version}` : ''} (${app.app.id})` : undefined,
-    // "iPhone 16 Pro (iPhone17,1) · iOS 18.2": the name reads better than a model identifier.
-    device:
-      device && entry.deviceId !== 'desktop'
-        ? [device.model && device.model !== device.name ? `${device.name} (${device.model})` : device.name, os].filter(Boolean).join(' · ')
-        : undefined,
+    app: shareAppLabel(app),
+    device: entry.deviceId !== 'desktop' ? shareDeviceLabel(device) : undefined,
     mocked: entry.mocked,
     mockRule: context.rule ?? entry.mockRuleId,
     requestHeaders: entry.requestHeaders,

@@ -9,7 +9,8 @@
  * WS /ui: hello → snapshot (3 devices, 3 apps + an older session, device apps, mocks, drivers) → ~2000
  * history logs → live batches (logs, network, metrics, device apps, occasional device/app changes). Every
  * command gets {ok: true} with plausible data. REST: /api/health, /api/doctor, /api/network/:id (+ bodies),
- * /api/network/search, /api/export, /api/import, /api/har, /api/upload, /api/files/crash/:udid/:name.
+ * /api/network/search, /api/export, /api/import, /api/har, /api/upload, /api/files/crash/:udid/:name,
+ * /api/slack (+ /send: printed to stdout, never posted).
  * SPEC §10: apps without the SDK (`snapshot.deviceApps`: a Play build, a Firebase build, an APK
  * installed by hand, a TestFlight build next to an Xcode build — both "Runner" — on a USB iPhone), exact
  * log origins, dropbox / .ips crash records (one marked `duplicateOf`, one with a downloadable .ips),
@@ -929,6 +930,9 @@ function readBody(req) {
   });
 }
 
+/** Send to Slack state (the webhook itself is never kept: the mock only prints). */
+const slack = { hint: undefined, sender: undefined };
+
 const httpServer = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
   const p = url.pathname;
@@ -1004,6 +1008,25 @@ const httpServer = http.createServer(async (req, res) => {
     }
     if (p === '/api/har' && req.method === 'POST') {
       return json(res, 200, { log: { version: '1.2', creator: { name: 'Dürbün', version: '0.1.0' }, entries: [] } }, { 'Content-Disposition': 'attachment; filename="durbun.har"' });
+    }
+    if (p === '/api/slack') {
+      if (req.method === 'PUT') {
+        const patch = JSON.parse((await readBody(req)).toString() || '{}');
+        if ('webhookUrl' in patch) {
+          if (patch.webhookUrl && !String(patch.webhookUrl).startsWith('https://')) {
+            return json(res, 400, { error: 'The webhook URL must start with https://', code: 'slack.invalidUrl' });
+          }
+          slack.hint = patch.webhookUrl ? `hooks.slack.com · …${String(patch.webhookUrl).slice(-4)}` : undefined;
+        }
+        if ('sender' in patch) slack.sender = patch.sender || undefined;
+      }
+      return json(res, 200, { configured: !!slack.hint, hint: slack.hint, sender: slack.sender });
+    }
+    if (p === '/api/slack/send' && req.method === 'POST') {
+      const { text = '' } = JSON.parse((await readBody(req)).toString() || '{}');
+      if (!slack.hint) return json(res, 409, { error: 'Slack is not connected', code: 'slack.notConfigured' });
+      console.log(`[slack] ${String(text).length} chars:\n${text}\n`);
+      return setTimeout(() => json(res, 200, { ok: true }), 400);
     }
     if (p === '/api/upload' && req.method === 'POST') {
       await readBody(req);

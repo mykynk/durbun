@@ -1371,6 +1371,17 @@
 .setting-wide {
   width: 320px;
 }
+.slack-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.slack-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+}
 .log-preview {
   display: flex;
   align-items: center;

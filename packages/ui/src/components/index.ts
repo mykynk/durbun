@@ -40,6 +40,8 @@ export { CodeView } from './CodeView';
 export type { CodeViewProps } from './CodeView';
 export { CopyButton } from './CopyButton';
 export type { CopyButtonProps } from './CopyButton';
+export { SlackButton } from './SlackButton';
+export type { SlackButtonProps } from './SlackButton';
 export { Highlight, findRanges } from './Highlight';
 export { ErrorBoundary } from './ErrorBoundary';
 export { FeatureContext, useFeatureActive, useFeatureTab } from './FeatureContext';

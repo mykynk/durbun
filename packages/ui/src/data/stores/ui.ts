@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { MockRule } from '@durbun/protocol';
 import { TAB_IDS, usePrefs, type TabId } from './prefs';
 
-export type SettingsSection = 'appearance' | 'logs' | 'network' | 'connection' | 'about';
+export type SettingsSection = 'appearance' | 'logs' | 'network' | 'connection' | 'slack' | 'about';
 export type SdkGuideTab = 'flutter' | 'android' | 'ios' | 'react-native';
 /** Sections of the SDK guide a link can scroll to. */
 export type SdkGuideSection = 'setup' | 'release' | 'native' | 'vm';

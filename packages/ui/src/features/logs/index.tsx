@@ -15,6 +15,7 @@ import {
   OctagonX,
   Pause,
   Search,
+  Share2,
   Trash2,
   VolumeX,
   WrapText,
@@ -74,6 +75,7 @@ import { EXPAND_JSON, EXPAND_LINES, EXPAND_STACK, type DeviceMark, type RowDispl
 import { deviceMarks, keepCrashRelevant } from './model/devices';
 import { FilterChips, LogsToolbar, SourceFilters } from './components/Toolbar';
 import { DetailPanel, displayText, rowAsLines } from './components/DetailPanel';
+import { ShareDialog } from './components/ShareDialog';
 import { Histogram } from './components/Histogram';
 import { CrashBanner, IosScopeNote, NewLinesPill, PausedBar, crashTitle } from './components/Banners';
 import { NoLogsState, NoMatchState, type ActiveFilter } from './components/EmptyStates';
@@ -187,6 +189,7 @@ export default function LogsView() {
   const [expanded, setExpanded] = useState<ReadonlyMap<number, number>>(() => new Map());
   const [flashId, setFlashId] = useState<number | null>(null);
   const [dialog, setDialog] = useState<'noise' | 'highlight' | 'saved' | null>(null);
+  const [shareEntry, setShareEntry] = useState<LogEntry | null>(null);
   const [ageTick, setAgeTick] = useState(0);
   const listRef = useRef<LogListHandle>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -655,6 +658,7 @@ export default function LogsView() {
         { label: t('logs.ctx.copyMessage'), icon: Copy, onSelect: () => void copy(displayText(e)) },
         { label: t('logs.ctx.copyLine'), onSelect: () => void copy(rowAsLines(row)) },
         { label: t('logs.ctx.copyJson'), icon: Braces, onSelect: () => void copy(JSON.stringify(e, null, 2)) },
+        { label: t('logs.share.menu'), icon: Share2, onSelect: () => setShareEntry(e) },
         { type: 'separator' },
       ];
       if (e.tag) {
@@ -905,6 +909,9 @@ export default function LogsView() {
     { id: 'logs.clearFilters', title: t('logs.cmd.clearFilters'), group, icon: FunnelX, keywords: ['filter', 'filtre', 'reset'], run: clearFilters },
     { id: 'logs.noiseRules', title: t('logs.cmd.noiseRules'), group, icon: VolumeX, keywords: ['noise', 'gürültü', 'rules', 'kural'], run: () => { ui.setTab('logs'); setDialog('noise'); } },
     { id: 'logs.highlightRules', title: t('logs.cmd.highlightRules'), group, icon: HighlighterIcon, keywords: ['highlight', 'vurgu', 'color', 'renk'], run: () => { ui.setTab('logs'); setDialog('highlight'); } },
+    ...(sel
+      ? [{ id: 'logs.sel.share', title: t('logs.share.title'), group, icon: Share2, keywords: ['share', 'paylaş', 'slack', 'report', 'rapor', 'bug', 'hata'], run: () => setShareEntry(sel.entry) }]
+      : []),
   ]);
 
   /* ───── stable callbacks for the memoized toolbar / chips ───── */
@@ -983,6 +990,7 @@ export default function LogsView() {
         onFilter={filterBy}
         onShowInContext={(id) => revealEntry(id, { open: true })}
         onOpenNetwork={(id) => ui.focusNetwork(id)}
+        onShare={() => setShareEntry(sel.entry)}
       />
     ) : null;
 
@@ -1082,6 +1090,7 @@ export default function LogsView() {
         </div>
         {detail}
       </SplitPane>
+      {shareEntry ? <ShareDialog entry={shareEntry} onClose={() => setShareEntry(null)} /> : null}
       <NoiseRulesDialog open={dialog === 'noise'} onClose={() => setDialog(null)} keepsCrashLines={iosAppsScope && hiddenIphones.length > 0} />
       <HighlightRulesDialog open={dialog === 'highlight'} onClose={() => setDialog(null)} />
       <SavedFiltersDialog open={dialog === 'saved'} onClose={() => setDialog(null)} saved={saved} onChange={(next) => setSaved(next)} onApply={setQueryNow} />

@@ -148,6 +148,7 @@ describe('server codes → i18n', () => {
       'net.response',
       'sdk.close',
       'settings.json',
+      'slack.json',
       'settings.update',
       'upload.bin',
       'vm.attach',
