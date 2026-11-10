@@ -150,7 +150,10 @@ and status colors, tag colors, light and dark theme) and its tabs:
   desktop's query language (`tag:auth -tag:frame level:warn is:crash`),
   consecutive identical lines merged into `×N`, and request rows inside the
   stream. The detail view shows the message, a collapsible data tree, a stack
-  trace that highlights app frames, and "Only this tag" / hide-this-tag actions.
+  trace that highlights app frames, "Only this tag" / hide-this-tag actions,
+  and **Share**: the line as a report (level, app, device, message, data,
+  stack) to copy, send through the system share sheet or
+  [send to Slack](#send-to-slack).
 - **Network:** dart:io, `package:http`, Dio, OkHttp and URLSession in one table
   with status, method, path (query dimmed), start time (`HH:mm:ss`), host,
   source, size, duration (slow requests in yellow or red), GraphQL operation,
@@ -163,8 +166,8 @@ and status colors, tag colors, light and dark theme) and its tabs:
   **Replay** and **Copy as** (cURL, fetch, Dart dio, Swift, Kotlin).
   **Share** turns a request into a report your team can read without Dürbün
   (URL, status, trace IDs, headers, bodies, cURL; secret values are masked as
-  `••••` by default) and opens the system share sheet or copies the report. The
-  desktop produces the same report. The **Sort** button (next to the search
+  `••••` by default) and opens the system share sheet, copies the report or
+  [sends it to Slack](#send-to-slack). The desktop produces the same report. The **Sort** button (next to the search
   box) offers: newest on top (default), arrival order (newest at the bottom, the
   list follows new requests), slowest first, largest response first, and errors
   first. In a sorted list, rows you are reading stay in place while you scroll
@@ -255,6 +258,35 @@ Limits and settings:
 - In builds where Dürbün is off (`DURBUN=false`, or a release build without the
   define), the panel does not open and shaking is not listened to; the widget
   only draws the app.
+
+### Send to Slack
+
+Give the panel a Slack incoming webhook and every Share sheet gets a
+**Send to Slack** button: the report goes to that webhook's channel (for
+example `#mobile-app`) from the phone itself, without the Mac, and only when
+someone taps it. Slack shows it as one message with code blocks, ending with
+"Sent with Dürbün (in-app panel)".
+
+1. Open [Add to Slack](https://appnify.dev/durbun/slack/), pick the channel
+   and copy the `https://hooks.slack.com/services/…` URL it shows. (A webhook
+   of your own Slack app works the same.)
+2. Keep the URL in your local environment, not in the repository, and pass it
+   at build time:
+
+```sh
+export DURBUN_SLACK_WEBHOOK=https://hooks.slack.com/services/…   # e.g. in ~/.zshrc
+flutter run --dart-define=DURBUN_SLACK_WEBHOOK=$DURBUN_SLACK_WEBHOOK
+```
+
+A git-ignored `--dart-define-from-file` works the same way, and
+`DurbunOptions(slackWebhook: ...)` sets it in code. Only `https://` URLs are
+used; without a webhook the button does not appear.
+
+Anyone who has the webhook URL can post to its channel. The URL is compiled
+into the build you pass it to, so whoever has that build can find it; which
+builds get one is your call. The request to Slack is not captured, so the URL
+does not appear in the Network list. The Mac app has the same button for
+logs and requests (Settings → Slack), with its own webhook.
 
 ## Release, Firebase and store builds
 
@@ -470,6 +502,7 @@ rules are on their way).
 | `listenForUsb` | `true` | The usbmux listener on iOS devices |
 | `useBackgroundIsolate` | `true` | Runs the transport layer in a background isolate |
 | `inspector` | `true` | Keeps recent logs, requests and metrics on the phone for the in-app panel (`DurbunInspector`) |
+| `slackWebhook` | `null` | Slack incoming webhook for the panel's [Send to Slack](#send-to-slack); `null` reads `--dart-define=DURBUN_SLACK_WEBHOOK` |
 
 ## Limitations
 

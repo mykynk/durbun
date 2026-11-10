@@ -300,6 +300,16 @@ String? resolveDesktopHost(String? option) {
   }
 }
 
+/// Resolves the panel's Slack webhook: option → `--dart-define=DURBUN_SLACK_WEBHOOK`.
+/// Only https URLs (the URL is the secret); anything else means no Slack button.
+String? resolveSlackWebhook(String? option) {
+  const fromDefine = String.fromEnvironment('DURBUN_SLACK_WEBHOOK');
+  final value = _nonEmpty(option) ?? _nonEmpty(fromDefine);
+  if (value == null) return null;
+  final uri = Uri.tryParse(value);
+  return uri != null && uri.scheme == 'https' && uri.host.isNotEmpty && uri.userInfo.isEmpty ? value : null;
+}
+
 /// Splits `host` or `host:port` (IPv6 in brackets) → (host, port).
 (String, int) splitHostPort(String value, int defaultPort) {
   var v = value.trim();

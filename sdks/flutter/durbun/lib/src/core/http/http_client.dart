@@ -415,6 +415,31 @@ class DurbunHttpOverrides extends HttpOverrides {
       HttpOverrides.global = current.previous;
     }
   }
+
+  /// A client Dürbün does not capture, for the in-app panel's own requests
+  /// (Send to Slack: the webhook URL must not land in the request list). The
+  /// app's own overrides (proxy, certificates) still apply.
+  static HttpClient uncapturedClient() {
+    final global = currentGlobal;
+    final delegate = global is DurbunHttpOverrides ? global.previous : global;
+    return HttpOverrides.runWithHttpOverrides(HttpClient.new, _UncapturedHttpOverrides(delegate));
+  }
+}
+
+class _UncapturedHttpOverrides extends HttpOverrides {
+  _UncapturedHttpOverrides(this.delegate);
+
+  final HttpOverrides? delegate;
+
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    final client = delegate?.createHttpClient(context) ?? super.createHttpClient(context);
+    return client is DurbunHttpClient ? client.inner : client;
+  }
+
+  @override
+  String findProxyFromEnvironment(Uri url, Map<String, String>? environment) =>
+      delegate?.findProxyFromEnvironment(url, environment) ?? super.findProxyFromEnvironment(url, environment);
 }
 
 /// Zone overrides for code that runs inside `Durbun.run` (see

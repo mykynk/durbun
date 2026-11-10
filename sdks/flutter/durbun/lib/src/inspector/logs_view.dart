@@ -3,6 +3,8 @@
 /// network rows and a detail page.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'filter_ui.dart';
@@ -11,6 +13,7 @@ import 'json_tree.dart';
 import 'live_list.dart';
 import 'network_model.dart';
 import 'network_view.dart' show CallDetailPage;
+import 'share_sheet.dart' show showLogShareSheet;
 import 'store.dart';
 import 'strings.dart';
 import 'text_match.dart';
@@ -420,7 +423,7 @@ class _LogsViewState extends State<LogsView> {
                       newText: t.newItems,
                       itemBuilder: (context, it) => it.call != null
                           ? _NetLogRow(call: it.call!, store: widget.store, terms: terms)
-                          : LogRow(item: it, terms: terms, onTagAction: _applyTagAction),
+                          : LogRow(item: it, terms: terms, onTagAction: _applyTagAction, store: widget.store),
                     ),
             ),
             if (widget.store.droppedLogs > 0)
@@ -489,9 +492,12 @@ String dataPreview(Object? data, {int max = 120}) {
 }
 
 class LogRow extends StatelessWidget {
-  const LogRow({super.key, required this.item, this.terms = const <String>[], this.onTagAction});
+  const LogRow({super.key, required this.item, this.terms = const <String>[], this.onTagAction, this.store});
 
   final StreamItem item;
+
+  /// For the detail page's Share (app and device of the report, Slack).
+  final DurbunInspectorStore? store;
 
   /// Folded free words of the search, marked in the message.
   final List<String> terms;
@@ -512,7 +518,7 @@ class LogRow extends StatelessWidget {
           // The keyboard would come back with the search field's focus.
           FocusManager.instance.primaryFocus?.unfocus();
           final action = await Navigator.of(context).push<(String, String)>(
-            MaterialPageRoute<(String, String)>(builder: (routeContext) => DurbunTheme.wrap(routeContext, LogDetailPage(log: l, repeats: item.repeats))),
+            MaterialPageRoute<(String, String)>(builder: (routeContext) => DurbunTheme.wrap(routeContext, LogDetailPage(log: l, repeats: item.repeats, store: store))),
           );
           if (action != null) onTagAction?.call(action.$1, action.$2);
         },
@@ -630,10 +636,14 @@ class _NetLogRow extends StatelessWidget {
 }
 
 class LogDetailPage extends StatefulWidget {
-  const LogDetailPage({super.key, required this.log, this.repeats = 1});
+  const LogDetailPage({super.key, required this.log, this.repeats = 1, this.store});
 
   final InspectorLog log;
   final int repeats;
+
+  /// The store whose app and device the share report names (default: the
+  /// SDK's store).
+  final DurbunInspectorStore? store;
 
   @override
   State<LogDetailPage> createState() => _LogDetailPageState();
@@ -645,6 +655,7 @@ class _LogDetailPageState extends State<LogDetailPage> {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     final l = widget.log;
+    final store = widget.store ?? DurbunInspectorStore.existing;
     final e = l.error;
     final stack = e?['stack'] is String ? e!['stack'] as String : '';
     final head = e == null ? '' : errorHead(e);
@@ -681,6 +692,12 @@ class _LogDetailPageState extends State<LogDetailPage> {
               ),
             ),
           DIconButton(icon: Icons.copy_rounded, tooltip: t.copy, size: kMinTapTarget, onTap: () => copyText(context, logAsText(l))),
+          if (store != null)
+            DIconButton(
+                icon: Theme.of(context).platform == TargetPlatform.iOS ? Icons.ios_share_rounded : Icons.share_rounded,
+                tooltip: t.shareLogTitle,
+                size: kMinTapTarget,
+                onTap: () => unawaited(showLogShareSheet(context, l, store))),
           const SizedBox(width: 6),
         ],
       ),

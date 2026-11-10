@@ -572,6 +572,10 @@ class DurbunInspectorStore extends ChangeNotifier {
     }
   }
 
+  /// Slack incoming webhook for "Send to Slack" (`DurbunOptions.slackWebhook`
+  /// or `--dart-define=DURBUN_SLACK_WEBHOOK`); null hides the button.
+  String? slackWebhook;
+
   /// Set by the IO backend: builds the client's current hello.
   Map<String, Object?>? Function()? helloProvider;
 

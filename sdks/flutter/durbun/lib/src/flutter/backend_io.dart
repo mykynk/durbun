@@ -106,6 +106,7 @@ class IoDurbunBackend implements DurbunBackend {
         final store = DurbunInspectorStore.instance
           ..bodyResolver = wireBodyFromPending
           ..helloProvider = (() => client.isDisposed ? null : client.describeState()['hello'] as Map<String, Object?>?)
+          ..slackWebhook = resolveSlackWebhook(options.slackWebhook)
           ..attached = true;
         client.outgoingTap = store.ingest;
       }

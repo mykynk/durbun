@@ -27,6 +27,7 @@ class DurbunOptions {
     this.listenForUsb = true,
     this.useBackgroundIsolate = true,
     this.inspector = true,
+    this.slackWebhook,
   });
 
   /// Whether the SDK runs. `null` (default):
@@ -98,6 +99,16 @@ class DurbunOptions {
   /// 2,000 log lines, 300 requests and 24 MB of bodies.
   final bool inspector;
 
+  /// Slack incoming webhook for the in-app panel's "Send to Slack": a log
+  /// line or a request goes to that webhook's channel when someone taps Send,
+  /// from the phone itself, without the desktop. `null` (default): the
+  /// `--dart-define=DURBUN_SLACK_WEBHOOK=…` value, else no Slack button.
+  ///
+  /// Keep the URL out of the repository: pass it from your local environment
+  /// (`--dart-define=DURBUN_SLACK_WEBHOOK=$DURBUN_SLACK_WEBHOOK`, or a
+  /// git-ignored `--dart-define-from-file`). It is compiled into that build.
+  final String? slackWebhook;
+
   /// Copy with some fields replaced.
   DurbunOptions copyWith({
     bool? enabled,
@@ -116,6 +127,7 @@ class DurbunOptions {
     bool? listenForUsb,
     bool? useBackgroundIsolate,
     bool? inspector,
+    String? slackWebhook,
   }) {
     return DurbunOptions(
       enabled: enabled ?? this.enabled,
@@ -134,6 +146,7 @@ class DurbunOptions {
       listenForUsb: listenForUsb ?? this.listenForUsb,
       useBackgroundIsolate: useBackgroundIsolate ?? this.useBackgroundIsolate,
       inspector: inspector ?? this.inspector,
+      slackWebhook: slackWebhook ?? this.slackWebhook,
     );
   }
 }

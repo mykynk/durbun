@@ -487,3 +487,122 @@ List<String> shareReportLines(ShareInput input, ShareOptions options, InspectorS
   }
   return out;
 }
+
+/* ───────────── log lines ───────────── */
+
+/// One log line for the log report (`buildLogReport`).
+class LogShareInput {
+  const LogShareInput({
+    required this.level,
+    required this.ts,
+    required this.message,
+    this.kind,
+    this.tag,
+    this.utcOffsetMinutes,
+    this.app,
+    this.device,
+    this.process,
+    this.data,
+    this.errorType,
+    this.errorMessage,
+    this.stack,
+  });
+
+  final String level;
+
+  /// "Crash", "Flutter error" (already localized); null for plain lines.
+  final String? kind;
+  final String? tag;
+
+  /// Epoch ms.
+  final double ts;
+
+  /// Minutes east of UTC for the local time (default: this device's offset).
+  final int? utcOffsetMinutes;
+  final String? app;
+  final String? device;
+  final String? process;
+  final String message;
+
+  /// Structured data logged with the line (shown as JSON).
+  final Object? data;
+  final String? errorType;
+  final String? errorMessage;
+  final String? stack;
+}
+
+void _capped(List<String> out, String text, InspectorStrings t, [String language = '']) {
+  var shown = text;
+  var rest = 0;
+  if (shown.length > kMaxSharedBodyChars) {
+    var cut = kMaxSharedBodyChars;
+    final code = shown.codeUnitAt(cut - 1);
+    if (code >= 0xd800 && code <= 0xdbff) cut--;
+    rest = shown.length - cut;
+    shown = shown.substring(0, cut);
+  }
+  _fenced(out, language, shown);
+  if (rest > 0) out.addAll(<String>[t.reportMore(rest), '']);
+}
+
+/// The share report of one log line: what a teammate needs in Slack, Jira or
+/// an e-mail. The desktop builds the same text
+/// (`packages/ui/src/features/logs/model/shareReport.ts`). Log text is shown
+/// as it is: a free-form message has no field names to mask, so the preview
+/// is what goes out.
+String buildLogReport(LogShareInput input, InspectorStrings t) {
+  final head = <String?>[input.level.toUpperCase(), input.kind, input.tag].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
+  final out = <String>[head, ''];
+  out.add('- ${t.reportTime}: ${shareTime(input.ts, input.utcOffsetMinutes)}');
+  if (input.app != null) out.add('- ${t.reportApp}: ${input.app}');
+  if (input.device != null) out.add('- ${t.reportDevice}: ${input.device}');
+  if (input.process != null) out.add('- ${t.reportProcess}: ${input.process}');
+  out.add('');
+
+  final message = input.message.trimRight();
+  if (message.isNotEmpty) {
+    out.add('${t.message}:');
+    _capped(out, message, t);
+  }
+  if (input.data != null) {
+    String? json;
+    try {
+      json = const JsonEncoder.withIndent('  ').convert(input.data);
+    } catch (_) {
+      json = null;
+    }
+    if (json != null) {
+      out.add('${t.data}:');
+      _capped(out, json, t, 'json');
+    }
+  }
+  final errText = <String?>[input.errorType, input.errorMessage].whereType<String>().where((s) => s.isNotEmpty).join(': ');
+  if (errText.isNotEmpty && !message.contains(input.errorMessage ?? errText)) out.addAll(<String>['${t.reportError}: $errText', '']);
+  final stack = input.stack?.trimRight() ?? '';
+  if (stack.isNotEmpty && !message.contains(stack.split('\n').first)) {
+    out.add('${t.stack}:');
+    _capped(out, stack, t);
+  }
+  return out.join('\n').trimRight();
+}
+
+/// The report input for a panel log line.
+LogShareInput logShareInputFor(InspectorLog log, InspectorStrings t, {String? app, String? device}) {
+  final e = log.error;
+  String? text(Object? v) => v is String && v.isNotEmpty ? v : null;
+  return LogShareInput(
+    level: log.level,
+    kind: log.isEvent
+        ? t.event
+        : switch (log.kind) { 'crash' => t.crash, 'flutter-error' => t.reportFlutterError, _ => null },
+    tag: log.tag,
+    ts: log.ts,
+    app: app,
+    device: device,
+    message: log.message,
+    data: log.data,
+    errorType: text(e?['type']),
+    errorMessage: text(e?['message']),
+    stack: text(e?['stack']),
+  );
+}

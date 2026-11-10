@@ -401,6 +401,19 @@ class InspectorStrings {
   String get shareCopied => _('Rapor kopyalandı', 'Report copied');
   String get shareFallback => _('Paylaşım açılamadı; rapor panoya kopyalandı', 'Sharing did not open; the report was copied');
   String get copyReport => _('Paylaşım raporunu kopyala', 'Copy share report');
+  String get shareLogTitle => _('Log satırını paylaş', 'Share log line');
+  String get shareLogDescription => _(
+        'Ekibinizin Dürbün olmadan okuyabileceği bir rapor: seviye, uygulama, cihaz, mesaj ve yığın izi.',
+        'A report your team can read without Dürbün: level, app, device, message and stack trace.',
+      );
+
+  /* Send to Slack (DurbunOptions.slackWebhook / DURBUN_SLACK_WEBHOOK) */
+  String get slackSend => _('Slack’e gönder', 'Send to Slack');
+  String get slackSending => _('Gönderiliyor…', 'Sending…');
+  String get slackSent => _('Slack’e gönderildi', 'Sent to Slack');
+  String slackFailed(String why) => _('Slack’e gönderilemedi: $why', 'Could not send to Slack: $why');
+  String get slackCutNote => _('… (Slack sınırı nedeniyle kısaltıldı)', '… (shortened to fit Slack)');
+  String get slackFooter => _('Dürbün ile gönderildi (uygulama içi panel)', 'Sent with Dürbün (in-app panel)');
   String get reportPending => _('Bekliyor: henüz yanıt yok', 'Pending: no response yet');
   String get reportFailed => _('Başarısız', 'Failed');
   String get reportCancelled => _('İptal edildi', 'Cancelled');
@@ -413,6 +426,8 @@ class InspectorStrings {
       ? _('Mock: yanıt sunucudan değil, bir Dürbün mock kuralından geldi', 'Mocked: the response came from a Dürbün mock rule, not from the server')
       : _('Mock: yanıt sunucudan değil, Dürbün mock kuralından (“$rule”) geldi', 'Mocked: the response came from the Dürbün mock rule “$rule”, not from the server');
   String get reportError => _('Hata', 'Error');
+  String get reportProcess => _('Süreç', 'Process');
+  String get reportFlutterError => _('Flutter hatası', 'Flutter error');
   String get reportRequestHeaders => _('İstek başlıkları', 'Request headers');
   String get reportResponseHeaders => _('Yanıt başlıkları', 'Response headers');
   String get reportRequestBody => _('İstek gövdesi', 'Request body');

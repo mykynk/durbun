@@ -655,6 +655,22 @@ void main() {
       expect(current, isA<DurbunHttpOverrides>());
       expect((current! as DurbunHttpOverrides).previous, same(replacement));
     });
+
+    test("uncapturedClient (the panel's Send to Slack) keeps the app's overrides and is never captured", () async {
+      HttpOverrides.global = _UserAgentOverrides('own-agent/2.0');
+      DurbunHttpOverrides.ensureInstalled(client);
+      final quiet = DurbunHttpOverrides.uncapturedClient();
+      expect(quiet, isNot(isA<DurbunHttpClient>()));
+      expect(quiet.userAgent, 'own-agent/2.0');
+      await (await (await quiet.getUrl(Uri.parse('${origin.base}/json?case=uncaptured'))).close()).drain<void>();
+      quiet.close();
+      // A captured request after it: once it arrived, the quiet one would have too.
+      final loud = HttpClient();
+      await (await (await loud.getUrl(Uri.parse('${origin.base}/json?case=captured-after'))).close()).drain<void>();
+      loud.close();
+      await net('/json?case=captured-after');
+      expect(conn.received.where((m) => m['type'] == 'net.request' && '${m['url']}'.contains('case=uncaptured')), isEmpty);
+    });
   });
 }
 
