@@ -17,7 +17,7 @@
   <a href="README.md">English</a> · Türkçe
 </p>
 
-![Dürbün'ün ağ ekranı: HTTP istekleri listesi ve seçili isteğin JSON yanıtı](docs/images/network.png)
+![Örnek verilerle Dürbün: canlı loglar, bir isteğin JSON yanıtı, o istekten oluşturulan mock kuralı ve performans grafikleri](docs/images/demo.webp)
 
 Android veya iOS cihazı takın ya da simülatör/emülatör açın: Dürbün uygulamanın yaptığı her şeyi tek, okunaklı
 ve canlı bir pencerede gösterir.
@@ -25,8 +25,9 @@ ve canlı bir pencerede gösterir.
 - **Loglar.** Android logcat, iOS cihaz ve simülatör logları, uygulamanın kendi logları, hatalar, çökmeler ve
   event'ler. Çok satırlı çıktılar, stack trace'ler ve JSON katlanır; aynı satırlar ×N olarak birleşir;
   çökmeler göze batar.
-- **Ağ.** Her HTTP(S) isteği başlıkları, gövdeleri ve zamanlamalarıyla. cURL, fetch, Dio, Swift veya OkHttp
-  olarak kopyalama, yeniden ya da düzenleyip gönderme, iki isteği karşılaştırma, HAR olarak dışa aktarma.
+- **Ağ.** Her SDK'nın bağlandığı istemcilerden gelen HTTP(S) istekleri, başlıkları, gövdeleri ve
+  zamanlamalarıyla (bkz. [Ne yakalanır](#ne-yakalanır)). cURL, fetch, Dio, Swift veya OkHttp olarak kopyalama,
+  yeniden ya da düzenleyip gönderme, iki isteği karşılaştırma, HAR olarak dışa aktarma.
 - **Mock'lar.** Eşleşen isteklere hazır yanıt verme, gecikme ekleme veya hata simüle etme. Kuralları SDK
   uygulamanın içinde uygular; proxy ya da sertifika gerekmez.
 - **Performans.** CPU, bellek, heap, FPS ve takılmalar, saniyede istek ve saniyede log.
@@ -38,6 +39,8 @@ Cihaz logları SDK olmadan da gelir. SDK'sı olmayan Flutter debug uygulamaları
 üzerinden kendiliğinden bağlanır. Uygulama logları, ağ yakalama, ölçümler ve mock'lar için SDK eklenir.
 
 Arayüz İngilizce ve Türkçedir, sistem dilini izler.
+
+![Dürbün'ün ağ ekranı: HTTP istekleri listesi ve seçili isteğin JSON yanıtı](docs/images/network.png)
 
 ![Dürbün'ün log ekranı: üç cihazdan loglar, çökme bandı ve katlanmış stack trace](docs/images/logs.png)
 
@@ -91,6 +94,30 @@ SDK'lar release derlemelerinde siz açmadıkça kapalıdır; nasıl açılacağ�
 kendileri kurar: Android'de `adb reverse`, iOS cihazda usbmux, simülatörde `127.0.0.1:9751`. LAN
 bağlantılarına izin verirseniz Wi-Fi üzerinden de çalışır.
 
+## Ne yakalanır
+
+| Uygulamanız | Loglar | Ağ | Performans | Mock'lar |
+|---|---|---|---|---|
+| Herhangi bir uygulama, SDK yok | Cihaz logları (logcat, iOS cihaz ve simülatör logları) ve sistemin çökme kayıtları | Hayır | Android süreç ve kare istatistikleri | Hayır |
+| Flutter debug veya profile derlemesi, SDK yok (Dart VM Service üzerinden) | Ek olarak `dart:developer` `log()` ve Flutter hataları | dart:io HTTP: `package:http`, Dio'nun varsayılan adaptörü | FPS, takılmalar, Dart heap | Hayır |
+| `durbun` eklenmiş Flutter | Ek olarak `Durbun.log`, `debugPrint`, çökmeler ve native loglar | dart:io HTTP; iOS'ta URLSession, Android'de `DurbunInterceptor` eklenmiş OkHttp | FPS, takılmalar, bellek, CPU | Evet |
+| `Durbun` eklenmiş iOS | Ek olarak `Durbun.log`, `print` ve stderr, çökmeler | `URLSession.shared` ve kendi oturumlarınız, Alamofire dahil | CPU, bellek, thread'ler, FPS, takılmalar | Evet |
+| `durbun` eklenmiş Android | Ek olarak `Durbun.log` (Timber da) ve çökmeler | `DurbunInterceptor` eklenmiş `OkHttpClient`'lar: Retrofit, Coil, Ktor'un OkHttp motoru | CPU, bellek, Java heap, thread'ler, FPS, takılmalar | Evet |
+| `@durbun/react-native` eklenmiş React Native | Ek olarak `console.*` ve JS hataları | `XMLHttpRequest`: `fetch`, axios | JS heap, JS thread FPS'i | Evet |
+
+Yakalanmayanlar:
+
+- **Flutter:** gRPC ve doğrudan socket kullanan kod, WebSocket mesajları (el sıkışma görünür), arka plan
+  isolate'lerindeki istekler ve loglar (`compute`, `Isolate.run`), Android'de package:http'nin `CronetClient`'ı
+  ve `package:ok_http`. Dio'nun `NativeAdapter`'ı için [`durbun_dio`](https://pub.dev/packages/durbun_dio)
+  gerekir.
+- **iOS:** arka plan URLSession'ları, WKWebView ve AVPlayer trafiği.
+- **Android:** `HttpURLConnection` (Volley, Media3'ün varsayılan veri kaynağı, Ktor'un CIO motoru), Cronet,
+  WebView ve native kod. WebSocket, gRPC ve SSE akışlarının yalnızca boyutu görünür.
+- **React Native:** `<Image>` indirmeleri ve native modüllerin yaptığı istekler.
+
+Ayrıntılar ve diğer istemcileri kendiniz nasıl bildireceğiniz her SDK'nın kılavuzunda.
+
 ## Gizlilik
 
 - Dürbün kendiliğinden Mac'in dışına hiçbir şey göndermez: analitik, telemetri ya da otomatik güncelleme
@@ -99,7 +126,29 @@ bağlantılarına izin verirseniz Wi-Fi üzerinden de çalışır.
   istek) ve yakalanmış bir isteği yeniden göndermek (isteğin kendi adresine).
 - Sunucu yalnızca `127.0.0.1`'i dinler. Aynı ağdaki cihazların SDK portuna bağlanması için Ayarlar'da
   **LAN**'ı açın (ya da `--lan` verin).
-- SDK'lar yakaladıklarını yalnızca Mac'inizdeki Dürbün'e gönderir.
+- SDK'lar başka hiçbir servise bağlanmaz: yakaladıkları yalnızca Dürbün bağlantısından gider (bkz.
+  [Güvenlik](#güvenlik)).
+
+## Güvenlik
+
+Arayüz ve API'si yalnızca bu Mac'ten gelen bağlantılara ve yalnızca Dürbün'ün kendi sayfalarına yanıt verir;
+tarayıcınızda açık siteler bunları okuyamaz. `adb reverse` yalnızca SDK bağlantısına hizmet eden ayrı bir
+porta yönlenir; takılı telefondaki uygulamalar da bunları okuyamaz. LAN açıkken diğer cihazlar yalnızca SDK
+bağlantısına ulaşır.
+
+SDK bağlantısında henüz eşleşme ve şifreleme yok:
+
+- SDK'sı açık bir uygulama, portunda kim yanıt verirse onunla konuşur: loglarını ve ağ trafiğini ona
+  gönderir, bağlı kaldığı sürece onun mock kurallarını uygular. Android'de SDK cihazdaki `127.0.0.1:9751`'e
+  bağlanır; `adb reverse` bunu Mac'e iletir. iOS cihazda `127.0.0.1:9752–9755`'te dinler (yalnızca loopback)
+  ve Mac usbmux üzerinden bağlanır. İki durumda da aynı cihazdaki başka bir uygulama Mac'in yerini alabilir.
+- Wi-Fi'de trafik yerel ağdan şifresiz geçer.
+- SDK'lar release derlemelerinde siz açmadıkça kapalıdır. Açtığınız derlemeler, örneğin iç test derlemeleri,
+  burada anlatıldığı gibi davranır.
+- Yakalanan veride token'lar ve kişisel veriler olabilir. Başlık değerlerini her SDK'nın `redactHeaders`
+  seçeneğiyle gizleyin; dışa aktarmalar ve HAR dosyaları yakalanan her şeyi içerir.
+
+SDK'larla Mac uygulaması arasında eşleşme planlanıyor.
 
 ## Mac uygulaması ayrıntıları
 

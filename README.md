@@ -17,15 +17,16 @@
   English · <a href="README.tr.md">Türkçe</a>
 </p>
 
-![Dürbün's network view: a list of HTTP requests and the JSON response of the selected one](docs/images/network.png)
+![Dürbün with sample data: live logs, a request's JSON response, a mock rule made from that request, and performance charts](docs/images/demo.webp)
 
 Plug in an Android or iOS device, or start a simulator or emulator, and Dürbün shows everything the app
 does in one readable, live window. *Dürbün* is Turkish for binoculars.
 
 - **Logs.** Android logcat, the iOS device and simulator logs, your app's own logs, errors, crashes and
   events. Multi-line output, stack traces and JSON fold; repeated lines collapse into ×N; crashes stand out.
-- **Network.** Every HTTP(S) request with headers, bodies and timings. Copy as cURL, fetch, Dio, Swift or
-  OkHttp, resend or edit and send, compare two requests, export HAR.
+- **Network.** HTTP(S) requests with headers, bodies and timings, from the clients each SDK hooks into (see
+  [What gets captured](#what-gets-captured)). Copy as cURL, fetch, Dio, Swift or OkHttp, resend or edit and
+  send, compare two requests, export HAR.
 - **Mocks.** Answer matching requests with a canned response, add latency or simulate a failure. The SDK
   applies the rules inside the app, so no proxy or certificate is involved.
 - **Performance.** CPU, memory, heap, FPS and jank, requests per second and logs per second.
@@ -37,6 +38,8 @@ Device logs need no SDK. Flutter debug apps without the SDK are attached automat
 Service. The SDKs add app logs, network capture, metrics and mocks.
 
 The interface is available in English and Turkish and follows your system language.
+
+![Dürbün's network view: a list of HTTP requests and the JSON response of the selected one](docs/images/network.png)
 
 ![Dürbün's log view: logs from three devices, a crash banner and a folded stack trace](docs/images/logs.png)
 
@@ -90,6 +93,29 @@ The SDKs are off in release builds unless you turn them on; each guide shows how
 own: `adb reverse` on Android, usbmux on iOS devices, `127.0.0.1:9751` on simulators. Wi-Fi works too when
 you allow LAN connections.
 
+## What gets captured
+
+| Your app | Logs | Network | Performance | Mocks |
+|---|---|---|---|---|
+| Any app, no SDK | Device logs (logcat, iOS device and simulator logs) and system crash records | No | Android process and frame statistics | No |
+| Flutter debug or profile build, no SDK (through the Dart VM Service) | Adds `dart:developer` `log()` and Flutter errors | dart:io HTTP: `package:http`, Dio's default adapter | FPS, jank, Dart heap | No |
+| Flutter with `durbun` | Adds `Durbun.log`, `debugPrint`, crashes and native logs | dart:io HTTP, plus URLSession on iOS and OkHttp with `DurbunInterceptor` on Android | FPS, jank, memory, CPU | Yes |
+| iOS with `Durbun` | Adds `Durbun.log`, `print` and stderr, crashes | `URLSession.shared` and your own sessions, Alamofire included | CPU, memory, threads, FPS, jank | Yes |
+| Android with `durbun` | Adds `Durbun.log` (Timber too) and crashes | `OkHttpClient`s with `DurbunInterceptor`: Retrofit, Coil, Ktor's OkHttp engine | CPU, memory, Java heap, threads, FPS, jank | Yes |
+| React Native with `@durbun/react-native` | Adds `console.*` and JS errors | `XMLHttpRequest`: `fetch`, axios | JS heap, JS-thread FPS | Yes |
+
+Not captured:
+
+- **Flutter:** gRPC and raw sockets, WebSocket messages (the handshake shows), requests and logs in
+  background isolates (`compute`, `Isolate.run`), and on Android package:http's `CronetClient` and
+  `package:ok_http`. Dio's `NativeAdapter` needs [`durbun_dio`](https://pub.dev/packages/durbun_dio).
+- **iOS:** background URLSessions, WKWebView and AVPlayer traffic.
+- **Android:** `HttpURLConnection` (Volley, Media3's default data source, Ktor's CIO engine), Cronet, WebView
+  and native code. WebSocket, gRPC and SSE streams show their size only.
+- **React Native:** `<Image>` downloads and requests made by native modules.
+
+Each SDK guide has the details, and shows how to report other clients yourself.
+
 ## Privacy
 
 - Dürbün sends nothing off your Mac on its own: no analytics, no telemetry, no automatic update check.
@@ -98,7 +124,30 @@ you allow LAN connections.
   resending a captured request (to that request's own host).
 - The server listens on `127.0.0.1` only. Turn on **LAN** in Settings (or pass `--lan`) to let devices on
   the same network reach the SDK port.
-- The SDKs send what they capture only to the Dürbün on your Mac.
+- The SDKs contact no other service: what they capture goes only over the Dürbün connection (see
+  [Security](#security)).
+
+## Security
+
+The interface and its API answer only connections from this Mac, and only Dürbün's own pages, so websites open
+in your browser cannot read them. `adb reverse` points at a separate port that serves the SDK connection and
+nothing else, so apps on a plugged-in phone cannot read them either. With LAN on, other devices reach the SDK
+connection only.
+
+The SDK connection itself is not paired or encrypted yet:
+
+- An app with the SDK on talks to whatever answers on its port: it sends that peer its logs and network
+  traffic, and applies the peer's mock rules while it stays connected. On Android the SDK connects to
+  `127.0.0.1:9751` on the device, which `adb reverse` forwards to the Mac. On an iOS device it listens on
+  `127.0.0.1:9752–9755` (loopback only), and the Mac connects through usbmux. In both cases another app on the
+  same device could take the Mac's place.
+- Over Wi-Fi the traffic crosses the local network unencrypted.
+- The SDKs are off in release builds unless you turn them on. Builds you turn them on for, such as internal
+  test builds, behave as described here.
+- Captured data can include tokens and personal data. Hide header values with each SDK's `redactHeaders`
+  option; exports and HAR files contain whatever was captured.
+
+Pairing between the SDKs and the Mac app is planned.
 
 ## The Mac app in detail
 
