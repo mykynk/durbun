@@ -1,0 +1,37 @@
+# The "Dürbün" Slack app behind https://appnify.dev/durbun/slack/ (Add to Slack).
+#
+# It asks for one thing: an incoming webhook for the channel the person picks. It cannot read
+# messages, channels or members. PKCE lets the static page above trade Slack's code for the
+# webhook in the person's own browser, so there is no client secret and no server.
+#
+# To run your own copy: api.slack.com/apps -> Create New App -> From a manifest, paste this,
+# upload icon.png under Basic Information -> Display Information, and point redirect_urls at
+# your own page. Turning PKCE on cannot be undone without Slack support.
+display_information:
+  name: Dürbün
+  description: Send a log line or a network request from Dürbün to a Slack channel, only when you click Send to Slack.
+  background_color: "#11141B"
+  long_description: |-
+    Dürbün is a free, open-source Mac app (MIT) that shows the live logs, network requests and performance of Android and iOS apps. When something breaks, anyone on the team can send that log line or request to a Slack channel with one click on Send to Slack, from the Mac app or from the in-app panel on the phone.
+
+    Adding Dürbün to Slack gives you an incoming webhook for the channel you pick. Dürbün posts only the reports someone chooses to send; it cannot read messages, channels or members. The webhook URL is shown once in your own browser and kept on your machine: AppNify runs no server for this and stores nothing. Remove the app from Slack at any time to stop it.
+
+    Source code and docs: https://github.com/mykynk/durbun
+features:
+  bot_user:
+    # Slack turns this into a username, which takes no "ü"; messages still show the app's name.
+    display_name: Durbun
+    always_online: false
+oauth_config:
+  redirect_urls:
+    - https://appnify.dev/durbun/slack/
+  scopes:
+    bot:
+      - incoming-webhook
+  pkce_enabled: true
+settings:
+  incoming_webhooks:
+    incoming_webhooks_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

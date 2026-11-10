@@ -31,6 +31,10 @@ ve canlı bir pencerede gösterir.
 - **Mock'lar.** Eşleşen isteklere hazır yanıt verme, gecikme ekleme veya hata simüle etme. Kuralları SDK
   uygulamanın içinde uygular; proxy ya da sertifika gerekmez.
 - **Performans.** CPU, bellek, heap, FPS ve takılmalar, saniyede istek ve saniyede log.
+- **Paylaşma.** Bir log satırı ya da istek, ekibinizin Dürbün olmadan okuyabileceği bir rapora dönüşür:
+  kopyalayın, Markdown olarak kaydedin ya da tek tıkla ekibinizin Slack kanalına gönderin (Ayarlar → Slack).
+  Kanalın webhook adresini almak da tek tık: [Slack'e ekle](https://appnify.dev/durbun/slack/?lang=tr).
+  Flutter uygulama içi paneli de telefondan gönderebilir.
 - **Cihaz araçları.** Ekran görüntüsü ve ekran kaydı, deep link, uygulama başlatma, durdurma, kurma ve
   kaldırma, koyu mod, yazı boyutu, konum, simülatöre push bildirimi, durum çubuğu ve uygulamanın kendi
   eklediği butonlar.
@@ -123,11 +127,13 @@ Ayrıntılar ve diğer istemcileri kendiniz nasıl bildireceğiniz her SDK'nın 
 - Dürbün kendiliğinden Mac'in dışına hiçbir şey göndermez: analitik, telemetri ya da otomatik güncelleme
   denetimi yoktur. Çökme dökümleri Mac'te kalır.
 - Mac'ten dışarı istek yalnızca siz istediğinizde çıkar: **Güncellemeleri Denetle** (GitHub API'ye tek
-  istek) ve yakalanmış bir isteği yeniden göndermek (isteğin kendi adresine).
+  istek), yakalanmış bir isteği yeniden göndermek (isteğin kendi adresine) ve **Slack'e gönder** (ayarladığınız
+  webhook'a).
 - Sunucu yalnızca `127.0.0.1`'i dinler. Aynı ağdaki cihazların SDK portuna bağlanması için Ayarlar'da
   **LAN**'ı açın (ya da `--lan` verin).
 - SDK'lar başka hiçbir servise bağlanmaz: yakaladıkları yalnızca Dürbün bağlantısından gider (bkz.
-  [Güvenlik](#güvenlik)).
+  [Güvenlik](#güvenlik)). Tek istisna Flutter uygulama içi panelinin **Slack'e gönder**'idir: raporu,
+  uygulamayı derlerken verdiğiniz webhook'a, yalnızca biri dokunduğunda gönderir.
 
 ## Güvenlik
 
@@ -147,6 +153,10 @@ SDK bağlantısında henüz eşleşme ve şifreleme yok:
   burada anlatıldığı gibi davranır.
 - Yakalanan veride token'lar ve kişisel veriler olabilir. Başlık değerlerini her SDK'nın `redactHeaders`
   seçeneğiyle gizleyin; dışa aktarmalar ve HAR dosyaları yakalanan her şeyi içerir.
+- Slack incoming webhook adresine sahip olan herkes o kanala mesaj atabilir. Mac uygulaması adresi veri
+  klasöründeki `slack.json` dosyasında (yalnızca sizin kullanıcınız okuyabilir) tutar ve bir daha göstermez.
+  Flutter panelinin webhook'u derleme komutunuzdan gelir (`--dart-define=DURBUN_SLACK_WEBHOOK`) ve o derlemenin
+  içine gömülür; derlemeye sahip olan onu bulabilir.
 
 SDK'larla Mac uygulaması arasında eşleşme planlanıyor.
 

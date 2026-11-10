@@ -30,6 +30,10 @@ does in one readable, live window. *Dürbün* is Turkish for binoculars.
 - **Mocks.** Answer matching requests with a canned response, add latency or simulate a failure. The SDK
   applies the rules inside the app, so no proxy or certificate is involved.
 - **Performance.** CPU, memory, heap, FPS and jank, requests per second and logs per second.
+- **Share.** A log line or a request becomes a report your team can read without Dürbün: copy it, save it as
+  Markdown, or send it to your team's Slack channel with one click (Settings → Slack). Getting the channel's
+  webhook is one click too: [Add to Slack](https://appnify.dev/durbun/slack/). The Flutter in-app panel can
+  send it from the phone too.
 - **Device tools.** Screenshots and screen recording, deep links, launch, stop, install and uninstall apps,
   dark mode, font size, location, simulator push notifications, status bar overrides, and buttons your app
   adds itself.
@@ -120,12 +124,13 @@ Each SDK guide has the details, and shows how to report other clients yourself.
 
 - Dürbün sends nothing off your Mac on its own: no analytics, no telemetry, no automatic update check.
   Crash dumps stay on the Mac.
-- Requests leave the Mac only when you ask: **Check for Updates** (one call to the GitHub API) and
-  resending a captured request (to that request's own host).
+- Requests leave the Mac only when you ask: **Check for Updates** (one call to the GitHub API),
+  resending a captured request (to that request's own host) and **Send to Slack** (to the webhook you set).
 - The server listens on `127.0.0.1` only. Turn on **LAN** in Settings (or pass `--lan`) to let devices on
   the same network reach the SDK port.
 - The SDKs contact no other service: what they capture goes only over the Dürbün connection (see
-  [Security](#security)).
+  [Security](#security)). The one exception is the Flutter in-app panel's **Send to Slack**, which posts a
+  report to the webhook you built the app with, and only when someone taps it.
 
 ## Security
 
@@ -146,6 +151,10 @@ The SDK connection itself is not paired or encrypted yet:
   test builds, behave as described here.
 - Captured data can include tokens and personal data. Hide header values with each SDK's `redactHeaders`
   option; exports and HAR files contain whatever was captured.
+- A Slack incoming webhook URL lets anyone who has it post to its channel. The Mac app keeps it in
+  `slack.json` in its data folder (readable only by your user) and never shows it again. The Flutter panel's
+  webhook comes from your build command (`--dart-define=DURBUN_SLACK_WEBHOOK`) and is compiled into that
+  build, so whoever has the build can find it.
 
 Pairing between the SDKs and the Mac app is planned.
 

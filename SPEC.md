@@ -247,6 +247,9 @@ REST:
 | `POST /api/upload?name=<file>` (raw body, ≤ 2 GB streamed to tempDir) | `{ file }` server path to pass to `app-install` |
 | `GET /api/files/:name` | files saved in tempDir (screenshots, recordings) |
 | `GET /api/files/crash/:udid/:name` | copied iOS crash reports (phase 3): udid `/^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/`, name `/^[A-Za-z0-9_][A-Za-z0-9._-]{0,199}\.ips$/i` without `..`, realpath must stay inside `<tempDir>/crash/<udid>/`; always `Content-Disposition: attachment`, `text/plain`, `nosniff`; same /api access rules |
+| `GET /api/slack` | `{ configured, hint?, sender? }`: Send to Slack status; never the webhook URL (`hint` = host + last 4 characters) |
+| `PUT /api/slack` `{ webhookUrl?: string \| null, sender?: string \| null }` | same status; `https://` only (`slack.invalidUrl`); stored in `<dataDir>/slack.json` (0600), not in settings.json (which every UI receives) |
+| `POST /api/slack/send` `{ text }` (Slack mrkdwn, ≤ 40,000 chars, built by the UI) | `{ ok: true }`; posts `{ text, unfurl_links: false, unfurl_media: false }`, no redirects, 15 s timeout; `slack.notConfigured` 409, `slack.rejected` / `slack.unreachable` 502 |
 
 The UI document, every static file, 304s and the "please build the UI" page carry a Content-Security-Policy:
 scripts only from the server (inline scripts are hashed at startup and re-hashed when index.html changes; no
