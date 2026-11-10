@@ -12,6 +12,7 @@
  *   POST /api/upload?name=<file>                  raw body (≤ 2 GB) → { file, name, size }
  *   GET  /api/files/:name                         a file from the temp directory (?download=1)
  *   GET  /api/files/crash/:udid/:name             a copied iOS crash report (<tempDir>/crash/<udid>/*.ips), as a download
+ *   GET|PUT /api/slack, POST /api/slack/send       Send to Slack (slack.ts)
  */
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, promises as fsp } from 'node:fs';
@@ -22,6 +23,7 @@ import { isPlainObject } from '../config';
 import type { Hub, Logger } from '../types';
 import { buildHar, headerValue } from './har';
 import { parseJsonBuffer } from './jsonParse';
+import type { SlackStore } from './slack';
 import { streamJson } from './jsonStream';
 import { extensionFor } from './mime';
 import { isInside, SANDBOX_CSP, sendFile, statFile } from './static';
@@ -48,6 +50,8 @@ export const UPLOAD_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
  */
 export const IMPORT_LIMIT_BYTES = 500 * 1024 * 1024;
 const JSON_LIMIT_BYTES = 16 * 1024 * 1024;
+/** A Slack message is at most 40,000 characters (up to 4 bytes each in UTF-8, more as JSON escapes). */
+const SLACK_BODY_LIMIT_BYTES = 1024 * 1024;
 
 export interface ApiDeps {
   hub: Hub;
@@ -58,6 +62,8 @@ export interface ApiDeps {
   runDoctor(): Promise<ToolCheck[]>;
   uploadLimitBytes?: number;
   importLimitBytes?: number;
+  /** Send to Slack; without it /api/slack answers 404. */
+  slack?: SlackStore;
 }
 
 export type ApiHandler = (req: IncomingMessage, res: ServerResponse, pathname: string, query: URLSearchParams) => Promise<void>;
@@ -443,6 +449,21 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
         if (segs.length !== 1) break;
         requireMethod(req, 'POST', 'PUT');
         return upload(req, res, query);
+      case 'slack': {
+        const slack = deps.slack;
+        if (!slack) break;
+        if (segs.length === 1 && method === 'PUT') return sendJson(res, 200, await slack.update(await readJson(req, SLACK_BODY_LIMIT_BYTES)));
+        if (segs.length === 1) {
+          requireMethod(req, 'GET', 'PUT');
+          return sendJson(res, 200, await slack.status());
+        }
+        if (segs.length === 2 && second === 'send') {
+          requireMethod(req, 'POST');
+          await slack.send(await readJson(req, SLACK_BODY_LIMIT_BYTES));
+          return sendJson(res, 200, { ok: true });
+        }
+        break;
+      }
       case 'files':
         if (segs.length === 4 && second === 'crash') {
           requireMethod(req, 'GET', 'HEAD');

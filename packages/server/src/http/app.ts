@@ -30,6 +30,7 @@ import { runDoctor as runDoctorChecks, type PortState } from '../doctor';
 import type { ClearEvent, DeviceDriver, DriverContext, FlutterVmModule, Hub, HubChange, Logger, SdkLayer } from '../types';
 import { SERVER_VERSION } from '../version';
 import { createApiHandler } from './api';
+import { SlackStore } from './slack';
 import { CommandError, createCommandRouter, withTimeout } from './commands';
 import { checkLocalAccess, checkSdkUpgrade } from './security';
 import { createStaticHandler } from './static';
@@ -409,6 +410,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     runDoctor,
     uploadLimitBytes: deps.uploadLimitBytes,
     importLimitBytes: deps.importLimitBytes,
+    slack: SlackStore.inDataDir(config.dataDir, logger.child('slack'), deps.fetchImpl),
   });
 
   async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
