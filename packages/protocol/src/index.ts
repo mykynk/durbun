@@ -7,6 +7,11 @@
  * Other SDKs (Dart, Kotlin, Swift) mirror these shapes by hand — keep field names stable.
  */
 
+import type { FlowRun, FlowRunDelta, FlowSummary } from './flows/types';
+
+export * from './flows/index';
+export * from './package';
+
 export const PROTOCOL_VERSION = 1;
 export const PRODUCT_NAME = 'Dürbün';
 
@@ -343,7 +348,7 @@ export interface NetworkEntry {
   id: string;
   appId?: string;
   deviceId: string;
-  /** 'dart:io' | 'dio' | 'okhttp' | 'urlsession' | 'fetch' | 'xhr' | 'vm-service' | 'replay' | 'demo' | … */
+  /** 'dart:io' | 'dio' | 'okhttp' | 'urlsession' | 'fetch' | 'xhr' | 'vm-service' | 'replay' | 'flow' | 'demo' | … */
   source: string;
   method: string;
   url: string;
@@ -670,6 +675,10 @@ export type ServerToUi =
       logCount: number;
       /** Apps the devices report (SPEC §10). Optional for older servers. */
       deviceApps?: DeviceApp[];
+      /** Saved flows (Akışlar). Optional for older servers. */
+      flows?: FlowSummary[];
+      /** Flow runs still running. */
+      flowRuns?: FlowRun[];
     }
   | { type: 'history'; logs: LogEntry[]; done: boolean }
   | {
@@ -691,7 +700,11 @@ export type ServerToUi =
   | { type: 'settings'; settings: ServerSettings }
   | { type: 'drivers'; drivers: DriverStatus[] }
   | ({ type: 'notice' } & UiNotice)
-  | { type: 'reply'; requestId: string; ok: boolean; data?: unknown; error?: string; code?: string };
+  | { type: 'reply'; requestId: string; ok: boolean; data?: unknown; error?: string; code?: string }
+  /** The flow list changed (saved, deleted, imported, a run ended). */
+  | { type: 'flows'; flows: FlowSummary[] }
+  /** A flow run changed: its header plus the steps that changed since the previous message. */
+  | ({ type: 'flowRun' } & FlowRunDelta);
 
 export interface ReplayOverrides {
   method?: string;
