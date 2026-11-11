@@ -1041,3 +1041,94 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
   Mock rules a peer pushed are cleared when it disconnects, in every SDK layer.
 - The UI document is served with a Content-Security-Policy (scripts only from the server, hashed when inline;
   WebSocket to the same host; `blob:` / `data:` for images and media; `frame-ancestors 'none'`).
+
+## 11. Flows, packages and backups (phase 4 — authoritative)
+
+### 11.1 Why (the user's words, summarized)
+- Testers chain what they check by hand into graphs: endpoint chains first, other features inside them, flows
+  calling flows. Features that need the Dart VM Service stay out of flows (testers run store and test builds).
+- Dürbün never calls an AI. People export a pack and a prompt to their own AI and import the answer with every
+  feature intact.
+- There is no cloud: teams share setups as files, and a new Mac gets everything back from a backup.
+
+### 11.2 Flow documents (`packages/protocol/src/flows`, frozen: add optional members only)
+- One JSON document per flow, `format: 'durbun-flow'`, `version: 1`: `id` (file name and the name sub-flow calls
+  use), `name`, `description?`, `tags?`, `inputs?` (`FlowVariableDef`), `outputs?`, `target?` (platform, appId),
+  `onUnsupported?: 'skip' | 'fail'`, `automation?`, `nodes`, `edges`. Stored as `<dataDir>/flows/<id>.json`
+  (≤ 1 000 flows); the same document is exported, shared in packages and written by AIs.
+- Nodes: `{id, type, label?, params?, position?, disabled?, continueOnError?, retry?, timeoutMs?, note?}`. Node ids
+  are template roots, so `env`, `vars`, `input`, `target`, `trigger`, `run`, `item` are reserved. Edges
+  `{from, port?, to}`; ports `out | true | false | loop | done | error`; every node that takes input has `error`.
+- The node catalog (`catalog.ts`, `FLOW_NODE_SPECS`) is the single source for types, params (kind, default,
+  limits, `advanced`), ports, what each node needs (device, SDK capability, tool, platform) and the texts the AI
+  pack prints. Groups: trigger (`manual`, `event`), http (`request`), logic (`condition`, `repeat`,
+  `setVariables`, `delay`, `flow.call`, `flow.end`), check (`assert`, `noErrors`), device (open URL, launch / stop
+  / restart, clear data, install / uninstall, screenshot, recording, appearance, font scale, location, push, text,
+  keys, status bar, animations), wait (`network`, `log`, `event`), mock (`add`, `toggle`, `remove`), output
+  (`marker`, `slack`, `note`). No node uses the VM Service.
+- Templates `{{…}}` read step outputs (`{{login.body.token}}`), `env`, `vars`, `input`, `target`, `trigger`, `run`,
+  `item`, helpers (`$uuid`, `$now`…) and pipes (`| json`, `| length`…). A string that is one template keeps the
+  value's type. `validateFlow` (protocol) is the only validator: the editor, import, the AI answer and the server
+  use it; errors block a run, warnings do not. Flows with errors are saved as drafts.
+- `docs/flows/durbun-flow.schema.json` is generated from the catalog (`flowJsonSchema()`); a server test fails
+  when it drifts (`DURBUN_UPDATE_SCHEMA=1` rewrites it).
+
+### 11.3 Running (`packages/server/src/flows`)
+- `POST /api/flows/:id/preflight` resolves the target (device + app, or automatic), the environment and inputs,
+  and lists issues (`preflight.*` codes), steps that will be skipped and irreversible steps (clear data,
+  uninstall, install). The UI asks for confirmation before irreversible steps. `run` answers 409 with the
+  preflight when it cannot start.
+- The engine runs one step at a time along the edges, with sub-flows (no recursion), repeat over a count or a
+  list, retries, per-step timeouts and cancellation. Mock rules a run adds (`flow-` ids) and recordings it starts
+  are removed / stopped when the run ends, whatever the outcome. HTTP steps go from the Mac (redirects followed
+  unless turned off); secrets are masked in run records.
+- Runs are kept in `<dataDir>/flow-runs` (newest 200, with their screenshots and recordings). The UI follows a
+  run through WS `flowRun` (header + changed steps, merged by step id) and `flows` (summary list); a REST read
+  never replaces a newer live copy.
+- Automation: a flow with `automation.enabled` and a `trigger.event` node starts by itself when its event
+  matches (crash, log line, request status or URL, app or device connecting), only while Dürbün runs, at most
+  once per `throttleMs` (default 30 s) per trigger, never twice at once, with a cap on concurrent automatic runs.
+- Environments: `<dataDir>/environments.json` (`format: 'durbun-environments'`, mode 0600): named sets of
+  `{key, value, secret?}` and the active one.
+
+### 11.4 Flows with the user's own AI
+- `POST /api/flows/ai-pack` builds a Markdown pack: the task, the format and schema, every node type with its
+  params, template rules, the user's flows (or the one being edited), environment keys (never values), the
+  app's last 40 distinct requests (method, origin + path, query names only, status; no headers or bodies) and the
+  answer format (one JSON code block per flow).
+- `POST /api/flows/import/preview` finds flows in any pasted text (a file, a JSON array, an AI answer with code
+  fences), validates each and reports new / changed / same; `POST /api/flows/import` saves the picked ones with
+  `replace | keepBoth | skip` for ids that exist.
+- `POST /api/flows/from-requests` turns captured requests into a flow: the host becomes `{{env.baseUrl}}`, values
+  of one response used by a later request become templates, and the environment can be created.
+
+### 11.5 Packages (`.durbun`, `packages/protocol/src/package.ts`, `packages/server/src/backup`)
+- `format: 'durbun-package'`, `version: 1`, `kind: 'share' | 'backup'`, `createdAt`, `createdBy {app, version,
+  host?}` (backups only name the Mac), `name?`, `note?`, `contents {flows?, mocks?, environments?, settings?,
+  uiPrefs?, slack?, runs?}`, `secrets?`. Every Dürbün file names its `format` first, so the UI tells sessions,
+  packages and flows apart from the first 64 KB.
+- Share: the picked flows plus the sub-flows they call; environments travel with secret values empty; the Slack
+  webhook never goes in. Backup: everything; secret values and the webhook only inside `secrets`, AES-256-GCM
+  with a key from scrypt (N 2^15, r 8, p 1) over a passphrase of at least 8 characters.
+- `POST /api/packages/inspect` returns a `PackageManifest` (each item new / exists / differs, warnings, whether
+  the passphrase opens the secrets) and a token kept 30 minutes; `POST /api/packages/import` takes the token (or
+  the package), what to bring and the conflict mode. A replace keeps local secret values when the package has
+  none. Look and log preferences come back to the UI (`uiPrefs`), which applies the portable ones (theme,
+  language, font size, density, time format, wrapping, noise and highlight rules, crash notifications).
+- The UI keeps a copy of those preferences on the server (`GET|PUT /api/ui-prefs`, `ui-prefs.json`) so backups
+  include them.
+
+### 11.6 Backups (Settings → Backup)
+- `<dataDir>/backup.json` (0600): `enabled`, `folder`, `keep`, `intervalHours`, `includeRuns`, the passphrase
+  (never returned: `hasPassphrase`), last result. Automatic backups run after changes (at most once an hour) and
+  on the interval, write `Durbun-backup-<mac>-<time>.durbun` atomically into the folder and keep the newest
+  `keep`. Folder suggestions: iCloud Drive, sync services under `~/Library/CloudStorage` (not plain mounts),
+  Documents.
+- Restoring lists the folder's backups (`GET /api/backup/files`) and opens one in the package import dialog.
+
+### 11.7 UI
+- `features/flows`: list, canvas editor (own SVG graph: pan, zoom, minimap, tidy up, undo / redo, copy / paste,
+  keyboard), node inspector, flow settings, run controls and run panel, history, environments, AI and import
+  dialogs. `features/transfer`: share / backup export, package import, Settings → Backup, the UI prefs sync.
+  Import / export menu and the command palette open them; any Dürbün file can be dropped on the window.
+- Network: **Create a flow from this request…** (row menu, detail panel, palette) and the multi-select action.

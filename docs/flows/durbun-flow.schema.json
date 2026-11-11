@@ -1,0 +1,3046 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mykynk/durbun/blob/main/docs/flows/durbun-flow.schema.json",
+  "title": "Dürbün flow",
+  "description": "A Dürbün flow: nodes (steps) connected by edges, run by the Dürbün Mac app against a device and an app.",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "id",
+    "name",
+    "nodes",
+    "edges"
+  ],
+  "properties": {
+    "format": {
+      "const": "durbun-flow"
+    },
+    "version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "description": "File-safe id, unique among the flows"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "description": "Values asked for when the flow starts or passed by a calling flow; read as {{input.<name>}}",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/varName"
+          },
+          "description": {
+            "type": "string"
+          },
+          "default": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "secret": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "description": "Values a calling flow reads as {{<call node id>.outputs.<name>}}",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/varName"
+          },
+          "value": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "enum": [
+            "android",
+            "ios",
+            "any"
+          ]
+        },
+        "appId": {
+          "type": "string",
+          "description": "Bundle id / package name of the app under test"
+        }
+      },
+      "additionalProperties": false
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "onUnsupported": {
+          "enum": [
+            "skip",
+            "fail"
+          ]
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000
+        },
+        "recordRequests": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "automation": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "throttleMs": {
+          "type": "integer",
+          "minimum": 1000
+        }
+      },
+      "additionalProperties": false
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "title": "Manual start",
+            "description": "Where a run starts when someone presses Run. Flow inputs are read as {{input.<name>}}.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "trigger.manual"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "When something happens",
+            "description": "Starts the flow on its own when the event happens on a connected device (only while the flow's automation switch is on and Dürbün is open). The run targets the device and app of the event. Event data is read as {{trigger.<field>}}.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "trigger.event"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "event": {
+                    "enum": [
+                      "crash",
+                      "logMatch",
+                      "networkError",
+                      "networkMatch",
+                      "appConnected",
+                      "deviceConnected"
+                    ],
+                    "description": "What starts the flow.",
+                    "default": "crash"
+                  },
+                  "text": {
+                    "type": "string",
+                    "not": {
+                      "pattern": "\\{\\{"
+                    },
+                    "description": "Text the log line contains (or a regex when `regex` is on)."
+                  },
+                  "regex": {
+                    "type": "boolean",
+                    "description": "Treat `text` as a regular expression.",
+                    "default": false
+                  },
+                  "level": {
+                    "enum": [
+                      "verbose",
+                      "debug",
+                      "info",
+                      "warn",
+                      "error",
+                      "fatal"
+                    ],
+                    "description": "Lowest log level that counts.",
+                    "default": "verbose"
+                  },
+                  "method": {
+                    "enum": [
+                      "*",
+                      "GET",
+                      "POST",
+                      "PUT",
+                      "PATCH",
+                      "DELETE",
+                      "HEAD",
+                      "OPTIONS"
+                    ],
+                    "description": "HTTP method.",
+                    "default": "*"
+                  },
+                  "url": {
+                    "type": "string",
+                    "not": {
+                      "pattern": "\\{\\{"
+                    },
+                    "description": "URL pattern."
+                  },
+                  "match": {
+                    "enum": [
+                      "contains",
+                      "exact",
+                      "glob",
+                      "regex"
+                    ],
+                    "description": "How `url` matches.",
+                    "default": "contains"
+                  },
+                  "status": {
+                    "type": "string",
+                    "pattern": "^\\s*$|^\\s*(\\d[xX]{2}|\\d{3}(\\s*-\\s*\\d{3})?)(\\s*,\\s*(\\d[xX]{2}|\\d{3}(\\s*-\\s*\\d{3})?))*\\s*$",
+                    "not": {
+                      "pattern": "\\{\\{"
+                    },
+                    "description": "Status filter: '2xx', '404', '400-499', '500,502' (empty = any)."
+                  },
+                  "appId": {
+                    "type": "string",
+                    "not": {
+                      "pattern": "\\{\\{"
+                    },
+                    "description": "Only this app (bundle id / package). Empty = the flow's target app, or any app when the flow has none."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "HTTP request",
+            "description": "Sends a request from the Mac (not through the app, so it works with any build). The response is the step output; it also shows in the Network tab under \"Desktop\".",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "http.request"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "GET",
+                      "POST",
+                      "PUT",
+                      "PATCH",
+                      "DELETE",
+                      "HEAD",
+                      "OPTIONS"
+                    ],
+                    "description": "HTTP method.",
+                    "default": "GET"
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "Absolute http(s) URL; usually starts with {{env.baseUrl}}.",
+                    "examples": [
+                      "{{env.baseUrl}}/v1/cart"
+                    ]
+                  },
+                  "query": {
+                    "$ref": "#/$defs/keyValue",
+                    "description": "Query parameters appended to the URL.",
+                    "default": []
+                  },
+                  "headers": {
+                    "$ref": "#/$defs/keyValue",
+                    "description": "Request headers.",
+                    "default": [],
+                    "examples": [
+                      [
+                        [
+                          "Authorization",
+                          "Bearer {{login.body.token}}"
+                        ]
+                      ]
+                    ]
+                  },
+                  "bodyType": {
+                    "enum": [
+                      "none",
+                      "json",
+                      "text",
+                      "form"
+                    ],
+                    "description": "Body: 'none', 'json' (sends `body` as JSON), 'text' (sends `body` as is), 'form' (x-www-form-urlencoded from `form`).",
+                    "default": "none"
+                  },
+                  "body": {
+                    "description": "JSON body (bodyType json) or text (bodyType text). Strings may contain templates. Without a body type, an object or list goes as JSON and text as plain text; the step notes it.",
+                    "examples": [
+                      {
+                        "productId": "{{vars.productId}}",
+                        "quantity": 1
+                      }
+                    ]
+                  },
+                  "form": {
+                    "$ref": "#/$defs/keyValue",
+                    "description": "Form fields (bodyType form).",
+                    "default": []
+                  },
+                  "expectStatus": {
+                    "type": "string",
+                    "pattern": "^\\s*$|^\\s*(\\d[xX]{2}|\\d{3}(\\s*-\\s*\\d{3})?)(\\s*,\\s*(\\d[xX]{2}|\\d{3}(\\s*-\\s*\\d{3})?))*\\s*$|\\{\\{",
+                    "description": "Fail the step unless the status matches: '2xx', '200', '200,201', '200-299'. Empty = any status passes.",
+                    "default": ""
+                  },
+                  "extract": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/extract"
+                    },
+                    "description": "Save values from the response as variables ({{vars.<name>}}).",
+                    "default": []
+                  },
+                  "timeoutMs": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 100,
+                        "maximum": 600000
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Give up after this many milliseconds.",
+                    "default": 30000
+                  },
+                  "followRedirects": {
+                    "type": "boolean",
+                    "description": "Follow 3xx redirects.",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "url"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Condition",
+            "description": "Checks rules and continues through `true` or `false`.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "logic.condition"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "all",
+                      "any"
+                    ],
+                    "description": "'all' = every rule must hold, 'any' = one is enough.",
+                    "default": "all"
+                  },
+                  "rules": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/condition"
+                    },
+                    "description": "Rules: left, op, right.",
+                    "default": [],
+                    "examples": [
+                      [
+                        {
+                          "left": "{{getCart.status}}",
+                          "op": "equals",
+                          "right": "200"
+                        }
+                      ]
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "rules"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Repeat",
+            "description": "Runs everything connected to `loop` up to `count` times (one iteration ends when its steps end or come back to this node), then continues through `done`. With `until` rules it stops as soon as they hold — use it to poll (\"until the order is ready\"). The iteration number is {{<id>.index}} (0-based).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "logic.repeat"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "count": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Most iterations (0 = none). A template that gives a list (e.g. {{getOrders.body.items}}), or a JSON list in text, runs once per element, read as {{item}}.",
+                    "default": 3
+                  },
+                  "until": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/condition"
+                    },
+                    "description": "Stop early when all these rules hold (checked after each iteration).",
+                    "default": []
+                  },
+                  "delayMs": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 600000
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Wait between iterations (ms).",
+                    "default": 0
+                  },
+                  "failIfNotMet": {
+                    "type": "boolean",
+                    "description": "Fail when `until` never held within `count` iterations.",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Set variables",
+            "description": "Sets variables read as {{vars.<name>}} later in the run.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "logic.setVariables"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "assignments": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/assignment"
+                    },
+                    "description": "name = value (template or literal).",
+                    "default": [],
+                    "examples": [
+                      [
+                        {
+                          "name": "email",
+                          "value": "qa+{{$timestamp}}@example.com"
+                        }
+                      ]
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "assignments"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Wait",
+            "description": "Waits a fixed time.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "logic.delay"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "durationMs": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1800000
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Milliseconds to wait.",
+                    "default": 1000
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Check",
+            "description": "Fails the run when an assertion does not hold. Use it for what a tester would verify.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "check.assert"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "assertions": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/assertion"
+                    },
+                    "description": "left, op, right and an optional message.",
+                    "default": [],
+                    "examples": [
+                      [
+                        {
+                          "left": "{{createOrder.status}}",
+                          "op": "equals",
+                          "right": "201",
+                          "message": "The order is created"
+                        }
+                      ]
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "assertions"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "No errors so far",
+            "description": "Fails when the app crashed during the run on the target device; by default also when its requests failed or got a 5xx response, and optionally when it logged error/fatal lines.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "check.noErrors"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "networkFailures": {
+                    "type": "boolean",
+                    "description": "Also fail on failed requests and 5xx responses of the app.",
+                    "default": true
+                  },
+                  "errorLogs": {
+                    "type": "boolean",
+                    "description": "Also fail on error/fatal log lines of the app.",
+                    "default": false
+                  },
+                  "since": {
+                    "enum": [
+                      "previous",
+                      "run"
+                    ],
+                    "description": "'run' (default) or 'previous' step.",
+                    "default": "run"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Run another flow",
+            "description": "Runs another flow (sub-flow) with inputs and continues with its outputs: {{<id>.outputs.<name>}}. The sub-flow uses the same device, app and environment.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "flow.call"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "flowId": {
+                    "type": "string",
+                    "description": "Id of the flow to run."
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    },
+                    "description": "Values for the sub-flow's inputs: { name: template }.",
+                    "default": {},
+                    "examples": [
+                      {
+                        "email": "{{input.email}}"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "flowId"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "End the run",
+            "description": "Ends the run here as passed or failed. Inside a sub-flow it ends that sub-flow: failed makes the calling step fail (its error edge can handle it), passed returns to the caller.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "flow.end"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "passed",
+                      "failed"
+                    ],
+                    "description": "Result.",
+                    "default": "passed"
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "Shown in the report."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Open a link (deep link)",
+            "description": "Opens a URL or deep link on the device.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.openUrl"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "description": "URL or deep link."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "url"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Launch the app",
+            "description": "Starts the app (brings it to the front when it runs).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.launchApp"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string",
+                    "description": "Bundle id / package name of the app. Defaults to the run's app ({{target.appId}}).",
+                    "default": "{{target.appId}}"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Stop the app",
+            "description": "Force-stops the app.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.stopApp"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string",
+                    "description": "Bundle id / package name of the app. Defaults to the run's app ({{target.appId}}).",
+                    "default": "{{target.appId}}"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Restart the app",
+            "description": "Stops and launches the app again.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.restartApp"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string",
+                    "description": "Bundle id / package name of the app. Defaults to the run's app ({{target.appId}}).",
+                    "default": "{{target.appId}}"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Clear app data",
+            "description": "Deletes the app data (fresh install state). Cannot be undone.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.clearData"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string",
+                    "description": "Bundle id / package name of the app. Defaults to the run's app ({{target.appId}}).",
+                    "default": "{{target.appId}}"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Install a build",
+            "description": "Installs an .apk / .ipa / .app from a path on this Mac.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.installApp"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "description": "Absolute path of the build on this Mac."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "file"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Uninstall the app",
+            "description": "Removes the app and its data. Cannot be undone.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.uninstallApp"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string",
+                    "description": "Bundle id / package name of the app. Defaults to the run's app ({{target.appId}}).",
+                    "default": "{{target.appId}}"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Screenshot",
+            "description": "Takes a screenshot and keeps it with the run as evidence.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.screenshot"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Name shown in the report."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Start screen recording",
+            "description": "Starts recording the screen; \"Stop screen recording\" (or the end of the run) saves the video with the run.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.startRecording"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "maxSeconds": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 1,
+                        "maximum": 600
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Stop by itself after this many seconds (platform limits: Android 180, iOS 600).",
+                    "default": 180
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Stop screen recording",
+            "description": "Stops the recording and keeps the video with the run.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.stopRecording"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Name shown in the report."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Dark / light mode",
+            "description": "Switches the system appearance.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.appearance"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "dark",
+                      "light"
+                    ],
+                    "description": "Appearance.",
+                    "default": "dark"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Font size",
+            "description": "Sets the system font scale (1 = default).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.fontScale"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "scale": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0.85,
+                        "maximum": 2
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Scale, 0.85–2.",
+                    "default": 1.3
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Set location",
+            "description": "Moves the simulated location (simulators and emulators).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.location"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "lat": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": -90,
+                        "maximum": 90
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Latitude.",
+                    "default": 41.0082
+                  },
+                  "lon": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": -180,
+                        "maximum": 180
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Longitude.",
+                    "default": 28.9784
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Send a push notification",
+            "description": "Delivers a push payload to the app (iOS simulator).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.pushNotification"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string",
+                    "description": "Bundle id / package name of the app. Defaults to the run's app ({{target.appId}}).",
+                    "default": "{{target.appId}}"
+                  },
+                  "payload": {
+                    "description": "APNs payload.",
+                    "default": {
+                      "aps": {
+                        "alert": {
+                          "title": "Dürbün",
+                          "body": "Test notification"
+                        }
+                      }
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Type text",
+            "description": "Types into the focused field (Android).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.inputText"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Text to type."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "text"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Press a key",
+            "description": "Presses a hardware or system key (Android).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.keyEvent"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "enum": [
+                      "back",
+                      "home",
+                      "recents",
+                      "enter",
+                      "delete",
+                      "menu",
+                      "power",
+                      "volume-up",
+                      "volume-down"
+                    ],
+                    "description": "Key.",
+                    "default": "back"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Clean status bar",
+            "description": "Shows a clean status bar for screenshots, or resets it (iOS simulator).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.statusBar"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "clean",
+                      "reset"
+                    ],
+                    "description": "clean or reset.",
+                    "default": "clean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "System animations",
+            "description": "Turns system animations on or off (Android).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.animations"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Animations on.",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Wait for an app request",
+            "description": "Waits until the app under test makes a matching request and it finishes, then outputs it like an HTTP request step (status, headers, body…). Needs the app's network capture (Dürbün SDK).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "wait.network"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "*",
+                      "GET",
+                      "POST",
+                      "PUT",
+                      "PATCH",
+                      "DELETE",
+                      "HEAD",
+                      "OPTIONS"
+                    ],
+                    "description": "HTTP method.",
+                    "default": "*"
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "URL pattern."
+                  },
+                  "match": {
+                    "enum": [
+                      "contains",
+                      "exact",
+                      "glob",
+                      "regex"
+                    ],
+                    "description": "How `url` matches.",
+                    "default": "contains"
+                  },
+                  "status": {
+                    "type": "string",
+                    "pattern": "^\\s*$|^\\s*(\\d[xX]{2}|\\d{3}(\\s*-\\s*\\d{3})?)(\\s*,\\s*(\\d[xX]{2}|\\d{3}(\\s*-\\s*\\d{3})?))*\\s*$|\\{\\{",
+                    "description": "Only responses with this status: '2xx', '200,201' (empty = any, failed requests included).",
+                    "default": ""
+                  },
+                  "timeoutMs": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 100,
+                        "maximum": 1800000
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Give up after this many milliseconds.",
+                    "default": 30000
+                  },
+                  "since": {
+                    "enum": [
+                      "previous",
+                      "run",
+                      "now"
+                    ],
+                    "description": "Which events count: 'previous' (default) also catches what happened while the previous step ran (e.g. the request a deep link caused), 'run' anything since the run started, 'now' only what happens after this step starts.",
+                    "default": "previous"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "url"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Wait for a log line",
+            "description": "Waits until a matching log line appears on the target device (device logs work without the SDK).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "wait.log"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Text the line contains (or a regex when `regex` is on)."
+                  },
+                  "regex": {
+                    "type": "boolean",
+                    "description": "Treat `text` as a regular expression; group 1 becomes {{<id>.match}}, every group {{<id>.groups}}.",
+                    "default": false
+                  },
+                  "level": {
+                    "enum": [
+                      "verbose",
+                      "debug",
+                      "info",
+                      "warn",
+                      "error",
+                      "fatal"
+                    ],
+                    "description": "Lowest level that counts.",
+                    "default": "verbose"
+                  },
+                  "tag": {
+                    "type": "string",
+                    "description": "Only this tag (exact, case-insensitive)."
+                  },
+                  "appOnly": {
+                    "type": "boolean",
+                    "description": "Only lines of the run's app.",
+                    "default": true
+                  },
+                  "timeoutMs": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 100,
+                        "maximum": 1800000
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Give up after this many milliseconds.",
+                    "default": 30000
+                  },
+                  "since": {
+                    "enum": [
+                      "previous",
+                      "run",
+                      "now"
+                    ],
+                    "description": "Which events count: 'previous' (default) also catches what happened while the previous step ran (e.g. the request a deep link caused), 'run' anything since the run started, 'now' only what happens after this step starts.",
+                    "default": "previous"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "text"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Wait for an app event",
+            "description": "Waits for a custom event the app sends with the Dürbün SDK (Durbun.event(name, props)).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "wait.event"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Event name."
+                  },
+                  "timeoutMs": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 100,
+                        "maximum": 1800000
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Give up after this many milliseconds.",
+                    "default": 30000
+                  },
+                  "since": {
+                    "enum": [
+                      "previous",
+                      "run",
+                      "now"
+                    ],
+                    "description": "Which events count: 'previous' (default) also catches what happened while the previous step ran (e.g. the request a deep link caused), 'run' anything since the run started, 'now' only what happens after this step starts.",
+                    "default": "previous"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Add a mock",
+            "description": "Adds a mock rule the app's SDK applies to matching requests: respond with a fake response, add delay, or fail. Removed when the run ends unless `keep` is on. Needs the Dürbün SDK in the app.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "mock.add"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Rule name."
+                  },
+                  "method": {
+                    "enum": [
+                      "*",
+                      "GET",
+                      "POST",
+                      "PUT",
+                      "PATCH",
+                      "DELETE",
+                      "HEAD",
+                      "OPTIONS"
+                    ],
+                    "description": "HTTP method.",
+                    "default": "*"
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "URL pattern."
+                  },
+                  "match": {
+                    "enum": [
+                      "contains",
+                      "exact",
+                      "glob",
+                      "regex"
+                    ],
+                    "description": "How `url` matches.",
+                    "default": "contains"
+                  },
+                  "action": {
+                    "enum": [
+                      "respond",
+                      "delay",
+                      "fail"
+                    ],
+                    "description": "'respond' = fake response, 'delay' = slow down the real request, 'fail' = network error.",
+                    "default": "respond"
+                  },
+                  "status": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 100,
+                        "maximum": 599
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Status code (respond).",
+                    "default": 200
+                  },
+                  "headers": {
+                    "$ref": "#/$defs/keyValue",
+                    "description": "Response headers (respond).",
+                    "default": [
+                      [
+                        "Content-Type",
+                        "application/json"
+                      ]
+                    ]
+                  },
+                  "body": {
+                    "type": "string",
+                    "description": "Response body (respond).",
+                    "default": ""
+                  },
+                  "delayMs": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 120000
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "\\{\\{"
+                      }
+                    ],
+                    "description": "Delay in ms.",
+                    "default": 0
+                  },
+                  "error": {
+                    "enum": [
+                      "timeout",
+                      "connection",
+                      "dns",
+                      "tls"
+                    ],
+                    "description": "Error kind (fail).",
+                    "default": "timeout"
+                  },
+                  "appOnly": {
+                    "type": "boolean",
+                    "description": "Apply only to the run's app.",
+                    "default": true
+                  },
+                  "keep": {
+                    "type": "boolean",
+                    "description": "Keep the rule after the run.",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "url"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Turn a mock on/off",
+            "description": "Enables or disables an existing mock rule (by id or name). Restored after the run unless `keep` is on.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "mock.toggle"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "rule": {
+                    "type": "string",
+                    "description": "Rule id or name."
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "On or off.",
+                    "default": true
+                  },
+                  "keep": {
+                    "type": "boolean",
+                    "description": "Keep the change after the run.",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "rule"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Remove a mock",
+            "description": "Removes a mock rule (by id or name) — also one added earlier in this run.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "mock.remove"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "rule": {
+                    "type": "string",
+                    "description": "Rule id or name."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "rule"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Timeline marker",
+            "description": "Adds a marker line to the log timeline of the device, so the run is easy to find in the logs.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "output.marker"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "description": "Marker text.",
+                    "default": "{{run.flowName}}"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Send to Slack",
+            "description": "Posts a message to the team's Slack channel (Settings → Slack), optionally with the run summary so far.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "output.slack"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Message.",
+                    "default": "{{run.flowName}}: {{run.status}}"
+                  },
+                  "includeSummary": {
+                    "type": "boolean",
+                    "description": "Append the steps so far.",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Note",
+            "description": "Writes a line into the run report (e.g. \"Order {{vars.orderId}} created\").",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "output.note"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Text."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "text"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "$ref": "#/$defs/nodeId"
+          },
+          "port": {
+            "enum": [
+              "out",
+              "true",
+              "false",
+              "loop",
+              "done",
+              "error"
+            ],
+            "default": "out",
+            "description": "out (most nodes), true/false (logic.condition), loop/done (logic.repeat), error (every node with input except flow.end)"
+          },
+          "to": {
+            "$ref": "#/$defs/nodeId"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "createdAt": {
+      "type": "number"
+    },
+    "updatedAt": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nodeId": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$",
+      "not": {
+        "enum": [
+          "env",
+          "vars",
+          "input",
+          "target",
+          "trigger",
+          "run",
+          "item",
+          "__proto__",
+          "constructor",
+          "prototype"
+        ]
+      },
+      "description": "Unique node id; templates read its output as {{<id>.<field>}}"
+    },
+    "varName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$",
+      "not": {
+        "enum": [
+          "__proto__",
+          "constructor",
+          "prototype"
+        ]
+      }
+    },
+    "position": {
+      "type": "object",
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "retry": {
+      "type": "object",
+      "required": [
+        "count"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "keyValue": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "prefixItems": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "string"
+          }
+        ],
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "condition": {
+      "type": "object",
+      "required": [
+        "left",
+        "op"
+      ],
+      "properties": {
+        "left": {
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "equals",
+            "notEquals",
+            "contains",
+            "notContains",
+            "startsWith",
+            "endsWith",
+            "matches",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "in",
+            "exists",
+            "notExists",
+            "isEmpty",
+            "isNotEmpty",
+            "isTrue",
+            "isFalse"
+          ]
+        },
+        "right": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            }
+          ],
+          "description": "Template or literal; required except for exists, notExists, isEmpty, isNotEmpty, isTrue and isFalse. For `in`: a comma-separated list ('a, b') or a JSON list (['a', 'b'])."
+        }
+      },
+      "additionalProperties": false
+    },
+    "assertion": {
+      "type": "object",
+      "required": [
+        "left",
+        "op"
+      ],
+      "properties": {
+        "left": {
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "equals",
+            "notEquals",
+            "contains",
+            "notContains",
+            "startsWith",
+            "endsWith",
+            "matches",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "in",
+            "exists",
+            "notExists",
+            "isEmpty",
+            "isNotEmpty",
+            "isTrue",
+            "isFalse"
+          ]
+        },
+        "right": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            }
+          ],
+          "description": "Template or literal; required except for exists, notExists, isEmpty, isNotEmpty, isTrue and isFalse. For `in`: a comma-separated list ('a, b') or a JSON list (['a', 'b'])."
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "extract": {
+      "type": "object",
+      "required": [
+        "name",
+        "from"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/varName"
+        },
+        "from": {
+          "enum": [
+            "body",
+            "header",
+            "status",
+            "bodyText"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "description": "JSON path for body (items[0].id), header name for header"
+        },
+        "regex": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "assignment": {
+      "type": "object",
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/varName"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

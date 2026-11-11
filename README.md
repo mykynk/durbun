@@ -30,10 +30,16 @@ does in one readable, live window. *Dürbün* is Turkish for binoculars.
 - **Mocks.** Answer matching requests with a canned response, add latency or simulate a failure. The SDK
   applies the rules inside the app, so no proxy or certificate is involved.
 - **Performance.** CPU, memory, heap, FPS and jank, requests per second and logs per second.
+- **Flows.** Tests you draw as a graph: requests sent from the Mac, checks, waits on what the app does, mock
+  scenarios and device actions, chained and calling each other as sub-flows (see [Flows](#flows)). Write them
+  by hand, from captured requests, or with your own AI assistant.
 - **Share.** A log line or a request becomes a report your team can read without Dürbün: copy it, save it as
   Markdown, or send it to your team's Slack channel with one click (Settings → Slack). Getting the channel's
   webhook is one click too: [Add to Slack](https://appnify.dev/durbun/slack/). The Flutter in-app panel can
   send it from the phone too.
+- **Backups and sharing.** Your flows, mock rules, environments and settings in one `.durbun` file: share
+  your setup with the team, or back everything up for a new Mac, by hand or automatically into iCloud Drive
+  or any folder (see [Sharing and backups](#sharing-and-backups)).
 - **Device tools.** Screenshots and screen recording, deep links, launch, stop, install and uninstall apps,
   dark mode, font size, location, simulator push notifications, status bar overrides, and buttons your app
   adds itself.
@@ -120,12 +126,65 @@ Not captured:
 
 Each SDK guide has the details, and shows how to report other clients yourself.
 
+## Flows
+
+The **Flows** tab chains what you test by hand into a graph you can run again. Each step is a node; arrows
+decide what runs next, and a step that fails leaves through its error arrow when you draw one.
+
+| Group | Nodes |
+| --- | --- |
+| Start | Run by hand (with inputs), or start by itself when something happens: a crash, a matching or failing request, a log line, an app or a device connecting |
+| Requests | HTTP request from the Mac, with headers, body, timeouts and values picked from the response |
+| Logic | Condition, repeat (a count or a list), set variables, wait, call another flow, end |
+| Checks | Assert rules on any value, no errors in the logs |
+| Wait for the app | A request, a log line or an event from the app, with a time limit |
+| Mocks | Add, switch or remove a mock rule for the scenario; the flow's own rules go when the run ends |
+| Device | Open a link, launch, stop or restart the app, clear its data, install or uninstall, screenshot, screen recording, dark mode, font size, location, push notification, text and keys, status bar, animations |
+| Report | Marker in the logs, note in the run report, Slack message |
+
+- Values flow with templates: `{{login.body.token}}` reads the `login` step's response, `{{env.baseUrl}}` the
+  chosen environment, `{{input.email}}` a run input. The editor completes them as you type.
+- **Environments** (Staging, Production…) hold addresses and keys. Secret values stay on this Mac and are
+  masked in reports.
+- Before a run Dürbün checks what the flow needs (a device, an app, an SDK connection, a tool) and says what
+  is missing; steps that change the device for good (clear data, uninstall) ask first.
+- The run panel shows each step live with its timing, request and response, screenshots and recordings. The
+  last 200 runs are kept.
+- **From captured requests:** pick requests in Network (or **Create a flow from this request…** on one) and
+  Dürbün builds the flow, moves the host into an environment variable and feeds values from one response into
+  the next request.
+- **With your own AI:** Dürbün never calls an AI. **Write with AI** copies a pack (the flow format, every node
+  type, your flows, environment keys and the app's recent requests, without headers, bodies or query values)
+  to paste into the assistant you use. Paste its
+  answer back; Dürbün checks it, shows what is new or changed and imports it. The format is public: see
+  [Flow files](docs/flows/README.md) and [`durbun-flow.schema.json`](docs/flows/durbun-flow.schema.json).
+- Flows are plain JSON files in `~/.durbun/flows`, one per flow, so they also fit in a repository.
+
+Steps that need the SDK (waits on app events, mock rules) say so before the run; device steps work without it.
+
+## Sharing and backups
+
+Dürbün has no cloud, so your work lives in `~/.durbun` on this Mac. A `.durbun` package carries it elsewhere:
+
+- **Share your setup…** (Import / export menu, or **Share with the team…** on a flow): the flows you pick
+  with the sub-flows they call, mock rules, environments, settings, look and log rules, and optionally run
+  history. Secret environment values and the Slack link never go in.
+- **Back up everything…**: one file for a new Mac. Secret values and the Slack link go in only when you set a
+  passphrase, encrypted (AES-256-GCM, key from scrypt); without one they are left out.
+- **Settings → Backup** writes a backup into a folder you choose after changes (at most once an hour) and on a
+  schedule, keeping the newest ones. A synced folder such as iCloud Drive carries them to your other Mac; there,
+  **Restore…** opens one. The passphrase for automatic backups is kept on this Mac only.
+- Opening a package (**Import a file…**, or drop it on the window) shows what is new, what already exists and
+  what differs, and lets you replace, keep both or skip. Nothing is overwritten before you choose.
+
 ## Privacy
 
 - Dürbün sends nothing off your Mac on its own: no analytics, no telemetry, no automatic update check.
   Crash dumps stay on the Mac.
 - Requests leave the Mac only when you ask: **Check for Updates** (one call to the GitHub API),
-  resending a captured request (to that request's own host) and **Send to Slack** (to the webhook you set).
+  resending a captured request (to that request's own host), **Send to Slack** (to the webhook you set) and
+  flows (their HTTP and Slack steps go where the flow says; a flow set to start on an event runs only while
+  Dürbün is open). Backups are written to the folder you choose; syncing it is up to that folder's service.
 - The server listens on `127.0.0.1` only. Turn on **LAN** in Settings (or pass `--lan`) to let devices on
   the same network reach the SDK port.
 - The SDKs contact no other service: what they capture goes only over the Dürbün connection (see
@@ -155,6 +214,10 @@ The SDK connection itself is not paired or encrypted yet:
   `slack.json` in its data folder (readable only by your user) and never shows it again. The Flutter panel's
   webhook comes from your build command (`--dart-define=DURBUN_SLACK_WEBHOOK`) and is compiled into that
   build, so whoever has the build can find it.
+- Environment secrets and the backup passphrase are kept in the data folder, readable only by your user.
+  Shared packages never contain them; backups contain them only encrypted with your passphrase. A flow runs
+  the requests and device actions written in it, so open flows from people you trust, and read what an AI
+  wrote before you run it.
 
 Pairing between the SDKs and the Mac app is planned.
 
@@ -202,7 +265,7 @@ node dist/durbun.mjs [--port 9750] [--sdk-port 9751] [--demo] [--no-open] [--lan
                      [--data-dir ~/.durbun] [--ui-dir PATH] [--verbose]
 ```
 
-Settings and mock rules live in `~/.durbun`.
+Settings, mock rules, flows, environments and run history live in `~/.durbun`.
 
 ## Build the Mac app
 
@@ -225,7 +288,9 @@ state, single-instance lock and logs), `DURBUN_DEMO=1` or `DURBUN_DEBUG=1`.
 
 1. Quit Dürbün (⌘Q) and move it from Applications to the Trash.
 2. To remove its data as well, delete:
-   - `~/.durbun`: settings (`settings.json`), mock rules (`mocks.json`) and temporary files.
+   - `~/.durbun`: settings (`settings.json`), mock rules (`mocks.json`), flows (`flows/`), run history
+     (`flow-runs/`), environments (`environments.json`), backup settings (`backup.json`) and temporary files.
+     Backups you wrote into another folder stay there.
    - `~/Library/Application Support/Dürbün`: window state, interface preferences, the diagnostic log and
      crash dumps.
 3. Remove the SDK packages from your apps.
@@ -243,7 +308,7 @@ npm run app:test     # the Mac app
 |---|---|
 | `packages/protocol` | Data types and commands shared by the server, the interface and the SDKs |
 | `packages/server` | Device drivers (adb, simctl, devicectl, idevicesyslog), SDK connections, the Dart VM Service bridge, HTTP/WebSocket API, demo, CLI |
-| `packages/ui` | The React interface: Logs, Network, Mocks, Performance, Device ([structure](packages/ui/src/README-ui.md)) |
+| `packages/ui` | The React interface: Logs, Network, Mocks, Performance, Device, Flows ([structure](packages/ui/src/README-ui.md)) |
 | `apps/desktop` | The Mac app (Electron) |
 | `sdks/*` | The Flutter, Android, iOS and React Native SDKs |
 | `SPEC.md` | Product and engineering specification |

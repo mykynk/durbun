@@ -8,6 +8,29 @@ All notable changes to Dürbün are listed here. The format follows
 
 ### Added
 
+- **Flows.** A new tab for tests you draw as a graph: HTTP requests sent from the Mac, conditions, loops and
+  variables, checks, waits on what the app does (a request, a log line, an event), mock rules switched on for a
+  scenario, device actions (open a link, launch, clear data, screenshot, recording, dark mode, location…),
+  notes, markers and Slack reports. Flows call each other as sub-flows with inputs and outputs, pick values
+  from earlier steps with `{{templates}}`, and run against the device and app you choose, with environments
+  (Staging, Production…) whose secret values stay on the Mac. Each run keeps its steps, timings, responses and
+  screenshots in a run history. A flow can also start by itself when something happens (a crash, a failing
+  request, a log line, an app connecting) while Dürbün is open.
+- Make a flow from captured requests (Network → **Create a flow from this request…**, or several at once): the
+  host becomes an environment variable and values from one response feed the next request.
+- **Flows with your own AI.** Dürbün never calls an AI. **Write with AI** copies a pack (the flow format, every
+  node type, your flows, environment keys and the app's recent requests without headers, bodies or query
+  values) to paste into the assistant you use;
+  paste its answer back and Dürbün checks it, shows what is new or changed, and imports it. The flow format is
+  public: `docs/flows/durbun-flow.schema.json`.
+- **Share your setup.** Flows (with the sub-flows they call), mock rules, environments, settings and look and
+  log rules go into one `.durbun` file for your team. Secret values never go in.
+- **Backups.** Everything Dürbün keeps in one `.durbun` file for a new Mac, by hand or automatically into a
+  folder you choose (iCloud Drive, Dropbox…; Settings → Backup). Secret values go in only encrypted with a
+  passphrase (AES-256-GCM). Opening a package shows what is new, what already exists and what differs, and asks
+  whether to replace, keep both or skip.
+- **Import a file** opens any Dürbün file by its contents: session recordings, packages and flows; drop them on
+  the window too.
 - **Send to Slack.** Share a log line or a request with your team's Slack channel in one click. The Mac app
   keeps one incoming webhook (Settings → Slack, stored in `slack.json` in the data folder, never shown again)
   and posts only when someone clicks Send; log lines get a Share dialog of their own (context menu, detail

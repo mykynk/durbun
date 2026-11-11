@@ -31,10 +31,16 @@ ve canlı bir pencerede gösterir.
 - **Mock'lar.** Eşleşen isteklere hazır yanıt verme, gecikme ekleme veya hata simüle etme. Kuralları SDK
   uygulamanın içinde uygular; proxy ya da sertifika gerekmez.
 - **Performans.** CPU, bellek, heap, FPS ve takılmalar, saniyede istek ve saniyede log.
+- **Akışlar.** Graf olarak çizdiğiniz testler: Mac'ten gönderilen istekler, kontroller, uygulamanın
+  yaptıklarını bekleme, mock senaryoları ve cihaz işlemleri; birbirine zincirlenir, birbirini alt akış olarak
+  çağırır (bkz. [Akışlar](#akışlar)). Elle, kayıtlı isteklerden ya da kendi yapay zekâ asistanınızla yazın.
 - **Paylaşma.** Bir log satırı ya da istek, ekibinizin Dürbün olmadan okuyabileceği bir rapora dönüşür:
   kopyalayın, Markdown olarak kaydedin ya da tek tıkla ekibinizin Slack kanalına gönderin (Ayarlar → Slack).
   Kanalın webhook adresini almak da tek tık: [Slack'e ekle](https://appnify.dev/durbun/slack/?lang=tr).
   Flutter uygulama içi paneli de telefondan gönderebilir.
+- **Yedekleme ve paylaşım.** Akışlarınız, mock kurallarınız, ortamlarınız ve ayarlarınız tek bir `.durbun`
+  dosyasında: kurulumunuzu takımla paylaşın ya da yeni bir Mac için her şeyi yedekleyin; elle ya da iCloud
+  Drive'a veya istediğiniz klasöre otomatik (bkz. [Paylaşım ve yedekleme](#paylaşım-ve-yedekleme)).
 - **Cihaz araçları.** Ekran görüntüsü ve ekran kaydı, deep link, uygulama başlatma, durdurma, kurma ve
   kaldırma, koyu mod, yazı boyutu, konum, simülatöre push bildirimi, durum çubuğu ve uygulamanın kendi
   eklediği butonlar.
@@ -122,13 +128,68 @@ Yakalanmayanlar:
 
 Ayrıntılar ve diğer istemcileri kendiniz nasıl bildireceğiniz her SDK'nın kılavuzunda.
 
+## Akışlar
+
+**Akışlar** sekmesi elle test ettiklerinizi tekrar çalıştırılabilen bir grafa dönüştürür. Her adım bir
+düğümdür; oklar sırada neyin çalışacağını belirler, bir hata oku çizdiyseniz başarısız adım oradan devam eder.
+
+| Grup | Düğümler |
+| --- | --- |
+| Başlangıç | Elle çalıştırma (girdilerle) ya da bir şey olunca kendiliğinden başlama: çökme, eşleşen ya da başarısız istek, log satırı, uygulamanın ya da cihazın bağlanması |
+| İstekler | Mac'ten HTTP isteği; başlıklar, gövde, zaman aşımları ve yanıttan alınan değerlerle |
+| Mantık | Koşul, tekrar (sayı ya da liste), değişken atama, bekleme, başka akışı çağırma, bitiş |
+| Kontroller | Herhangi bir değer üzerinde kurallar, loglarda hata olmaması |
+| Uygulamayı bekleme | Uygulamadan bir istek, log satırı ya da event; süre sınırıyla |
+| Mock'lar | Senaryo için mock kuralı ekleme, açıp kapama ya da kaldırma; akışın kendi kuralları çalışma bitince kalkar |
+| Cihaz | Link açma, uygulamayı başlatma, durdurma ya da yeniden başlatma, verisini silme, kurma ya da kaldırma, ekran görüntüsü, ekran kaydı, koyu mod, yazı boyutu, konum, push bildirimi, metin ve tuşlar, durum çubuğu, animasyonlar |
+| Rapor | Loglara işaret, çalışma raporuna not, Slack mesajı |
+
+- Değerler şablonlarla akar: `{{login.body.token}}` `login` adımının yanıtını, `{{env.baseUrl}}` seçili
+  ortamı, `{{input.email}}` bir çalışma girdisini okur. Editör yazarken tamamlar.
+- **Ortamlar** (Staging, Production…) adresleri ve anahtarları tutar. Gizli değerler bu Mac'te kalır ve
+  raporlarda maskelenir.
+- Çalıştırmadan önce Dürbün akışın neye ihtiyacı olduğunu (cihaz, uygulama, SDK bağlantısı, araç) denetler ve
+  eksik olanı söyler; cihazı kalıcı olarak değiştiren adımlar (veri silme, kaldırma) önce sorar.
+- Çalıştırma paneli her adımı canlı olarak süresi, isteği ve yanıtı, ekran görüntüleri ve kayıtlarıyla
+  gösterir. Son 200 çalıştırma saklanır.
+- **Kayıtlı isteklerden:** Ağ'da istekleri seçin (ya da tek bir istekte **Bu istekten akış oluştur…**);
+  Dürbün akışı kurar, adresi bir ortam değişkenine taşır ve bir yanıttaki değerleri sonraki isteğe bağlar.
+- **Kendi yapay zekânızla:** Dürbün hiçbir yapay zekâya istek atmaz. **Yapay zekâyla yaz**, kullandığınız
+  asistana yapıştırmanız için bir paket kopyalar (akış biçimi, tüm düğüm türleri, akışlarınız, ortam anahtarları
+  ve uygulamanın son istekleri; başlıklar, gövdeler ve sorgu değerleri olmadan). Cevabını geri yapıştırın; Dürbün denetler, neyin yeni ya da değişmiş olduğunu gösterir
+  ve içe aktarır. Biçim herkese açık: [Akış dosyaları](docs/flows/README.md) (İngilizce) ve
+  [`durbun-flow.schema.json`](docs/flows/durbun-flow.schema.json).
+- Akışlar `~/.durbun/flows` içinde, her akış için bir düz JSON dosyasıdır; bir repoya da koyabilirsiniz.
+
+SDK gerektiren adımlar (uygulama event'lerini bekleme, mock kuralları) bunu çalıştırmadan önce söyler; cihaz
+adımları SDK'sız çalışır.
+
+## Paylaşım ve yedekleme
+
+Dürbün'ün bulutu yok; yaptıklarınız bu Mac'te `~/.durbun` içinde durur. Bir `.durbun` paketi onları başka
+yere taşır:
+
+- **Kurulumu paylaş…** (İçe / dışa aktar menüsü ya da bir akışta **Takımla paylaş…**): seçtiğiniz akışlar ve
+  çağırdıkları alt akışlar, mock kuralları, ortamlar, ayarlar, görünüm ve log kuralları, isterseniz
+  çalıştırma geçmişi. Gizli ortam değerleri ve Slack bağlantısı asla girmez.
+- **Her şeyi yedekle…**: yeni bir Mac için tek dosya. Gizli değerler ve Slack bağlantısı yalnızca parola
+  verirseniz şifreli girer (AES-256-GCM, anahtar scrypt ile); parola yoksa dışarıda kalır.
+- **Ayarlar → Yedekleme**, seçtiğiniz klasöre değişikliklerden sonra (en fazla saatte bir) ve belirlediğiniz
+  aralıkta yedek yazar, en yenilerini tutar. iCloud Drive gibi eşitlenen bir klasör yedekleri diğer Mac'inize
+  taşır; orada **Geri yükle…** birini açar. Otomatik yedeklerin parolası yalnızca bu Mac'te saklanır.
+- Bir paketi açmak (**Dosya içe aktar…** ya da pencereye bırakmak) neyin yeni olduğunu, neyin zaten var
+  olduğunu ve neyin farklı olduğunu gösterir; yerine koymayı, ikisini de tutmayı ya da atlamayı seçersiniz.
+  Siz seçmeden hiçbir şeyin üzerine yazılmaz.
+
 ## Gizlilik
 
 - Dürbün kendiliğinden Mac'in dışına hiçbir şey göndermez: analitik, telemetri ya da otomatik güncelleme
   denetimi yoktur. Çökme dökümleri Mac'te kalır.
 - Mac'ten dışarı istek yalnızca siz istediğinizde çıkar: **Güncellemeleri Denetle** (GitHub API'ye tek
-  istek), yakalanmış bir isteği yeniden göndermek (isteğin kendi adresine) ve **Slack'e gönder** (ayarladığınız
-  webhook'a).
+  istek), yakalanmış bir isteği yeniden göndermek (isteğin kendi adresine), **Slack'e gönder** (ayarladığınız
+  webhook'a) ve akışlar (HTTP ve Slack adımları akışta yazan yere gider; bir olayda kendiliğinden başlayan akış
+  yalnızca Dürbün açıkken çalışır). Yedekler seçtiğiniz klasöre yazılır; o klasörü eşitlemek klasörün
+  servisine kalmıştır.
 - Sunucu yalnızca `127.0.0.1`'i dinler. Aynı ağdaki cihazların SDK portuna bağlanması için Ayarlar'da
   **LAN**'ı açın (ya da `--lan` verin).
 - SDK'lar başka hiçbir servise bağlanmaz: yakaladıkları yalnızca Dürbün bağlantısından gider (bkz.
@@ -157,6 +218,10 @@ SDK bağlantısında henüz eşleşme ve şifreleme yok:
   klasöründeki `slack.json` dosyasında (yalnızca sizin kullanıcınız okuyabilir) tutar ve bir daha göstermez.
   Flutter panelinin webhook'u derleme komutunuzdan gelir (`--dart-define=DURBUN_SLACK_WEBHOOK`) ve o derlemenin
   içine gömülür; derlemeye sahip olan onu bulabilir.
+- Ortamların gizli değerleri ve yedek parolası veri klasöründe, yalnızca sizin kullanıcınızın okuyabileceği
+  dosyalarda tutulur. Paylaşılan paketlerde asla bulunmaz; yedeklerde yalnızca parolanızla şifrelenmiş olarak
+  bulunur. Bir akış içinde yazan istekleri ve cihaz işlemlerini çalıştırır; başkalarından gelen akışları
+  güvendiğiniz kişilerden açın, yapay zekânın yazdığını çalıştırmadan önce okuyun.
 
 SDK'larla Mac uygulaması arasında eşleşme planlanıyor.
 
@@ -204,7 +269,7 @@ node dist/durbun.mjs [--port 9750] [--sdk-port 9751] [--demo] [--no-open] [--lan
                      [--data-dir ~/.durbun] [--ui-dir YOL] [--verbose]
 ```
 
-Ayarlar ve mock kuralları `~/.durbun` içinde saklanır.
+Ayarlar, mock kuralları, akışlar, ortamlar ve çalıştırma geçmişi `~/.durbun` içinde saklanır.
 
 ## Mac uygulamasını derlemek
 
@@ -227,7 +292,9 @@ tek kopya kilidi ve günlükler), `DURBUN_DEMO=1`, `DURBUN_DEBUG=1`.
 
 1. Dürbün'ü kapatın (⌘Q) ve Uygulamalar klasöründen Çöp Sepeti'ne taşıyın.
 2. Verilerini de silmek için:
-   - `~/.durbun`: ayarlar (`settings.json`), mock kuralları (`mocks.json`) ve geçici dosyalar.
+   - `~/.durbun`: ayarlar (`settings.json`), mock kuralları (`mocks.json`), akışlar (`flows/`), çalıştırma
+     geçmişi (`flow-runs/`), ortamlar (`environments.json`), yedekleme ayarları (`backup.json`) ve geçici
+     dosyalar. Başka bir klasöre yazdığınız yedekler orada kalır.
    - `~/Library/Application Support/Dürbün`: pencere durumu, arayüz tercihleri, tanılama günlüğü ve çökme
      dökümleri.
 3. Uygulamalarınıza eklediğiniz SDK paketlerini kaldırın.
@@ -245,7 +312,7 @@ npm run app:test     # Mac uygulaması
 |---|---|
 | `packages/protocol` | Sunucu, arayüz ve SDK'ların paylaştığı veri tipleri ve komutlar |
 | `packages/server` | Cihaz sürücüleri (adb, simctl, devicectl, idevicesyslog), SDK bağlantıları, Dart VM Service köprüsü, HTTP/WebSocket API, demo, CLI |
-| `packages/ui` | React arayüzü: Loglar, Ağ, Mock'lar, Performans, Cihaz ([yapı](packages/ui/src/README-ui.md)) |
+| `packages/ui` | React arayüzü: Loglar, Ağ, Mock'lar, Performans, Cihaz, Akışlar ([yapı](packages/ui/src/README-ui.md)) |
 | `apps/desktop` | Mac uygulaması (Electron) |
 | `sdks/*` | Flutter, Android, iOS ve React Native SDK'ları |
 | `SPEC.md` | Ürün ve mühendislik şartnamesi |
