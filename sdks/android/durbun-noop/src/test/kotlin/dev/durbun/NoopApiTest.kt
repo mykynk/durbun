@@ -28,7 +28,7 @@ class NoopApiTest {
         Durbun.removeAction("app.staging")
         assertFalse(Durbun.isStarted)
         assertFalse(Durbun.isConnected)
-        assertEquals("0.1.0", Durbun.VERSION)
+        assertEquals("0.2.0", Durbun.VERSION)
         assertEquals(Level.ERROR, Level.fromPriority(6))
         assertEquals(9751, DurbunOptions().port)
         assertNull(DurbunOptions().host)

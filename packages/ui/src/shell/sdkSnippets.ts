@@ -10,13 +10,13 @@ declare const __DURBUN_RN_VERSION__: string;
 declare const __DURBUN_SDK_VERSION__: string;
 
 /** Published SDK version (Flutter, Android, iOS) at build time. */
-export const SDK_VERSION: string = typeof __DURBUN_SDK_VERSION__ === 'string' && __DURBUN_SDK_VERSION__ ? __DURBUN_SDK_VERSION__ : '0.1.0';
+export const SDK_VERSION: string = typeof __DURBUN_SDK_VERSION__ === 'string' && __DURBUN_SDK_VERSION__ ? __DURBUN_SDK_VERSION__ : '0.2.0';
 export const REPO_URL = 'https://github.com/mykynk/durbun';
 /** Maven Central group of the Android SDK (sdks/android publishing). */
 export const MAVEN_GROUP = 'io.github.mykynk';
 
 /** `@durbun/react-native` version at build time → `npm pack` file name. */
-const RN_VERSION: string = typeof __DURBUN_RN_VERSION__ === 'string' && __DURBUN_RN_VERSION__ ? __DURBUN_RN_VERSION__ : '0.1.0';
+const RN_VERSION: string = typeof __DURBUN_RN_VERSION__ === 'string' && __DURBUN_RN_VERSION__ ? __DURBUN_RN_VERSION__ : '0.2.0';
 export const RN_TGZ = `durbun-react-native-${RN_VERSION}.tgz`;
 
 const c = (lang: Lang, tr: string, en: string) => (lang === 'tr' ? tr : en);

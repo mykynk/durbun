@@ -8,7 +8,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'Durbun'
-  s.version          = '0.1.0'
+  s.version          = '0.2.0'
   s.summary          = 'Streams an iOS app\'s logs, URLSession traffic, crashes and metrics to the Dürbün desktop app.'
   s.description      = <<-DESC
 Dürbün iOS SDK: sends print/stdout/stderr and os_log lines, URLSession traffic (headers, bodies, timings),

@@ -27,11 +27,11 @@ not the folder** (Metro cannot resolve `react-native` through a symlinked folder
 ```sh
 # 1) In your clone of the Dürbün repository: build the package (prepack builds it automatically)
 cd /path/to/durbun/sdks/js
-npm pack                      # → durbun-react-native-0.1.0.tgz
+npm pack                      # → durbun-react-native-0.2.0.tgz
 
 # 2) In your app
-npm install /path/to/durbun/sdks/js/durbun-react-native-0.1.0.tgz
-# or: yarn add file:/path/to/durbun/sdks/js/durbun-react-native-0.1.0.tgz
+npm install /path/to/durbun/sdks/js/durbun-react-native-0.2.0.tgz
+# or: yarn add file:/path/to/durbun/sdks/js/durbun-react-native-0.2.0.tgz
 ```
 
 ## Start it in `index.js`

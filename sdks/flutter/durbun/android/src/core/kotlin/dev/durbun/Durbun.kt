@@ -28,7 +28,7 @@ import dev.durbun.internal.android.AndroidRuntime
  */
 object Durbun {
     /** SDK version reported to the desktop. */
-    const val VERSION: String = "0.1.0"
+    const val VERSION: String = "0.2.0"
 
     private const val TAG = "Durbun"
 

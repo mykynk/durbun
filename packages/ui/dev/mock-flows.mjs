@@ -168,7 +168,7 @@ function packageOf(req) {
     version: 1,
     kind,
     createdAt: now(),
-    createdBy: { app: 'Dürbün', version: '0.1.0', ...(kind === 'backup' ? { host: 'Mock Mac' } : {}) },
+    createdBy: { app: 'Dürbün', version: '0.2.0', ...(kind === 'backup' ? { host: 'Mock Mac' } : {}) },
     contents,
     ...(req.name ? { name: req.name } : {}),
     ...(req.note ? { note: req.note } : {}),

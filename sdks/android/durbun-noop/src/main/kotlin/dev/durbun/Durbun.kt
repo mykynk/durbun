@@ -13,7 +13,7 @@ import android.content.Context
  */
 object Durbun {
     /** SDK version (kept identical to the `durbun` module). */
-    const val VERSION: String = "0.1.0"
+    const val VERSION: String = "0.2.0"
 
     @JvmStatic
     @JvmOverloads

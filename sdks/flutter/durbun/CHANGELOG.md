@@ -1,3 +1,13 @@
+## 0.2.0
+
+- In-app panel: **Send to Slack** on the request and log Share sheets posts
+  to your team's channel from the phone itself, without the desktop. The
+  webhook comes from `DurbunOptions.slackWebhook` or
+  `--dart-define=DURBUN_SLACK_WEBHOOK=…`; without one there is no Slack
+  button. Keep the URL out of the repository: it is compiled into the build.
+- Log lines can be shared through the system share sheet too.
+- Works with Dürbün 0.2.0 on the Mac (Flows, shared packages, backups).
+
 ## 0.1.0
 
 First public release.

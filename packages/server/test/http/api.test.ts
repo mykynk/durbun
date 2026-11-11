@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SessionExport } from '@durbun/protocol';
 import { bodyFileName, importLabel, safeUploadName, validateSessionExport } from '../../src/http/api';
+import { SERVER_VERSION } from '../../src/version';
 import { sampleApp, sampleDevice, sampleNetwork, startTestApp, type TestApp } from './fakes';
 
 let t: TestApp | undefined;
@@ -35,7 +36,7 @@ describe('REST API', () => {
     const res = await fetch(`${t.base}/api/health`);
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(await res.json()).toEqual({ ok: true, name: 'durbun', version: '0.1.0' });
+    expect(await res.json()).toEqual({ ok: true, name: 'durbun', version: SERVER_VERSION });
   });
 
   it('GET /api/network/:id returns the detail with bodies; unknown ids are 404', async () => {
@@ -121,7 +122,7 @@ describe('REST API', () => {
     expect(all.headers.get('content-disposition')).toMatch(/attachment; filename="durbun-\d{4}-\d{2}-\d{2}-\d{6}\.har"/);
     const har = (await all.json()) as { log: { version: string; creator: unknown; entries: { request: { method: string } }[] } };
     expect(har.log.version).toBe('1.2');
-    expect(har.log.creator).toEqual({ name: 'Dürbün', version: '0.1.0' });
+    expect(har.log.creator).toEqual({ name: 'Dürbün', version: SERVER_VERSION });
     expect(har.log.entries.map((e) => e.request.method)).toEqual(['POST', 'GET']);
 
     const one = await fetch(`${t.base}/api/har`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: ['app:1:7', 'missing'] }) });

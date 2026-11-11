@@ -41,7 +41,7 @@ or in `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  durbun: ^0.1.0
+  durbun: ^0.2.0
 ```
 
 To use the latest unreleased code, depend on the repository instead:

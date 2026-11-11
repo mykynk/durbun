@@ -1,6 +1,6 @@
 {
   "name": "durbun",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Dürbün — live logs, network and performance inspector for Android and iOS devices",
   "type": "module",

@@ -5,7 +5,7 @@
 // src/core/java and core-rules.pro. Edit the original and run `dart run tool/sync_native.dart`
 // (test/native_sync_test.dart fails when the copy drifts).
 group = "dev.durbun.flutter"
-version = "0.1.0"
+version = "0.2.0"
 
 buildscript {
     ext.kotlin_version = "2.2.20"

@@ -2,7 +2,7 @@ name: durbun
 description: >-
   Network, log and crash inspector for Flutter apps: an in-app panel on the
   phone and live streaming to the Dürbün Mac app, with mocks and native capture.
-version: 0.1.0
+version: 0.2.0
 homepage: https://github.com/mykynk/durbun
 repository: https://github.com/mykynk/durbun/tree/HEAD/sdks/flutter/durbun
 issue_tracker: https://github.com/mykynk/durbun/issues

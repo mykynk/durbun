@@ -54,7 +54,7 @@ export class MahalleApp extends DemoApp {
         version: '5.12.0',
         build: '5120',
         processName: 'com.mykynk.mahalle',
-        sdk: { name: 'durbun-android', version: '0.1.0', platform: 'android' },
+        sdk: { name: 'durbun-android', version: '0.2.0', platform: 'android' },
         source: 'okhttp',
         capabilities: ['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands'],
         device: { model: 'Pixel 8', name: 'Pixel 8', osVersion: '15', apiLevel: 35, manufacturer: 'Google' },

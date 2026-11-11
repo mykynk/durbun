@@ -32,10 +32,10 @@ same API with empty bodies, for release builds). `mavenCentral()` is declared by
 
 ```kotlin
 dependencies {
-    debugImplementation("io.github.mykynk:durbun:0.1.0")        // the real SDK, debug builds only
-    releaseImplementation("io.github.mykynk:durbun-noop:0.1.0") // same API with empty bodies in release
+    debugImplementation("io.github.mykynk:durbun:0.2.0")        // the real SDK, debug builds only
+    releaseImplementation("io.github.mykynk:durbun-noop:0.2.0") // same API with empty bodies in release
     // Flutter host apps also have a "profile" build type:
-    // "profileImplementation"("io.github.mykynk:durbun-noop:0.1.0")
+    // "profileImplementation"("io.github.mykynk:durbun-noop:0.2.0")
 }
 ```
 

@@ -4,7 +4,7 @@ All notable changes to Dürbün are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org). The Mac app, the server and every SDK share one version.
 
-## [Unreleased]
+## [0.2.0] - 2026-11-12
 
 ### Added
 
@@ -69,5 +69,6 @@ First public release.
 - Android: `io.github.mykynk:durbun` and the no-op `durbun-noop` (OkHttp interceptor, Timber, metrics).
 - React Native / JavaScript: `@durbun/react-native` (fetch / XMLHttpRequest, console, errors).
 
-[Unreleased]: https://github.com/mykynk/durbun/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mykynk/durbun/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mykynk/durbun/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mykynk/durbun/releases/tag/v0.1.0

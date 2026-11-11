@@ -1,6 +1,6 @@
 {
   "name": "@durbun/react-native",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Dürbün SDK for React Native and JavaScript apps — streams logs, network and errors to the Dürbün desktop app",
   "license": "MIT",
   "author": "Muhammed Yusuf Kaynak (https://github.com/mykynk)",

@@ -4,6 +4,7 @@ import WsClient from 'ws';
 import { Durbun } from '../src/index.js';
 import { FakeDesktop, sleep, waitFor } from './helpers/fakeDesktop.js';
 import { closedPort } from './helpers/httpServer.js';
+import { SDK_VERSION } from '../src/version.js';
 
 let desktop: FakeDesktop | undefined;
 let extra: FakeDesktop | undefined;
@@ -32,7 +33,7 @@ describe('handshake', () => {
     expect(hello).toMatchObject({
       type: 'hello',
       protocol: 1,
-      sdk: { name: '@durbun/react-native', version: '0.1.0', platform: 'js' },
+      sdk: { name: '@durbun/react-native', version: SDK_VERSION, platform: 'js' },
       app: { id: 'com.mykynk.pati', name: 'Pati', version: '1.4.0', pid: process.pid },
       device: { platform: 'other' },
     });

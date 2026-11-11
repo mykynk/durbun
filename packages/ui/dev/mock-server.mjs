@@ -59,7 +59,7 @@ let settings = {
 };
 const server = () => ({
   name: 'durbun',
-  version: '0.1.0',
+  version: '0.2.0',
   protocol: 1,
   ports: { http: PORT, sdk: 9751 },
   startedAt,
@@ -162,7 +162,7 @@ function baseApps() {
       id: 'app:1',
       sessionKey: 's-pati-old',
       deviceId: PIXEL,
-      sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter' },
+      sdk: { name: 'durbun', version: '0.2.0', platform: 'flutter' },
       app: { name: 'Pati', id: 'com.mykynk.pati', version: '1.4.1', build: '41', pid: 11873, processName: 'com.mykynk.pati', debug: true },
       transport: 'adb-reverse',
       connected: false,
@@ -176,7 +176,7 @@ function baseApps() {
       id: 'app:2',
       sessionKey: 's-pati',
       deviceId: PIXEL,
-      sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter', layers: ['dart', 'android'] },
+      sdk: { name: 'durbun', version: '0.2.0', platform: 'flutter', layers: ['dart', 'android'] },
       app: { name: 'Pati', id: 'com.mykynk.pati', version: '1.4.2', build: '42', pid: 12345, processName: 'com.mykynk.pati', debug: true },
       transport: 'adb-reverse',
       connected: true,
@@ -189,7 +189,7 @@ function baseApps() {
       id: 'app:3',
       sessionKey: 's-kasa',
       deviceId: PIXEL,
-      sdk: { name: 'durbun-android', version: '0.1.0', platform: 'android' },
+      sdk: { name: 'durbun-android', version: '0.2.0', platform: 'android' },
       app: { name: 'Kasa', id: 'com.mykynk.kasa', version: '2.0.1', build: '201', pid: 13002, processName: 'com.mykynk.kasa', debug: true },
       transport: 'adb-reverse',
       connected: true,
@@ -202,7 +202,7 @@ function baseApps() {
       id: 'app:4',
       sessionKey: 's-pati-ios',
       deviceId: SIM,
-      sdk: { name: 'durbun', version: '0.1.0', platform: 'flutter', layers: ['dart', 'ios'] },
+      sdk: { name: 'durbun', version: '0.2.0', platform: 'flutter', layers: ['dart', 'ios'] },
       app: { name: 'Pati', id: 'com.mykynk.pati', version: '1.4.2', build: '42', pid: 48211, processName: 'Runner', debug: true },
       transport: 'tcp',
       connected: true,
@@ -940,7 +940,7 @@ const httpServer = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
   const p = url.pathname;
   try {
-    if (p === '/api/health') return json(res, 200, { ok: true, name: 'durbun', version: '0.1.0' });
+    if (p === '/api/health') return json(res, 200, { ok: true, name: 'durbun', version: '0.2.0' });
     if (p === '/api/doctor') return setTimeout(() => json(res, 200, doctorChecks()), 350);
     if (p === '/api/network/search' && req.method === 'POST') {
       const { text = '', ids } = JSON.parse((await readBody(req)).toString() || '{}');
@@ -978,7 +978,7 @@ const httpServer = http.createServer(async (req, res) => {
         format: 'durbun-session',
         version: 1,
         exportedAt: Date.now(),
-        server: { version: '0.1.0' },
+        server: { version: '0.2.0' },
         devices: deviceId ? devices.filter((d) => d.id === deviceId) : devices,
         apps: apps.filter((a) => appIds.has(a.id)),
         logs: logs.filter(inScope).slice(-5000),
@@ -1010,7 +1010,7 @@ const httpServer = http.createServer(async (req, res) => {
       return res.end(ipsFile());
     }
     if (p === '/api/har' && req.method === 'POST') {
-      return json(res, 200, { log: { version: '1.2', creator: { name: 'Dürbün', version: '0.1.0' }, entries: [] } }, { 'Content-Disposition': 'attachment; filename="durbun.har"' });
+      return json(res, 200, { log: { version: '1.2', creator: { name: 'Dürbün', version: '0.2.0' }, entries: [] } }, { 'Content-Disposition': 'attachment; filename="durbun.har"' });
     }
     if (p === '/api/slack') {
       if (req.method === 'PUT') {

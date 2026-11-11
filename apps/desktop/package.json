@@ -1,7 +1,7 @@
 {
   "name": "durbun-desktop",
   "productName": "Dürbün",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Dürbün for macOS — starts the Dürbün server and opens its UI in one window",
   "author": "Muhammed Yusuf Kaynak",

@@ -16,9 +16,9 @@ const repoDir = (process.env.DURBUN_REPO_DIR ?? fileURLToPath(new URL('../..', i
 function rnSdkVersion(): string {
   try {
     const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../../sdks/js/package.json', import.meta.url)), 'utf8')) as { version?: unknown };
-    return typeof pkg.version === 'string' ? pkg.version : '0.1.0';
+    return typeof pkg.version === 'string' ? pkg.version : '0.2.0';
   } catch {
-    return '0.1.0';
+    return '0.2.0';
   }
 }
 
@@ -26,9 +26,9 @@ function rnSdkVersion(): string {
 function sdkVersion(): string {
   try {
     const pubspec = readFileSync(fileURLToPath(new URL('../../sdks/flutter/durbun/pubspec.yaml', import.meta.url)), 'utf8');
-    return /^version:\s*([0-9][^\s#]*)/m.exec(pubspec)?.[1] ?? '0.1.0';
+    return /^version:\s*([0-9][^\s#]*)/m.exec(pubspec)?.[1] ?? '0.2.0';
   } catch {
-    return '0.1.0';
+    return '0.2.0';
   }
 }
 

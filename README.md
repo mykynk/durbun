@@ -95,7 +95,7 @@ The **SDK setup** screen in the app shows the same steps with copyable snippets.
 | Platform | Install | Guide |
 |---|---|---|
 | Flutter | [`durbun`](https://pub.dev/packages/durbun) on pub.dev, plus [`durbun_dio`](https://pub.dev/packages/durbun_dio) for Dio's native adapters | [sdks/flutter/durbun](sdks/flutter/durbun/README.md) |
-| iOS (Swift, URLSession) | Swift Package Manager: `https://github.com/mykynk/durbun` from `0.1.0`; CocoaPods: `pod 'Durbun'` | [sdks/ios](sdks/ios/README.md) |
+| iOS (Swift, URLSession) | Swift Package Manager: `https://github.com/mykynk/durbun` from `0.2.0`; CocoaPods: `pod 'Durbun'` | [sdks/ios](sdks/ios/README.md) |
 | Android (Kotlin, OkHttp) | [`io.github.mykynk:durbun`](https://central.sonatype.com/artifact/io.github.mykynk/durbun) on Maven Central, plus `durbun-noop` for release builds | [sdks/android](sdks/android/README.md) |
 | React Native / JavaScript | [`@durbun/react-native`](https://www.npmjs.com/package/@durbun/react-native) on npm | [sdks/js](sdks/js/README.md) |
 

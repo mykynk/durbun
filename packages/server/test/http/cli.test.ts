@@ -16,6 +16,7 @@ import {
   type CliIo,
 } from '../../src/cli';
 import type { StartedServer } from '../../src/server';
+import { SERVER_VERSION } from '../../src/version';
 
 const ANSI = /\x1b\[/;
 
@@ -141,7 +142,7 @@ describe('main', () => {
     expect(a.lines.join('\n')).toContain('Kullanım · Usage');
     const b = io();
     expect(await main(['--version'], b)).toBe(0);
-    expect(b.lines).toEqual(['0.1.0']);
+    expect(b.lines).toEqual([SERVER_VERSION]);
     const c = io();
     expect(await main(['--bogus'], c)).toBe(2);
     expect(c.errors[0]).toContain('Unknown option --bogus');

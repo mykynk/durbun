@@ -96,7 +96,7 @@ Uygulamadaki **SDK kurulumu** ekranı aynı adımları kopyalanabilir haliyle g�
 | Platform | Kurulum | Kılavuz |
 |---|---|---|
 | Flutter | pub.dev'de [`durbun`](https://pub.dev/packages/durbun); Dio'nun native adaptörleri için [`durbun_dio`](https://pub.dev/packages/durbun_dio) | [sdks/flutter/durbun](sdks/flutter/durbun/README.md) |
-| iOS (Swift, URLSession) | Swift Package Manager: `0.1.0` sürümünden itibaren `https://github.com/mykynk/durbun`; CocoaPods: `pod 'Durbun'` | [sdks/ios](sdks/ios/README.md) |
+| iOS (Swift, URLSession) | Swift Package Manager: `0.2.0` sürümünden itibaren `https://github.com/mykynk/durbun`; CocoaPods: `pod 'Durbun'` | [sdks/ios](sdks/ios/README.md) |
 | Android (Kotlin, OkHttp) | Maven Central'da [`io.github.mykynk:durbun`](https://central.sonatype.com/artifact/io.github.mykynk/durbun); release derlemeleri için `durbun-noop` | [sdks/android](sdks/android/README.md) |
 | React Native / JavaScript | npm'de [`@durbun/react-native`](https://www.npmjs.com/package/@durbun/react-native) | [sdks/js](sdks/js/README.md) |
 

@@ -1,3 +1,8 @@
+## 0.2.0
+
+- Requires `durbun: ^0.2.0`. No changes of its own: every Dürbün part
+  carries the same version.
+
 ## 0.1.0
 
 - First release: `DurbunDioInterceptor` reports Dio requests made through
