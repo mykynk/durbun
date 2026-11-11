@@ -123,6 +123,12 @@ export class SlackStore {
     return { configured: !!webhookUrl, ...(webhookUrl ? { hint: slackHint(webhookUrl) } : {}), ...(sender ? { sender } : {}) };
   }
 
+  /** The stored webhook and sender, for an encrypted backup (never sent to the UI). */
+  async secrets(): Promise<{ webhookUrl?: string; sender?: string }> {
+    await this.ready();
+    return { ...this.config };
+  }
+
   /** `null` (or an empty string) removes a value; a missing key keeps it. */
   async update(raw: unknown): Promise<SlackStatus> {
     await this.ready();

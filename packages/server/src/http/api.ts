@@ -13,6 +13,8 @@
  *   GET  /api/files/:name                         a file from the temp directory (?download=1)
  *   GET  /api/files/crash/:udid/:name             a copied iOS crash report (<tempDir>/crash/<udid>/*.ips), as a download
  *   GET|PUT /api/slack, POST /api/slack/send       Send to Slack (slack.ts)
+ *   /api/flows…, /api/flow-runs…, /api/flow-environments, /api/packages…, /api/backup…, /api/ui-prefs
+ *                                                 flows and Dürbün packages (flows/module.ts)
  */
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, promises as fsp } from 'node:fs';
@@ -64,6 +66,8 @@ export interface ApiDeps {
   importLimitBytes?: number;
   /** Send to Slack; without it /api/slack answers 404. */
   slack?: SlackStore;
+  /** Route groups served by other modules (flows, packages, backup): the first path segment picks one. */
+  modules?: readonly { prefixes: readonly string[]; handle(req: IncomingMessage, res: ServerResponse, segs: string[], query: URLSearchParams): Promise<void> }[];
 }
 
 export type ApiHandler = (req: IncomingMessage, res: ServerResponse, pathname: string, query: URLSearchParams) => Promise<void>;
@@ -410,6 +414,8 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
     const segs = pathname.split('/').slice(2).filter((s, i, all) => s !== '' || i < all.length - 1).map(decodeSegment);
     const method = req.method ?? 'GET';
     const [first, second, third, fourth] = segs;
+    const mod = first ? deps.modules?.find((m) => m.prefixes.includes(first)) : undefined;
+    if (mod) return mod.handle(req, res, segs, query);
     switch (first) {
       case 'health':
         requireMethod(req, 'GET', 'HEAD');

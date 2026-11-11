@@ -31,6 +31,7 @@ import type { ClearEvent, DeviceDriver, DriverContext, FlutterVmModule, Hub, Hub
 import { SERVER_VERSION } from '../version';
 import { createApiHandler } from './api';
 import { SlackStore } from './slack';
+import { createFlowsModule } from '../flows/module';
 import { CommandError, createCommandRouter, withTimeout } from './commands';
 import { checkLocalAccess, checkSdkUpgrade } from './security';
 import { createStaticHandler } from './static';
@@ -68,6 +69,8 @@ export interface HttpAppDeps {
   /** Temp cleanup while running (tests): every `tempCleanIntervalMs`, entries older than `tempMaxAgeMs`. */
   tempCleanIntervalMs?: number;
   tempMaxAgeMs?: number;
+  /** Automatic flow runs and backups (default true; tests turn them off). */
+  flowsBackground?: boolean;
 }
 
 export interface SdkListenerState {
@@ -233,6 +236,20 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     tempDir: config.tempDir,
   });
 
+  const slack = SlackStore.inDataDir(config.dataDir, logger.child('slack'), deps.fetchImpl);
+  const flowsModule = createFlowsModule({
+    hub,
+    config,
+    logger,
+    router,
+    slack,
+    fetchImpl: deps.fetchImpl,
+    broadcast: (message) => ui.broadcast(message),
+    notice: (n) => ui.broadcast({ type: 'notice', ...n }),
+    version,
+    background: deps.flowsBackground,
+  });
+
   const ui = new UiChannel({
     hub,
     logger: logger.child('ui'),
@@ -249,6 +266,8 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
       metrics: hub.getMetrics(),
       logCount: hub.getLogCount(),
       deviceApps: hub.getDeviceApps(),
+      flows: flowsModule.summaries(),
+      flowRuns: flowsModule.runningRuns(),
     }),
   });
 
@@ -410,7 +429,8 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     runDoctor,
     uploadLimitBytes: deps.uploadLimitBytes,
     importLimitBytes: deps.importLimitBytes,
-    slack: SlackStore.inDataDir(config.dataDir, logger.child('slack'), deps.fetchImpl),
+    slack,
+    modules: [flowsModule],
   });
 
   async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -596,6 +616,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     closed = true;
     clearInterval(driverTimer);
     clearInterval(tempTimer);
+    await flowsModule.dispose().catch((err) => logger.warn(`flows did not stop cleanly: ${errorMessage(err)}`));
     for (const u of unsubscribers) {
       try {
         u();
