@@ -5,8 +5,8 @@ import { readStorage, writeStorage } from '../../lib/persist';
 export type ThemePref = 'system' | 'dark' | 'light';
 export type Density = 'compact' | 'comfortable';
 export type TimeFormat = 'absolute' | 'relative' | 'delta';
-export type TabId = 'logs' | 'network' | 'mocks' | 'perf' | 'device';
-export const TAB_IDS: readonly TabId[] = ['logs', 'network', 'mocks', 'perf', 'device'];
+export type TabId = 'logs' | 'network' | 'mocks' | 'perf' | 'device' | 'flows';
+export const TAB_IDS: readonly TabId[] = ['logs', 'network', 'mocks', 'perf', 'device', 'flows'];
 
 /** Hides known-noisy system lines when `hideNoise` is on (SPEC §1.1-4). Editable by the user. */
 export interface NoiseRule {

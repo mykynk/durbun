@@ -1,7 +1,8 @@
 # Dürbün UI — foundation guide for feature engineers
 
 This document is the contract between the UI foundation (shell, design system, data layer) and the
-phase-2 feature views (`src/features/{logs,network,mocks,perf,device}`). Everything here is implemented
+phase-2 feature views (`src/features/{logs,network,mocks,perf,device,flows}`; `features/transfer` holds the package
+dialogs and Settings → Backup, not a tab). Everything here is implemented
 and exported; signatures below are the real ones. Data shapes come from `@durbun/protocol`
 (`packages/protocol/src/index.ts`) — read SPEC §1.1 (readability) and §7 before building a view.
 
@@ -16,7 +17,7 @@ import { registerMessages, useT } from '../../i18n';
 ## 1. Feature contract
 
 - Each tab renders the **default export** of `src/features/<tab>/index.tsx` (`logs`, `network`, `mocks`,
-  `perf`, `device`). It is lazy-loaded (own chunk) and mounted inside `.feature`: an absolutely
+  `perf`, `device`, `flows`). It is lazy-loaded (own chunk) and mounted inside `.feature`: an absolutely
   positioned, **full-height flex column** (`display:flex; flex-direction:column; min-height:0`). Your root
   should be `flex: 1; min-height: 0` (utility class `fill`) and own its scrolling.
 - Views are **kept mounted** after the first visit and hidden (not unmounted) when another tab is active,
@@ -32,7 +33,11 @@ import { registerMessages, useT } from '../../i18n';
 - The **onboarding** overlay covers every tab except `mocks` while there are no devices and no apps.
 - Register your own i18n namespace (`registerMessages('logs', …)`), palette commands (`useCommands`) and
   shortcuts (`useShortcut`) from inside your view.
-- Window-wide drag-and-drop imports `.durbun.json` sessions. If your view has its own drop zone (e.g. app
+- Window-wide drag-and-drop (and **Import a file…**) opens any Dürbün file by its `format` (first 64 KB,
+  `sniffFormat` in `features/transfer/store.ts`): `durbun-session` → session import, `durbun-package` → the package
+  import dialog (`transfer.openImport(text)`), `durbun-flow` → the Flows import dialog (`ui.importFlows(text)`). A
+  feature's own file picker that may get a package (Flows, Mocks) accepts `.durbun` too and hands a package to the
+  package dialog (`readPicked` / `sniffFormat`), which also brings its environments and mocks. If your view has its own drop zone (e.g. app
   install on the Device tab), put `data-dropzone` on the element; the global handler then ignores drops
   inside it and you handle `dragover`/`drop` yourself.
 
@@ -53,6 +58,8 @@ npm run build -w @durbun/ui               # → dist/ui
 The mock also carries the phase-3 data: `snapshot.deviceApps` (Play, Firebase, a hand-installed APK, two "Runner"
 apps on a USB iPhone), exact origins, dropbox / .ips crash records (one `duplicateOf`, one downloadable .ips), device
 readers and SDK layers.
+Flows, environments, packages, backups and UI prefs come from `dev/mock-flows.mjs`: an in-memory store with the real
+REST shapes (two sample flows; a run answers `flow.engine.closed`, nothing is written to disk).
 The mock answers every command with `{ok:true}` and plausible data; `demo.set false/true` empties/refills
 it (onboarding). It is a dev tool only — the real server is `packages/server`. Its system lines use the real
 server params (SPEC §9.2).
@@ -174,9 +181,11 @@ Counters & rates (throttled hooks): `useScopedLogCounts(throttleMs = 250)`,
 | `isImportedDevice(id)`, `isNetworkDevice(id)`, `isReadOnlyDevice(id)`, `DESKTOP_DEVICE_ID` | virtual-device helpers (see 4.6) |
 | `useScope()` / `setScope(scope, hint?)` / `getScope()` | current scope (see 4.4); persisted; validated after every resync |
 | `useMocks(s => s.rules)` / `saveMocks(rules): Promise<MockRule[]>` | mock rules; `saveMocks` = `mocks.set` (optimistic, reverts on error) |
+| `useFlows(s => s.summaries \| s.runs)` | flow list (WS `flows`) and live runs by id (WS `flowRun` deltas merged by step id, `applyFlowRunDelta`); `rememberFlowRun(run)` stores a REST copy unless a newer live copy exists; `latestRunOf(runs, flowId)` |
+| `useTransfer` / `transfer` (`features/transfer/store.ts`) | package dialogs: `transfer.openExport('share' \| 'backup', flowIds?)`, `transfer.openImport(text?, fileName?)`, `transfer.close()` |
 | `useServerSettings(s => s.settings)` / `updateServerSettings(patch)` | `ServerSettings`; update = `settings.update` (optimistic) |
 | `usePrefs` | UI prefs, persisted to localStorage (`durbun.prefs.v1`) |
-| `useUi` / `ui` | active tab + global screens: `ui.setTab(id)`, `ui.openPalette()`, `ui.openSettings(section?)`, `ui.openDoctor()`, `ui.openSdkGuide(tab?)`, `ui.openShortcuts()`; cross-feature navigation: `ui.focusLog(logId)`, `ui.focusNetwork(netId)`, `ui.focusMock(ruleId)`, `ui.newMockFromDraft(draft)` set `useUi(s => s.focus)` (`UiFocus` with a `seq`) and switch tabs — the target view handles it in an effect keyed on `focus?.seq`, then calls `ui.consumeFocus(seq)` |
+| `useUi` / `ui` | active tab + global screens: `ui.setTab(id)`, `ui.openPalette()`, `ui.openSettings(section?)`, `ui.openDoctor()`, `ui.openSdkGuide(tab?)`, `ui.openShortcuts()`; cross-feature navigation: `ui.focusLog(logId)`, `ui.focusNetwork(netId)`, `ui.focusMock(ruleId)`, `ui.newMockFromDraft(draft)`, `ui.newFlowFromRequests(ids)`, `ui.importFlows(text)` set `useUi(s => s.focus)` (`UiFocus` with a `seq`) and switch tabs — the target view handles it in an effect keyed on `focus?.seq`, then calls `ui.consumeFocus(seq)` |
 
 `UiPrefs` fields: `theme ('system'|'dark'|'light')`, `language ('tr'|'en')`, `logFontSize (11–16)`,
 `density ('compact'|'comfortable')`, `timeFormat ('absolute'|'relative'|'delta')`, `wrapLines`,
@@ -278,6 +287,9 @@ with `tCode(code, data, fallback)`. Default timeouts: 15 s; `device.action` 30 s
 | `api.doctor()` | `GET /api/doctor` → `ToolCheck[]` |
 | `api.upload(file, { name?, onProgress?, signal? })` | `POST /api/upload` → `{ file }` (pass to `app-install`); errors keep the server `code` (`upload.tooLarge`…) |
 | `api.fileUrl(name)`, `api.health()` | `/api/files/:name`, `/api/health` |
+| `api.listFlows()`, `getFlow`, `createFlow`, `saveFlow`, `deleteFlow`, `duplicateFlow`, `preflightFlow`, `runFlow`, `listFlowRuns`, `getFlowRun`, `cancelFlowRun`, `getFlowEnvironments`, `saveFlowEnvironments`, `aiPack`, `previewFlowImport`, `importFlows`, `flowFromRequests` | `/api/flows*`, `/api/flow-runs*`, `/api/flow-environments` (SPEC §11) |
+| `api.exportPackage(req)` → `{ blob, fileName }`, `api.inspectPackage(text, passphrase?)`, `api.importPackage(req)` | `/api/packages/*` (`.durbun` share / backup) |
+| `api.getBackup()`, `updateBackup(patch)`, `runBackup()`, `backupSuggestions()`, `backupFiles()`, `readBackupFile(name)`, `getUiPrefs()`, `putUiPrefs(prefs)` | Settings → Backup and the server copy of the portable UI prefs (`features/transfer/prefsSync.ts` keeps it current) |
 | `api.slackStatus()`, `api.updateSlack(patch)`, `api.sendToSlack(text)` | `/api/slack` (Send to Slack; never returns the webhook URL). Prefer `useSlackStatus()` / `updateSlack()` from `data` and the `SlackButton` component, which converts a share report with `toSlackText` (`lib/slack.ts`) |
 
 Also: `downloadUrl(url, name?)`, `downloadBlob(blob, name)`, `downloadText(text, name)`,

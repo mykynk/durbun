@@ -13,6 +13,7 @@ import {
   ScrollText,
   Share2,
   X,
+  Workflow,
 } from 'lucide-react';
 import type { NetworkDetail, NetworkEntry } from '@durbun/protocol';
 import { ui, useApp, useDevice, useMocks } from '../../../data';
@@ -71,6 +72,7 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
   const moreItems: MenuItem[] = [
     { label: t('network.menu.showInLogs'), icon: ScrollText, onSelect: () => showInLogs(entry) },
     { label: t('network.menu.compare'), icon: ArrowLeftRight, onSelect: onCompare },
+    { label: t('network.menu.createFlow'), icon: Workflow, disabled: gone || entry.method === '?', onSelect: () => ui.newFlowFromRequests([entry.id]) },
     { type: 'separator' },
     { label: t('network.menu.har'), icon: FileDown, disabled: gone, onSelect: () => void downloadHarFor([entry.id], harFileName(entry)) },
     { label: t('network.menu.downloadResponse'), icon: FileDown, disabled: gone || !entry.hasResponseBody, onSelect: () => downloadBody(entry, 'response') },

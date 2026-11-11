@@ -49,12 +49,15 @@ function PopoverInner({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
+  // The panel stays hidden until it is placed, and hidden elements cannot take focus: focus once it shows.
+  const focused = useRef(false);
   useLayoutEffect(() => {
-    if (!autoFocus || !ref.current) return;
+    if (!autoFocus || focused.current || !placement || !ref.current) return;
+    focused.current = true;
     const first = focusableWithin(ref.current)[0];
     (first ?? ref.current).focus({ preventScroll: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [placement]);
 
   useEffect(() => {
     const onDown = (e: PointerEvent) => {

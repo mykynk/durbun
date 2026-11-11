@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useImperativeHandle, useRef, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { clsx } from 'clsx';
 import type { IconType } from './Icons';
 import { Tooltip } from './Tooltip';
@@ -27,11 +27,15 @@ export interface TabsProps<T extends string> {
   idPrefix?: string;
   'aria-label'?: string;
   className?: string;
+  /** Too narrow for every label: tabs other than the selected one show their icon (the name stays for screen readers and in the tooltip). */
+  compact?: boolean;
+  ref?: Ref<HTMLDivElement>;
 }
 
 /** Accessible tab list (←/→/Home/End move focus and select). Render the panel yourself. */
-export function Tabs<T extends string>({ value, onChange, items, variant = 'underline', size = 'md', idPrefix, className, ...aria }: TabsProps<T>) {
+export function Tabs<T extends string>({ value, onChange, items, variant = 'underline', size = 'md', idPrefix, className, compact, ref: outerRef, ...aria }: TabsProps<T>) {
   const ref = useRef<HTMLDivElement>(null);
+  useImperativeHandle(outerRef, () => ref.current as HTMLDivElement, []);
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();
@@ -67,7 +71,7 @@ export function Tabs<T extends string>({ value, onChange, items, variant = 'unde
             onClick={() => onChange(item.value)}
           >
             {Icon ? <Icon size={size === 'sm' ? 14 : 15} aria-hidden /> : null}
-            <span className="tab__label">{item.label}</span>
+            <span className={clsx('tab__label', compact && !selected && Icon && 'sr-only')}>{item.label}</span>
             {item.badge}
           </button>
         );

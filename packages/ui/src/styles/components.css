@@ -1475,6 +1475,28 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.menu__item--desc {
+  height: auto;
+  min-height: 30px;
+  padding: 6px 8px;
+  align-items: flex-start;
+  white-space: normal;
+}
+.menu__item--desc .menu__icon {
+  margin-top: 2px;
+}
+.menu__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 1px;
+}
+.menu__desc {
+  color: var(--text-subtle);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+}
 .menu__hint {
   color: var(--text-subtle);
   font-size: var(--fs-sm);

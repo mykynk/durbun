@@ -19,10 +19,11 @@ const FEATURES: Record<TabId, LazyExoticComponent<ComponentType>> = {
   mocks: lazy(() => import('../features/mocks')),
   perf: lazy(() => import('../features/perf')),
   device: lazy(() => import('../features/device')),
+  flows: lazy(() => import('../features/flows')),
 };
 
 /** Tabs that work without any device (no onboarding overlay). */
-const DEVICE_INDEPENDENT: ReadonlySet<TabId> = new Set(['mocks']);
+const DEVICE_INDEPENDENT: ReadonlySet<TabId> = new Set(['mocks', 'flows']);
 
 function Loading() {
   return (

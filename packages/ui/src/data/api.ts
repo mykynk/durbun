@@ -1,4 +1,23 @@
-import type { NetworkDetail, SessionExport, ToolCheck } from '@durbun/protocol';
+import type {
+  BackupSettings,
+  BackupSettingsPatch,
+  FlowDoc,
+  FlowEnvironments,
+  FlowIssue,
+  FlowPreflight,
+  FlowRun,
+  FlowRunHeader,
+  FlowRunRequest,
+  FlowSummary,
+  NetworkDetail,
+  PackageConflict,
+  PackageExportRequest,
+  PackageImportRequest,
+  PackageImportResult,
+  PackageManifest,
+  SessionExport,
+  ToolCheck,
+} from '@durbun/protocol';
 import { downloadBlob } from '../lib/download';
 
 /** REST helpers for `/api/*` (same origin; Vite proxies `/api` in dev). */
@@ -6,17 +25,21 @@ import { downloadBlob } from '../lib/download';
 export class ApiError extends Error {
   readonly status: number;
   readonly code?: string;
-  constructor(status: number, message: string, code?: string) {
+  /** The parsed JSON error body (e.g. `{ error, code, preflight }` of a flow that cannot start). */
+  readonly body?: Record<string, unknown>;
+  constructor(status: number, message: string, code?: string, body?: Record<string, unknown>) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.body = body;
   }
 }
 
 async function errorFrom(res: Response): Promise<ApiError> {
   let message = `${res.status} ${res.statusText}`.trim();
   let code: string | undefined;
+  let parsed: Record<string, unknown> | undefined;
   try {
     const text = await res.text();
     if (text) {
@@ -25,6 +48,7 @@ async function errorFrom(res: Response): Promise<ApiError> {
         const m = body.error ?? body.message;
         if (typeof m === 'string' && m) message = m;
         if (typeof body.code === 'string') code = body.code;
+        if (body && typeof body === 'object') parsed = body as Record<string, unknown>;
       } catch {
         message = text.slice(0, 300);
       }
@@ -32,7 +56,7 @@ async function errorFrom(res: Response): Promise<ApiError> {
   } catch {
     /* ignore */
   }
-  return new ApiError(res.status, message, code);
+  return new ApiError(res.status, message, code, parsed);
 }
 
 async function fetchOk(path: string, init?: RequestInit): Promise<Response> {
@@ -228,4 +252,229 @@ export function upload(file: File | Blob, opts: UploadOptions = {}): Promise<{ f
     }
     xhr.send(file);
   });
+}
+
+/* ───────────── Flows (Akışlar) ───────────── */
+
+export interface FlowWithIssues {
+  flow: FlowDoc;
+  issues: FlowIssue[];
+}
+
+export function listFlows(signal?: AbortSignal): Promise<FlowSummary[]> {
+  return json('/api/flows', { signal });
+}
+
+export function getFlow(id: string, signal?: AbortSignal): Promise<FlowWithIssues> {
+  return json(`/api/flows/${enc(id)}`, { signal });
+}
+
+/** A new flow (the server picks a free id from the name when the id is taken). */
+export function createFlow(flow: unknown): Promise<FlowWithIssues> {
+  return json('/api/flows', postJson({ flow }));
+}
+
+/** Saves a flow; drafts with errors are saved too and come back with their issues. */
+export function saveFlow(id: string, flow: unknown): Promise<FlowWithIssues> {
+  return json(`/api/flows/${enc(id)}`, { ...postJson({ flow }), method: 'PUT' });
+}
+
+export async function deleteFlow(id: string): Promise<void> {
+  await fetchOk(`/api/flows/${enc(id)}`, { method: 'DELETE' });
+}
+
+export function duplicateFlow(id: string, name?: string): Promise<FlowWithIssues> {
+  return json(`/api/flows/${enc(id)}/duplicate`, postJson({ name }));
+}
+
+/** Download URL of one flow file (`<id>.durbun-flow.json`). */
+export function flowExportUrl(id: string): string {
+  return `/api/flows/${enc(id)}/export`;
+}
+
+/** Download URL of the flow JSON Schema. */
+export function flowSchemaUrl(): string {
+  return '/api/flows/schema?download=1';
+}
+
+export interface AiPackRequest {
+  goal?: string;
+  flowId?: string;
+  appId?: string;
+  deviceId?: string;
+  include?: { schema?: boolean; requests?: boolean; flows?: boolean; environments?: boolean };
+  language?: 'tr' | 'en';
+}
+
+/** The Markdown the user hands to their own AI (Dürbün never calls one). */
+export function aiPack(req: AiPackRequest, signal?: AbortSignal): Promise<{ markdown: string }> {
+  return json('/api/flows/ai-pack', postJson(req, signal));
+}
+
+export interface FlowImportItem {
+  flow: FlowDoc;
+  issues: FlowIssue[];
+  exists: boolean;
+  differs: boolean;
+  nodes: number;
+}
+
+/** Reads flows out of any text (an AI answer, a flow file, a package) and validates them. Nothing is saved. */
+export function previewFlowImport(text: string, signal?: AbortSignal): Promise<{ items: FlowImportItem[]; problems: string[] }> {
+  return json('/api/flows/import/preview', postJson({ text }, signal));
+}
+
+export function importFlows(
+  flows: FlowDoc[],
+  conflict: PackageConflict,
+): Promise<{ saved: { id: string; name: string; created: boolean }[]; skipped: number; problems: string[] }> {
+  return json('/api/flows/import', postJson({ flows, conflict }));
+}
+
+export interface FromRequestsResult extends FlowWithIssues {
+  envVars: { key: string; secret?: boolean }[];
+  links: number;
+}
+
+/** A new flow from captured requests (in the order they happened); base URL and secrets go to the environment. */
+export function flowFromRequests(ids: string[], name: string, opts: { saveEnv?: boolean; environmentId?: string } = {}): Promise<FromRequestsResult> {
+  return json('/api/flows/from-requests', postJson({ ids, name, ...opts }));
+}
+
+export function preflightFlow(id: string, req: FlowRunRequest, signal?: AbortSignal): Promise<FlowPreflight> {
+  return json(`/api/flows/${enc(id)}/preflight`, postJson(req, signal));
+}
+
+/** Starts a run. A flow that cannot start throws an ApiError whose `body.preflight` says why. */
+export function runFlow(id: string, req: FlowRunRequest): Promise<FlowRun> {
+  return json(`/api/flows/${enc(id)}/run`, postJson(req));
+}
+
+export function listFlowRuns(opts: { flowId?: string; limit?: number; signal?: AbortSignal } = {}): Promise<{ running: FlowRunHeader[]; runs: FlowRunHeader[] }> {
+  const q = new URLSearchParams();
+  if (opts.flowId) q.set('flowId', opts.flowId);
+  if (opts.limit) q.set('limit', String(opts.limit));
+  const qs = q.toString();
+  return json(`/api/flow-runs${qs ? `?${qs}` : ''}`, { signal: opts.signal });
+}
+
+export function getFlowRun(id: string, signal?: AbortSignal): Promise<FlowRun> {
+  return json(`/api/flow-runs/${enc(id)}`, { signal });
+}
+
+export async function deleteFlowRun(id: string): Promise<void> {
+  await fetchOk(`/api/flow-runs/${enc(id)}`, { method: 'DELETE' });
+}
+
+export async function clearFlowRuns(flowId?: string): Promise<number> {
+  const res = await json<{ removed?: number }>(`/api/flow-runs${flowId ? `?flowId=${enc(flowId)}` : ''}`, { method: 'DELETE' });
+  return typeof res.removed === 'number' ? res.removed : 0;
+}
+
+export async function cancelFlowRun(id: string): Promise<void> {
+  await fetchOk(`/api/flow-runs/${enc(id)}/cancel`, { method: 'POST' });
+}
+
+export function getFlowEnvironments(signal?: AbortSignal): Promise<FlowEnvironments> {
+  return json('/api/flow-environments', { signal });
+}
+
+export function saveFlowEnvironments(envs: FlowEnvironments): Promise<FlowEnvironments> {
+  return json('/api/flow-environments', { ...postJson(envs), method: 'PUT' });
+}
+
+/* ───────────── Dürbün packages, backups, UI preferences ───────────── */
+
+function fileNameOf(res: Response, fallback: string): string {
+  const cd = res.headers.get('Content-Disposition') ?? '';
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1]);
+    } catch {
+      /* fall through */
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(cd);
+  return plain?.[1] ?? fallback;
+}
+
+/** Builds a `.durbun` package; resolves with the file to save. */
+export async function exportPackage(req: PackageExportRequest): Promise<{ blob: Blob; fileName: string }> {
+  const res = await fetchOk('/api/packages/export', postJson(req));
+  const blob = await res.blob();
+  return { blob, fileName: fileNameOf(res, `Durbun-${req.kind}.durbun`) };
+}
+
+/**
+ * What a package holds. `text` is the file content as is (it is not parsed and re-encoded here: packages with run
+ * evidence can be large). The manifest's `token` imports it without sending it again.
+ */
+export function inspectPackage(text: string, passphrase?: string, signal?: AbortSignal): Promise<PackageManifest> {
+  // A byte order mark (some editors write one) would break the wrapping below.
+  const clean = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const body = `{"package":${clean}${passphrase ? `,"passphrase":${JSON.stringify(passphrase)}` : ''}}`;
+  return json('/api/packages/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal });
+}
+
+/** Reads the package an earlier inspect kept again (by its token), e.g. to check a passphrase, without sending it. */
+export function inspectStagedPackage(token: string, passphrase?: string, signal?: AbortSignal): Promise<PackageManifest> {
+  return json('/api/packages/inspect', postJson({ token, ...(passphrase ? { passphrase } : {}) }, signal));
+}
+
+/** The import dialog closed: the server forgets the package it kept for it. */
+export async function releasePackage(token: string): Promise<void> {
+  await fetchOk('/api/packages/release', postJson({ token }));
+}
+
+export function importPackage(req: PackageImportRequest): Promise<PackageImportResult> {
+  return json('/api/packages/import', postJson(req));
+}
+
+export function getBackup(signal?: AbortSignal): Promise<BackupSettings> {
+  return json('/api/backup', { signal });
+}
+
+export function updateBackup(patch: BackupSettingsPatch): Promise<BackupSettings> {
+  return json('/api/backup', { ...postJson(patch), method: 'PUT' });
+}
+
+export function runBackup(): Promise<{ file: string; size: number; settings: BackupSettings }> {
+  return json('/api/backup/run', { method: 'POST' });
+}
+
+export interface BackupFolderSuggestion {
+  id: string;
+  label: string;
+  path: string;
+}
+
+export function backupSuggestions(signal?: AbortSignal): Promise<BackupFolderSuggestion[]> {
+  return json('/api/backup/suggestions', { signal });
+}
+
+export interface BackupFile {
+  file: string;
+  name: string;
+  size: number;
+  modifiedAt: number;
+}
+
+export function backupFiles(signal?: AbortSignal): Promise<BackupFile[]> {
+  return json('/api/backup/files', { signal });
+}
+
+/** One backup file of the folder, as text (inspect it like a package the user picked). */
+export async function readBackupFile(name: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetchOk(`/api/backup/files/${enc(name)}`, { signal });
+  return res.text();
+}
+
+/** The UI's preferences the server keeps for backups and packages. */
+export function getUiPrefs(signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+  return json('/api/ui-prefs', { signal });
+}
+
+export async function putUiPrefs(prefs: Record<string, unknown>): Promise<void> {
+  await fetchOk('/api/ui-prefs', { ...postJson(prefs), method: 'PUT' });
 }

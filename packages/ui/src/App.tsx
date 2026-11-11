@@ -21,6 +21,7 @@ import { DoctorDialog } from './shell/DoctorDialog';
 import { SdkGuideDialog } from './shell/SdkGuide';
 import { DataSourcesDialog } from './sources';
 import { DropImport } from './shell/DropImport';
+import { TransferHost } from './features/transfer/TransferHost';
 import { useGlobalCommands } from './shell/globalCommands';
 
 const NOTICE_KIND: Record<'info' | 'success' | 'warn' | 'error', ToastKind> = { info: 'info', success: 'success', warn: 'warn', error: 'error' };
@@ -73,6 +74,7 @@ export function App() {
         <SdkGuideDialog />
         <DataSourcesDialog />
       </DialogBoundary>
+      <TransferHost />
       <DropImport />
       <ConfirmHost />
       <ContextMenuHost />

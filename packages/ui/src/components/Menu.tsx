@@ -14,8 +14,10 @@ export interface MenuItem {
   icon?: IconType;
   /** Shortcut hint (display only). */
   shortcut?: string;
-  /** Right-aligned secondary text. */
+  /** Right-aligned secondary text (short: it is cut to one line). */
   hint?: ReactNode;
+  /** A line under the label that explains the item; it wraps instead of being cut. */
+  description?: ReactNode;
   danger?: boolean;
   disabled?: boolean;
   /** Renders a check column; true shows ✓. */
@@ -142,7 +144,7 @@ function MenuList({ items, onClose, minWidth }: { items: readonly MenuItem[]; on
             role={item.checked !== undefined ? 'menuitemcheckbox' : 'menuitem'}
             aria-checked={item.checked}
             aria-disabled={item.disabled || undefined}
-            className={clsx('menu__item', i === active && 'is-active', item.danger && 'menu__item--danger', item.disabled && 'is-disabled')}
+            className={clsx('menu__item', item.description && 'menu__item--desc', i === active && 'is-active', item.danger && 'menu__item--danger', item.disabled && 'is-disabled')}
             onPointerMove={() => {
               if (isActionable(item) && active !== i) setActive(i);
             }}
@@ -150,7 +152,14 @@ function MenuList({ items, onClose, minWidth }: { items: readonly MenuItem[]; on
           >
             {hasChecks ? <span className="menu__check">{item.checked ? <Check size={13} aria-hidden /> : null}</span> : null}
             {Icon ? <Icon size={14} className="menu__icon" aria-hidden /> : null}
-            <span className="menu__text">{item.label}</span>
+            {item.description ? (
+              <span className="menu__body">
+                <span className="menu__text">{item.label}</span>
+                <span className="menu__desc">{item.description}</span>
+              </span>
+            ) : (
+              <span className="menu__text">{item.label}</span>
+            )}
             {item.hint ? <span className="menu__hint">{item.hint}</span> : null}
             {item.shortcut ? <Kbd combo={item.shortcut} size="sm" className="menu__kbd" /> : null}
           </div>

@@ -1,7 +1,8 @@
-import { useMemo, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
 import {
+  Archive,
   ArrowDownUp,
   ArrowLeftRight,
   BookOpen,
@@ -14,6 +15,7 @@ import {
   FileDown,
   FileUp,
   Gauge,
+  History,
   Info,
   Keyboard,
   LayoutGrid,
@@ -23,11 +25,13 @@ import {
   ScrollText,
   Search,
   Settings,
+  Share2,
   ShieldCheck,
   Smartphone,
   Stethoscope,
   Sun,
   Waypoints,
+  Workflow,
 } from 'lucide-react';
 import { useT } from '../i18n';
 import { deviceDisplayName } from '../i18n/codes';
@@ -39,6 +43,7 @@ import {
   useHub,
   useMetricsVersion,
   useMocks,
+  useFlows,
   usePrefs,
   useScope,
   useScopedLogCounts,
@@ -65,6 +70,7 @@ import { formatClock, formatCompact } from '../lib/format';
 import { appTitle } from './labels';
 import { BuildBadgeChip, ScopeSourcesButton, SourceBadge } from '../sources';
 import { exportHar, exportSession, pickAndImport, setTheme, toggleLanguage, toggleSidebar } from './actions';
+import { transfer } from '../features/transfer/store';
 
 export const TAB_ICONS: Record<TabId, IconType> = {
   logs: ScrollText,
@@ -72,6 +78,7 @@ export const TAB_ICONS: Record<TabId, IconType> = {
   mocks: Drama,
   perf: Gauge,
   device: Smartphone,
+  flows: Workflow,
 };
 
 /**
@@ -94,12 +101,68 @@ function TabCount({ total, alert, alertTitle }: { total: number; alert: number; 
   );
 }
 
+const TAB_LABEL_KEYS = ['shell.tabs.logs', 'shell.tabs.network', 'shell.tabs.mocks', 'shell.tabs.perf', 'shell.tabs.device', 'shell.tabs.flows'] as const;
+
 function usePerfLive(): boolean {
   const compiled = useCompiledScope();
   useMetricsVersion({ throttleMs: 2000 });
   const now = Date.now();
   for (const s of metricsStore.series.values()) if (now - s.updatedAt < 6000 && compiled.metrics(s)) return true;
   return false;
+}
+
+/**
+ * The tab strip when the window (or the sidebar) leaves too little room: tabs other than the selected one fall back to
+ * their icon (name in the tooltip and for screen readers), and the selected tab is always scrolled into view.
+ */
+function useCompactTabs(labelsKey: string) {
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const growRef = useRef<HTMLSpanElement>(null);
+  const [compact, setCompact] = useState(false);
+  /** Width the tabs need with every label (measured while they were shown). */
+  const fullWidth = useRef(0);
+
+  const check = () => {
+    const el = tabsRef.current;
+    const grow = growRef.current;
+    if (!el || !grow) return;
+    if (!compact) {
+      if (el.scrollWidth > el.clientWidth + 1) {
+        fullWidth.current = el.scrollWidth;
+        setCompact(true);
+      }
+    } else if (fullWidth.current <= el.clientWidth + grow.getBoundingClientRect().width - 1) setCompact(false);
+  };
+  const reveal = () => {
+    const el = tabsRef.current;
+    const sel = el?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!el || !sel) return;
+    const r = sel.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    if (r.left < b.left) el.scrollLeft -= b.left - r.left + 4;
+    else if (r.right > b.right) el.scrollLeft += r.right - b.right + 4;
+  };
+  const latest = useRef({ check, reveal });
+  latest.current = { check, reveal };
+
+  // New labels (another language): measure them at full width again.
+  useLayoutEffect(() => setCompact(false), [labelsKey]);
+  // Counts and dots change the width on their own: cheap reads after every render of the bar.
+  useLayoutEffect(() => {
+    check();
+    reveal();
+  });
+  useLayoutEffect(() => {
+    const header = tabsRef.current?.parentElement;
+    if (!header || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      latest.current.check();
+      latest.current.reveal();
+    });
+    ro.observe(header);
+    return () => ro.disconnect();
+  }, []);
+  return { tabsRef, growRef, compact };
 }
 
 export function TopBar() {
@@ -109,6 +172,7 @@ export function TopBar() {
   const logs = useScopedLogCounts(500);
   const net = useScopedNetworkCounts(500);
   const enabledMocks = useMocks((s) => s.rules.reduce((n, r) => n + (r.enabled ? 1 : 0), 0));
+  const runningFlows = useFlows((s) => Object.values(s.runs).reduce((n, r) => n + (r.status === 'running' ? 1 : 0), 0));
   const perfLive = usePerfLive();
   const scope = useScope();
   const scopedDevice = useHub((s) => {
@@ -128,6 +192,8 @@ export function TopBar() {
   const netProblems = net.failed + net.serverError;
   const newNetErrors = useUnseen(netProblems, syncing || tab === 'network', scopeKey);
 
+  const labelsKey = TAB_LABEL_KEYS.map((k) => t(k)).join('|');
+  const { tabsRef, growRef, compact } = useCompactTabs(labelsKey);
   const items: TabItem<TabId>[] = [
     {
       value: 'logs',
@@ -169,6 +235,14 @@ export function TopBar() {
       title: t('shell.tabs.device'),
       badge: deviceAttention ? <StatusDot tone="warn" size={6} title={t('shell.tabs.deviceAttention')} /> : null,
     },
+    {
+      value: 'flows',
+      label: t('shell.tabs.flows'),
+      icon: TAB_ICONS.flows,
+      shortcut: 'Mod+6',
+      title: t('shell.tabs.flows'),
+      badge: runningFlows > 0 ? <CountBadge count={runningFlows} tone="accent" title={t('shell.tabs.flowsRunning', { count: runningFlows })} /> : null,
+    },
   ];
 
   return (
@@ -177,8 +251,8 @@ export function TopBar() {
       <ScopeBreadcrumb />
       <ScopeSourcesButton className="topbar__sources" />
       <span className="topbar__divider" aria-hidden />
-      <Tabs variant="pill" items={items} value={tab} onChange={ui.setTab} idPrefix="main" aria-label={t('shell.tabs.label')} className="topbar__tabs" />
-      <span className="grow" />
+      <Tabs variant="pill" items={items} value={tab} onChange={ui.setTab} idPrefix="main" aria-label={t('shell.tabs.label')} className="topbar__tabs" compact={compact} ref={tabsRef} />
+      <span className="grow" ref={growRef} />
       <div className="topbar__actions">
         <Tooltip content={t('shell.palette.title')} shortcut="Mod+K">
           <button type="button" className="palette-trigger" onClick={ui.openPalette} aria-label={t('shell.palette.title')}>
@@ -299,6 +373,15 @@ function useScopeName(): string | undefined {
   return target.device ? deviceDisplayName(target.device) : undefined;
 }
 
+/** Packages: share a setup with the team, back everything up for a new Mac. */
+function packageItems(t: ReturnType<typeof useT>): MenuItem[] {
+  return [
+    { label: t('transfer.menu.share'), icon: Share2, hint: t('transfer.menu.shareHint'), onSelect: () => transfer.openExport('share') },
+    { label: t('transfer.menu.backup'), icon: Archive, hint: t('transfer.menu.backupHint'), onSelect: () => transfer.openExport('backup') },
+    { label: t('transfer.menu.autoBackup'), icon: History, onSelect: () => ui.openSettings('backup') },
+  ];
+}
+
 function ImportExportMenu() {
   const t = useT();
   const scope = useScope();
@@ -311,7 +394,9 @@ function ImportExportMenu() {
         ...(scope.kind !== 'all' && scopeName ? [{ label: t('shell.io.exportScope', { name: scopeName }), icon: FileDown, onSelect: () => exportSession(scope) }] : []),
         { label: t('shell.io.exportHar'), icon: FileDown, onSelect: () => void exportHar() },
         { type: 'separator' },
-        { label: t('shell.io.import'), icon: FileUp, hint: t('shell.io.dropHint'), onSelect: () => void pickAndImport() },
+        ...packageItems(t),
+        { type: 'separator' },
+        { label: t('shell.io.import'), icon: FileUp, description: t('shell.io.importHint'), onSelect: () => void pickAndImport() },
       ]}
     >
       {(p) => <IconButton icon={ArrowDownUp} label={t('shell.io.title')} {...p} />}
@@ -333,6 +418,8 @@ function MoreMenu() {
         ...(scope.kind !== 'all' && scopeName ? [{ label: t('shell.io.exportScope', { name: scopeName }), icon: FileDown, onSelect: () => exportSession(scope) }] : []),
         { label: t('shell.io.exportHar'), icon: FileDown, onSelect: () => void exportHar() },
         { label: t('shell.io.import'), icon: FileUp, onSelect: () => void pickAndImport() },
+        { type: 'separator' },
+        ...packageItems(t),
         { type: 'separator' },
         { type: 'label', label: t('shell.theme.title') },
         { label: t('shell.theme.system'), icon: Monitor, checked: theme === 'system', onSelect: () => setTheme('system') },

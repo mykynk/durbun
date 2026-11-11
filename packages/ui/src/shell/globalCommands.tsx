@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BookOpen, Bookmark, FileDown, FileUp, FlaskConical, Keyboard, Languages, LayoutGrid, Monitor, Moon, PanelLeft, Plug, RefreshCw, Settings, Stethoscope, Sun, Trash } from 'lucide-react';
+import { Archive, BookOpen, Bookmark, FileDown, FileUp, FlaskConical, Keyboard, Languages, LayoutGrid, Monitor, Moon, PanelLeft, PackageOpen, Plug, RefreshCw, Settings, Share2, Stethoscope, Sun, Trash } from 'lucide-react';
 import { useT } from '../i18n';
 import { translate } from '../i18n/core';
 import { deviceDisplayName } from '../i18n/codes';
@@ -23,6 +23,7 @@ import type { PaletteCommand } from '../lib/commands';
 import { PlatformIcon, sdkLabel, type IconType } from '../components/Icons';
 import { TAB_ICONS } from './TopBar';
 import { deviceSubtitle } from './labels';
+import { transfer } from '../features/transfer/store';
 import { addMarker, clearEverything, exportHar, exportSession, pickAndImport, setDemo, setTheme, toggleLanguage, toggleSidebar } from './actions';
 
 const TAB_KEYWORDS: Record<TabId, string[]> = {
@@ -31,6 +32,7 @@ const TAB_KEYWORDS: Record<TabId, string[]> = {
   mocks: ['mocks', 'mock', 'kurallar', 'rules'],
   perf: ['performance', 'performans', 'cpu', 'memory', 'bellek', 'fps'],
   device: ['device', 'cihaz', 'screenshot', 'ekran görüntüsü', 'apps'],
+  flows: ['flows', 'akış', 'akışlar', 'flow', 'scenario', 'senaryo', 'test', 'graph'],
 };
 
 /** The message in both languages, so palette search works whatever the UI language is. */
@@ -155,6 +157,10 @@ export function useGlobalCommands(): void {
     { id: 'export.all', title: t('shell.io.exportAll'), group: data, icon: FileDown, keywords: ['save', ...both('shell.io.exportAll')], run: () => exportSession('all') },
     { id: 'export.har', title: t('shell.io.exportHar'), group: data, icon: FileDown, keywords: ['har', ...both('shell.io.exportHar')], run: () => void exportHar() },
     { id: 'import', title: t('shell.io.import'), group: data, icon: FileUp, keywords: ['open', ...both('shell.io.import')], run: () => void pickAndImport() },
+    { id: 'package.share', title: t('transfer.menu.share'), group: data, icon: Share2, keywords: ['package', 'paket', 'export', 'team', 'takım', ...both('transfer.menu.share')], run: () => transfer.openExport('share') },
+    { id: 'package.backup', title: t('transfer.menu.backup'), group: data, icon: Archive, keywords: ['package', 'paket', 'backup', 'yedek', 'mac', ...both('transfer.menu.backup')], run: () => transfer.openExport('backup') },
+    { id: 'package.open', title: t('transfer.menu.open'), group: data, icon: PackageOpen, keywords: ['package', 'paket', 'restore', 'geri yükle', 'import', ...both('transfer.menu.open')], run: () => transfer.openImport() },
+    { id: 'package.auto', title: t('transfer.menu.autoBackup'), group: data, icon: Archive, keywords: ['backup', 'yedek', 'icloud', 'auto', 'otomatik', ...both('transfer.menu.autoBackup')], run: () => ui.openSettings('backup') },
     {
       id: 'demo',
       title: demo ? t('shell.demo.disable') : t('shell.demo.enable'),
@@ -185,7 +191,7 @@ export function useGlobalCommands(): void {
     return () => window.removeEventListener('durbun:command', onCommand);
   }, []);
   useShortcut('Mod+B', toggleSidebar);
-  useShortcut(['Mod+1', 'Mod+2', 'Mod+3', 'Mod+4', 'Mod+5'], (e) => {
+  useShortcut(['Mod+1', 'Mod+2', 'Mod+3', 'Mod+4', 'Mod+5', 'Mod+6'], (e) => {
     const n = Number(e.code?.startsWith('Digit') ? e.code.slice(5) : e.key) - 1;
     const id = TAB_IDS[n];
     if (!id) return false;

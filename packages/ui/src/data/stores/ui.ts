@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { MockRule } from '@durbun/protocol';
 import { TAB_IDS, usePrefs, type TabId } from './prefs';
 
-export type SettingsSection = 'appearance' | 'logs' | 'network' | 'connection' | 'slack' | 'about';
+export type SettingsSection = 'appearance' | 'logs' | 'network' | 'connection' | 'slack' | 'backup' | 'about';
 export type SdkGuideTab = 'flutter' | 'android' | 'ios' | 'react-native';
 /** Sections of the SDK guide a link can scroll to. */
 export type SdkGuideSection = 'setup' | 'release' | 'native' | 'vm';
@@ -42,7 +42,12 @@ export type UiFocus =
   /** Mocks tab: select / open this saved rule. */
   | { kind: 'mock'; ruleId: string; seq: number }
   /** Mocks tab: open the editor pre-filled with a new, unsaved rule. */
-  | { kind: 'mockDraft'; draft: MockRuleDraft; seq: number };
+  | { kind: 'mockDraft'; draft: MockRuleDraft; seq: number }
+  /** Flows tab: open this flow (and show this run). */
+  | { kind: 'flow'; flowId: string; runId?: string; seq: number }
+  | { kind: 'flowFromRequests'; ids: string[]; seq: number }
+  /** Flows tab: open the import dialog with this text (a dropped flow file, an AI answer). */
+  | { kind: 'flowImport'; text: string; seq: number };
 
 let focusSeq = 0;
 
@@ -116,6 +121,21 @@ export const ui = {
   newMockFromDraft(draft: MockRuleDraft): void {
     ui.setTab('mocks');
     useUi.setState({ focus: { kind: 'mockDraft', draft, seq: ++focusSeq } });
+  },
+  /** Switch to Flows and open this flow (and run). */
+  focusFlow(flowId: string, runId?: string): void {
+    ui.setTab('flows');
+    useUi.setState({ focus: { kind: 'flow', flowId, ...(runId ? { runId } : {}), seq: ++focusSeq } });
+  },
+  /** Switch to Flows and offer to build a flow from these captured requests. */
+  newFlowFromRequests(ids: string[]): void {
+    ui.setTab('flows');
+    useUi.setState({ focus: { kind: 'flowFromRequests', ids, seq: ++focusSeq } });
+  },
+  /** Switch to Flows and offer to import the flows in this text. */
+  importFlows(text: string): void {
+    ui.setTab('flows');
+    useUi.setState({ focus: { kind: 'flowImport', text, seq: ++focusSeq } });
   },
   /** Mark a focus request as handled (no-op when a newer request replaced it). */
   consumeFocus(seq: number): void {

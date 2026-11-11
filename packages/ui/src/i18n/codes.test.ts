@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { FLOW_NODE_SPECS } from '@durbun/protocol';
 import { messageKeys, setLanguage, type Lang } from './core';
 import {
   LOCAL_CODES,
@@ -96,6 +97,186 @@ const NOTICE_SAMPLES: [code: string, params: Record<string, string | number> | u
   ['vm.attachFailed', { url: 'http://127.0.0.1:50123/x=/', error: 'timeout' }],
 ];
 
+/** Flow step summaries, step errors, preflight and validation issues, notices: params as the server sends them. */
+const FLOW_SAMPLES: [code: string, params: Record<string, string | number>][] = [
+  ['flow.step.http', { method: 'POST', url: 'https://api.kumbara.app/v1/login', status: 200, duration: '142 ms' }],
+  ['flow.step.http', { method: 'GET', url: 'https://api.kumbara.app/v1/cart', status: 503, duration: '12.5 s' }],
+  ['flow.step.sawRequest', { method: 'GET', url: 'https://api.kumbara.app/v1/cart', status: 200 }],
+  ['flow.step.sawRequest', { method: 'POST', url: 'https://api.kumbara.app/v1/order', status: 0 }],
+  ['flow.step.sawLog', { message: 'Checkout finished in 812 ms' }],
+  ['flow.step.sawEvent', { name: 'checkout_done' }],
+  ['flow.step.waited', { duration: '500 ms' }],
+  ['flow.step.checksPassed', { count: 1 }],
+  ['flow.step.checksPassed', { count: 3 }],
+  ['flow.step.conditionTrue', { explain: '' }],
+  ['flow.step.conditionFalse', { explain: '401 — expected equals 200' }],
+  ['flow.step.conditionFalse', { explain: ' and nothing — expected it to exist' }],
+  ['flow.step.vars', { names: 'orderId, total' }],
+  ['flow.step.vars', { names: '' }],
+  ['flow.step.screenshot', { name: 'Sepet ekranı' }],
+  ['flow.step.recording', { seconds: 180 }],
+  ['flow.step.recordingSaved', { name: 'recording' }],
+  ['flow.step.mockAdded', { url: '/v1/cart' }],
+  ['flow.step.mockAddedWaiting', { url: '/v1/cart' }],
+  ['flow.step.httpBodyInferred', { method: 'POST', url: 'https://api.kumbara.app/v1/login', status: 200, duration: '142 ms', bodyType: 'json' }],
+  ['flow.step.openedUrl', { url: 'kumbara://cart' }],
+  ['flow.step.appLaunched', { app: 'com.mykynk.pati' }],
+  ['flow.step.appStopped', { app: 'com.mykynk.pati' }],
+  ['flow.step.appRestarted', { app: 'com.mykynk.pati' }],
+  ['flow.step.appDataCleared', { app: 'com.mykynk.pati' }],
+  ['flow.step.appInstalled', { file: 'app-debug.apk' }],
+  ['flow.step.appUninstalled', { app: 'com.mykynk.pati' }],
+  ['flow.step.appearance', { mode: 'dark' }],
+  ['flow.step.fontScale', { scale: '1.3' }],
+  ['flow.step.location', { lat: '41.0082', lon: '28.9784' }],
+  ['flow.step.pushSent', { app: 'com.mykynk.pati' }],
+  ['flow.step.textTyped', { text: 'qa+1731300000@example.com' }],
+  ['flow.step.keyPressed', { key: 'back' }],
+  ['flow.step.statusBar', { mode: 'clean' }],
+  ['flow.step.animationsOn', {}],
+  ['flow.step.animationsOff', {}],
+  ['flow.automation.loop', { flow: 'Çökme raporu', count: 5 }],
+  ['flow.automation.busy', {}],
+  ['flow.id.reserved', {}],
+  ['preflight.start.unknown', { node: 'http_3' }],
+  ['preflight.call.depth', { flow: 'Giriş yap', max: 8 }],
+  ['flow.step.mockOn', { rule: 'Sepet 500' }],
+  ['flow.step.mockOff', { rule: 'Sepet 500' }],
+  ['flow.step.mockRemoved', { rule: '/v1/cart' }],
+  ['flow.step.marker', { label: 'Ödeme testi' }],
+  ['flow.step.note', { text: 'Kampanya kodu yalnızca TR’de geçerli' }],
+  ['flow.step.note', { text: '' }],
+  ['flow.step.subflowPassed', { flow: 'Giriş yap' }],
+  ['flow.step.iteration', { index: 2, count: 5 }],
+  ['flow.step.iterationStopped', { index: 3, count: 5 }],
+  ['flow.step.repeated', { count: 1 }],
+  ['flow.step.repeatMet', { count: 2 }],
+  ['flow.step.repeatNotMet', { count: 10 }],
+  ['flow.step.retrying', { attempt: 1, error: 'GET https://api.kumbara.app/v1/cart failed: connect ECONNREFUSED 10.0.2.2:443' }],
+  ['flow.step.timeout', { seconds: 300 }],
+  ['flow.sdk.missing', { capability: 'network', app: 'com.mykynk.pati' }],
+  ['flow.sdk.missing', { capability: 'events', app: '' }],
+  ['flow.http.method', { method: 'G ET' }],
+  ['flow.http.invalidUrl', { url: '' }],
+  ['flow.http.invalidUrl', { url: 'ftp://files.kumbara.app' }],
+  ['flow.http.header', { header: 'X Token' }],
+  ['flow.http.failed', { method: 'GET', url: 'https://api.kumbara.app/v1/cart', error: 'The request timed out' }],
+  ['flow.http.failed', { method: 'GET', url: 'https://api.kumbara.app/v1/cart', error: '' }],
+  ['flow.http.status', { method: 'POST', url: 'https://api.kumbara.app/v1/login', status: 401, duration: '88 ms', expected: '2xx' }],
+  ['flow.extract.missing', { name: 'token', from: 'body', path: 'data.token' }],
+  ['flow.extract.missing', { name: 'session', from: 'header', path: '' }],
+  ['flow.regex.invalid', { pattern: '([a-z' }],
+  ['flow.assert.failed', { count: 1, first: 'Total is 15 (12 — expected equals 15)' }],
+  ['flow.assert.failed', { count: 3, first: 'Total is 15 (12 — expected equals 15)' }],
+  ['flow.noErrors.found', { count: 2, first: 'Crash: FormatException: Invalid radix-10 number' }],
+  ['flow.repeat.notMet', { count: 10 }],
+  ['flow.call.unknown', { flow: 'login' }],
+  ['flow.call.depth', { max: 8 }],
+  ['flow.call.input', { flow: 'Giriş yap', name: 'email' }],
+  ['flow.call.failed', { flow: 'Giriş yap', error: 'Expected status 2xx, got 401 (POST https://api.kumbara.app/v1/login)' }],
+  ['flow.call.failed', { flow: 'Giriş yap', error: '' }],
+  ['flow.param.type', { param: 'durationMs', expected: 'number' }],
+  ['flow.param.type', { param: 'headers', expected: 'somethingNew' }],
+  ['flow.param.type', { param: 'count', expected: 'numberOrList' }],
+  ['flow.param.json', { param: 'payload' }],
+  ['flow.mock.invalid', { error: 'url must not be empty' }],
+  ['flow.mock.notFound', { rule: 'Sepet 500' }],
+  ['flow.wait.network', { url: '/v1/cart', timeout: '30.0 s' }],
+  ['flow.wait.network', { url: '', timeout: '5000 ms' }],
+  ['flow.wait.log', { text: 'Checkout finished', timeout: '30.0 s' }],
+  ['flow.wait.event', { name: 'checkout_done', timeout: '15.0 s' }],
+  ['flow.node.unknownType', { type: 'http.reqest' }],
+  ['flow.template.syntax', { ref: 'login.body.items[' }],
+  ['flow.template.unknownRoot', { ref: 'loginn.body.token' }],
+  ['flow.template.unknownHelper', { ref: '$uuidd' }],
+  ['flow.template.unknownPipe', { ref: 'login.body.items | size' }],
+  ['template.syntax', { ref: 'login.body.items[' }],
+  // Notices
+  ['flow.automation.failed', { flow: 'Çökme raporu', error: 'No device is connected; this flow has device steps', reason: 'flow.preflight.failed' }],
+  ['flow.automation.failed', { flow: 'Çökme raporu', error: 'At most 10 runs at once', reason: 'flow.run.tooMany' }],
+  ['flow.automation.failed', { flow: 'Çökme raporu', error: 'boom' }],
+  ['flow.file.unreadable', { file: 'login.json', problem: 'Unexpected token } in JSON at position 41' }],
+  ['backup.failed', { error: 'ENOSPC: no space left on device' }],
+  // Validation issues
+  ['flow.format', { format: 'durbun-session' }],
+  ['flow.version', { version: '2' }],
+  ['flow.id.fixed', { from: 'Login Flow', to: 'login-flow' }],
+  ['flow.node.idGenerated', { id: 'http1' }],
+  ['flow.node.idFixed', { from: 'get-cart', to: 'get_cart' }],
+  ['flow.node.duplicateId', { id: 'login' }],
+  ['flow.node.reservedId', { id: 'env' }],
+  ['flow.node.unknownType', { type: 'http.reqest', suggestion: 'http.request' }],
+  ['flow.node.unknownType', { type: 'tap', suggestion: '' }],
+  ['flow.node.unreachable', { node: 'Sepeti aç' }],
+  ['flow.nodes.tooMany', { max: 500 }],
+  ['flow.edges.tooMany', { max: 2000 }],
+  ['flow.edge.unknownNode', { node: 'cart2' }],
+  ['flow.edge.port', { port: 'yes', ports: 'true, false, error' }],
+  ['flow.edge.intoTrigger', { node: 'start' }],
+  ['flow.param.required', { param: 'url' }],
+  ['flow.param.range', { param: 'maxSeconds', min: 1, max: 600 }],
+  ['flow.param.range', { param: 'delayMs', min: 0, max: '' }],
+  ['flow.param.option', { param: 'method', value: 'FETCH', options: 'GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS' }],
+  ['flow.param.option', { param: 'bodyType', value: '', options: 'none, json, text, form' }],
+  ['flow.param.unknown', { param: 'retries', type: 'http.request' }],
+  ['flow.rule.op', { op: '=~' }],
+  ['flow.rule.op', { op: '' }],
+  ['flow.extract.name', { name: 'access-token' }],
+  ['flow.extract.from', { value: 'cookie' }],
+  ['flow.assign.name', { name: '1x' }],
+  ['flow.input.name', { name: 'e mail' }],
+  ['flow.input.duplicate', { name: 'email' }],
+  ['flow.output.name', { name: 'order id' }],
+  ['flow.template.syntax', { detail: 'Unclosed {{ (every {{ needs a }} after it)' }],
+  ['flow.param.jsonText', { param: 'text' }],
+  ['flow.param.status', { param: 'expectStatus', value: '2XX OK' }],
+  ['flow.param.fixed', { param: 'status' }],
+  ['flow.param.fixed', { param: 'extract.path' }],
+  ['flow.mock.delay', {}],
+  ['flow.name.reserved', { name: '__proto__' }],
+  ['flow.rule.right', { op: 'equals' }],
+  ['flow.extract.pathSyntax', { detail: 'Unclosed [ in "items[0"' }],
+  ['flow.extract.pathFixed', { from: '$.data.token', to: 'data.token' }],
+  ['flow.regex.invalid', { pattern: '([a-z]+', param: 'text' }],
+  ['flow.template.unknownRoot', { root: 'loginn' }],
+  ['flow.call.unknown', { flowId: 'login' }],
+  ['flow.trigger.added', { id: 'start1' }],
+  // Preflight issues
+  ['preflight.flow.invalid', { problem: 'url is required' }],
+  ['preflight.device.gone', { device: 'android:R5CW30XYZ' }],
+  ['preflight.device.offline', { device: 'Galaxy S23', state: 'offline' }],
+  ['preflight.device.offline', { device: 'Pixel 7', state: 'somethingNew' }],
+  ['preflight.device.nonePlatform', { platform: 'ios' }],
+  ['preflight.device.nonePlatform', { platform: 'other' }],
+  ['preflight.device.noneSkipped', { count: 12 }],
+  ['preflight.device.auto', { device: 'Pixel 8' }],
+  ['preflight.app.notInstalled', { app: 'com.mykynk.pati', device: 'Pixel 7' }],
+  ['preflight.action.emulator', { step: 'Location', device: 'Galaxy S23', action: 'location' }],
+  ['preflight.action.simulator', { step: 'Push notification', device: 'Yusuf’un iPhone’u', action: 'push-notification' }],
+  ['preflight.action.tool', { step: 'Screen recording', device: 'iPhone 15', action: 'screen-record' }],
+  ['preflight.action.platform', { step: 'Input text', device: 'iPhone 16 Pro', action: 'input-text' }],
+  ['preflight.sdk.notConnected', { step: 'Wait for a request', capability: 'network' }],
+  ['preflight.sdk.notConnected', { step: 'Wait for a request', capability: 'commands' }],
+  ['preflight.call.unknown', { flow: 'login' }],
+  ['preflight.call.recursive', { flow: 'Giriş yap' }],
+  ['preflight.env.unknown', { env: 'staging' }],
+  ['preflight.env.none', { keys: 'baseUrl, token' }],
+  ['preflight.env.missing', { env: 'Staging', keys: 'token' }],
+  ['preflight.env.empty', { env: 'Staging', keys: 'password' }],
+  ['preflight.input.missing', { name: 'email' }],
+  // Package inspect warnings
+  ['package.flow.invalid', { problem: 'nodes must be a list' }],
+  ['package.flow.problems', { flow: 'Giriş yap', count: 2 }],
+  ['package.mock.invalid', { problem: 'rule #2 (Login): action is missing' }],
+  // Package import notices
+  ['package.settings.ignored', { keys: 'futureSetting' }],
+  ['package.settings.failed', { error: 'Invalid settings: maxLogEntries must be a number' }],
+  ['package.slack.failed', { error: 'The webhook URL must start with https://' }],
+  ['package.flow.saveFailed', { flow: 'Giriş yap', error: 'At most 200 flows' }],
+  ['package.mocks.saveFailed', { error: 'too many mock rules (1001); at most 1000' }],
+  ['package.run.failed', { run: 'Giriş yap', error: 'ENOSPC: no space left on device' }],
+];
+
 /** English words that must not leak into Turkish system lines. */
 const ENGLISH_LEFTOVERS = /\b(connected|disconnected|started|died|stopped|interrupted|restarting|attached|detached|pending|failed|shut down)\b/;
 
@@ -129,11 +310,13 @@ describe('server codes → i18n', () => {
   });
 
   it('the maintained list covers every code literal in the server source', () => {
-    const root = existsSync(join(process.cwd(), 'packages/server/src')) ? join(process.cwd(), 'packages/server/src') : join(process.cwd(), '../server/src');
-    if (!existsSync(root)) return; // UI package checked out alone
+    const packages = existsSync(join(process.cwd(), 'packages/server/src')) ? join(process.cwd(), 'packages') : join(process.cwd(), '..');
+    const roots = [join(packages, 'server/src'), join(packages, 'protocol/src/flows')];
+    if (!roots.every((r) => existsSync(r))) return; // UI package checked out alone
     const NOT_CODES = new Set([
       'api.kumbara.app', // a demo host name
       'app.action',
+      'backup.json',
       'command.result',
       'demo.set',
       'device.action',
@@ -146,19 +329,27 @@ describe('server codes → i18n', () => {
       'net.replay',
       'net.request',
       'net.response',
+      'preflight.action.unsupported', // examples in a doc comment (the real codes: preflight.action.<where>, preflight.sdk.notConnected)
+      'preflight.sdk.missing',
       'sdk.close',
       'settings.json',
+      'settings.onUnsupported', // JSON paths of flow validation issues
+      'settings.timeoutMs',
       'slack.json',
       'settings.update',
       'upload.bin',
       'vm.attach',
       'vm.detach',
     ]);
+    // Flow node types ('flow.call', 'device.openUrl', …) are not codes.
+    const nodeTypes = new Set(FLOW_NODE_SPECS.map((s) => s.type));
     const literal =
-      /'((?:device|app|logs|driver|demo|action|command|config|settings|replay|vm|server|sdk|metrics|net|params|screenshot|process|marker|import|upload|body|file|har|search|url|method|access|api|mocks|doctor|reader)\.[A-Za-z][A-Za-z.]*)'/g;
+      /'((?:device|app|logs|driver|demo|action|command|config|settings|replay|vm|server|sdk|metrics|net|params|screenshot|process|marker|import|upload|body|file|har|search|url|method|access|api|mocks|doctor|reader|flow|flowRun|preflight|package|backup|uiPrefs|template|env)\.[A-Za-z][A-Za-z.]*)'/g;
     const found = new Set<string>();
-    for (const f of walk(root)) for (const m of readFileSync(f, 'utf8').matchAll(literal)) if (!NOT_CODES.has(m[1]!)) found.add(m[1]!);
-    expect(found.size).toBeGreaterThan(100);
+    for (const root of roots) {
+      for (const f of walk(root)) for (const m of readFileSync(f, 'utf8').matchAll(literal)) if (!NOT_CODES.has(m[1]!) && !nodeTypes.has(m[1]!)) found.add(m[1]!);
+    }
+    expect(found.size).toBeGreaterThan(250);
     const known = new Set(allServerCodes());
     expect([...found].filter((c) => !known.has(c)).sort()).toEqual([]);
   });
@@ -248,7 +439,7 @@ describe('server codes → i18n', () => {
       'Kurulum başarısız oldu: Failure [INSTALL_FAILED_VERSION_DOWNGRADE]',
     );
     expect(errorText({ code: 'config.invalid', message: 'Invalid settings: maxLogEntries must be a number' })).toBe('Geçersiz ayar: maxLogEntries must be a number');
-    expect(errorText({ code: 'replay.invalidMethod', message: 'Invalid HTTP method "G E T"' })).toBe('Geçersiz HTTP yöntemi: G E T');
+    expect(errorText({ code: 'replay.invalidMethod', message: 'Invalid HTTP method "G E T"' })).toBe('Geçersiz HTTP metodu: G E T');
     expect(errorText({ code: 'upload.tooLarge', message: 'File is too large (limit 2 GB)' })).toBe('Dosya çok büyük (en fazla 2 GB)');
     expect(errorText({ code: 'action.failed', message: 'The action failed' })).toBe('İşlem başarısız oldu');
     expect(errorText({ code: 'device.readOnly', message: 'Imported sessions are read-only recordings' })).toBe(
@@ -279,14 +470,83 @@ describe('server codes → i18n', () => {
     // The server says "3 virtual devices"; the text names no count, so it cannot go stale again.
     expect(driverStatusText({ id: 'demo', detail: 'Generating demo data for 3 virtual devices', code: 'demo.active' })).toBe('Demo cihazlarında örnek veri üretiliyor');
     expect(driverStatusText({ id: 'android', detail: 'something odd' })).toBe('something odd');
-    expect(deviceDisplayName({ id: 'desktop', name: 'Desktop' })).toBe('Masaüstü · yeniden gönderilenler');
+    expect(deviceDisplayName({ id: 'desktop', name: 'Desktop' })).toBe('Masaüstü · Dürbün’ün gönderdikleri');
     expect(deviceDisplayName({ id: 'import:1', name: '📁 Pixel 8 · Demo' })).toBe('📁 Pixel 8 · Demo');
     expect(deviceStateText({ state: 'disconnected', stateCode: 'device.imported' })).toBe('İçe aktarılan kayıt · salt okunur');
     expect(deviceStateText({ state: 'unauthorized', stateCode: 'device.untrusted' })).toMatch(/Güven’e dokunun/);
     expect(logStatusText({ logs: { status: 'unavailable', code: 'logs.networkOnly' } })).toMatch(/^Yalnızca SDK verisi/);
     setLanguage('en');
-    expect(deviceDisplayName({ id: 'desktop', name: 'Desktop' })).toBe('Desktop · replays');
+    expect(deviceDisplayName({ id: 'desktop', name: 'Desktop' })).toBe('Desktop · sent by Dürbün');
     expect(driverStatusText({ id: 'ios-sim', detail: '1 booted simulator' })).toBe('1 booted simulator');
+  });
+});
+
+describe('flow codes → i18n', () => {
+  it.each(LANGS)('renders flow, preflight, validation and package codes with real params cleanly (%s)', (lang) => {
+    for (const [code, params] of FLOW_SAMPLES) {
+      expect(allServerCodes(), code).toContain(code);
+      expectClean(tCodeIn(lang, code, params, FALLBACK), `${lang} ${code} ${JSON.stringify(params)}`);
+    }
+  });
+
+  it('words the most visible flow codes', () => {
+    const tr = (code: string, params: Record<string, string | number>) => tCodeIn('tr', code, params, FALLBACK);
+    const sample = (code: string, i = 0) => FLOW_SAMPLES.filter(([c]) => c === code)[i]![1];
+    expect(tr('flow.step.http', sample('flow.step.http'))).toBe('POST https://api.kumbara.app/v1/login → 200 · 142 ms');
+    expect(tr('flow.step.http', sample('flow.step.http', 1))).toBe('GET https://api.kumbara.app/v1/cart → 503 · 12,5 sn');
+    expect(tcodeEn('flow.step.http', sample('flow.step.http', 1))).toBe('GET https://api.kumbara.app/v1/cart → 503 · 12.5 s');
+    expect(tr('flow.step.sawRequest', sample('flow.step.sawRequest', 1))).toBe('POST https://api.kumbara.app/v1/order → başarısız');
+    expect(tr('flow.wait.network', sample('flow.wait.network'))).toBe('30 sn içinde “/v1/cart” ile eşleşen istek gelmedi');
+    expect(tr('flow.step.conditionFalse', sample('flow.step.conditionFalse', 1))).toBe('Koşul sağlanmadı: nothing — expected it to exist');
+    expect(tr('flow.param.type', sample('flow.param.type'))).toBe('durationMs: bir sayı olmalı');
+    expect(tr('flow.param.type', sample('flow.param.type', 1))).toBe('headers: değer türü yanlış');
+    expect(tr('flow.param.type', { param: 'count', expected: 'numberOrList' })).toBe('count: bir sayı ya da liste olmalı');
+    expect(tcodeEn('flow.automation.loop', { flow: 'Crash report', count: 5 })).toBe(
+      'Automation for “Crash report” was switched off: it started 5 times in a row right after its previous run',
+    );
+    expect(tr('flow.extract.missing', sample('flow.extract.missing'))).toBe('token yanıttan okunamadı (yanıt gövdesi data.token)');
+
+    expect(tr('flow.assert.failed', sample('flow.assert.failed'))).toBe('Kontrol başarısız: Total is 15 (12 — expected equals 15)');
+    expect(tr('flow.assert.failed', sample('flow.assert.failed', 1))).toBe('3 kontrol başarısız; ilki: Total is 15 (12 — expected equals 15)');
+    expect(tcodeEn('flow.assert.failed', sample('flow.assert.failed'))).toBe('Check failed: Total is 15 (12 — expected equals 15)');
+    expect(tcodeEn('flow.assert.failed', sample('flow.assert.failed', 1))).toBe('3 checks failed; first: Total is 15 (12 — expected equals 15)');
+    expect(tcodeEn('flow.step.checksPassed', { count: 1 })).toBe('1 check passed');
+
+    expect(tr('preflight.device.auto', sample('preflight.device.auto'))).toBe('Pixel 8 üzerinde çalışacak. Başka bir cihaz için hedefi değiştirin.');
+    expect(tcodeEn('preflight.device.auto', sample('preflight.device.auto'))).toBe('Runs on Pixel 8. Change the target to use another device.');
+    expect(tr('preflight.device.offline', sample('preflight.device.offline'))).toBe('Galaxy S23 hazır değil (çevrimdışı)');
+    expect(tr('preflight.device.offline', sample('preflight.device.offline', 1))).toBe('Pixel 7 hazır değil');
+    expect(tr('preflight.device.nonePlatform', sample('preflight.device.nonePlatform'))).toBe('Bağlı iOS cihazı yok; akışta cihaz adımları var');
+    expect(tr('preflight.device.noneSkipped', { count: 12 })).toBe('Bağlı cihaz yok; 12 cihaz adımı atlanacak');
+    expect(tcodeEn('preflight.device.noneSkipped', { count: 1 })).toBe('No device is connected; the device step will be skipped');
+    expect(tr('preflight.action.emulator', sample('preflight.action.emulator'))).toBe('Galaxy S23 bu adımı çalıştıramaz: yalnızca Android emülatöründe çalışır');
+    expect(tcodeEn('preflight.action.emulator', sample('preflight.action.emulator'))).toBe('Location works only on an Android emulator, not on Galaxy S23');
+    expect(tr('flow.sdk.missing', sample('flow.sdk.missing'))).toBe('com.mykynk.pati Dürbün SDK’sıyla bağlı değil; bu adım ağ isteklerini SDK üzerinden görür');
+
+    // The automation notice says why in Turkish (the reason code), in English the server's own text.
+    expect(tr('flow.automation.failed', sample('flow.automation.failed', 1))).toBe(
+      '“Çökme raporu” otomatik akışı başlatılamadı: Aynı anda çalışabilecek akış sınırına ulaşıldı; birinin bitmesini bekleyin',
+    );
+    expect(tcodeEn('flow.automation.failed', sample('flow.automation.failed', 1))).toBe('The automatic flow “Çökme raporu” could not start: At most 10 runs at once');
+
+    // REST errors go through errorText (`detail` = the specific part of the English message).
+    setLanguage('tr');
+    expect(errorText({ code: 'package.passphrase.wrong', message: 'The passphrase is wrong, or the file was changed after it was saved' })).toBe('Parola yanlış ya da dosya kaydedildikten sonra değiştirilmiş');
+    expect(errorText({ code: 'backup.folder.unavailable', message: 'The backup folder is not available: /Volumes/Yedek/Dürbün' })).toBe(
+      'Yedek klasörüne ulaşılamıyor (/Volumes/Yedek/Dürbün); disk takılı değil ya da eşitleme hesabından çıkılmış olabilir',
+    );
+    expect(errorText({ code: 'package.tooLarge', message: 'The file is too large (limit 256 MB)' })).toBe('Dosya çok büyük (en fazla 256 MB)');
+    expect(errorText({ code: 'backup.folder.unwritable', message: "Dürbün cannot write to /Volumes/Yedek/Durbun: EACCES: permission denied, mkdir '/Volumes/Yedek/Durbun'" })).toBe(
+      "Dürbün bu klasöre yazamıyor: EACCES: permission denied, mkdir '/Volumes/Yedek/Durbun'",
+    );
+    expect(errorText({ code: 'flow.id.invalid', message: 'Invalid flow id "Login Flow"' })).toBe('Geçersiz akış kimliği: Login Flow');
+    setLanguage('en');
+    expect(errorText({ code: 'package.passphrase.wrong', message: 'The passphrase is wrong, or the file was changed after it was saved' })).toBe(
+      'The passphrase is wrong, or the file was changed after it was saved',
+    );
+    expect(errorText({ code: 'backup.folder.unwritable', message: "Dürbün cannot write to /Volumes/Yedek/Durbun: EACCES: permission denied, mkdir '/Volumes/Yedek/Durbun'" })).toBe(
+      "Dürbün cannot write to this folder: EACCES: permission denied, mkdir '/Volumes/Yedek/Durbun'",
+    );
   });
 });
 

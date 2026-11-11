@@ -60,6 +60,8 @@ export type { Scope, ScopeHint } from './stores/scope';
 export { useMocks, saveMocks, useServerSettings, updateServerSettings } from './stores/server';
 export type { MocksState, ServerSettingsState } from './stores/server';
 export { useSlack, useSlackStatus, loadSlack, updateSlack } from './stores/slack';
+export { useFlows, rememberFlowRun, latestRunOf, setFlowSummaries } from './stores/flows';
+export type { FlowsState } from './stores/flows';
 export type { SlackState } from './stores/slack';
 export { usePrefs, getPrefs, flushPrefs, defaultPrefs, DEFAULT_NOISE_RULES, HIGHLIGHT_COLORS, TAB_IDS } from './stores/prefs';
 export type { UiPrefs, ThemePref, Density, TimeFormat, TabId, NoiseRule, HighlightRule, HighlightColor } from './stores/prefs';

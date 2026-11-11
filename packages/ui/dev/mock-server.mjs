@@ -19,6 +19,7 @@
  */
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
+import { flowSummaries, handleFlowsApi } from './mock-flows.mjs';
 
 const args = process.argv.slice(2);
 const argValue = (name, fallback) => {
@@ -644,6 +645,8 @@ function snapshot() {
     metrics: [],
     deviceApps,
     logCount: logs.length,
+    flows: flowSummaries(),
+    flowRuns: [],
   };
 }
 
@@ -1028,6 +1031,7 @@ const httpServer = http.createServer(async (req, res) => {
       console.log(`[slack] ${String(text).length} chars:\n${text}\n`);
       return setTimeout(() => json(res, 200, { ok: true }), 400);
     }
+    if (await handleFlowsApi(req, res, p, { json, readBody, broadcast })) return;
     if (p === '/api/upload' && req.method === 'POST') {
       await readBody(req);
       return json(res, 200, { file: `/tmp/durbun/${url.searchParams.get('name') ?? 'upload.bin'}` });

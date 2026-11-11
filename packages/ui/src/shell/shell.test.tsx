@@ -342,7 +342,7 @@ describe('Sidebar', () => {
     expect(text).toContain('Cihazdaki “USB hata ayıklamaya izin verilsin mi?” sorusunu onaylayın');
     expect(text).toContain('Cihazın kilidini açın ve “Bu bilgisayara güvenilsin mi?” sorusunda Güven’e dokunun');
     expect(text).toContain('iOS 18.1 · yalnızca SDK verisi');
-    expect(text).toContain('Masaüstü · yeniden gönderilenler');
+    expect(text).toContain('Masaüstü · Dürbün’ün gönderdikleri');
     expect(text).not.toContain('Desktop');
     expect(text).toContain('📁 Pixel 8 · Demo');
     expect(text).toContain('İçe aktarıldı');
@@ -358,7 +358,7 @@ describe('Sidebar', () => {
     setLanguage('en');
     const { container } = render(<Sidebar />);
     const text = container.textContent ?? '';
-    expect(text).toContain('Desktop · replays');
+    expect(text).toContain('Desktop · sent by Dürbün');
     expect(text).toContain('SDK data only');
     expect(text).toContain('Imported');
     expect(text).toContain('Unlock the device and tap Trust on “Trust This Computer?”');

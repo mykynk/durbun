@@ -6,6 +6,7 @@ import { metricsStore } from './metricsStore';
 import { hubActions, useHub, appGroupKey, deviceAppKey } from './stores/hub';
 import { useConnection } from './stores/connection';
 import { setMocksFromServer, setServerSettingsFromServer } from './stores/server';
+import { applyFlowRunDelta, setFlowSummaries, setFlowsFromServer } from './stores/flows';
 import { ALL_SCOPE, setScope, useScopeStore } from './stores/scope';
 import { flushPendingCommands, handleReply } from './commands';
 import { emitNotice, emitResync, emitServerMessage } from './events';
@@ -136,6 +137,7 @@ export function handleServerMessage(msg: ServerToUi): void {
       networkStore.upsert(msg.network ?? [], { history: true });
       metricsStore.push(msg.metrics ?? []);
       setMocksFromServer(msg.mocks ?? []);
+      setFlowsFromServer(msg.flows, msg.flowRuns);
       useConnection.setState({ expectedLogCount: msg.logCount ?? 0, historyReceived: 0 });
       validateScope();
       emitResync();
@@ -170,6 +172,12 @@ export function handleServerMessage(msg: ServerToUi): void {
       break;
     case 'mocks':
       setMocksFromServer(msg.rules ?? []);
+      break;
+    case 'flows':
+      setFlowSummaries(msg.flows ?? []);
+      break;
+    case 'flowRun':
+      applyFlowRunDelta({ run: msg.run, steps: msg.steps ?? [] });
       break;
     case 'settings':
       setServerSettingsFromServer(msg.settings);

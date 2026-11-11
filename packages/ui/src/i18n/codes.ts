@@ -1,5 +1,6 @@
 import type { DeviceInfo, DriverStatus, I18nParams, LogEntry, UiNotice } from '@durbun/protocol';
 import { getLanguage, hasMessage, registerMessages, t, translateOr, type Lang, type TParams } from './core';
+import { FLOW_CODES, FLOW_PREPARE } from './flowCodes';
 
 /**
  * Localization of server-generated i18n codes: system log lines, device / log-stream / driver states,
@@ -225,6 +226,8 @@ export const SERVER_CODES = {
     'upload.tooLarge',
     'url.invalid',
   ],
+  /** Flows, packages and backups (flowCodes.ts). */
+  ...FLOW_CODES,
 } as const satisfies Record<string, readonly string[]>;
 
 /** Codes produced by the UI itself (CommandError / ApiError). */
@@ -376,7 +379,7 @@ registerMessages('code', {
       'Metinde Dart VM Service adresi bulunamadı. flutter run çıktısındaki “A Dart VM Service … is available at: http://127.0.0.1:…/…=/” adresini, bir DevTools bağlantısını ya da çıktının tamamını yapıştırın.',
     'metrics.unsupported': 'Bu cihazda CPU ve bellek ölçümü yapılamıyor',
     'net.unknown': 'Bu istek artık bellekte değil',
-    'replay.invalidMethod': ['Geçersiz HTTP yöntemi: {detail}', 'Geçersiz HTTP yöntemi'],
+    'replay.invalidMethod': ['Geçersiz HTTP metodu: {detail}', 'Geçersiz HTTP metodu'],
     'replay.invalidUrl': 'Geçersiz URL',
     'replay.unsupportedUrl': 'Yalnızca http ve https istekleri yeniden gönderilebilir',
     'demo.unavailable': 'Bu sürümde demo modu yok',
@@ -519,7 +522,7 @@ registerMessages('code', {
       },
       adjustedRange: '{name}: {from} yerine {to} kullanıldı (izin verilen {min}–{max})',
       adjustedWatchedApps: 'İzlenen uygulamalar listesi düzenlendi (boşluklar ve tekrarlar temizlendi)',
-      desktopDevice: 'Masaüstü · yeniden gönderilenler',
+      desktopDevice: 'Masaüstü · Dürbün’ün gönderdikleri',
       driver: {
         androidOnline: '{adb} · {count, number} cihaz bağlı',
         simulators: '{count, number} açık simülatör',
@@ -808,7 +811,7 @@ registerMessages('code', {
       },
       adjustedRange: '{name}: {to} instead of {from} (allowed {min}–{max})',
       adjustedWatchedApps: 'The watched apps list was cleaned up (trimmed, duplicates removed)',
-      desktopDevice: 'Desktop · replays',
+      desktopDevice: 'Desktop · sent by Dürbün',
       driver: {
         androidOnline: { one: '{adb} · {count, number} device online', other: '{adb} · {count, number} devices online' },
         simulators: { one: '{count, number} booted simulator', other: '{count, number} booted simulators' },
@@ -977,6 +980,7 @@ const PREPARE: Record<string, Preparer> = {
     const h = num(p.height);
     return { params: { ...p, size: w && h ? `${w}×${h}` : '' } };
   },
+  ...FLOW_PREPARE,
 };
 
 function prepare(code: string, params: Params | undefined, lang: Lang): Prepared {

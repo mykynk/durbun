@@ -20,7 +20,7 @@ export function ShortcutsDialog() {
     const general: ShortcutRow[] = [
       { combos: ['Mod+K'], label: t('shell.shortcuts.palette') },
       { combos: ['?'], label: t('shell.shortcuts.help') },
-      { combos: ['Mod+1', 'Mod+5'], label: t('shell.shortcuts.tabs') },
+      { combos: ['Mod+1', 'Mod+6'], label: t('shell.shortcuts.tabs') },
       { combos: ['Mod+,'], label: t('shell.settings.title') },
       { combos: ['Mod+B'], label: t('shell.shortcuts.sidebar') },
       { combos: ['Escape'], label: t('shell.shortcuts.escape') },

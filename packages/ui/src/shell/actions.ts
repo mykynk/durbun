@@ -3,7 +3,8 @@ import { sendCommand } from '../data/commands';
 import { useHub } from '../data/stores/hub';
 import { getScope, setScope, type Scope } from '../data/stores/scope';
 import { usePrefs, type ThemePref } from '../data/stores/prefs';
-import { useUi } from '../data/stores/ui';
+import { ui, useUi } from '../data/stores/ui';
+import { sniffFormat, transfer, type DurbunFileKind } from '../features/transfer/store';
 import { downloadUrl, pickFiles } from '../lib/download';
 import { t } from '../i18n/core';
 import { errorText } from '../i18n/codes';
@@ -42,14 +43,41 @@ export async function exportHar(): Promise<void> {
 }
 
 const SESSION_EXT = /\.(json|durbun)$/i;
+const TEXT_EXT = /\.(json|durbun|md|txt)$/i;
 const INSTALL_EXT = /\.(apk|aab|ipa|app|zip)$/i;
 
-/** Import a session file; switches the scope to the imported device on success. */
+/**
+ * Import a Dürbün file, by what it holds: a package (.durbun) or a flow file asks what to bring in, a session
+ * recording opens as an imported device (the scope switches to it on success).
+ */
 export async function importFile(file: File): Promise<void> {
-  if (!SESSION_EXT.test(file.name)) {
+  if (INSTALL_EXT.test(file.name) || !TEXT_EXT.test(file.name)) {
     toast.warn(t('code.import.invalid'), {
       description: INSTALL_EXT.test(file.name) ? t('shell.io.installHint') : t('shell.io.sessionHint'),
     });
+    return;
+  }
+  // Only the head is read to tell them apart: session recordings can be hundreds of megabytes.
+  let kind: DurbunFileKind = 'unknown';
+  try {
+    kind = sniffFormat(await file.slice(0, 64 * 1024).text());
+  } catch {
+    /* unreadable: the session import below reports it */
+  }
+  if (kind === 'package' || kind === 'flow') {
+    try {
+      const text = await file.text();
+      if (kind === 'package') transfer.openImport(text, file.name);
+      else ui.importFlows(text);
+    } catch (err) {
+      toast.error(t('shell.io.importFailed'), { description: errorMessage(err) });
+    }
+    return;
+  }
+  // Every Dürbün file names its format first; a session file is still sent when its name says so (the server
+  // explains what is wrong with it).
+  if (!SESSION_EXT.test(file.name) || (kind === 'unknown' && !/\.durbun\.json$/i.test(file.name))) {
+    toast.warn(t('shell.io.notDurbun'), { description: t('shell.io.sessionHint') });
     return;
   }
   const id = toast({ kind: 'info', title: t('shell.io.importing', { name: file.name }), duration: 0 });
@@ -69,7 +97,7 @@ export async function importFile(file: File): Promise<void> {
 }
 
 export async function pickAndImport(): Promise<void> {
-  const [file] = await pickFiles({ accept: '.json,.durbun,application/json' });
+  const [file] = await pickFiles({ accept: '.json,.durbun,.md,.txt,application/json' });
   if (file) await importFile(file);
 }
 

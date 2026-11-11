@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { ArrowLeftRight, BookOpen, Columns3, Copy, Drama, Eraser, FileDown, FilterX, Link2, Pause, PencilLine, Play, Radio, RotateCw, ScrollText, Share2, X } from 'lucide-react';
+import { ArrowLeftRight, BookOpen, Columns3, Copy, Drama, Eraser, FileDown, FilterX, Link2, Pause, PencilLine, Play, Radio, RotateCw, ScrollText, Share2, Workflow, X } from 'lucide-react';
 import type { NetworkEntry, UiCommand } from '@durbun/protocol';
 import {
   ALL_SCOPE,
@@ -262,6 +262,7 @@ export default function NetworkView() {
       { label: t('network.menu.replay'), icon: RotateCw, disabled: e.method === '?', onSelect: () => void doReplay(e) },
       { label: t('network.menu.editReplayEllipsis'), icon: PencilLine, disabled: e.method === '?', onSelect: () => setReplayEntry(e) },
       { label: t('network.menu.createMock'), icon: Drama, onSelect: () => void createMockFrom(e) },
+      { label: t('network.menu.createFlow'), icon: Workflow, disabled: e.method === '?', onSelect: () => ui.newFlowFromRequests([e.id]) },
       { type: 'separator' },
       { label: t('network.menu.showInLogs'), icon: ScrollText, onSelect: () => showInLogs(e) },
       { label: t('network.menu.har'), icon: FileDown, onSelect: () => void downloadHarFor([e.id], harFileName(e)) },
@@ -444,6 +445,7 @@ export default function NetworkView() {
           { id: 'network.sel.replay', title: t('network.menu.replay'), group, icon: RotateCw, keywords: ['replay', 'tekrar', 'gönder'], run: () => void doReplay(sel) },
           { id: 'network.sel.edit', title: t('network.menu.editReplayEllipsis'), group, icon: PencilLine, keywords: ['edit', 'düzenle', 'replay'], run: () => setReplayEntry(sel) },
           { id: 'network.sel.mock', title: t('network.menu.createMock'), group, icon: Drama, keywords: ['mock', 'oluştur'], run: () => void createMockFrom(sel) },
+          { id: 'network.sel.flow', title: t('network.menu.createFlow'), group, icon: Workflow, keywords: ['flow', 'akış', 'test', 'senaryo', 'scenario'], run: () => ui.newFlowFromRequests([sel.id]), disabled: sel.method === '?' },
           { id: 'network.sel.logs', title: t('network.menu.showInLogs'), group, icon: ScrollText, keywords: ['logs', 'loglar'], run: () => showInLogs(sel) },
           { id: 'network.sel.compare', title: t('network.menu.compareEllipsis'), group, icon: ArrowLeftRight, keywords: ['compare', 'karşılaştır', 'diff'], run: () => setCompareBase(sel.id) },
         ]

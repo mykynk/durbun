@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
-import { Bell, Check, ExternalLink, Info, Network, Palette, RotateCcw, ScrollText, Send, Settings, Unplug, Wifi } from 'lucide-react';
+import { Archive, Bell, ExternalLink, Info, Network, Palette, RotateCcw, ScrollText, Send, Settings, Unplug, Wifi } from 'lucide-react';
 import { DEFAULT_PORTS, type ServerSettings } from '@durbun/protocol';
 import { errorText, useLanguage, useT } from '../i18n';
 import {
@@ -21,7 +21,6 @@ import { Dialog, confirm } from '../components/Dialog';
 import { Button } from '../components/Button';
 import { SegmentedControl, Toggle } from '../components/Controls';
 import { Input, Select } from '../components/Form';
-import { Callout } from '../components/Layout';
 import { Chip } from '../components/Badges';
 import { CopyButton } from '../components/CopyButton';
 import { toast } from '../components/Toast';
@@ -32,6 +31,8 @@ import { DurbunMark } from '../components/Icons';
 import { sdkHostLines } from './sdkHosts';
 import { Snippet } from './Snippet';
 import { SLACK_ADD_URL, toSlackText } from '../lib/slack';
+import { Group, OfflineNote, Row, SectionHeader } from './settingsParts';
+import { BackupSection } from '../features/transfer/BackupSection';
 
 /** Inclusive ranges the server accepts (packages/server/src/config.ts SETTINGS_LIMITS); KB for bodies. */
 const LIMITS = {
@@ -49,6 +50,7 @@ const SECTIONS: { id: SettingsSection; icon: typeof Palette }[] = [
   { id: 'network', icon: Network },
   { id: 'connection', icon: Wifi },
   { id: 'slack', icon: Send },
+  { id: 'backup', icon: Archive },
   { id: 'about', icon: Info },
 ];
 
@@ -79,67 +81,12 @@ export function SettingsDialog() {
             {section === 'network' ? <NetworkSection /> : null}
             {section === 'connection' ? <ConnectionSection /> : null}
             {section === 'slack' ? <SlackSection /> : null}
+            {section === 'backup' ? <BackupSection /> : null}
             {section === 'about' ? <AboutSection /> : null}
           </div>
         </div>
       ) : null}
     </Dialog>
-  );
-}
-
-function SectionHeader({ title, description, onClose }: { title: string; description?: string; onClose?: boolean }) {
-  const t = useT();
-  return (
-    <header className="settings__header">
-      <div>
-        <h2 className="settings__title">{title}</h2>
-        {description ? <p className="settings__desc">{description}</p> : null}
-      </div>
-      {onClose !== false ? (
-        <Button variant="ghost" size="sm" onClick={ui.closeSettings}>
-          {t('common.done')}
-        </Button>
-      ) : null}
-    </header>
-  );
-}
-
-function Row({ label, hint, children, saved, range }: { label: ReactNode; hint?: ReactNode; children: ReactNode; saved?: boolean; range?: [min: number, max: number, unit?: string] }) {
-  const t = useT();
-  return (
-    <div className="setting-row">
-      <div className="setting-row__text">
-        <div className="setting-row__label">
-          {label}
-          {saved ? (
-            <span className="setting-row__saved" role="status" aria-label={t('code.settings.saved')}>
-              <Check size={12} aria-hidden />
-            </span>
-          ) : null}
-        </div>
-        {hint || range ? (
-          <div className="setting-row__hint">
-            {hint}
-            {range ? (
-              <span className="setting-row__range tnum">
-                {hint ? ' · ' : null}
-                {t('shell.settings.range', { min: formatNumber(range[0]), max: `${formatNumber(range[1])}${range[2] ? ` ${range[2]}` : ''}` })}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-      <div className="setting-row__control">{children}</div>
-    </div>
-  );
-}
-
-function Group({ title, children }: { title?: string; children: ReactNode }) {
-  return (
-    <section className="settings__group">
-      {title ? <h3 className="settings__group-title">{title}</h3> : null}
-      <div className="settings__group-body">{children}</div>
-    </section>
   );
 }
 
@@ -359,17 +306,6 @@ function TextField({ value, onCommit, placeholder, disabled, label }: { value: s
         if (e.key === 'Enter') commit();
       }}
     />
-  );
-}
-
-function OfflineNote() {
-  const t = useT();
-  const status = useConnection((s) => s.status);
-  if (isConnected(status)) return null;
-  return (
-    <Callout tone="warn" compact>
-      {t('shell.settings.offline')}
-    </Callout>
   );
 }
 

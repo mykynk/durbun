@@ -46,6 +46,7 @@ import { RuleList } from './components/RuleList';
 import { RuleEditor, type KnownApp } from './components/RuleEditor';
 import { CapabilityHints, ImportDialog, type PendingImport } from './components/Extras';
 import { ExplainCallout, ExplainEmpty, pickEmptyReason, useScopeExplain } from '../../sources';
+import { sniffFormat, transfer } from '../transfer/store';
 import './i18n';
 import './mocks.css';
 
@@ -278,10 +279,15 @@ export default function MocksView() {
     toast.success(t('mocks.io.exported', { count: rules.length }));
   };
   const importFromFile = async () => {
-    const [file] = await pickFiles({ accept: '.json,application/json' });
+    const [file] = await pickFiles({ accept: '.json,.durbun,application/json' });
     if (!file) return;
     try {
       const text = await file.text();
+      // A package carries more than rules (flows, environments…): its own dialog lets the user pick.
+      if (sniffFormat(text.slice(0, 64 * 1024)) === 'package') {
+        transfer.openImport(text, file.name);
+        return;
+      }
       const { rules: parsed, issues } = parseRulesFile(text);
       setPendingImport({ file: file.name, rules: parsed, issues });
     } catch (err) {
