@@ -277,9 +277,12 @@ class DurbunDioInterceptor extends Interceptor {
           error: message,
         );
       case 'tls':
-        return DioException.badCertificate(
+        // Same as DioException.badCertificate, which only exists from dio 5.5.0 (this package allows 5.4).
+        return DioException(
           requestOptions: options,
+          type: DioExceptionType.badCertificate,
           error: message ?? 'CERTIFICATE_VERIFY_FAILED (Dürbün mock)',
+          message: 'The certificate of the response is not approved.',
         );
       case 'dns':
         return DioException.connectionError(

@@ -175,6 +175,33 @@ void main() {
     await setMocks(const []);
   });
 
+  test('a "tls" mock fails with a badCertificate DioException', () async {
+    await setMocks([
+      {
+        'id': 'mock-tls',
+        'enabled': true,
+        'method': '*',
+        'url': '/secure',
+        'match': 'contains',
+        'action': {'type': 'fail', 'error': 'tls'},
+        'createdAt': 1,
+      },
+    ]);
+    final adapter = FakeNativeAdapter();
+    final dio = nativeDio(adapter);
+    await expectLater(
+      dio.get<Object?>('/secure'),
+      throwsA(isA<DioException>()
+          .having((e) => e.type, 'type', DioExceptionType.badCertificate)
+          .having((e) => '${e.error}', 'error', contains('CERTIFICATE_VERIFY_FAILED'))),
+    );
+    expect(adapter.calls, 0);
+    final (_, failed) = await net('/secure');
+    expect(failed['type'], 'net.error');
+    expect(failed['mocked'], isTrue);
+    await setMocks(const []);
+  });
+
   test('Dio with the default dart:io adapter is not reported twice', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) => req.response
