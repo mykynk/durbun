@@ -243,6 +243,16 @@ export class NetworkStore {
     return entry;
   }
 
+  /** Notes that a part of the exchange arrived in a message too large to accept (NetworkEntry.tooLarge). */
+  markTooLarge(id: string, info: NonNullable<NetworkEntry['tooLarge']>, status?: number): NetworkEntry | undefined {
+    const entry = this.entries.get(id);
+    if (!entry) return undefined;
+    entry.tooLarge = { ...info };
+    if (status !== undefined && entry.status === undefined) entry.status = status;
+    this.onChange(entry);
+    return entry;
+  }
+
   /** Pending requests of an app become failed (a later response still upgrades them). */
   failPending(appId: string, error: string, endTs: number | undefined): NetworkEntry[] {
     const failed: NetworkEntry[] = [];

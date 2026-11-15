@@ -4,6 +4,7 @@
  * validate → hello/handshake → hub.
  */
 import type {
+  AppSession,
   MetricSample,
   MockRule,
   SdkCommandResult,
@@ -16,7 +17,22 @@ import type {
 import { PROTOCOL_VERSION } from '@durbun/protocol';
 import type { Hub, Logger, SdkAttachMeta } from '../types';
 import { resolveDevice } from './devices';
+import {
+  CLOCK_SKEW_LINE_MS,
+  ClockSkewEstimator,
+  clockSkewLine,
+  DropReporter,
+  KNOWN_SDK_TYPES,
+  netTooLargeInput,
+  protocolLine,
+  protocolMismatch,
+  readFrameHead,
+  type DropReason,
+} from './diagnostics';
 import { parseSdkMessage } from './validate';
+
+/** Extra pings right after the welcome (ms), so the clock estimate does not wait for the keepalive interval. */
+const EARLY_PING_DELAYS_MS = [0, 3_000];
 
 export interface SdkTimings {
   /** Close connections that do not send `hello` in time. */
@@ -86,6 +102,8 @@ export class SdkConnection {
   appName: string | undefined;
   /** Session lives on a `net:` device whose state follows its connections. */
   networkDevice = false;
+  /** Device hints from `hello` (a `net:` session may later move to the plugged-in device running the app). */
+  hints: SdkHello['device'] | undefined;
   /** Its hello put a driverless `ios-sim:` placeholder online (ResolvedDevice.placeholder). */
   placeholderDevice = false;
   established = false;
@@ -96,6 +114,11 @@ export class SdkConnection {
   private helloTimer: ReturnType<typeof setTimeout> | undefined;
   private pingTimer: ReturnType<typeof setInterval> | undefined;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  private earlyPingTimers: ReturnType<typeof setTimeout>[] = [];
+  private readonly clock = new ClockSkewEstimator();
+  private readonly drops = new DropReporter((line) => {
+    if (this.deviceId) this.host.hub.pushSystemLog(this.deviceId, line);
+  });
 
   constructor(
     private readonly host: ConnectionHost,
@@ -143,17 +166,51 @@ export class SdkConnection {
       msg = parseSdkMessage(value);
     } catch (err) {
       this.host.logger.debug(`invalid message on ${this.describe()}`, err);
-      return;
     }
     if (!msg) {
       this.host.logger.debug(`ignored an invalid/unknown message on ${this.describe()}`);
+      this.noteRejected(value);
       return;
     }
     try {
-      this.dispatch(msg);
+      this.dispatch(msg, value);
     } catch (err) {
       this.host.logger.warn(`failed to handle "${msg.type}" from ${this.describe()}`, err);
     }
+  }
+
+  /**
+   * A frame over the size limit was dropped unread; `head` is its first bytes. Once the session is known the
+   * drop becomes a (rate-limited) system line, and a dropped request / response updates its network entry
+   * instead of leaving it pending. Never throws.
+   */
+  oversized(bytes: number, head?: Buffer | string): void {
+    if (this.closed || !this.established || !this.appId) return;
+    try {
+      const fields = readFrameHead(head);
+      const net = netTooLargeInput(fields, bytes);
+      if (net) this.host.hub.netTooLarge?.(this.appId, net);
+      this.reportDrop('tooLarge', { type: fields.type, bytes });
+    } catch (err) {
+      this.host.logger.debug(`reporting an oversized frame on ${this.describe()} failed`, err);
+    }
+  }
+
+  /** A JSON value that failed validation: a known type with bad fields, or a type this server does not know. */
+  private noteRejected(value: unknown): void {
+    if (!this.established) return;
+    try {
+      const type = typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as { type?: unknown }).type : undefined;
+      const known = typeof type === 'string' && KNOWN_SDK_TYPES.has(type);
+      this.reportDrop(typeof type === 'string' && !known ? 'unknownType' : 'invalid', { type: typeof type === 'string' ? type : undefined });
+    } catch (err) {
+      this.host.logger.debug(`reporting a rejected message on ${this.describe()} failed`, err);
+    }
+  }
+
+  private reportDrop(reason: DropReason, details: { type?: string; bytes?: number }): void {
+    if (!this.appId) return;
+    this.drops.drop(reason, { id: this.appId, app: { id: this.bundleId ?? '', name: this.appName ?? this.bundleId ?? '' } }, details);
   }
 
   close(reason: string, code = 1000): void {
@@ -162,6 +219,8 @@ export class SdkConnection {
     if (this.helloTimer) clearTimeout(this.helloTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    for (const t of this.earlyPingTimers) clearTimeout(t);
+    this.earlyPingTimers = [];
     this.helloTimer = this.pingTimer = this.idleTimer = undefined;
     try {
       this.wire.close(reason, code);
@@ -178,14 +237,14 @@ export class SdkConnection {
     if (!this.established) this.callbacks.onClosedBeforeWelcome?.(reason);
   }
 
-  private dispatch(msg: SdkToServer): void {
+  private dispatch(msg: SdkToServer, raw?: unknown): void {
     if (!this.established) {
       if (msg.type !== 'hello') {
         this.host.logger.debug(`"${msg.type}" before hello ignored on ${this.describe()}`);
         return;
       }
       try {
-        this.handleHello(msg);
+        this.handleHello(msg, raw);
       } catch (err) {
         this.host.logger.warn(`hello from ${this.describe()} rejected`, err);
         this.close('hello could not be processed', 1011);
@@ -225,11 +284,30 @@ export class SdkConnection {
         hub.patchApp(appId, { actions: msg.actions });
         return;
       case 'pong':
+        this.onPong(msg.ts);
         return;
     }
   }
 
-  private handleHello(hello: SdkHello): void {
+  private sendPing(): void {
+    const now = Date.now();
+    this.clock.pingSent(now);
+    this.send({ type: 'ping', ts: now });
+  }
+
+  private onPong(deviceTs: number): void {
+    const estimate = this.clock.pong(deviceTs, Date.now());
+    if (!this.appId) return;
+    const { hub } = this.host;
+    if (estimate) hub.patchApp(this.appId, { clockOffsetMs: estimate.offsetMs, clockOffsetAccuracyMs: estimate.accuracyMs });
+    const best = this.clock.estimate;
+    if (best && this.deviceId && this.clock.shouldReport()) {
+      const deviceName = hub.getDevice(this.deviceId)?.name ?? this.deviceId;
+      hub.pushSystemLog(this.deviceId, clockSkewLine({ id: this.appId, app: { id: this.bundleId ?? '', name: this.appName ?? '' } }, best, deviceName));
+    }
+  }
+
+  private handleHello(hello: SdkHello, raw?: unknown): void {
     const { hub, logger } = this.host;
     const resolved = resolveDevice(hub, hello.device, this.meta, hello.app.id);
     const app = hub.registerApp({
@@ -247,12 +325,15 @@ export class SdkConnection {
     this.deviceId = resolved.deviceId;
     this.bundleId = hello.app.id;
     this.appName = hello.app.name;
+    this.hints = hello.device;
     this.networkDevice = resolved.network;
     this.placeholderDevice = resolved.placeholder === true;
     this.established = true;
     if (this.helloTimer) clearTimeout(this.helloTimer);
     this.helloTimer = undefined;
     this.host.onEstablished(this);
+    this.noteProtocol(app, raw);
+    if (app.clockOffsetMs !== undefined && Math.abs(app.clockOffsetMs) >= CLOCK_SKEW_LINE_MS) this.clock.markReported();
 
     const config = this.host.configFor(resolved.deviceId);
     this.lastConfigKey = configKey(config);
@@ -265,11 +346,35 @@ export class SdkConnection {
       mocks: this.host.mocksFor(hello.app.id),
     });
     if (this.keepalive) {
-      this.pingTimer = setInterval(() => this.send({ type: 'ping', ts: Date.now() }), this.host.timings.pingIntervalMs);
+      this.pingTimer = setInterval(() => this.sendPing(), this.host.timings.pingIntervalMs);
       this.pingTimer.unref?.();
+      for (const ms of EARLY_PING_DELAYS_MS) {
+        const timer = setTimeout(() => this.sendPing(), ms);
+        timer.unref?.();
+        this.earlyPingTimers.push(timer);
+      }
     }
     logger.info(`SDK connected: ${this.describe()} → device ${resolved.deviceId}`);
     this.callbacks.onWelcome?.(app.id);
+  }
+
+  /**
+   * Records the protocol version from the raw hello (absent = unknown, never an error) and writes one line
+   * when the SDK is newer than this server understands or older than it supports.
+   */
+  private noteProtocol(app: AppSession, raw: unknown): void {
+    const value = typeof raw === 'object' && raw !== null ? (raw as { protocol?: unknown }).protocol : undefined;
+    const sdkProtocol = typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
+    const mismatch = protocolMismatch(sdkProtocol);
+    const { hub } = this.host;
+    if (sdkProtocol !== app.sdkProtocol || mismatch !== app.protocolMismatch) {
+      hub.patchApp(app.id, { sdkProtocol, protocolMismatch: mismatch });
+    }
+    // Once per session: a reconnect of the same launch (Wi-Fi drop) does not repeat the line.
+    if (mismatch && sdkProtocol !== undefined && app.protocolMismatch !== mismatch) {
+      this.host.logger.warn(`${this.describe()} speaks SDK protocol ${sdkProtocol} (${mismatch})`);
+      hub.pushSystemLog(app.deviceId, protocolLine(app, sdkProtocol, mismatch));
+    }
   }
 
   private scheduleIdleCheck(delayMs: number): void {

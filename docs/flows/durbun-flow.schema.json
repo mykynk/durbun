@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/mykynk/durbun/blob/main/docs/flows/durbun-flow.schema.json",
+  "$id": "https://raw.githubusercontent.com/mykynk/durbun/main/docs/flows/durbun-flow.schema.json",
   "title": "Dürbün flow",
   "description": "A Dürbün flow: nodes (steps) connected by edges, run by the Dürbün Mac app against a device and an app.",
   "type": "object",
@@ -13,6 +13,10 @@
     "edges"
   ],
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Where editors find this schema (written on export, ignored on import)"
+    },
     "format": {
       "const": "durbun-flow"
     },

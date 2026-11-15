@@ -5,8 +5,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DeviceHints, DeviceInfo } from '@durbun/protocol';
 import { findDeviceRunningApp, lanAddress, RECENT_APP_ACTIVITY_MS, resolveDevice } from '../../src/sdk/devices';
-import type { Hub, SdkAttachMeta } from '../../src/types';
-import { device, makeHub } from '../hub/helpers';
+import { createSdkLayerWithTimings } from '../../src/sdk/layer';
+import type { Hub, SdkAttachMeta, SdkLayer } from '../../src/types';
+import { silentLogger } from '../../src/util/logger';
+import { device, hello as helloMsg, makeHub, makeSettings, sleep, waitFor } from '../hub/helpers';
 
 const BUNDLE = 'com.mykynk.pati';
 const lanA: SdkAttachMeta = { transport: 'websocket', remote: '::ffff:192.168.1.42:50125' };
@@ -83,5 +85,86 @@ describe('Wi-Fi sessions without a known device', () => {
     expect(lanAddress('[fe80::1c2:3]:50125')).toBe('fe80::1c2:3');
     expect(lanAddress('127.0.0.1:5000')).toBeUndefined();
     expect(lanAddress(undefined)).toBeUndefined();
+  });
+});
+
+describe('a network session moves once a driver reports its phone', () => {
+  const layers: SdkLayer[] = [];
+  afterEach(async () => {
+    for (const l of layers.splice(0)) await l.close();
+  });
+
+  function layer(h: Hub): SdkLayer {
+    const l = createSdkLayerWithTimings({ hub: h, logger: silentLogger, settings: () => makeSettings(), mocks: () => [], serverVersion: '0.3.0' });
+    layers.push(l);
+    return l;
+  }
+
+  async function connectRn(l: SdkLayer, meta: SdkAttachMeta = lanA, session = 'launch-1') {
+    const v = l.openVirtual(meta);
+    v.send(helloMsg({ device: rnIphone, session, app: { name: 'Pati', id: BUNDLE } }));
+    return { v, appId: await v.appId };
+  }
+
+  it('moves to the one plugged-in iPhone that later runs the app; the empty network row disappears', async () => {
+    setup([iphone('D1', 'Yusuf’s iPhone')]);
+    const l = layer(hub);
+    const { appId } = await connectRn(l);
+    const netId = hub.getApp(appId)!.deviceId;
+    expect(netId).toMatch(/^net:/);
+
+    hub.upsertDeviceApp({ deviceId: 'ios:D1', id: BUNDLE, running: true, pids: [501], lastActivity: Date.now() });
+    await waitFor(() => hub.getApp(appId)?.deviceId === 'ios:D1');
+    await waitFor(() => !hub.getDevice(netId));
+    expect(hub.getLogs().some((e) => e.deviceId === netId)).toBe(false);
+    const moved = hub.getLogs().find((e) => e.code === 'app.deviceFound');
+    expect(moved).toMatchObject({ deviceId: 'ios:D1', appId, params: { app: 'Pati', device: 'Yusuf’s iPhone', from: netId } });
+
+    // Later data goes to the phone; the session's disconnect does not resurrect the network row.
+    hub.pushAppLog(appId, { ts: Date.now(), level: 'info', message: 'on the phone' });
+    expect(hub.getLogs().find((e) => e.message === 'on the phone')?.deviceId).toBe('ios:D1');
+  });
+
+  it('keeps a network row that already holds the session data (offline, as history)', async () => {
+    setup([iphone('D1', 'A')]);
+    const l = layer(hub);
+    const { v, appId } = await connectRn(l);
+    const netId = hub.getApp(appId)!.deviceId;
+    v.send({ type: 'log', ts: Date.now(), level: 'info', message: 'before the move' });
+    hub.upsertDeviceApp({ deviceId: 'ios:D1', id: BUNDLE, running: true, pids: [501], lastActivity: Date.now() });
+    await waitFor(() => hub.getApp(appId)?.deviceId === 'ios:D1');
+    await waitFor(() => hub.getDevice(netId)?.state === 'disconnected');
+    expect(hub.getLogs().find((e) => e.message === 'before the move')?.deviceId).toBe(netId);
+  });
+
+  it('never guesses: two phones running it, or another app, leave the session where it is', async () => {
+    setup([iphone('D1', 'A'), iphone('D2', 'B')]);
+    const l = layer(hub);
+    const { appId } = await connectRn(l);
+    const netId = hub.getApp(appId)!.deviceId;
+    hub.upsertDeviceApp({ deviceId: 'ios:D1', id: 'com.other.app', running: true, pids: [7], lastActivity: Date.now() });
+    await sleep(50);
+    expect(hub.getApp(appId)!.deviceId).toBe(netId);
+    hub.upsertDeviceApp({ deviceId: 'ios:D1', id: BUNDLE, running: true, pids: [501], lastActivity: Date.now() });
+    hub.upsertDeviceApp({ deviceId: 'ios:D2', id: BUNDLE, running: true, pids: [502], lastActivity: Date.now() });
+    await sleep(200);
+    expect(hub.getApp(appId)!.deviceId).toBe(netId);
+    expect(hub.getDevice(netId)?.state).toBe('online');
+  });
+
+  it('a second session on the same network row keeps it online after the first moves', async () => {
+    setup([iphone('D1', 'A')]);
+    const l = layer(hub);
+    const first = await connectRn(l);
+    const netId = hub.getApp(first.appId)!.deviceId;
+    const v2 = l.openVirtual(lanA);
+    v2.send(helloMsg({ device: rnIphone, session: 'launch-2', app: { name: 'Mahalle', id: 'com.mykynk.mahalle' } }));
+    const second = await v2.appId;
+    expect(hub.getApp(second)!.deviceId).toBe(netId);
+    hub.upsertDeviceApp({ deviceId: 'ios:D1', id: BUNDLE, running: true, pids: [501], lastActivity: Date.now() });
+    await waitFor(() => hub.getApp(first.appId)?.deviceId === 'ios:D1');
+    await sleep(30);
+    expect(hub.getDevice(netId)?.state).toBe('online');
+    expect(hub.getApp(second)!.deviceId).toBe(netId);
   });
 });

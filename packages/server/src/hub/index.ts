@@ -37,6 +37,7 @@ import {
   markerLine,
   processLine,
 } from './lifecycle';
+import { ConsoleEchoFilter } from './consoleEcho';
 import { capLogEntry, logEntryBytes } from './logSize';
 import { MetricsStore, sanitizeSample, type MetricSeriesInfo } from './metrics';
 import { cleanUndefined, DISCONNECTED_ERROR, NetworkStore, type NetworkLimits } from './network';
@@ -466,8 +467,28 @@ export function createHub(opts: CreateHubOptions): Hub {
 
   /* ───────────── logs & processes ───────────── */
 
+  /** The live React Native SDK session that owns process `pid` on the device (console echo filter). */
+  function rnSessionFor(deviceId: string, pid: number): string | undefined {
+    const mapped = appByPid.get(pidKey(deviceId, pid));
+    const candidates = mapped ? [apps.get(mapped)] : apps.values();
+    for (const app of candidates) {
+      if (!app || !app.connected || app.deviceId !== deviceId || app.sdk.platform !== 'react-native') continue;
+      if (app.app.pid === pid || mapped === app.id) return app.id;
+      if (deviceApps.get(deviceId, app.app.id)?.pids.includes(pid)) return app.id;
+      if (processes.get(deviceId)?.get(pid)?.name === app.app.id) return app.id;
+    }
+    return undefined;
+  }
+
+  const consoleEcho = new ConsoleEchoFilter({ sessionFor: rnSessionFor, release: (deviceId, inputs) => appendDeviceLogs(deviceId, inputs) });
+
   function pushDeviceLogs(deviceId: string, entries: DeviceLogInput[]): void {
     if (!Array.isArray(entries) || entries.length === 0 || disposed) return;
+    appendDeviceLogs(deviceId, consoleEcho.filter(deviceId, entries.filter((e) => !!e)));
+  }
+
+  function appendDeviceLogs(deviceId: string, entries: DeviceLogInput[]): void {
+    if (entries.length === 0 || disposed) return;
     const procs = processes.get(deviceId);
     const out: LogEntry[] = [];
     for (const input of entries) {
@@ -626,6 +647,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     const failed = network.failPending(id, DISCONNECTED_ERROR, appLastTs.get(id));
     for (const entry of failed) settleNetRow(entry);
     appLastTs.delete(id); // only needed for requests still pending; a reconnect notes it again
+    consoleEcho.sessionEnded(id);
     batcher.appChanged(app);
     pushSystem(app.deviceId, appDisconnectedLine(app, deviceName(app.deviceId), failed.length));
   }
@@ -746,6 +768,7 @@ export function createHub(opts: CreateHubOptions): Hub {
       if (isRecord(log.error)) entry.error = log.error;
       countAppLog(app, level);
       appendLogs([entry]);
+      if (kind === 'text' && app.sdk.platform === 'react-native') consoleEcho.noteSdkLine(appId, entry.message, entry.tag);
       return entry;
     },
 
@@ -789,6 +812,38 @@ export function createHub(opts: CreateHubOptions): Hub {
       if (!app || !msg || disposed) return;
       noteAppTs(appId, msg.ts);
       settleNetRow(network.error(`${appId}:${msg.id}`, appId, app.deviceId, msg));
+    },
+
+    netTooLarge(appId, input) {
+      const app = apps.get(appId);
+      if (!app || !input || typeof input.id !== 'string' || !input.id || disposed) return;
+      const ts = finite(input.ts) ?? appLastTs.get(appId) ?? Date.now();
+      const id = `${appId}:${input.id}`;
+      const info = { part: input.part, bytes: Math.max(0, Math.floor(finite(input.bytes) ?? 0)), limit: Math.max(0, Math.floor(finite(input.limit) ?? 0)) };
+      const mb = (n: number) => `${Math.round((n / (1024 * 1024)) * 10) / 10} MB`;
+      if (input.part === 'request') {
+        if (!network.get(id)) {
+          hub.netRequest(appId, {
+            type: 'net.request',
+            id: input.id,
+            ts,
+            method: typeof input.method === 'string' && input.method ? input.method.slice(0, 32).toUpperCase() : '?',
+            url: typeof input.url === 'string' ? input.url : '',
+            headers: [],
+            source: 'sdk',
+          });
+        }
+        network.markTooLarge(id, info);
+        return;
+      }
+      const status = finite(input.status);
+      hub.netError(appId, {
+        type: 'net.error',
+        id: input.id,
+        ts,
+        error: `Dürbün could not receive this response: its message (${mb(info.bytes)}) is over the ${mb(info.limit)} limit. The app itself got the response.`,
+      });
+      network.markTooLarge(id, info, status !== undefined ? Math.floor(status) : undefined);
     },
 
     pushAppMetrics(appId, sample) {
@@ -1187,6 +1242,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      consoleEcho.dispose();
       deviceApps.dispose();
       batcher.dispose();
       clearedListeners.clear();

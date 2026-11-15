@@ -174,6 +174,10 @@ In-memory store + change batching. Interface: `Hub` in `types.ts`.
 - **Logs**: ring buffer of `settings.maxLogEntries` (default 200 000). Assigns `id`, `deviceId`,
   `source`. For device logs: fills `process` from the pid map when missing; sets `appId` when
   `(deviceId, pid)` matches an app session's `app.pid`.
+- **React Native console echo**: while a live React Native SDK session of the process has sent console lines in
+  the last 30 s, a logcat line tagged `ReactNativeJS` of that process whose text matches an SDK line is dropped
+  (either order of arrival: an unmatched logcat line waits up to 1.5 s for its SDK copy, then is kept). Lines
+  without an SDK copy, other tags and processes, and everything after the session ends pass unchanged.
 - **Lifecycle lines** (system source) are generated automatically for: device connect/disconnect, app
   (SDK) connect/disconnect/reconnect, process start/death for processes whose name equals the `app.id`
   or `processName` of any app session ever seen on that device or listed in `settings.watchedApps`.
@@ -197,15 +201,30 @@ In-memory store + change batching. Interface: `Hub` in `types.ts`.
 Implements the wire protocol (§6.1) for raw streams (NDJSON), WebSockets (JSON text frames) and in-process
 virtual sessions (used by the Flutter VM module and the demo driver).
 
-- First message must be `hello` within 10 s, else close. Unknown/invalid messages are ignored (debug log).
+- First message must be `hello` within 10 s, else close. After the hello, an invalid message, one of an unknown
+  type or a frame over the size limit is dropped and said in a system line (`app.messageInvalid`,
+  `app.messageUnknown`, `app.messageTooLarge`; params `app`, `type`, `count`, plus `bytes`/`limit`), at most one per
+  session and reason a minute (later drops are counted into the next line). A dropped `net.response`/`net.error`
+  ends its request as `failed` with `tooLarge: {part:'response', bytes, limit}`; a dropped `net.request` keeps the
+  method and URL read from the frame's start (`tooLarge.part: 'request'`).
+- `hello.protocol` is recorded as `AppSession.sdkProtocol` (absent = unknown, not an error). Newer than
+  `PROTOCOL_VERSION` → `protocolMismatch: 'sdk-newer'` + `app.sdkNewer` (update Dürbün); older than the oldest
+  supported → `'sdk-older'` + `app.sdkOlder` (update the SDK). Once per app launch.
 - **Device resolution** for a new session: `meta.deviceId` (transport knows it: adb reverse per-device
   port, usbmux) → else `hello.device.simulatorUdid` → `ios-sim:<udid>` → else an existing device whose
   platform/model/name matches unambiguously → else upsert a `net:<platform>-<model>-<name>` device
-  (`kind: 'physical'`, `connection: 'wifi'`).
+  (`kind: 'physical'`, `connection: 'wifi'`). A `net:` session moves to the plugged-in device once a driver
+  reports the app running on exactly one online device of its platform and kind (same rule as at connect time,
+  no guess with two); what it sent so far stays, an empty `net:` row is removed; line `app.deviceFound`.
 - Register/reuse an `AppSession` (same `sessionKey` + device → reuse, mark connected, `app.reconnected`).
 - Reply `welcome` with `appId`, `SdkConfig` (`deviceLogsAvailable` = that device's `logs.status ===
   'streaming'`) and the mock rules applicable to the app (`rule.apps` empty or contains `app.id`).
-- `ping` every 15 s; close after 45 s without any inbound data.
+- `ping` every 15 s (and right after `welcome`, again at 3 s); close after 45 s without any inbound data.
+- Device clock: each `pong` carries the device clock; offset = midpoint of the round trip − `pong.ts`, the
+  shortest round trip wins (≤ 2 s). Published as `AppSession.clockOffsetMs` (Mac − device) and
+  `clockOffsetAccuracyMs` (half the round trip); two samples beyond 5 s → one `app.clockBehind` /
+  `app.clockAhead` line per launch. Timestamps are never rewritten (the hello `ts` is not used: SDKs resend a
+  stale hello on reconnect).
 - `mocks.set` from the UI → broadcast `{type:'mocks'}` to every connected session (filtered per app).
 - `sendCommand(appId, name, params)` → `{type:'command', id}`; resolves on `command.result` (timeout 10 s).
 - `event` messages become logs: `kind:'event'`, `tag:'event'`, `message: name`, `data: props`,
@@ -1011,7 +1030,9 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
   `productName` with "ü" must be given as `'Dürbün'.normalize('NFD')` or the packaged app never starts.
 - The server entry for embedders is `dist/server.mjs` (`startServer(opts, {logger})`, `probeServer(port)`);
   `startServer` installs no process handlers and never exits the process; a busy HTTP port rejects with
-  `ServerStartError.code === 'EADDRINUSE'`.
+  `ServerStartError.code === 'EADDRINUSE'`. After the Mac wakes from sleep the host calls
+  `server.onSystemResume()`: every driver's optional `resume()` checks its streams and forwards and restarts what
+  died (never throws; calls within 5 s of the last one are folded into it).
 - Desktop-only styles live in the UI under `html[data-desktop='mac']` (+ `html[data-desktop-fullscreen]`), set
   by the app's preload: drag areas, the traffic-light inset, compact mode.
 - Attach: when a Dürbün already answers on the port the app opens a window on it; when that server stops, the app
@@ -1078,7 +1099,8 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
   value's type. `validateFlow` (protocol) is the only validator: the editor, import, the AI answer and the server
   use it; errors block a run, warnings do not. Flows with errors are saved as drafts.
 - `docs/flows/durbun-flow.schema.json` is generated from the catalog (`flowJsonSchema()`); a server test fails
-  when it drifts (`DURBUN_UPDATE_SCHEMA=1` rewrites it).
+  when it drifts (`DURBUN_UPDATE_SCHEMA=1` rewrites it). Its `$id` is `FLOW_SCHEMA_URL` (the raw GitHub URL of that
+  file); `GET /api/flows/:id/export` writes `"$schema": FLOW_SCHEMA_URL` first; import ignores `$schema`.
 
 ### 11.3 Running (`packages/server/src/flows`)
 - `POST /api/flows/:id/preflight` resolves the target (device + app, or automatic), the environment and inputs,
@@ -1117,7 +1139,9 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
 - `POST /api/flows/ai-pack` builds a Markdown pack: the task, the format and schema, every node type with its
   params, template rules, the user's flows (or the one being edited), environment keys (never values), the
   app's last 40 distinct requests (method, origin + path, query names only, status; no headers or bodies) and the
-  answer format (one JSON code block per flow).
+  answer format (one JSON code block per flow). When a flow is being changed, a "What is wrong now" section lists
+  its validation problems (`include.issues`, default on), problems the UI sends in `issues` (max 200) and the
+  failed steps of its latest run when that run failed (`include.lastRun`, default on), secrets masked.
 - `POST /api/flows/import/preview` finds flows in any pasted text (a file, a JSON array, an AI answer with code
   fences), validates each and reports new / changed / same; `POST /api/flows/import` saves the picked ones with
   `replace | keepBoth | skip` for ids that exist.

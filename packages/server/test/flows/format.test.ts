@@ -267,6 +267,48 @@ describe('AI pack', () => {
     expect(markdown).toContain('pin={{env.pin}}&v=43210');
   });
 
+  it('includes what is wrong now: validation problems, problems the UI sent and the failed latest run, secrets masked', () => {
+    const broken: FlowDoc = { ...editing, id: 'broken', nodes: [...editing.nodes, { id: 'call', type: 'flow.call', params: { flowId: 'missing-flow' } }], edges: [...editing.edges, { from: 'login', to: 'call' }] };
+    const d = {
+      ...deps(),
+      flows: { list: () => [broken], get: (id: string) => (id === 'broken' ? broken : undefined) },
+      lastFailedRun: {
+        id: 'run-1',
+        flowId: 'broken',
+        flowName: 'Edit me',
+        status: 'failed',
+        startedAt: 1,
+        trigger: { kind: 'manual' },
+        error: 'login failed',
+        counts: { total: 2, passed: 1, failed: 1, skipped: 0 },
+        steps: [
+          { id: 1, nodeId: 'start', type: 'trigger.manual', flowId: 'broken', depth: 0, status: 'passed', startedAt: 1 },
+          { id: 2, nodeId: 'login', type: 'http.request', flowId: 'broken', depth: 0, status: 'failed', startedAt: 2, error: 'Expected 200, got 401 for Bearer tok-SECRET-123456' },
+        ],
+      },
+    } as unknown as AiPackDeps;
+    const { markdown } = buildAiPack(d, {
+      flowId: 'broken',
+      include: { requests: false, schema: false },
+      issues: [
+        { level: 'error', code: 'flow.param.required', message: 'url is required', nodeId: 'get', path: 'nodes[1].params.url' },
+        { level: 'nonsense', code: 'x', message: 'dropped' } as never,
+      ],
+    });
+    expect(markdown).toContain('## What is wrong now');
+    expect(markdown).toContain('missing-flow');
+    expect(markdown).toContain('- error flow.param.required (step "get" at nodes[1].params.url): url is required');
+    expect(markdown).not.toContain('dropped');
+    expect(markdown).toContain('The latest run failed: login failed.');
+    expect(markdown).toContain('- step "login" (http.request): Expected 200, got 401 for Bearer {{env.token}}');
+    expect(markdown).not.toContain('tok-SECRET-123456');
+
+    const off = buildAiPack(d, { flowId: 'broken', include: { requests: false, schema: false, issues: false, lastRun: false } });
+    expect(off.markdown).not.toContain('## What is wrong now');
+    // A new flow without problems has no such section.
+    expect(buildAiPack(deps(), { include: { schema: false } }).markdown).not.toContain('## What is wrong now');
+  });
+
   it('lists helper and pipe signatures, argument rules and the `in` syntax', () => {
     const { markdown } = buildAiPack(deps(), { include: { schema: false } });
     expect(markdown).toContain('`$randomInt(min, max)`');

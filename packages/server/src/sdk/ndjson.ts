@@ -7,9 +7,14 @@ import { MAX_FRAME_BYTES } from '@durbun/protocol';
 export interface NdjsonDecoderOptions {
   /** Called for every complete, non-blank line (without the trailing CR/LF). */
   onLine(line: string): void;
-  /** Called when a line exceeded `maxLineBytes`; the line is dropped and decoding resumes after it. */
-  onOversize?(bytes: number): void;
+  /**
+   * Called when a line exceeded `maxLineBytes`; the line is dropped and decoding resumes after it. `head` is
+   * its first `headBytes` bytes (to tell what was dropped).
+   */
+  onOversize?(bytes: number, head: Buffer): void;
   maxLineBytes?: number;
+  /** Bytes of an oversized line kept for onOversize (default 8 KiB). */
+  headBytes?: number;
 }
 
 export class NdjsonDecoder {
@@ -18,11 +23,27 @@ export class NdjsonDecoder {
   /** Inside an oversized line: drop bytes until the next newline. */
   private discarding = false;
   private discardedBytes = 0;
+  private discardHead: Buffer = Buffer.alloc(0);
+  private readonly headBytes: number;
   /** Longest line kept; may change between chunks (the SDK layer raises it once the hello is in). */
   maxLineBytes: number;
 
   constructor(private readonly opts: NdjsonDecoderOptions) {
     this.maxLineBytes = opts.maxLineBytes ?? MAX_FRAME_BYTES;
+    this.headBytes = Math.max(0, opts.headBytes ?? 8 * 1024);
+  }
+
+  /** First headBytes of the held chunks followed by `more` (copied: chunks may be reused by the caller). */
+  private headOf(more?: Buffer): Buffer {
+    const parts: Buffer[] = [];
+    let size = 0;
+    for (const c of more ? [...this.chunks, more] : this.chunks) {
+      if (size >= this.headBytes) break;
+      const take = c.subarray(0, this.headBytes - size);
+      parts.push(take);
+      size += take.length;
+    }
+    return Buffer.from(Buffer.concat(parts, size));
   }
 
   /** Bytes held while waiting for the end of the current line. */
@@ -48,7 +69,9 @@ export class NdjsonDecoder {
       start = nl + 1;
       if (this.discarding) {
         this.discarding = false;
-        this.opts.onOversize?.(this.discardedBytes + piece.length);
+        const head = this.discardHead;
+        this.discardHead = Buffer.alloc(0);
+        this.opts.onOversize?.(this.discardedBytes + piece.length, head);
         this.discardedBytes = 0;
         continue;
       }
@@ -56,9 +79,10 @@ export class NdjsonDecoder {
       if (this.chunks.length > 0) {
         const total = this.pendingBytes + piece.length;
         if (total > this.maxLineBytes) {
+          const head = this.headOf(piece);
           this.chunks = [];
           this.pendingBytes = 0;
-          this.opts.onOversize?.(total);
+          this.opts.onOversize?.(total, head);
           continue;
         }
         this.chunks.push(piece);
@@ -67,7 +91,7 @@ export class NdjsonDecoder {
         this.pendingBytes = 0;
       } else {
         if (piece.length > this.maxLineBytes) {
-          this.opts.onOversize?.(piece.length);
+          this.opts.onOversize?.(piece.length, Buffer.from(piece.subarray(0, this.headBytes)));
           continue;
         }
         line = piece;
@@ -92,6 +116,7 @@ export class NdjsonDecoder {
     this.pendingBytes = 0;
     this.discarding = false;
     this.discardedBytes = 0;
+    this.discardHead = Buffer.alloc(0);
   }
 
   private hold(rest: Buffer): void {
@@ -101,6 +126,7 @@ export class NdjsonDecoder {
       return;
     }
     if (this.pendingBytes + rest.length > this.maxLineBytes) {
+      this.discardHead = this.headOf(rest);
       this.discarding = true;
       this.discardedBytes = this.pendingBytes + rest.length;
       this.chunks = [];

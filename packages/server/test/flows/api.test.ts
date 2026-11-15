@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { DurbunPackage, FlowDoc, FlowEnvironments, FlowRun, PackageManifest } from '@durbun/protocol';
+import { FLOW_SCHEMA_URL, flowJsonSchema, type DurbunPackage, type FlowDoc, type FlowEnvironments, type FlowRun, type PackageManifest } from '@durbun/protocol';
 import { connectUi, sampleNetwork, startTestApp, type TestApp } from '../http/fakes';
 import { BackupService } from '../../src/backup/scheduler';
 
@@ -144,6 +144,27 @@ describe('flows API', () => {
     expect(saved.data.saved.map((s) => s.id)).toEqual(['ai-flow']);
     const again = await call<{ saved: { id: string }[]; skipped: number }>('POST', '/api/flows/import', { flows: [item.flow], conflict: 'keepBoth' });
     expect(again.data.saved[0]!.id).toBe('ai-flow-2');
+  });
+
+  it('an exported flow file names its schema first; importing it (or an old file without it) ignores the line', async () => {
+    t = await startTestApp({ flowsBackground: false });
+    await call('POST', '/api/flows', { flow: simpleFlow('shared') });
+    const res = await fetch(`${t.base}/api/flows/shared/export`);
+    const text = await res.text();
+    expect(Object.keys(JSON.parse(text))[0]).toBe('$schema');
+    expect(JSON.parse(text).$schema).toBe(FLOW_SCHEMA_URL);
+    expect(flowJsonSchema()).toMatchObject({ $id: FLOW_SCHEMA_URL, properties: { $schema: { type: 'string' } } });
+
+    const preview = await call<{ items: { flow: FlowDoc; issues: { code: string }[] }[]; problems: string[] }>('POST', '/api/flows/import/preview', {
+      text: JSON.stringify({ ...JSON.parse(text), id: 'shared-copy' }, null, 2),
+    });
+    expect(preview.data.problems).toEqual([]);
+    const item = preview.data.items[0]!;
+    expect(item.flow.$schema).toBeUndefined();
+    expect(item.issues.filter((i) => i.code !== 'flow.name.missing')).toEqual([]);
+    const saved = await call<{ saved: { id: string }[] }>('POST', '/api/flows/import', { flows: [{ ...item.flow, $schema: FLOW_SCHEMA_URL }], conflict: 'skip' });
+    expect(saved.data.saved.map((s) => s.id)).toEqual(['shared-copy']);
+    expect((await call<FlowDoc>('GET', '/api/flows/shared-copy')).data.$schema).toBeUndefined();
   });
 
   it('answers an environments save with the saved document, as GET returns it', async () => {

@@ -33,6 +33,7 @@
 import { promises as fsp } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
+  FLOW_SCHEMA_URL,
   flowFromRequests,
   flowJsonSchema,
   type CapturedRequest,
@@ -302,7 +303,10 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
         case 'ai-pack': {
           requireMethod(req, 'POST');
           const b = (await body(req)) as AiPackRequest;
-          return sendJson(res, 200, buildAiPack({ hub, flows, environments: () => envs.get() }, b));
+          // The latest run of the flow to change, when it failed: what broke goes into the pack.
+          const last = typeof b.flowId === 'string' && b.include?.lastRun !== false ? runs.list(b.flowId, 1)[0] : undefined;
+          const lastFailedRun = last?.status === 'failed' ? await runs.get(last.id).catch(() => undefined) : undefined;
+          return sendJson(res, 200, buildAiPack({ hub, flows, environments: () => envs.get(), lastFailedRun }, b));
         }
         case 'from-requests':
           requireMethod(req, 'POST');
@@ -362,7 +366,9 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
           requireMethod(req, 'GET');
           const flow = flows.get(id);
           if (!flow) throw new HttpError(404, `Flow ${id} does not exist`, 'flow.notFound');
-          return sendJson(res, 200, flow, { 'Content-Disposition': contentDisposition(`${flow.id}.durbun-flow.json`) });
+          // `$schema` first: editors find the schema without any setup (validateFlow ignores it on import).
+          const { $schema: _stored, ...rest } = flow;
+          return sendJson(res, 200, { $schema: FLOW_SCHEMA_URL, ...rest }, { 'Content-Disposition': contentDisposition(`${flow.id}.durbun-flow.json`) });
         }
         case 'preflight':
           requireMethod(req, 'POST');

@@ -22,6 +22,7 @@ import {
   type FlowEnvironments,
   type FlowIssue,
   type FlowParamSpec,
+  type FlowRun,
 } from '@durbun/protocol';
 import type { Hub } from '../types';
 
@@ -33,7 +34,16 @@ export interface AiPackRequest {
   /** App and device the flow is for (recent requests come from it). */
   appId?: string;
   deviceId?: string;
-  include?: { schema?: boolean; requests?: boolean; flows?: boolean; environments?: boolean };
+  /**
+   * `issues` (default on): the problems Dürbün finds in the flow to change. `lastRun` (default on): what failed
+   * in its latest run, when that run failed (the module looks it up: AiPackDeps.lastFailedRun).
+   */
+  include?: { schema?: boolean; requests?: boolean; flows?: boolean; environments?: boolean; issues?: boolean; lastRun?: boolean };
+  /**
+   * Problems the UI already has for this request (an answer that did not import, a flow open in the editor),
+   * sent back to the AI with the rest (at most MAX_PACK_ISSUES; English messages).
+   */
+  issues?: FlowIssue[];
   /** The UI language: the AI writes labels and descriptions in it. */
   language?: 'tr' | 'en';
 }
@@ -42,6 +52,76 @@ export interface AiPackDeps {
   hub: Pick<Hub, 'getNetwork' | 'getApps' | 'getDeviceApps' | 'getDevices'>;
   flows: { list(): FlowDoc[]; get(id: string): FlowDoc | undefined };
   environments(): FlowEnvironments;
+  /** The latest run of the flow when it failed (looked up before the pack is built). */
+  lastFailedRun?: FlowRun;
+}
+
+/** Problems written into one pack. */
+export const MAX_PACK_ISSUES = 200;
+const ISSUE_LEVELS = new Set(['error', 'warning', 'info']);
+
+/** One problem as a line the AI can act on: level, rule code, step and JSON path, English message. */
+export function issueLineForAi(i: Pick<FlowIssue, 'level' | 'code' | 'message' | 'nodeId' | 'path'>): string {
+  const where = [i.nodeId ? `step "${i.nodeId}"` : '', i.path ? `at ${i.path}` : ''].filter(Boolean).join(' ');
+  return `- ${i.level} ${i.code}${where ? ` (${where})` : ''}: ${i.message}`;
+}
+
+/** Issues from a request body: well-formed ones only, bounded, strings capped. */
+function cleanIssues(v: unknown): FlowIssue[] {
+  if (!Array.isArray(v)) return [];
+  const out: FlowIssue[] = [];
+  const str = (x: unknown, max: number) => (typeof x === 'string' ? x.slice(0, max) : undefined);
+  for (const raw of v) {
+    if (out.length >= MAX_PACK_ISSUES) break;
+    if (!isRecord(raw)) continue;
+    const level = str(raw.level, 16);
+    const code = str(raw.code, 128);
+    const message = str(raw.message, 2_000);
+    if (!level || !ISSUE_LEVELS.has(level) || !code || !message) continue;
+    const issue = { level, code, message } as FlowIssue;
+    const nodeId = str(raw.nodeId, 128);
+    if (nodeId) issue.nodeId = nodeId;
+    const path = str(raw.path, 256);
+    if (path) issue.path = path;
+    out.push(issue);
+  }
+  return out;
+}
+
+/** "## What is wrong now": validation problems and the latest failed run, secrets masked. */
+function problemsSection(deps: AiPackDeps, req: AiPackRequest, editing: FlowDoc | undefined, inc: { issues?: boolean; lastRun?: boolean }): string[] {
+  const mask = editing ? textMasker(secretValues(editing, deps.environments())) : (t: string) => t;
+  const seen = new Set<string>();
+  const issues: FlowIssue[] = [];
+  const add = (i: FlowIssue) => {
+    const key = `${i.level}|${i.code}|${i.nodeId ?? ''}|${i.path ?? ''}|${i.message}`;
+    if (seen.has(key) || issues.length >= MAX_PACK_ISSUES) return;
+    seen.add(key);
+    issues.push(i);
+  };
+  if (editing && inc.issues !== false) {
+    const known = new Set(deps.flows.list().map((f) => f.id));
+    for (const i of validateFlow(editing, { knownFlowIds: known, addTrigger: false }).issues) add(i);
+  }
+  for (const i of cleanIssues(req.issues)) add(i);
+  const run = inc.lastRun !== false && editing && deps.lastFailedRun?.flowId === editing.id && deps.lastFailedRun.status === 'failed' ? deps.lastFailedRun : undefined;
+  if (issues.length === 0 && !run) return [];
+  const out: string[] = ['## What is wrong now', ''];
+  if (issues.length) {
+    // Errors first: they block the run.
+    const sorted = [...issues.filter((i) => i.level === 'error'), ...issues.filter((i) => i.level !== 'error')];
+    const errors = sorted.filter((i) => i.level === 'error').length;
+    out.push(`Dürbün checked the flow and found ${errors} error(s) and ${sorted.length - errors} warning(s). Fix them in your answer.`, '');
+    for (const i of sorted) out.push(mask(issueLineForAi(i)));
+    out.push('');
+  }
+  if (run) {
+    out.push(`The latest run failed${run.error ? `: ${mask(run.error)}` : ''}.`);
+    const failed = run.steps.filter((s) => s.status === 'failed' && !s.handled).slice(0, 10);
+    for (const s of failed) out.push(`- step "${s.nodeId}" (${s.type})${s.flowId !== run.flowId ? ` in flow "${s.flowId}"` : ''}: ${mask(s.error ?? s.summary ?? 'failed')}`);
+    out.push('');
+  }
+  return out;
 }
 
 const GROUP_TITLES: Record<string, string> = {
@@ -279,6 +359,7 @@ export function buildAiPack(deps: AiPackDeps, req: AiPackRequest): { markdown: s
     const shown = stripPositions(maskSecrets(editing, deps.environments()));
     out.push('## The flow to change', '', 'Keep the ids of the steps you do not change (other flows and templates refer to them).', '', '```json', JSON.stringify(shown, null, 2), '```', '');
   }
+  out.push(...problemsSection(deps, req, editing, inc));
 
   out.push('## How to answer', '');
   out.push(
@@ -342,11 +423,15 @@ const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v =
  * The flow with secret values (secret environment variables, secret input defaults) replaced by the template that
  * reads them: a token pasted into a header becomes `{{env.token}}` before the AI sees it.
  */
-function maskSecrets(flow: FlowDoc, envs: FlowEnvironments): FlowDoc {
+function secretValues(flow: FlowDoc, envs: FlowEnvironments): Map<string, string> {
   const secrets = new Map<string, string>();
   for (const i of flow.inputs ?? []) if (i.secret && i.default !== undefined && String(i.default).length >= 3) secrets.set(String(i.default), `{{input.${i.name}}}`);
   for (const e of envs.environments) for (const v of e.vars) if (v.secret && v.value.length >= 3 && !secrets.has(v.value)) secrets.set(v.value, `{{env.${v.key}}}`);
-  if (secrets.size === 0) return flow;
+  return secrets;
+}
+
+/** Text with secret values replaced by the template that reads them (see maskSecrets). */
+function textMasker(secrets: Map<string, string>): (text: string) => string {
   const list = [...secrets.entries()].sort((a, b) => b[0].length - a[0].length);
   const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const mask = (text: string): string => {
@@ -359,6 +444,13 @@ function maskSecrets(flow: FlowDoc, envs: FlowEnvironments): FlowDoc {
     }
     return out;
   };
+  return mask;
+}
+
+function maskSecrets(flow: FlowDoc, envs: FlowEnvironments): FlowDoc {
+  const secrets = secretValues(flow, envs);
+  if (secrets.size === 0) return flow;
+  const mask = textMasker(secrets);
   const walk = (v: unknown): unknown => {
     if (typeof v === 'string') return mask(v);
     if (typeof v === 'number' && secrets.has(String(v)) && String(v).length >= 4) return `${secrets.get(String(v))!.slice(0, -2)} | number}}`;

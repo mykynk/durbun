@@ -66,6 +66,12 @@ export interface StartedServer extends RunningServer {
   readonly dataDir: string;
   readonly sdkListening: boolean;
   readonly app: HttpApp;
+  /**
+   * The Mac woke from sleep: every driver checks its streams and port forwards and restarts what died
+   * (DeviceDriver.resume). Never throws; calls within a few seconds of the last one are folded into it
+   * (sleep/wake and screen unlock often arrive together), so it is safe to call on every wake event.
+   */
+  onSystemResume(): void;
 }
 
 export interface StartServerExtras {
@@ -92,6 +98,10 @@ export class ServerStartError extends Error {
 const PLATFORM_DRIVER_IDS = ['android', 'ios-sim', 'ios-device'] as const;
 const DRIVER_STOP_TIMEOUT_MS = 5_000;
 const DEFAULT_DRIVER_START_WAIT_MS = 3_000;
+/** Wake events within this window after a resume run are folded into it. */
+export const SYSTEM_RESUME_DEBOUNCE_MS = 5_000;
+/** A driver whose resume() hangs is logged and left behind after this long (the next wake tries again). */
+const DRIVER_RESUME_TIMEOUT_MS = 15_000;
 
 /* ────────────────────────────── stand-ins for modules that failed to load ────────────────────────────── */
 
@@ -398,6 +408,28 @@ async function startLocked(opts: StartServerOptions, factories: ServerFactories,
   await Promise.race([Promise.allSettled(starts), delay(extras.driverStartWaitMs ?? DEFAULT_DRIVER_START_WAIT_MS)]);
 
   let stopping: Promise<void> | undefined;
+  let lastResumeAt = Number.NEGATIVE_INFINITY;
+  let resuming = false;
+  const onSystemResume = (): void => {
+    try {
+      const now = Date.now();
+      if (stopping || resuming || now - lastResumeAt < SYSTEM_RESUME_DEBOUNCE_MS) return;
+      lastResumeAt = now;
+      resuming = true;
+      const drivers = demo ? [...platform.drivers, demo] : platform.drivers;
+      logger.debug('system resumed: checking device drivers');
+      const tasks = drivers.map((d) =>
+        typeof d.resume === 'function' ? settle(`resuming driver ${d.id}`, () => Promise.resolve(d.resume?.()), logger, DRIVER_RESUME_TIMEOUT_MS) : Promise.resolve(),
+      );
+      void Promise.all(tasks).finally(() => {
+        resuming = false;
+      });
+    } catch (err) {
+      resuming = false;
+      logger.warn(`system resume: ${errorMessage(err)}`);
+    }
+  };
+
   const shutdown = async (): Promise<void> => {
     logger.debug('shutting down');
     // Let in-flight starts settle so their child processes get stopped too.
@@ -425,6 +457,7 @@ async function startLocked(opts: StartServerOptions, factories: ServerFactories,
       return app.info();
     },
     stop: () => (stopping ??= shutdown()),
+    onSystemResume,
     warnings,
     notices,
     uiDir: ui.dir,

@@ -100,6 +100,8 @@ export interface FlowAutomation {
 }
 
 export interface FlowDoc {
+  /** Schema address for editors (FLOW_SCHEMA_URL), written on export; ignored on import. */
+  $schema?: string;
   format: typeof FLOW_FORMAT;
   version: typeof FLOW_VERSION;
   /** Lower-case letters, digits, '-' and '_' (max 64); the file name on disk. */

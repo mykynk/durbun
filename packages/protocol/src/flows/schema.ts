@@ -72,6 +72,9 @@ function paramSchema(p: FlowParamSpec, type: string): Schema {
   return s;
 }
 
+/** Public address of the flow file schema (its `$id`); exported flow files name it in `"$schema"`. */
+export const FLOW_SCHEMA_URL = 'https://raw.githubusercontent.com/mykynk/durbun/main/docs/flows/durbun-flow.schema.json';
+
 export function flowJsonSchema(): Schema {
   const nodeSchemas = FLOW_NODE_SPECS.map((spec) => {
     const params: Schema = {
@@ -107,12 +110,13 @@ export function flowJsonSchema(): Schema {
   const ports = ['out', 'true', 'false', 'loop', 'done', 'error'];
   return {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
-    $id: 'https://github.com/mykynk/durbun/blob/main/docs/flows/durbun-flow.schema.json',
+    $id: FLOW_SCHEMA_URL,
     title: 'Dürbün flow',
     description: 'A Dürbün flow: nodes (steps) connected by edges, run by the Dürbün Mac app against a device and an app.',
     type: 'object',
     required: ['format', 'version', 'id', 'name', 'nodes', 'edges'],
     properties: {
+      $schema: { type: 'string', description: 'Where editors find this schema (written on export, ignored on import)' },
       format: { const: FLOW_FORMAT },
       version: { const: FLOW_VERSION },
       id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$', description: 'File-safe id, unique among the flows' },

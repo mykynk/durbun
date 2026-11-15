@@ -27,9 +27,10 @@ files in VS Code, map them to the schema in your user or workspace `settings.jso
 Flows kept as `~/.durbun/flows/<id>.json` or in your own repository under another name need their own
 `fileMatch` pattern, for example `"flows/*.json"`.
 
-A single file can also name the schema itself with a first line `"$schema": "https://raw.githubusercontent.com/mykynk/durbun/main/docs/flows/durbun-flow.schema.json",`.
-The schema does not list `$schema` as a field, so some editors flag that line, and Dürbün leaves it out when it
-imports the flow. The `json.schemas` setting avoids both.
+Exported files already name the schema in their first line,
+`"$schema": "https://raw.githubusercontent.com/mykynk/durbun/main/docs/flows/durbun-flow.schema.json",`, so most
+editors check them without any setting; you can add the same line to any flow file. The schema allows it, and
+Dürbün ignores it when it imports a flow (files without it import as before).
 
 ## Example
 

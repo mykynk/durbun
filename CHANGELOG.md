@@ -52,6 +52,11 @@ All notable changes to Dürbün are listed here. The format follows
 - A React Native app connected over Wi-Fi attaches to the plugged-in phone that runs it, and several iPhones
   no longer collapse into one row.
 - An app's session export holds the same lines as the app's view shows, device lines included.
+- A response too large to receive no longer stays pending: the request ends with a note that says so, and
+  Dürbün writes a line when it drops a message from an app because it is too large or unreadable.
+- React Native console lines on Android no longer show twice (once from the SDK, once from logcat).
+- An app connected over Wi-Fi moves under the plugged-in phone it runs on once that phone reports it.
+- After the Mac wakes from sleep, Dürbün checks device connections, port forwards and log streams again.
 - A Flutter layout overflow is shown as an error line instead of a crash banner.
 - `durbun_dio`: requests answered by another interceptor, retried after a token refresh or cancelled no
   longer stay "pending". The new `DurbunDioAdapter` wraps the adapter, so every request that reaches the
@@ -93,6 +98,8 @@ All notable changes to Dürbün are listed here. The format follows
   match has a time limit.
 - Flutter SDK: while no desktop answers, connection attempts slow down after two minutes to about one
   every 30 seconds and stop while the app is in the background; returning to the app tries at once.
+- Less work while idle: Android devices are followed through adb's own device list instead of asking every
+  two seconds, and simulators are not asked at all while none is open.
 
 ### Added
 
@@ -122,6 +129,10 @@ All notable changes to Dürbün are listed here. The format follows
 - Android: how long a screen took to open (`Displayed … +350ms`) is shown on its log line.
 - Apps the system closed for memory have their own badge and crash banner, and `is:oom` finds them.
 - System check gives the command that fixes a simulator problem.
+- A line says when an app's SDK is newer than this Dürbün understands or older than it supports, and when a
+  phone's clock is far off the Mac's.
+- Exported flow files name their schema, so editors complete and check them without setup; the pack for
+  your AI tool lists the flow's problems and what failed in its last run.
 - Flows: an environment can trust extra certificates (an internal CA) or turn certificate checks off for a
   self-signed test server. The check before a run and the run history say when checks were off.
 - Network: a request the Mac could not resend because of the server's certificate can be sent once without

@@ -8,9 +8,10 @@ import type { Duplex } from 'node:stream';
 import type { DeviceActionResult, MockRule, SdkCommandResult, SdkConfig, ServerSettings, ServerToSdk } from '@durbun/protocol';
 import { DEFAULT_SETTINGS, MAX_FRAME_BYTES } from '@durbun/protocol';
 import type { WebSocket } from 'ws';
-import type { CreateSdkLayerOptions, HubChange, SdkAttachMeta, SdkLayer, VirtualSdkSession } from '../types';
+import type { CreateSdkLayerOptions, Hub, HubChange, SdkAttachMeta, SdkLayer, VirtualSdkSession } from '../types';
 import { configKey, type ConnectionHost, DEFAULT_SDK_TIMINGS, SdkConnection, type SdkTimings } from './connection';
-import { isSdkPlaceholder } from './devices';
+import { findDeviceRunningApp, isSdkPlaceholder, NET_DEVICE_PREFIX } from './devices';
+import { OVERSIZE_HEAD_BYTES } from './diagnostics';
 import { NdjsonDecoder } from './ndjson';
 import { rawDataToBuffer, streamWire, virtualWire, webSocketWire } from './wires';
 
@@ -158,12 +159,7 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
         hub.markAppDisconnected(conn.appId);
       }
       if (conn.networkDevice && conn.deviceId) {
-        const left = (netDeviceRefs.get(conn.deviceId) ?? 1) - 1;
-        if (left > 0) netDeviceRefs.set(conn.deviceId, left);
-        else {
-          netDeviceRefs.delete(conn.deviceId);
-          hub.markDeviceDisconnected(conn.deviceId, 'No app is connected over the network', 'device.networkIdle');
-        }
+        releaseNetDevice(conn.deviceId);
       } else if (conn.placeholderDevice && conn.deviceId && placeholderRefs.has(conn.deviceId)) {
         const left = (placeholderRefs.get(conn.deviceId) ?? 1) - 1;
         if (left > 0) placeholderRefs.set(conn.deviceId, left);
@@ -194,8 +190,101 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
     },
   };
 
-  /** Pushes `config` when a device's log availability changed (e.g. logcat started after the app connected). */
+  let adoptScheduled = false;
+
+  /** A `net:` device lost one of its sessions; the last one takes it offline. */
+  function releaseNetDevice(deviceId: string, opts: { dropIfEmpty?: boolean } = {}): void {
+    const left = (netDeviceRefs.get(deviceId) ?? 1) - 1;
+    if (left > 0) {
+      netDeviceRefs.set(deviceId, left);
+      return;
+    }
+    netDeviceRefs.delete(deviceId);
+    hub.markDeviceDisconnected(deviceId, 'No app is connected over the network', 'device.networkIdle');
+    // A row that only ever held Dürbün's own lines (connected / disconnected) goes away entirely.
+    if (opts.dropIfEmpty && deviceId.startsWith(NET_DEVICE_PREFIX) && !holdsData(deviceId)) hub.clear('all', { deviceId });
+  }
+
+  /** The config for a connection when it differs from the last one it got (undefined otherwise). */
+  function hostConfig(conn: SdkConnection): SdkConfig | undefined {
+    const config = host.configFor(conn.deviceId ?? '');
+    const key = configKey(config);
+    if (key === conn.lastConfigKey) return undefined;
+    conn.lastConfigKey = key;
+    return config;
+  }
+
+  /** Does anything but Dürbün's own lines live on this device (app data, requests, metrics, other sessions)? */
+  function holdsData(deviceId: string): boolean {
+    if (hub.getApps().some((a) => a.deviceId === deviceId)) return true;
+    if (hub.getNetwork().some((e) => e.deviceId === deviceId)) return true;
+    if (hub.getMetrics().some((m) => m.deviceId === deviceId)) return true;
+    return hub.getLogs().some((l) => l.deviceId === deviceId && l.source !== 'system');
+  }
+
+  /**
+   * Sessions that sit on a `net:` device because nothing identified their phone when they connected move to
+   * the plugged-in device once a driver reports the app running there — the same rule as at connect time
+   * (findDeviceRunningApp: exactly one online device of that platform and kind runs it, otherwise no guess).
+   * What the session already sent stays where it arrived; an empty network row disappears.
+   */
+  function adoptNetworkSessions(): void {
+    const waiting = established().filter((c) => c.networkDevice && c.deviceId && c.appId && c.hints);
+    if (waiting.length === 0) return;
+    const devices = hub.getDevices();
+    let deviceApps: ReturnType<Hub['getDeviceApps']>;
+    try {
+      deviceApps = hub.getDeviceApps();
+    } catch {
+      return;
+    }
+    for (const conn of waiting) {
+      if (!conn.networkDevice) continue; // moved with a sibling connection of the same session
+      const host = findDeviceRunningApp(devices, deviceApps, conn.hints!, conn.bundleId, conn.meta.transport);
+      if (!host) continue;
+      const appId = conn.appId as string;
+      const from = conn.deviceId as string;
+      const app = hub.getApp(appId);
+      if (!app) continue;
+      if (app.deviceId === from) hub.patchApp(appId, { deviceId: host.id });
+      for (const sibling of byApp.get(appId) ?? []) {
+        if (!sibling.networkDevice || sibling.deviceId !== from) continue;
+        sibling.networkDevice = false;
+        sibling.deviceId = host.id;
+        releaseNetDevice(from, { dropIfEmpty: true });
+        const config = hostConfig(sibling);
+        if (config) sibling.send({ type: 'config', config });
+      }
+      logger.info(`SDK session ${conn.describe()} moved from ${from} to ${host.id}, which runs the app`);
+      hub.pushSystemLog(host.id, {
+        message: `${app.app.name} (connected over the network) runs on ${host.name}: its session now shows under this device`,
+        level: 'info',
+        kind: 'lifecycle',
+        code: 'app.deviceFound',
+        params: { app: app.app.name, bundleId: app.app.id, device: host.name, deviceId: host.id, from },
+        appId,
+      });
+    }
+  }
+
+  /**
+   * Pushes `config` when a device's log availability changed (e.g. logcat started after the app connected),
+   * and moves `net:` sessions once their phone is known (adoptNetworkSessions).
+   */
   const unsubscribeHub = hub.subscribe((change: HubChange) => {
+    if ((change.deviceApps.length > 0 || change.devices.length > 0) && !adoptScheduled && netDeviceRefs.size > 0) {
+      // Outside the hub's delivery: a move may clear an empty row, and the hub sends queued changes first.
+      adoptScheduled = true;
+      setImmediate(() => {
+        adoptScheduled = false;
+        if (closed) return;
+        try {
+          adoptNetworkSessions();
+        } catch (err) {
+          logger.warn('moving network SDK sessions to their device failed', err);
+        }
+      });
+    }
     if (change.devices.length === 0) return;
     const changed = new Set(change.devices.map((d) => d.id));
     for (const conn of established()) {
@@ -311,13 +400,14 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
         connection.receive(value);
         if (connection.established) decoder.maxLineBytes = MAX_FRAME_BYTES;
       },
-      onOversize: (bytes) => {
+      onOversize: (bytes, head) => {
         if (!connection.established) {
           logger.warn(`closed an SDK connection from ${describeMeta(meta)}: a ${bytes}-byte line before its hello (limit ${SDK_ADMISSION.maxHelloBytes})`);
           connection.close('hello too large', 1009);
           return;
         }
         logger.warn(`dropped an oversized SDK frame (${bytes} bytes) from ${connection.describe()}`);
+        connection.oversized(bytes, head);
       },
     });
     stream.on('data', (chunk: Buffer | string) => {
@@ -389,6 +479,7 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
       }
       if (buf.length > MAX_FRAME_BYTES) {
         logger.warn(`dropped an oversized WebSocket frame (${buf.length} bytes) from ${connection.describe()}`);
+        connection.oversized(buf.length, buf.subarray(0, OVERSIZE_HEAD_BYTES));
         return;
       }
       let value: unknown;
@@ -404,6 +495,9 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
     ws.on('close', () => connection.close('websocket closed'));
     ws.on('error', (err: Error) => {
       logger.debug(`websocket error on ${connection.describe()}: ${err.message}`);
+      // The WebSocket server refuses frames over MAX_FRAME_BYTES (maxPayload) and closes the socket (1009):
+      // say so in the session before it ends, size and content unknown.
+      if ((err as NodeJS.ErrnoException).code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH') connection.oversized(0);
       connection.close(`websocket error: ${err.message}`);
     });
     if (ws.readyState === ws.CLOSING || ws.readyState === ws.CLOSED) {
