@@ -53,9 +53,10 @@ test('the changelog check wants the section, a date and today', () => {
   assert.match(changelogProblems(CHANGELOG.replace('## [Unreleased]\n\n', ''), '0.3.0', '2026-11-20')[0], /no "## \[Unreleased\]" heading/);
 });
 
-test('the release text ends with the install and upgrade lines', () => {
+test('the release text carries the downloads, the SDK lines and the section', () => {
   const body = releaseBody(CHANGELOG, '0.3.0');
-  assert.ok(body.startsWith('### Added\n- In-app updates\n\n---'));
+  assert.ok(body.startsWith('## Downloads\n'));
+  assert.ok(body.includes("## What's new\n\n### Added\n- In-app updates\n\n---"));
   for (const line of ['Durbun-0.3.0-arm64.dmg', 'Durbun-0.3.0-x64.dmg', 'durbun: ^0.3.0', 'io.github.mykynk:durbun:0.3.0', "pod 'Durbun', '~> 0.3.0'", '@durbun/react-native@0.3.0', 'SHA256SUMS.txt']) assert.ok(body.includes(line), line);
   assert.equal(releaseBody(CHANGELOG, '0.9.9'), '');
 });

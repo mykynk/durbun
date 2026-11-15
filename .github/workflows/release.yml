@@ -40,12 +40,7 @@ jobs:
           DURBUN_ALLOW_UNSIGNED: "1"
       - name: Release notes from CHANGELOG.md
         run: |
-          awk -v v="${GITHUB_REF_NAME#v}" '
-            index($0, "## [" v "]") == 1 { on = 1; next }
-            on && /^## \[/ { exit }
-            on && /^\[[^]]+\]: / { next }
-            on { print }
-          ' CHANGELOG.md > notes.md
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > notes.md
           test -s notes.md
       - name: Draft the GitHub release
         env:
