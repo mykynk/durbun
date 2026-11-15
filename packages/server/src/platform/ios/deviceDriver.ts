@@ -47,14 +47,22 @@ import { Backoff, every, Poller, serialize } from '../shared/timing';
 import { probeXcodeTools, resolveIdeviceTool, type ResolvedTool } from '../tools';
 import { IosAppTracker } from './appTracker';
 import { IosCrashIndex } from './crashDedupe';
-import { crashReportEntry, type IpsReport } from './crashReport';
+import { crashReportEntry, jetsamEntries, type IpsReport, type JetsamReport } from './crashReport';
 import { devicectl, parseDevicectlDevices, probeDevicectlCaps, type DevicectlCaps, type DevicectlRunner } from './devicectl';
 import { iosDeviceActions, runIosDeviceAction } from './deviceActions';
 import { devicectlAppSource } from './deviceApps';
 import { crashCopyDir, crashReportUrl, DeviceCrashWatcher } from './deviceCrashes';
 import { IosDeviceLogFilter, iosDeviceLogScope, type IosDeviceLogScope } from './deviceLogScope';
 import { lockdownGetValues, type LockdownValues } from './lockdown';
-import { DEVELOPER_MODE_OFF_CODE, DEVICECTL_MISSING, IOS_FRAME_STATS_UNSUPPORTED, READ_FAILED_CODE } from './readerStates';
+import {
+  beforeDevicectl,
+  DEVELOPER_MODE_OFF_CODE,
+  DEVICECTL_MISSING,
+  DEVICECTL_MIN_IOS,
+  IOS_FRAME_STATS_UNSUPPORTED,
+  OS_TOO_OLD_CODE,
+  READ_FAILED_CODE,
+} from './readerStates';
 import { SyslogLineParser } from './syslog';
 import {
   pipeTunnel,
@@ -87,7 +95,7 @@ export const DEVELOPER_MODE_OFF = {
 /** Device actions that fail while Developer Mode is off. */
 const DEVELOPER_MODE_ACTIONS = new Set<DeviceActionId>(['app-launch', 'app-stop', 'app-restart', 'app-install', 'open-url', 'screenshot', 'screen-record']);
 /** Failures that are about the input, not the device (Developer Mode does not explain them). */
-const INPUT_FAILURES = new Set(['action.invalidParams', 'action.fileNotFound', 'action.unsupportedFile', 'action.appNotFound', 'action.toolMissing', 'action.recording.busy', 'action.recording.notRunning']);
+const INPUT_FAILURES = new Set(['action.invalidParams', 'action.fileNotFound', 'action.unsupportedFile', 'action.appNotFound', 'action.toolMissing', 'action.recording.busy', 'action.recording.notRunning', 'action.stopNotAllowed']);
 
 const SYSLOG_MISSING = {
   code: 'logs.idevicesyslogMissing',
@@ -168,12 +176,25 @@ export const DEFAULT_IOS_DEVICE_TIMING: IosDeviceTiming = {
 /** A connection that came back within the grace this recently counts as unstable (longer grace). */
 const UNSTABLE_WINDOW_MS = 2 * 60_000;
 /** Why `iosDeviceLogScope` 'apps' cannot be applied (params.reason of 'logs.scopeNotApplied'). */
-type ScopeNotAppliedReason = 'devicectlMissing' | 'appListFailed';
+type ScopeNotAppliedReason = 'devicectlMissing' | 'appListFailed' | 'osTooOld';
 const SCOPE_NOT_APPLIED = 'logs.scopeNotApplied';
 const SCOPE_WHY: Record<ScopeNotAppliedReason, string> = {
   devicectlMissing: 'telling app lines from system lines needs Xcode 15 or newer (devicectl)',
   appListFailed: 'the installed apps could not be read with devicectl, so app lines cannot be told from system lines',
+  osTooOld: `devicectl reads installed apps from iOS ${DEVICECTL_MIN_IOS} on; this device runs an older iOS, so app lines cannot be told from system lines`,
 };
+
+/** Actions that run through devicectl (an iPhone before iOS 17 refuses them). */
+const DEVICECTL_ACTIONS = new Set<DeviceActionId>([
+  'list-apps',
+  'app-launch',
+  'app-stop',
+  'app-restart',
+  'app-install',
+  'app-uninstall',
+  'open-url',
+  'screen-record',
+]);
 const STALL_RELAY_NOTE =
   'several idevicesyslog clients on one iPhone (Xcode, Console, another Dürbün or a terminal) can choke its syslog relay, so restarts slow down (2 s, 5 s, 15 s, then every 30 s) — close the other clients if it stays silent';
 
@@ -369,8 +390,13 @@ class IosDeviceSession {
   private scopeProblem(): ScopeNotAppliedReason | undefined {
     if (this.shared.logScope() !== 'apps') return undefined;
     if (!this.shared.caps().available) return 'devicectlMissing';
-    if (this.apps?.listingFinished && !this.apps.knowsApps) return 'appListFailed';
+    if (this.apps?.listingFinished && !this.apps.knowsApps) return this.osTooOld() ? 'osTooOld' : 'appListFailed';
     return undefined;
+  }
+
+  /** An iPhone before iOS 17: devicectl failures there are explained by the iOS version. */
+  private osTooOld(): boolean {
+    return beforeDevicectl(this.info.osVersion);
   }
 
   /** The streaming log state, with the scope problem (the UI's "system lines are hidden" note checks it). */
@@ -502,9 +528,12 @@ class IosDeviceSession {
       logger,
       isInteresting: (name) => apps.isInteresting(name),
       onReport: (report, file) => this.onCrashReport(report, file),
+      onJetsam: (report, file) => this.onJetsam(report, file),
       onStatus: (s) => {
         if (s.ok) this.crashReader.ok();
-        else this.crashReader.unavailable(this.developerMode === 'disabled' ? DEVELOPER_MODE_OFF_CODE : READ_FAILED_CODE, readerDetail(s.error));
+        else if (this.developerMode === 'disabled') this.crashReader.unavailable(DEVELOPER_MODE_OFF_CODE, readerDetail(s.error));
+        else if (this.osTooOld()) this.crashReader.unavailable(OS_TOO_OLD_CODE, osTooOldDetail(this.info.osVersion, s.error));
+        else this.crashReader.unavailable(READ_FAILED_CODE, readerDetail(s.error));
       },
       intervalMs: timing.crashesEveryMs,
       seen: this.shared.crashSeen(this.udid),
@@ -513,6 +542,22 @@ class IosDeviceSession {
     // Let the first app listing finish so crash files can be filtered by app name.
     const t = setTimeout(() => this.crashes?.start(), timing.crashStartDelayMs);
     t.unref?.();
+  }
+
+  /** iOS killed processes to free memory: rows for the device's apps among them (true = the copy is kept). */
+  private onJetsam(report: JetsamReport, file: string): boolean {
+    const apps = this.apps;
+    if (this.disposed || !apps) return false;
+    const pidOf = new Map(report.kills.map((k) => [k.name, k.pid]));
+    const entries = jetsamEntries(report, {
+      bundleOf: (exe) => apps.bundleForExecutable(exe, pidOf.get(exe)),
+      appName: (id) => apps.app(id)?.name,
+      watchStart: this.watchStart,
+      file,
+      reportUrl: crashReportUrl(path.basename(path.dirname(file)), path.basename(file)),
+    });
+    for (const e of entries) this.batcher.push(e);
+    return entries.length > 0;
   }
 
   private onCrashReport(report: IpsReport, file: string): void {
@@ -860,6 +905,7 @@ class IosDeviceSession {
         syslogAvailable: !!this.shared.syslogTool(),
         restartLogs: () => this.restartLogs(),
         recorder: this.recorder,
+        pidsOf: (bundleId) => this.apps?.pidsOf(bundleId) ?? [],
         ...(this.shared.actionDevicectl ? { devicectl: this.shared.actionDevicectl } : {}),
       },
       action,
@@ -871,6 +917,14 @@ class IosDeviceSession {
     if (!result.ok && this.developerMode === 'disabled' && DEVELOPER_MODE_ACTIONS.has(action) && !INPUT_FAILURES.has(result.code ?? '')) {
       const raw = result.error ?? result.message;
       return fail(`${DEVELOPER_MODE_OFF.detail}${raw ? ` (${raw})` : ''}`, 'action.developerModeOff');
+    }
+    // devicectl (CoreDevice) works from iOS 17 on: an older iPhone's refusal is explained by its version.
+    if (!result.ok && this.osTooOld() && DEVICECTL_ACTIONS.has(action) && !INPUT_FAILURES.has(result.code ?? '')) {
+      const raw = result.error ?? result.message;
+      return fail(
+        `This action uses Xcode's devicectl, which works with iOS ${DEVICECTL_MIN_IOS} and later; ${this.info.name} runs iOS ${this.info.osVersion}${raw ? ` (${raw})` : ''}`,
+        'action.osTooOld',
+      );
     }
     return result;
   }
@@ -1085,7 +1139,9 @@ export class IosDeviceDriver implements DeviceDriver {
       });
     }
     const shot = resolveIdeviceTool('idevicescreenshot', settings);
-    const caps = this.useDevicectl ? await probeDevicectlCaps(true) : NO_CAPS;
+    // xcode-select first: `xcrun devicectl` on a Mac without developer tools opens an install dialog.
+    const xcode = this.useDevicectl ? await probeXcodeTools(true) : undefined;
+    const caps = xcode?.devicectl ? await probeDevicectlCaps(!this.caps.available) : NO_CAPS;
     checks.push({
       id: 'devicectl',
       label: 'Xcode devicectl (iOS device actions)',
@@ -1094,7 +1150,7 @@ export class IosDeviceDriver implements DeviceDriver {
       detail: caps.available
         ? `screenshot: ${caps.screenshot ? 'yes' : 'no'} · screen recording: ${caps.screenRecord ? 'yes' : 'no'}`
         : 'Install Xcode 15 or newer to see installed apps and crash reports and to launch/stop/install apps on iOS devices',
-      ...(caps.available ? {} : { fix: 'Install Xcode from the App Store' }),
+      ...(caps.available ? {} : { fix: devicectlFix(xcode?.developerDir) }),
     });
     checks.push({
       id: 'idevicescreenshot',
@@ -1302,4 +1358,18 @@ export class IosDeviceDriver implements DeviceDriver {
     for (const t of this.detaching.values()) clearTimeout(t);
     this.detaching.clear();
   }
+}
+
+/**
+ * Xcode is installed but the Command Line Tools are selected: point xcode-select at Xcode. Otherwise
+ * install Xcode.
+ */
+export function devicectlFix(developerDir: string | undefined, xcodeApp = '/Applications/Xcode.app'): string {
+  if (developerDir?.includes('CommandLineTools') && fs.existsSync(xcodeApp)) return `sudo xcode-select -s ${xcodeApp}`;
+  return 'Install Xcode from the App Store';
+}
+
+function osTooOldDetail(osVersion: string | undefined, error: string | undefined): string {
+  const base = `Crash reports are read with Xcode's devicectl, which works with iOS ${DEVICECTL_MIN_IOS} and later; this device runs iOS ${osVersion ?? '?'}.`;
+  return error ? `${base} (${error.slice(0, 300)})` : base;
 }

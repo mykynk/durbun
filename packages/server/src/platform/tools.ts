@@ -116,6 +116,38 @@ export function resolveAdb(settings: Pick<ServerSettings, 'adbPath'>, renv = def
   return null;
 }
 
+/**
+ * Every adb binary on this Mac that resolveAdb could pick (settings, $ANDROID_HOME, Flutter's SDK, the
+ * default SDK, every PATH entry, well-known SDK folders), once per real file, in resolution order.
+ */
+export function listAdbCandidates(settings: Pick<ServerSettings, 'adbPath'>, renv = defaultResolveEnv()): ResolvedTool[] {
+  const out: ResolvedTool[] = [];
+  const seen = new Set<string>();
+  const add = (p: string, source: ToolSource, detail?: string) => {
+    if (!isExecutableFile(p)) return;
+    let real = p;
+    try {
+      real = fs.realpathSync(p);
+    } catch {
+      /* keep p */
+    }
+    if (seen.has(real)) return;
+    seen.add(real);
+    out.push({ path: p, source, ...(detail ? { detail } : {}) });
+  };
+  if (settings.adbPath?.trim()) add(expandHome(settings.adbPath.trim(), renv.home), 'settings');
+  for (const key of ['ANDROID_HOME', 'ANDROID_SDK_ROOT'] as const) {
+    const root = renv.env[key];
+    if (root) add(path.join(expandHome(root, renv.home), 'platform-tools', 'adb'), 'env');
+  }
+  const flutterSdk = flutterConfiguredAndroidSdk(renv);
+  if (flutterSdk) add(path.join(flutterSdk, 'platform-tools', 'adb'), 'sdk', 'Android SDK from `flutter config --android-sdk`');
+  add(path.join(renv.home, 'Library', 'Android', 'sdk', 'platform-tools', 'adb'), 'sdk');
+  for (const dir of pathDirs(renv.env, prefixesOf(renv))) add(path.join(expandHome(dir, renv.home), 'adb'), 'path');
+  for (const { root, label } of wellKnownAndroidSdks(renv)) add(path.join(root, 'platform-tools', 'adb'), 'sdk', `from ${label} (${root})`);
+  return out;
+}
+
 function joinNotes(a: string, b: string | undefined): string {
   return b ? `${a} · ${b}` : a;
 }

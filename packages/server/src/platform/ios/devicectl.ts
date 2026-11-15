@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { InstalledApp } from '@durbun/protocol';
 import { run } from '../exec';
+import { probeXcodeTools } from '../tools';
 import { XCRUN } from './simctl';
 
 /** Injectable devicectl invocation (tests pass a fake). */
@@ -218,12 +219,23 @@ export interface DevicectlCaps {
 
 let capsCache: DevicectlCaps | undefined;
 
-/** Which devicectl subcommands this Xcode has (cached). */
+const NO_DEVICECTL: DevicectlCaps = { available: false, screenshot: false, screenRecord: false, openURL: false };
+
+/**
+ * Which devicectl subcommands this Xcode has (cached). `xcrun devicectl` runs only once `xcode-select` points
+ * at an Xcode that has it: on a Mac without developer tools `xcrun` would offer to install them in a
+ * system dialog.
+ */
 export async function probeDevicectlCaps(force = false): Promise<DevicectlCaps> {
   if (capsCache && !force) return capsCache;
+  const xcode = await probeXcodeTools(force);
+  if (!xcode.devicectl) {
+    capsCache = { ...NO_DEVICECTL };
+    return capsCache;
+  }
   const v = await run(XCRUN, ['devicectl', '--version'], { timeoutMs: 15_000 });
   if (!v.ok) {
-    capsCache = { available: false, screenshot: false, screenRecord: false, openURL: false };
+    capsCache = { ...NO_DEVICECTL };
     return capsCache;
   }
   const [cap, proc] = await Promise.all([

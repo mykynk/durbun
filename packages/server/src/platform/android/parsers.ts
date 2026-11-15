@@ -41,6 +41,71 @@ export function parseAdbDevices(text: string): AdbDeviceRow[] {
   return rows;
 }
 
+/* ───────────── adb client / server versions ───────────── */
+
+/**
+ * The adb protocol version of `adb version` output: "Android Debug Bridge version 1.0.41" → 41. A client
+ * and a server with different numbers restart each other's server.
+ */
+export function adbProtocolVersion(versionOutput: string): number | undefined {
+  const m = /Android Debug Bridge version \d+\.\d+\.(\d+)/.exec(versionOutput);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+export interface AdbServerConflict {
+  /** Version of the server that was running (killed by this client). */
+  serverVersion?: number;
+  /** Version of the client that killed it. */
+  clientVersion?: number;
+}
+
+/**
+ * The line an adb client prints (stderr) when it finds a server of another version and kills it:
+ *   adb server version (41) doesn't match this client (40); killing...
+ *   adb server is out of date.  killing...        (adb before 1.0.32)
+ */
+export function parseAdbServerConflict(text: string): AdbServerConflict | undefined {
+  if (!text || !text.includes('adb')) return undefined;
+  const m = /adb:? server version \((\d+)\) doesn['’]?t match this client \((\d+)\)/i.exec(text);
+  if (m) return { serverVersion: Number(m[1]), clientVersion: Number(m[2]) };
+  if (/adb:? server is out of date/i.test(text)) return {};
+  return undefined;
+}
+
+/* ───────────── transports of one phone (USB + Wi-Fi) ───────────── */
+
+/**
+ * Hardware serial inside an mDNS wireless-debugging serial:
+ * "adb-R5CW1234ABC-Xy1z2W._adb-tls-connect._tcp" → "R5CW1234ABC" (adbd names the service
+ * adb-<ro.serialno>-<random>).
+ */
+export function serialFromMdnsName(serial: string): string | undefined {
+  const m = /^adb-(.+)-[A-Za-z0-9]{6}\._adb(?:-tls-connect)?\._tcp\.?$/.exec(serial);
+  return m ? m[1] : undefined;
+}
+
+/** Placeholder serials many phones share: never used to merge transports. */
+const GENERIC_SERIALS = new Set(['0123456789abcdef', '0000000000000000', 'unknown', 'null', 'emulator']);
+
+export function isGenericSerial(serial: string): boolean {
+  return GENERIC_SERIALS.has(serial.trim().toLowerCase());
+}
+
+/** `getprop ro.serialno` output (also accepts a full `getprop` listing). */
+export function parseSerialProp(text: string): string | undefined {
+  const props = parseGetprop(text);
+  const fromList = props['ro.serialno'] || props['ro.boot.serialno'];
+  if (fromList) return fromList.trim() || undefined;
+  if (Object.keys(props).length > 0) return undefined;
+  const line = text
+    .split('\n')
+    .map((l) => l.trim())
+    .find(Boolean);
+  if (!line || /\s/.test(line) || line.length > 64 || /^(unknown|null|0+)$/i.test(line)) return undefined;
+  return line;
+}
+
 export function mapAdbState(state: string): DeviceState {
   switch (state) {
     case 'device':

@@ -36,6 +36,13 @@ All notable changes to Dürbün are listed here. The format follows
 - Flutter in-app panel: the Performance page no longer shows a "Dart heap" tile and chart line that never
   filled.
 - `durbun_dio` works with dio 5.4 again.
+- Android: Dürbün never restarts an adb server of another version (for example Android Studio's). It uses a
+  matching adb found on the Mac, or says what to do.
+- Android: a phone connected over USB and Wi-Fi is one device. It moves between the two without losing log
+  lines, and a new wireless-debugging port no longer creates a new device.
+- iOS: **Stop** works for TestFlight and App Store apps, or says why iOS refuses.
+- System check no longer runs `xcrun devicectl` on a Mac without Xcode, which could open the install dialog.
+- Flutter debug apps that were started before Dürbün attach by themselves (Android, simulators).
 - React Native: server-sent events and other open streams over XHR appear as soon as their headers arrive
   instead of staying pending.
 - React Native: binary mock bodies arrive intact when they are valid UTF-8; other binary bodies on `blob`
@@ -67,6 +74,9 @@ All notable changes to Dürbün are listed here. The format follows
 
 - Logs and Network say when the memory limit has dropped the oldest lines or requests.
 - An iPhone with Developer Mode off says so, and actions that need it explain how to turn it on.
+- Android: log lines of your apps from before the phone was plugged in are read from the phone's log buffer.
+- Apps closed by the system for memory are shown: iOS Jetsam reports and Android low-memory kills.
+- iPhones on iOS 16 and older say which actions need a newer iOS instead of failing without a reason.
 - Importing a masked recording says that `••••` values are masks.
 - Mac app: `.durbun` packages and backups and `.durbun.json` recordings open from Finder (double click, Open
   With, the Dock icon), also when Dürbün is not running; **File → Open…** (⌘O).

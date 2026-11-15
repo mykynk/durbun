@@ -28,6 +28,35 @@ export function simLogStreamArgs(settings: Pick<ServerSettings, 'iosSimLogLevel'
   return args;
 }
 
+/** Earlier Dart VM service announcements (`log show`): a Flutter debug app started before Dürbün. */
+export const SIM_VM_HISTORY = {
+  lastMinutes: 30,
+  timeoutMs: 20_000,
+  /** The stream waits this long for the history so the old lines come first. */
+  waitMs: 2000,
+};
+
+const VM_ANNOUNCE_PREDICATE =
+  'eventMessage CONTAINS "Dart VM service is listening on" OR eventMessage CONTAINS "Observatory listening on"';
+
+/** `log show` arguments after `xcrun simctl spawn <udid>` for the VM service lines of the last minutes. */
+export function simVmHistoryArgs(minutes = SIM_VM_HISTORY.lastMinutes): string[] {
+  return ['log', 'show', '--last', `${minutes}m`, '--style', 'ndjson', '--predicate', VM_ANNOUNCE_PREDICATE];
+}
+
+/** The newest announcement line per process from `log show` output (older ones point at dead URLs). */
+export function latestVmAnnouncements(text: string, nowMs = Date.now()): DeviceLogInput[] {
+  const byProcess = new Map<string, DeviceLogInput>();
+  for (const line of text.split('\n')) {
+    const entry = parseSimLogLine(line, nowMs);
+    if (!entry || !/(?:Dart VM service is|Observatory) listening on/.test(entry.message)) continue;
+    const key = entry.process ?? String(entry.pid ?? '');
+    const prev = byProcess.get(key);
+    if (!prev || entry.ts >= prev.ts) byProcess.set(key, entry);
+  }
+  return [...byProcess.values()].sort((a, b) => a.ts - b.ts);
+}
+
 /** "2026-11-02 11:43:01.123456+0300" → epoch ms (fractional). */
 export function parseUnifiedTimestamp(ts: string): number | undefined {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?\s*(Z|[+-]\d{2}:?\d{2})?$/.exec(ts.trim());

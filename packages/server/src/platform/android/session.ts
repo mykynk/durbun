@@ -4,6 +4,7 @@
  * (DeviceApps), dropbox crash / ANR records and frame stats.
  */
 import type {
+  ConnectionType,
   DeviceActionId,
   DeviceActionResult,
   DeviceInfo,
@@ -18,13 +19,13 @@ import { LogBatcher } from '../shared/batcher';
 import { fail } from '../shared/files';
 import { ScreenRecorder } from '../shared/screenRecord';
 import { humanizeModel } from '../shared/text';
-import { every } from '../shared/timing';
+import { every, sleep } from '../shared/timing';
 import { androidActionsFor, runAndroidAction } from './actions';
 import type { Adb } from './adb';
 import type { DeviceClock } from './deviceClock';
 import { basePackage, DeviceAppTracker } from './deviceApps';
 import { CrashIndex, createDropboxCursor, DropboxWatcher, type DropboxCursor } from './dropbox';
-import { AndroidLogPipeline, logcatSinceArg, type ProcessEvent } from './logcat';
+import { AndroidLogPipeline, logcatSinceArg, selectBackfill, type LogResume, type ProcessEvent } from './logcat';
 import { AndroidMetricsWatcher, type MetricsTarget } from './metrics';
 import {
   connectionForSerial,
@@ -33,6 +34,7 @@ import {
   parseBattery,
   parseGetprop,
   parsePs,
+  isGenericSerial,
   parseWmOutput,
   type AdbDeviceRow,
 } from './parsers';
@@ -42,6 +44,29 @@ import { AdbReverseRouter } from './reverse';
 const VIA = 'logcat';
 const INFO_SEP = '___DURBUN_SECTION___';
 
+export const HISTORY_TIMING = {
+  /** `logcat -d` of the whole buffer at connect. */
+  dumpTimeoutMs: 20_000,
+  /** Waiting for the package lists (which processes are the user's apps) before the dump. */
+  appsWaitMs: 5000,
+  dumpMaxBytes: 64 * 1024 * 1024,
+};
+
+/** System line after the history: { lines, minutes } (older app lines read from the device's log buffer). */
+export const HISTORY_CODE = 'logs.history';
+/** System line when the session moved to another transport of the same phone: { device, connection, previous }. */
+export const TRANSPORT_CODE = 'device.transportChanged';
+
+/** What the session of a phone's next transport takes over (same device id). */
+export interface HandoverState {
+  info: DeviceInfo;
+  resume?: LogResume;
+  lastLineAt: number;
+  watchStart?: number;
+  apiLevel?: number;
+  emulator: boolean;
+}
+
 export interface AndroidSessionDeps {
   ctx: DriverContext;
   adb: () => Adb | null;
@@ -50,6 +75,15 @@ export interface AndroidSessionDeps {
   dropboxCursor?: DropboxCursor;
   /** DeviceApp ids published for this serial (kept by the driver across replugs, see DeviceAppTrackerDeps). */
   publishedApps?: Set<string>;
+  /** The phone's `ro.serialno` once read (the driver merges its Wi-Fi transports by it). */
+  onHardwareSerial?(serial: string): void;
+}
+
+export interface AndroidSessionOptions {
+  /** Device id key (`android:<key>`): the phone's hardware serial; default the adb serial. */
+  key?: string;
+  /** The previous transport's session of this phone. */
+  previous?: HandoverState;
 }
 
 interface StateText {
@@ -126,23 +160,42 @@ export class AndroidDeviceSession {
   private readonly readers = new DeviceReaders((id, state) => this.patchReader(id, state));
   private readonly recorder = new ScreenRecorder((recording) => this.patch({ recording }));
 
+  private readonly previous?: HandoverState;
+  private connections: ConnectionType[] = [];
+
   constructor(
     private readonly deps: AndroidSessionDeps,
     row: AdbDeviceRow,
+    opts: AndroidSessionOptions = {},
   ) {
     this.serial = row.serial;
-    this.id = `android:${row.serial}`;
-    this.emulator = isEmulatorSerial(row.serial);
+    this.id = `android:${opts.key ?? row.serial}`;
+    const prev = opts.previous;
+    this.previous = prev;
+    this.emulator = prev?.emulator || isEmulatorSerial(row.serial);
+    if (prev?.apiLevel) this.apiLevel = prev.apiLevel;
     const now = Date.now();
     const model = row.props.model ? humanizeModel(row.props.model) : undefined;
     const state = mapAdbState(row.state);
     const st = state === 'online' ? undefined : stateText(row.state);
+    const old = prev?.info;
     this.info = {
+      // Name, model, OS, screen… of the same phone stay while this transport reads them again.
+      ...(old
+        ? {
+            name: old.name,
+            ...(old.model ? { model: old.model } : {}),
+            ...(old.manufacturer ? { manufacturer: old.manufacturer } : {}),
+            ...(old.osVersion ? { osVersion: old.osVersion } : {}),
+            ...(old.apiLevel ? { apiLevel: old.apiLevel } : {}),
+            ...(old.hardwareSerial ? { hardwareSerial: old.hardwareSerial } : {}),
+            ...(old.screen ? { screen: old.screen } : {}),
+            ...(old.battery ? { battery: old.battery } : {}),
+          }
+        : { name: model ?? row.serial, ...(model ? { model } : {}) }),
       id: this.id,
       platform: 'android',
       kind: this.emulator ? 'emulator' : 'physical',
-      name: model ?? row.serial,
-      ...(model ? { model } : {}),
       serial: row.serial,
       connection: connectionForSerial(row.serial),
       state,
@@ -152,7 +205,7 @@ export class AndroidDeviceSession {
           ? { status: 'starting', via: VIA }
           : { status: 'unavailable', via: VIA, code: st!.code, detail: st!.detail },
       actions: [],
-      firstSeen: now,
+      firstSeen: old?.firstSeen ?? now,
       lastSeen: now,
     };
     const hub = deps.ctx.hub;
@@ -189,6 +242,12 @@ export class AndroidDeviceSession {
       crashes: this.crashes,
       onReader: (r) => this.readers.report('crashReports', r),
     });
+    if (prev) {
+      // Logcat continues where the previous transport stopped (no repeated tail, no gap).
+      if (prev.resume) this.pipeline.restoreResume(prev.resume);
+      this.lastLineAt = prev.lastLineAt;
+      if (prev.watchStart !== undefined) this.watchStart = prev.watchStart;
+    }
     try {
       // Live logcat crashes / ANRs (with their hub ids) → de-duplication of dropbox records.
       this.unsubLogs = deps.ctx.onLogs((entries) => {
@@ -207,9 +266,45 @@ export class AndroidDeviceSession {
     return this.info;
   }
 
-  /** First appearance → hub.upsertDevice. */
+  /** First appearance → hub.upsertDevice (after a transport change: a system line says so). */
   announce(): void {
-    this.deps.ctx.hub.upsertDevice({ ...this.info });
+    // `connections` always present: a transport change must not keep the previous session's list.
+    this.deps.ctx.hub.upsertDevice({ ...this.info, connections: this.info.connections });
+    const prev = this.previous?.info;
+    if (prev && prev.connection !== this.info.connection) {
+      this.deps.ctx.hub.pushSystemLog(this.id, {
+        level: 'info',
+        code: TRANSPORT_CODE,
+        message: `${this.info.name} is now watched over ${connectionText(this.info.connection)} (was ${connectionText(prev.connection)})`,
+        params: { device: this.info.name, connection: connectionText(this.info.connection), previous: connectionText(prev.connection) },
+      });
+    }
+  }
+
+  /** Every online transport of the phone (running one first); the driver sets it on each poll. */
+  setConnections(list: ConnectionType[]): void {
+    const same = list.length === this.connections.length && list.every((c, i) => c === this.connections[i]);
+    if (same) return;
+    this.connections = [...list];
+    // Only worth a field when the phone is reachable in more than one way.
+    const value = list.length > 1 ? [...list] : undefined;
+    if (value === undefined && this.info.connections === undefined) return;
+    this.patch({ connections: value });
+  }
+
+  /** State for the session of the phone's next transport. */
+  handoverState(): HandoverState {
+    this.pipeline.flush();
+    this.batcher.flush();
+    const resume = this.pipeline.resumeState();
+    return {
+      info: { ...this.info },
+      ...(resume ? { resume } : {}),
+      lastLineAt: this.lastLineAt,
+      ...(this.watchStart !== undefined ? { watchStart: this.watchStart } : {}),
+      ...(this.apiLevel ? { apiLevel: this.apiLevel } : {}),
+      emulator: this.emulator,
+    };
   }
 
   /** Apply the latest `adb devices` row (latest wins; transitions are serialized). */
@@ -278,8 +373,12 @@ export class AndroidDeviceSession {
     await this.refreshProcesses();
     if (gen !== this.gen || this.disposed) return;
     void this.apps.start();
+    // SDK routing does not wait for the history read.
+    const router = this.startRouter(gen);
+    await this.readHistory(gen);
+    if (gen !== this.gen || this.disposed) return;
     this.startLogcat();
-    await this.startRouter(gen);
+    await router;
     if (gen !== this.gen || this.disposed) return;
     this.dropbox.start();
     this.timers.push(
@@ -320,8 +419,14 @@ export class AndroidDeviceSession {
     this.logsStatus = 'unavailable';
   }
 
-  /** Device gone ('disconnected') or driver stopping ('stopped'). */
-  async dispose(reason: 'disconnected' | 'stopped'): Promise<void> {
+  /**
+   * Device gone ('disconnected'), driver stopping ('stopped') or the phone continues on another transport
+   * ('handover': the device stays; `removeMappings` when the old transport is still there).
+   */
+  async dispose(
+    reason: 'disconnected' | 'stopped' | 'handover',
+    opts: { removeMappings?: boolean; detail?: string; code?: string } = {},
+  ): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
     const wasOnline = this.online;
@@ -338,7 +443,7 @@ export class AndroidDeviceSession {
     await this.stopLogcat();
     this.pipeline.dispose();
     this.batcher.dispose();
-    const cleanup = reason === 'stopped' && wasOnline;
+    const cleanup = wasOnline && (reason === 'stopped' || (reason === 'handover' && opts.removeMappings === true));
     await this.router?.stop(cleanup);
     this.router = undefined;
     if (cleanup) {
@@ -347,7 +452,8 @@ export class AndroidDeviceSession {
     }
     this.forwards.clear();
     this.online = false;
-    if (reason === 'disconnected') this.deps.ctx.hub.markDeviceDisconnected(this.id);
+    if (reason === 'handover') return;
+    if (reason === 'disconnected') this.deps.ctx.hub.markDeviceDisconnected(this.id, opts.detail, opts.code);
     else this.deps.ctx.hub.markDeviceDisconnected(this.id, 'Dürbün stopped watching Android devices', 'device.driverStopped');
   }
 
@@ -400,6 +506,8 @@ export class AndroidDeviceSession {
     if (emulator && avd) name = humanizeModel(avd);
     else if (deviceName && deviceName !== 'null' && !deviceName.includes('Exception')) name = deviceName;
     else name = marketName || model;
+    const hw = (props['ro.serialno'] || props['ro.boot.serialno'] || '').trim();
+    const hardwareSerial = hw && !emulator && !isGenericSerial(hw) ? hw : undefined;
 
     const patch: Partial<DeviceInfo> = {
       kind: emulator ? 'emulator' : 'physical',
@@ -408,11 +516,13 @@ export class AndroidDeviceSession {
       ...(props['ro.product.manufacturer'] ? { manufacturer: props['ro.product.manufacturer'] } : {}),
       ...(props['ro.build.version.release'] ? { osVersion: props['ro.build.version.release'] } : {}),
       ...(this.apiLevel ? { apiLevel: this.apiLevel } : {}),
+      ...(hardwareSerial ? { hardwareSerial } : {}),
       ...(screen ? { screen } : {}),
       ...(battery ? { battery } : {}),
     };
     if (emulator && this.info.connection === 'usb') patch.connection = 'local';
     this.patch(patch);
+    if (hardwareSerial) this.deps.onHardwareSerial?.(hardwareSerial);
   }
 
   private async refreshBattery(): Promise<void> {
@@ -499,6 +609,52 @@ export class AndroidDeviceSession {
 
   /* ───────────── logcat ───────────── */
 
+  /**
+   * Before the stream starts (first connect, or back after more than 10 min): read the whole log buffer
+   * once and keep the user's apps' lines (plus crashes, lmkd, Flutter) from before the last
+   * settings.logcatTail lines, so what happened before the cable went in is there. The stream then
+   * resumes after the dump's last line. Without the dump (old Android, failure, timeout) the stream starts
+   * with `-T <logcatTail>` as before.
+   */
+  private async readHistory(gen: number): Promise<void> {
+    const adb = this.deps.adb();
+    if (!adb || this.legacyLogcat || this.apiLevel === undefined || this.apiLevel < 24) return;
+    const last = this.pipeline.lastTimestamp;
+    if (last !== undefined && Date.now() - this.lastLineAt < 10 * 60_000) return; // the stream resumes by itself
+    await Promise.race([this.apps.ready().catch(() => false), sleep(HISTORY_TIMING.appsWaitMs)]);
+    if (gen !== this.gen || this.disposed) return;
+    const r = await adb.run(['-s', this.serial, 'logcat', '-d', '-v', 'threadtime', '-v', 'epoch', '-v', 'printable'], {
+      timeoutMs: HISTORY_TIMING.dumpTimeoutMs,
+      maxBuffer: HISTORY_TIMING.dumpMaxBytes,
+    });
+    if (gen !== this.gen || this.disposed) return;
+    if (!r.ok || !r.stdout) {
+      this.deps.logger.debug(`${this.serial}: logcat -d failed (${r.error ?? `exit ${r.code}`}); starting with the last ${this.tail()} lines`);
+      return;
+    }
+    const plan = selectBackfill(r.stdout.split('\n'), {
+      tail: this.tail(),
+      isAppProcess: (name) => this.apps.classifyProcess(name)?.kind === 'third-party',
+      processName: (pid) => this.processes.get(pid),
+    });
+    this.pipeline.pushBackfill(plan.lines, plan.end);
+    this.batcher.flush();
+    this.lastLineAt = Date.now();
+    if (plan.history > 0 && plan.firstTs !== undefined) {
+      const minutes = Math.max(1, Math.round((Date.now() - plan.firstTs) / 60_000));
+      this.deps.ctx.hub.pushSystemLog(this.id, {
+        level: 'info',
+        code: HISTORY_CODE,
+        message: `${plan.history} earlier line${plan.history === 1 ? '' : 's'} of your apps read from the device's log buffer (back ${minutes} min)`,
+        params: { lines: plan.history, minutes },
+      });
+    }
+  }
+
+  private tail(): number {
+    return Math.max(1, Math.floor(this.deps.ctx.settings().logcatTail || 1));
+  }
+
   private logcatSpec(): StreamSpec | null {
     const adb = this.deps.adb();
     if (!adb) return null;
@@ -509,7 +665,7 @@ export class AndroidDeviceSession {
       const last = this.pipeline.lastTimestamp;
       const fresh = Date.now() - this.lastLineAt < 10 * 60_000;
       if (modern && last !== undefined && fresh) args.push('-T', logcatSinceArg(last));
-      else args.push('-T', String(Math.max(1, Math.floor(this.deps.ctx.settings().logcatTail || 1))));
+      else args.push('-T', String(this.tail()));
     }
     return { cmd: adb.path, args, env: adb.tool.env };
   }
@@ -718,4 +874,8 @@ export class AndroidDeviceSession {
       },
     };
   }
+}
+
+function connectionText(c: ConnectionType): string {
+  return c === 'wifi' ? 'Wi-Fi' : c === 'usb' ? 'USB' : c;
 }

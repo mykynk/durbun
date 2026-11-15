@@ -16,3 +16,21 @@ export const DEVICECTL_MISSING = {
 /** A devicectl listing failed while the device reports Developer Mode off (the likely cause). */
 export const DEVELOPER_MODE_OFF_CODE = 'reader.crashReports.developerModeOff';
 export const READ_FAILED_CODE = 'reader.crashReports.failed';
+
+/** A devicectl listing failed on an iPhone older than iOS 17 (CoreDevice, which devicectl uses, starts there). */
+export const OS_TOO_OLD_CODE = 'reader.crashReports.osTooOld';
+
+/** First iOS version devicectl (CoreDevice) works with. */
+export const DEVICECTL_MIN_IOS = 17;
+
+/** Major iOS version of "16.7.10" → 16 (undefined when unknown). */
+export function iosMajor(osVersion: string | undefined): number | undefined {
+  const n = Number(/^(\d+)/.exec(osVersion ?? '')?.[1]);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+/** An iOS version devicectl is known not to work with. */
+export function beforeDevicectl(osVersion: string | undefined): boolean {
+  const major = iosMajor(osVersion);
+  return major !== undefined && major < DEVICECTL_MIN_IOS;
+}

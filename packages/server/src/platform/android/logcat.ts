@@ -239,6 +239,12 @@ export class LogcatMerger {
 
 /* ───────────────────────── restart boundary de-dup ───────────────────────── */
 
+/** The newest record a logcat reader saw: epoch ms and the raw lines at that ms. */
+export interface LogResume {
+  lastTs: number;
+  atLast: string[];
+}
+
 /**
  * After a restart with `-T <last epoch>` logcat repeats the lines at that timestamp; drop the ones
  * already delivered (and anything older) until the stream moves past the boundary.
@@ -255,6 +261,22 @@ export class BoundaryDeduper {
   /** Call right before restarting logcat with `-T lastTimestamp`. */
   beginResume(): void {
     if (Number.isFinite(this.lastTs)) this.resuming = true;
+  }
+
+  /** Where the stream stands (handed to the session of the phone's next transport). */
+  snapshot(): LogResume | undefined {
+    return Number.isFinite(this.lastTs) ? { lastTs: this.lastTs, atLast: [...this.atLast] } : undefined;
+  }
+
+  /** Continue after `state` (the newest record seen, possibly by another reader of the same buffer). */
+  restore(state: LogResume): void {
+    if (!Number.isFinite(state.lastTs)) return;
+    if (state.lastTs > this.lastTs) {
+      this.lastTs = state.lastTs;
+      this.atLast = new Set(state.atLast);
+    } else if (state.lastTs === this.lastTs) {
+      for (const raw of state.atLast) this.atLast.add(raw);
+    }
   }
 
   accept(line: LogcatLine, raw: string): boolean {
@@ -491,6 +513,128 @@ export class AndroidCrashGrouper {
   }
 }
 
+/* ───────────────────────────── low-memory kills ───────────────────────────── */
+
+/** A process lmkd (logcat tag `lowmemorykiller`) killed to free memory. */
+export interface LowMemoryKill {
+  process: string;
+  pid: number;
+  uid?: number;
+  /** oom_score_adj: 0 = the app on screen, ≤ 200 visible / perceptible, ≥ 900 cached in the background. */
+  adj: number;
+  freedKb?: number;
+  reason?: string;
+}
+
+/** Visible to the user when killed (on screen, visible or perceptible). */
+export const LMK_VISIBLE_ADJ = 200;
+
+/**
+ * lmkd lines:
+ *   Kill 'com.foo' (12345), uid 10234, oom_score_adj 900 to free 51234kB rss, 1024kB swap; reason: low watermark is breached …
+ *   Kill 'com.foo' (12345), uid 10234, oom_adj 900 to free 51234kB          (Android 9 / 10)
+ */
+const LMK_KILL_RE = /^Kill '([^']+)' \((\d+)\), uid (\d+), oom_(?:score_)?adj (-?\d+)(?: to free (\d+)kB)?/;
+const LMK_REASON_RE = /; reason: (.+)$/;
+
+export function parseLowMemoryKill(tag: string, message: string): LowMemoryKill | null {
+  if (tag !== 'lowmemorykiller' && tag !== 'lmkd') return null;
+  const m = LMK_KILL_RE.exec(message);
+  if (!m) return null;
+  const reason = LMK_REASON_RE.exec(message)?.[1]?.trim();
+  return {
+    process: m[1]!,
+    pid: Number(m[2]),
+    uid: Number(m[3]),
+    adj: Number(m[4]),
+    ...(m[5] ? { freedKb: Number(m[5]) } : {}),
+    ...(reason ? { reason } : {}),
+  };
+}
+
+/* ───────────────────────────── history at connect ───────────────────────────── */
+
+/** Tags kept from the older part of the buffer whatever process wrote them (crashes, Flutter, lmkd). */
+const HISTORY_TAGS = new Set(['AndroidRuntime', 'DEBUG', 'crash_dump32', 'crash_dump64', 'libc', 'flutter', 'lowmemorykiller', 'lmkd']);
+const AM_TAGS = new Set(['ActivityManager', 'ProcessList', 'ActivityManagerService', 'ActivityTaskManager']);
+/** ActivityManager lines about one app process: start, death, kill, ANR, force stop. */
+const AM_APP_RE = /^(?:Start proc \d+:|Process |Killing \d+:|ANR in |Force stopping |Force finishing activity )([A-Za-z0-9_.:]+)/;
+
+export interface BackfillOptions {
+  /** The newest records are kept whatever they are (settings.logcatTail, like `-T`). */
+  tail: number;
+  /** One of the user's apps (third-party package, or one of its processes)? */
+  isAppProcess(name: string): boolean;
+  /** Name of a pid that runs now (`ps`), for processes started before the buffer's first line. */
+  processName?(pid: number): string | undefined;
+  nowMs?: number;
+}
+
+export interface BackfillPlan {
+  /** Raw lines to replay, oldest first. */
+  lines: string[];
+  /** The dump's newest record (the stream resumes after it). */
+  end?: LogResume;
+  /** Time of the oldest kept line. */
+  firstTs?: number;
+  /** Kept lines older than the tail. */
+  history: number;
+}
+
+/**
+ * From a `logcat -d` dump keep the newest `tail` records and, before them, only what concerns the user's
+ * apps: lines of their processes (pid → name from ActivityManager "Start proc" lines as they come, else
+ * `ps`), crash / ANR / tombstone / lmkd / Flutter lines, and ActivityManager lines about their processes.
+ */
+export function selectBackfill(raw: readonly string[], opts: BackfillOptions): BackfillPlan {
+  const now = opts.nowMs ?? Date.now();
+  const recs: { raw: string; rec: LogcatLine }[] = [];
+  for (const line of raw) {
+    const l = line.endsWith('\r') ? line.slice(0, -1) : line;
+    if (!l || isLogcatSeparator(l)) continue;
+    const rec = parseLogcatLine(l, now);
+    if (rec) recs.push({ raw: l, rec });
+  }
+  const tailFrom = Math.max(0, recs.length - Math.max(0, Math.floor(opts.tail)));
+  const names = new Map<number, string>();
+  const lines: string[] = [];
+  let history = 0;
+  let firstTs: number | undefined;
+  let lastTs = -Infinity;
+  let atLast: string[] = [];
+  for (let i = 0; i < recs.length; i += 1) {
+    const { raw: l, rec } = recs[i]!;
+    if (AM_TAGS.has(rec.tag)) {
+      const ev = detectProcessEvent(rec.tag, rec.message, rec.ts, () => undefined);
+      if (ev?.event === 'started') names.set(ev.pid, ev.name);
+    }
+    if (rec.ts > lastTs) {
+      lastTs = rec.ts;
+      atLast = [l];
+    } else if (rec.ts === lastTs) atLast.push(l);
+    let keep = i >= tailFrom;
+    if (!keep) {
+      const name = names.get(rec.pid) ?? opts.processName?.(rec.pid);
+      if (name && opts.isAppProcess(name)) keep = true;
+      else if (HISTORY_TAGS.has(rec.tag)) keep = true;
+      else if (AM_TAGS.has(rec.tag)) {
+        const m = AM_APP_RE.exec(rec.message);
+        keep = !!m && opts.isAppProcess(m[1]!);
+      }
+      if (keep) history += 1;
+    }
+    if (!keep) continue;
+    lines.push(l);
+    if (firstTs === undefined) firstTs = rec.ts;
+  }
+  return {
+    lines,
+    ...(Number.isFinite(lastTs) ? { end: { lastTs, atLast } } : {}),
+    ...(firstTs !== undefined ? { firstTs } : {}),
+    history,
+  };
+}
+
 /* ───────────────────────────── full pipeline ───────────────────────────── */
 
 export interface AndroidPipelineHooks {
@@ -531,6 +675,26 @@ export class AndroidLogPipeline {
     this.dedupe.beginResume();
   }
 
+  resumeState(): LogResume | undefined {
+    return this.dedupe.snapshot();
+  }
+
+  restoreResume(state: LogResume): void {
+    this.dedupe.restore(state);
+  }
+
+  /**
+   * Older lines read with `logcat -d` before the stream starts: `lines` go through the pipeline (lines
+   * already delivered are dropped), then the stream resumes after `end`, the dump's last record — also
+   * when that record was not kept.
+   */
+  pushBackfill(lines: readonly string[], end?: LogResume): void {
+    this.beginResume();
+    for (const l of lines) this.pushLine(l);
+    this.flush();
+    if (end) this.dedupe.restore(end);
+  }
+
   pushLine(raw: string): void {
     if (raw.length === 0) return;
     const rec = parseLogcatLine(raw);
@@ -568,6 +732,27 @@ export class AndroidLogPipeline {
       pid: rec.pid,
       tid: rec.tid,
     };
+    const lmk = parseLowMemoryKill(rec.tag, rec.message);
+    if (lmk) {
+      // Attribute the kill to the killed process so app-scoped views show it.
+      entry.pid = lmk.pid;
+      entry.tid = undefined;
+      entry.process = lmk.process;
+      entry.data = {
+        termination: 'low-memory',
+        reporterPid: rec.pid,
+        process: lmk.process,
+        pid: lmk.pid,
+        adj: lmk.adj,
+        visible: lmk.adj <= LMK_VISIBLE_ADJ,
+        ...(lmk.freedKb !== undefined ? { freedKb: lmk.freedKb } : {}),
+        ...(lmk.reason ? { reason: lmk.reason } : {}),
+      };
+      // A kill in the background (cached app) is routine; one of the app on screen is what testers report.
+      if (lmk.adj <= LMK_VISIBLE_ADJ && entry.level !== 'fatal') entry.level = 'error';
+      this.crashes.push(entry);
+      return;
+    }
     const name = this.hooks.processName?.(rec.pid);
     if (name) entry.process = name;
     const ev = detectProcessEvent(rec.tag, rec.message, rec.ts, (pid) => this.hooks.processName?.(pid));

@@ -31,6 +31,8 @@ export interface IosDeviceActionTarget {
   restartLogs(): Promise<void>;
   /** Tests: a fake devicectl (default: `xcrun devicectl`). */
   devicectl?: DevicectlRunner;
+  /** Live pids Dürbün already knows for an app (the app tracker's process listing). */
+  pidsOf?(bundleId: string): number[];
   recorder: ScreenRecorder;
 }
 
@@ -160,21 +162,38 @@ export async function runIosDeviceAction(
 async function stopApp(t: IosDeviceActionTarget, appId: string): Promise<DeviceActionResult> {
   const devicectl = t.devicectl ?? xcrunDevicectl;
   const dev = ['--device', t.udid];
-  const appsR = await devicectl(['device', 'info', 'apps', ...dev, '--bundle-id', appId], 60_000);
-  if (!appsR.ok) return fail(`Could not look up ${appId}: ${appsR.error}`);
-  const app = parseDevicectlApps(appsR.json).find((a) => a.bundleIdentifier === appId);
-  if (!app?.url) return fail(`${appId} is not installed (or not a developer app)`, 'action.appNotFound');
-  const procR = await devicectl(['device', 'info', 'processes', ...dev], 60_000);
-  if (!procR.ok) return fail(`Could not list processes: ${procR.error}`);
-  const processes = parseDevicectlProcesses(procR.json);
-  if (!processes.some((p) => p.executable)) {
-    return fail(`Could not find the process of ${appId}: devicectl did not report executable paths`);
+  // --include-all-apps: TestFlight / App Store / ad-hoc apps are not "developer apps" and are missing otherwise.
+  const appsR = await devicectl(['device', 'info', 'apps', ...dev, '--include-all-apps', '--bundle-id', appId], 60_000);
+  const app = appsR.ok ? parseDevicectlApps(appsR.json).find((a) => a.bundleIdentifier === appId) : undefined;
+  const known = t.pidsOf?.(appId) ?? [];
+  let pids: number[];
+  if (app?.url) {
+    const procR = await devicectl(['device', 'info', 'processes', ...dev], 60_000);
+    if (!procR.ok) return fail(`Could not list processes: ${procR.error}`);
+    const processes = parseDevicectlProcesses(procR.json);
+    if (!processes.some((p) => p.executable)) {
+      if (known.length === 0) return fail(`Could not find the process of ${appId}: devicectl did not report executable paths`);
+      pids = known;
+    } else pids = pidsForApp(processes, app.url);
+  } else if (known.length > 0) {
+    pids = known; // the running app Dürbün already follows
+  } else if (!appsR.ok) {
+    return fail(`Could not look up ${appId}: ${appsR.error}`);
+  } else {
+    return fail(`${appId} is not installed`, 'action.appNotFound');
   }
-  const pids = pidsForApp(processes, app.url);
   if (pids.length === 0) return done(`${appId} is not running`);
   for (const pid of pids) {
     const r = await devicectl(['device', 'process', 'terminate', ...dev, '--pid', String(pid)], 30_000);
-    if (!r.ok) return fail(`Could not stop ${appId} (pid ${pid}): ${r.error}`);
+    if (r.ok) continue;
+    if (/no such process|not found|does not exist|ESRCH/i.test(r.error ?? '')) continue; // it ended meanwhile
+    if (app && app.builtByDeveloper !== true) {
+      return fail(
+        `iOS does not let this Mac stop ${appId} (only apps installed from Xcode can be stopped); close it from the app switcher on the device (${r.error})`,
+        'action.stopNotAllowed',
+      );
+    }
+    return fail(`Could not stop ${appId} (pid ${pid}): ${r.error}`);
   }
   return done(`Stopped ${appId}`);
 }

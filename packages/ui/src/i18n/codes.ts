@@ -61,6 +61,8 @@ export const SERVER_CODES = {
     'vm.hotRestart',
     'vm.hotReload',
     'sdk.routeElsewhere',
+    'device.transportChanged',
+    'logs.history',
   ],
   /** `DeviceInfo.stateCode`. */
   deviceStates: [
@@ -77,6 +79,7 @@ export const SERVER_CODES = {
     'device.sdkIdle',
     'demo.stopped',
     'device.developerModeOff',
+    'device.adbConflict',
   ],
   /** `DeviceInfo.logs.code`. */
   logStatuses: [
@@ -102,6 +105,7 @@ export const SERVER_CODES = {
     'logs.idevicesyslogMissing',
     'driver.initFailed',
     'driver.statusFailed',
+    'driver.adbVersionConflict',
     'demo.active',
     'demo.inactive',
   ],
@@ -189,6 +193,8 @@ export const SERVER_CODES = {
     'action.recording.busy',
     'action.recording.notRunning',
     'action.developerModeOff',
+    'action.stopNotAllowed',
+    'action.osTooOld',
   ],
   /** `DeviceInfo.readers.<id>.code`: why an SDK-less reader (crash records, frame stats) does not work. */
   readers: [
@@ -196,11 +202,12 @@ export const SERVER_CODES = {
     'reader.crashReports.devicectlMissing',
     'reader.crashReports.developerModeOff',
     'reader.crashReports.failed',
+    'reader.crashReports.osTooOld',
     'reader.frameStats.noData',
     'reader.frameStats.unsupported',
   ],
   /** `ToolCheck.code`: Doctor rows worded specially (params in `ToolCheck.params`). */
-  doctor: ['doctor.node.embedded'],
+  doctor: ['doctor.node.embedded', 'driver.adbVersionConflict', 'doctor.adbMatchedServer'],
   /** REST `{ error, code }` bodies (`ApiError.code`). */
   rest: [
     'access.denied',
@@ -210,6 +217,10 @@ export const SERVER_CODES = {
     'body.invalidJson',
     'body.none',
     'body.tooLarge',
+    'bugReport.invalid',
+    'export.bundleNeedsDevice',
+    'export.invalidTime',
+    'export.scopeConflict',
     'file.unknown',
     'har.invalid',
     'import.failed',
@@ -288,6 +299,15 @@ registerMessages('code', {
       'Bu cihazın SDK bağlantıları bu bilgisayarda çalışan başka bir Dürbün’e gidiyor (localhost:{port}). SDK’lı uygulamalar orada görünür; cihaz logları burada da gelir.',
       'Bu cihazın SDK bağlantıları bu bilgisayarda çalışan başka bir Dürbün’e gidiyor. SDK’lı uygulamalar orada görünür; cihaz logları burada da gelir.',
     ],
+    'device.transportChanged': [
+      '{device} artık {connection} üzerinden izleniyor ({previous} bağlantısı yerine); loglar kaldığı yerden sürüyor',
+      '{device} artık {connection} üzerinden izleniyor; loglar kaldığı yerden sürüyor',
+      'Cihaz artık başka bir bağlantı üzerinden izleniyor; loglar kaldığı yerden sürüyor',
+    ],
+    'logs.history': [
+      'Telefonun log arabelleğinden uygulamalarınızın önceki {lines, number} satırı eklendi (son {minutes, number} dk)',
+      'Telefonun log arabelleğinden uygulamalarınızın önceki satırları eklendi',
+    ],
 
     /* ── device states ── */
     'device.unauthorized': 'Cihazdaki “USB hata ayıklamaya izin verilsin mi?” sorusunu onaylayın',
@@ -303,6 +323,7 @@ registerMessages('code', {
     'device.sdkIdle': 'Bağlı uygulama kalmadı; Dürbün bu simülatörü kendisi izlemiyor',
     'demo.stopped': 'Demo modu kapatıldı',
     'device.developerModeOff': 'Geliştirici Modu kapalı: uygulama başlatma, durdurma, kurma, ekran görüntüsü ve ekran kaydı çalışmaz',
+    'device.adbConflict': 'Bu Mac’te sürümü farklı başka bir adb sunucusu çalışıyor; Dürbün onu kapatmamak için bekliyor. Çözüm Sistem kontrolünde.',
     'device.booting': 'Cihaz açılıyor…',
 
     /* ── log stream states ── */
@@ -321,6 +342,11 @@ registerMessages('code', {
     'driver.simctlError': 'simctl hata verdi',
     'driver.initFailed': 'Sürücü başlatılamadı',
     'driver.statusFailed': 'Sürücü durumu okunamadı',
+    'driver.adbVersionConflict': [
+      'Başka bir program adb sunucusunun {server} sürümünü çalıştırıyor, Dürbün’ün adb’si ise {client} sürümünde ({path}). Dürbün o sunucuyu yeniden başlatıp diğer programın cihaz bağlantılarını koparmamak için Android cihazlarını bekletiyor. Ayarlar’da adb yolunu {match} yapın (aynı sürüm).',
+      'Başka bir program adb sunucusunun {server} sürümünü çalıştırıyor, Dürbün’ün adb’si ise {client} sürümünde ({path}). Dürbün o sunucuyu yeniden başlatıp diğer programın cihaz bağlantılarını koparmamak için Android cihazlarını bekletiyor. O programı kapatın ya da Ayarlar’da adb yolunu o programın kullandığı adb yapın.',
+      'Başka bir program farklı sürümde bir adb sunucusu çalıştırıyor. Dürbün onu yeniden başlatmamak için Android cihazlarını bekletiyor; ayrıntı ve çözüm Sistem kontrolünde.',
+    ],
     'demo.active': 'Demo cihazlarında örnek veri üretiliyor',
     'demo.inactive': 'Demo modu kapalı',
 
@@ -413,6 +439,12 @@ registerMessages('code', {
     'action.recording.notRunning': 'Bu cihazda süren bir ekran kaydı yok',
     'action.developerModeOff':
       'iPhone’da Geliştirici Modu kapalı. Ayarlar → Gizlilik ve Güvenlik → Geliştirici Modu’nu açın ve telefonu yeniden başlatın (seçenek görünmüyorsa iPhone’u bir kez Xcode’a bağlayın).',
+    'action.stopNotAllowed':
+      'iOS bu uygulamanın bu Mac’ten durdurulmasına izin vermiyor; yalnızca Xcode’dan kurulan uygulamalar durdurulabilir. Uygulamayı telefondaki uygulama değiştiriciden kapatın.',
+    'action.osTooOld': [
+      'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor ({detail})',
+      'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor.',
+    ],
     'action.unsupported': 'Bu cihaz bu işlemi desteklemiyor',
     'action.deviceOffline': 'Cihaz çevrimdışı ya da kapalı',
     'action.deviceNotFound': 'Cihaz bulunamadı',
@@ -435,6 +467,10 @@ registerMessages('code', {
     'body.invalidJson': ['Geçersiz JSON: {detail}', 'Geçersiz JSON'],
     'body.none': 'Bu isteğin gövdesi yok',
     'body.tooLarge': ['İstek gövdesi çok büyük (en fazla {limit})', 'İstek gövdesi çok büyük'],
+    'bugReport.invalid': ['Hata raporu oluşturulamadı: {detail}', 'Hata raporu oluşturulamadı'],
+    'export.bundleNeedsDevice': 'Uygulamanın kaydı için cihazı da belirtin',
+    'export.invalidTime': 'Zaman aralığı geçersiz',
+    'export.scopeConflict': 'Kayıt için ya oturumu ya da uygulamayı belirtin, ikisini birden değil',
     'file.unknown': 'Dosya bulunamadı',
     'har.invalid': 'Geçersiz HAR isteği',
     'import.failed': ['İçe aktarılamadı: {detail}', 'İçe aktarılamadı'],
@@ -463,12 +499,19 @@ registerMessages('code', {
     'reader.crashReports.developerModeOff':
       'iPhone’da Geliştirici Modu kapalı olduğu için çökme raporları (.ips) okunamıyor. Ayarlar → Gizlilik ve Güvenlik → Geliştirici Modu açılıp telefon yeniden başlatılınca raporlar gelir.',
     'reader.crashReports.failed': ['Cihazın çökme kayıtları okunamadı: {detail}', 'Cihazın çökme kayıtları şu an okunamıyor.'],
+    'reader.crashReports.osTooOld':
+      'Çökme raporları ve kurulu uygulamalar Xcode’un devicectl aracıyla okunur; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor. Canlı loglar idevicesyslog ile yine gelir.',
     'reader.frameStats.noData':
       'CPU ve bellek cihazın süreç listesinden okunur. FPS ise bu cihazda dışarıdan ölçülemiyor: ne gfxinfo ne SurfaceFlinger bu uygulama için kare verdi; FPS için SDK ya da Flutter debug oturumu gerekir.',
     'reader.frameStats.unsupported': 'Bu cihaz kare istatistiklerini dışarıya vermiyor; FPS ve takılan kareler yalnızca uygulamanın içinden (SDK ya da Flutter debug) ölçülür.',
 
     /* ── Doctor rows (ToolCheck.code) ── */
     'doctor.node.embedded': ['Dürbün.app içinde gömülü (Electron {electron}, Node {node})', 'Dürbün.app içinde gömülü (Node {node})', 'Dürbün.app içinde gömülü'],
+    'doctor.adbMatchedServer': [
+      'Başka bir programın başlattığı adb sunucusu {server} sürümünde. Dürbün onu yeniden başlatmamak için aynı sürümdeki adb’yi kullanıyor: {path} (kendi bulduğu: {own}).',
+      'Başka bir programın başlattığı adb sunucusu {server} sürümünde. Dürbün onu yeniden başlatmamak için aynı sürümdeki adb’yi kullanıyor: {path}.',
+      'Dürbün, başka bir programın başlattığı adb sunucusuyla aynı sürümdeki adb’yi kullanıyor.',
+    ],
 
     /* ── UI-side messages kept under code.* (used by the shell) ── */
     'demo.enabled': 'Demo verisi açıldı',
@@ -500,6 +543,7 @@ registerMessages('code', {
       scopeWhy: {
         devicectlMissing: 'uygulama satırlarını ayırmak için Xcode 15 ya da daha yenisi (devicectl) gerekir',
         appListFailed: 'kurulu uygulamalar devicectl ile okunamadığı için uygulama satırları ayrılamıyor',
+        osTooOld: 'devicectl kurulu uygulamaları iOS 17’den itibaren okur; bu cihaz daha eski bir iOS kullandığı için uygulama satırları ayrılamıyor',
       },
       /** logs.connectionLost / connectionRestored while the log stream was cut. */
       gap: { lost: 'dönene kadar log satırı gelmez', restored: 'aradaki log satırları eksik' },
@@ -592,6 +636,15 @@ registerMessages('code', {
       'This device’s SDK connections go to another Dürbün running on this computer (localhost:{port}). Apps with the SDK show up there; device logs still appear here.',
       'This device’s SDK connections go to another Dürbün running on this computer. Apps with the SDK show up there; device logs still appear here.',
     ],
+    'device.transportChanged': [
+      '{device} is now watched over {connection} (instead of {previous}); logs continue where they stopped',
+      '{device} is now watched over {connection}; logs continue where they stopped',
+      'The device is now watched over another connection; logs continue where they stopped',
+    ],
+    'logs.history': [
+      '{lines, number} earlier lines of your apps added from the phone’s log buffer (last {minutes, number} min)',
+      'Earlier lines of your apps added from the phone’s log buffer',
+    ],
 
     /* ── device states ── */
     'device.unauthorized': 'Accept the “Allow USB debugging?” prompt on the device',
@@ -607,6 +660,7 @@ registerMessages('code', {
     'device.sdkIdle': 'No app is connected, and Dürbün does not watch this simulator itself',
     'demo.stopped': 'Demo mode turned off',
     'device.developerModeOff': 'Developer Mode is off: starting, stopping and installing apps, screenshots and screen recordings do not work',
+    'device.adbConflict': 'Another adb server of a different version runs on this Mac; Dürbün waits instead of restarting it. The fix is in System check.',
     'device.booting': 'Device is booting…',
 
     /* ── log stream states ── */
@@ -625,6 +679,11 @@ registerMessages('code', {
     'driver.simctlError': 'simctl reported an error',
     'driver.initFailed': 'The driver failed to start',
     'driver.statusFailed': 'Could not read the driver status',
+    'driver.adbVersionConflict': [
+      'Another program runs adb server version {server}; the adb Dürbün uses is version {client} ({path}). Dürbün keeps Android devices waiting instead of restarting that server and cutting the other program’s device connections. Set the adb path in Settings to {match} (the same version).',
+      'Another program runs adb server version {server}; the adb Dürbün uses is version {client} ({path}). Dürbün keeps Android devices waiting instead of restarting that server and cutting the other program’s device connections. Quit that program, or set the adb path in Settings to the adb it uses.',
+      'Another program runs an adb server of a different version. Dürbün keeps Android devices waiting instead of restarting it; details and the fix are in System check.',
+    ],
     'demo.active': 'Generating sample data on the demo devices',
     'demo.inactive': 'Demo mode is off',
 
@@ -717,6 +776,12 @@ registerMessages('code', {
     'action.recording.notRunning': 'No screen recording is running on this device',
     'action.developerModeOff':
       'Developer Mode is off on the iPhone. Turn it on in Settings → Privacy & Security → Developer Mode and restart the phone (if the switch is not there, connect the iPhone to Xcode once).',
+    'action.stopNotAllowed':
+      'iOS does not let this Mac stop this app; only apps installed from Xcode can be stopped. Close it from the app switcher on the phone.',
+    'action.osTooOld': [
+      'This action uses Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS ({detail})',
+      'This action uses Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS.',
+    ],
     'action.unsupported': 'This device does not support this action',
     'action.deviceOffline': 'The device is offline or not booted',
     'action.deviceNotFound': 'Device not found',
@@ -739,6 +804,10 @@ registerMessages('code', {
     'body.invalidJson': ['Invalid JSON: {detail}', 'Invalid JSON'],
     'body.none': 'This request has no body',
     'body.tooLarge': ['The request body is too large (limit {limit})', 'The request body is too large'],
+    'bugReport.invalid': ['Could not build the bug report: {detail}', 'Could not build the bug report'],
+    'export.bundleNeedsDevice': 'An app’s recording needs its device too',
+    'export.invalidTime': 'The time window is not valid',
+    'export.scopeConflict': 'A recording takes either a session or an app, not both',
     'file.unknown': 'File not found',
     'har.invalid': 'Invalid HAR request',
     'import.failed': ['Import failed: {detail}', 'Import failed'],
@@ -766,11 +835,18 @@ registerMessages('code', {
     'reader.crashReports.developerModeOff':
       'Crash reports (.ips) cannot be read while Developer Mode is off on the iPhone. Once it is turned on in Settings → Privacy & Security → Developer Mode and the phone has restarted, the reports come in.',
     'reader.crashReports.failed': ['The device’s crash records could not be read: {detail}', 'The device’s crash records cannot be read right now.'],
+    'reader.crashReports.osTooOld':
+      'Crash reports and installed apps are read with Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS. Live logs still come through idevicesyslog.',
     'reader.frameStats.noData':
       'CPU and memory are read from the device’s process list. FPS cannot be measured from outside on this device: neither gfxinfo nor SurfaceFlinger gave frames for this app; FPS needs the SDK or a Flutter debug session.',
     'reader.frameStats.unsupported': 'This device does not expose frame stats; FPS and janky frames can only be measured inside the app (SDK or Flutter debug).',
 
     'doctor.node.embedded': ['Embedded in Dürbün.app (Electron {electron}, Node {node})', 'Embedded in Dürbün.app (Node {node})', 'Embedded in Dürbün.app'],
+    'doctor.adbMatchedServer': [
+      'Another program started adb server version {server}. Dürbün uses the adb of that version so it never restarts it: {path} (its own pick: {own}).',
+      'Another program started adb server version {server}. Dürbün uses the adb of that version so it never restarts it: {path}.',
+      'Dürbün uses the adb of the same version as the adb server another program started.',
+    ],
 
     /* ── UI-side messages kept under code.* (used by the shell) ── */
     'demo.enabled': 'Demo data enabled',
@@ -799,6 +875,7 @@ registerMessages('code', {
       scopeWhy: {
         devicectlMissing: 'telling app lines apart needs Xcode 15 or newer (devicectl)',
         appListFailed: 'the installed apps could not be read with devicectl, so app lines cannot be told apart',
+        osTooOld: 'devicectl reads installed apps from iOS 17 on; this device runs an older iOS, so app lines cannot be told apart',
       },
       gap: { lost: 'no log lines until it is back', restored: 'log lines from the gap are missing' },
       sdk: {

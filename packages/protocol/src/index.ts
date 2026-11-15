@@ -103,7 +103,17 @@ export interface DeviceInfo {
   apiLevel?: number;
   /** adb serial or UDID. */
   serial?: string;
+  /**
+   * Android: the phone's own serial (`ro.serialno`, Settings › About phone › Status). Equals `serial` over
+   * USB; over Wi-Fi `serial` is the ip:port / mDNS name of the transport. Tells same-name phones apart.
+   */
+  hardwareSerial?: string;
   connection: ConnectionType;
+  /**
+   * Every way the device is reachable right now, the one in use (`connection`) first; set only when there
+   * is more than one (an Android phone on USB with wireless debugging also on: ['usb', 'wifi']).
+   */
+  connections?: ConnectionType[];
   state: DeviceState;
   /** English explanation of `state` (e.g. "Accept the USB debugging prompt on the device"). */
   stateDetail?: string;
@@ -532,6 +542,10 @@ export type DeviceActionId =
   | 'app-uninstall'
   | 'app-install'
   | 'logs-clear-buffer'
+  /**
+   * Android also takes an optional `{ bufferSize: '16M' }` (64K–256M): the device's log buffers get that
+   * size (`logcat -G`, until the phone restarts) before the stream restarts; reply data LogBufferSizeData.
+   */
   | 'logs-restart'
   | 'appearance'
   | 'font-scale'
@@ -545,6 +559,14 @@ export type DeviceActionId =
   | 'screen-record-stop';
 
 /** Reply data of `screen-record` / `screen-record-stop`. */
+/** Reply data of Android `logs-restart` with `bufferSize`: ring buffer size per log buffer (bytes) before and after. */
+export interface LogBufferSizeData {
+  before: Record<string, number>;
+  after: Record<string, number>;
+  /** The size asked for, e.g. "16M". */
+  requested: string;
+}
+
 export interface ScreenRecordData {
   /** Same-origin URL of the video. */
   url: string;

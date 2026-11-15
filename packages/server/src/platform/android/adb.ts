@@ -2,9 +2,15 @@
 import type { ChildProcess } from 'node:child_process';
 import { run, runBuffer, spawnTracked, type RunOptions, type RunResult } from '../exec';
 import type { ResolvedTool } from '../tools';
-import { parseForwardPort, parsePortMappings, type PortMapping } from './parsers';
+import { parseAdbServerConflict, parseForwardPort, parsePortMappings, type AdbServerConflict, type PortMapping } from './parsers';
 
 export class Adb {
+  /**
+   * Called when a command of this client killed an adb server of another version (its stderr says so).
+   * The driver then stops running adb until the versions match (see adbServer.ts).
+   */
+  onServerConflict?: (conflict: AdbServerConflict) => void;
+
   constructor(readonly tool: ResolvedTool) {}
 
   get path(): string {
@@ -15,12 +21,26 @@ export class Adb {
     return { ...opts, env: { ...this.tool.env, ...opts?.env } };
   }
 
-  run(args: string[], opts?: RunOptions): Promise<RunResult<string>> {
-    return run(this.tool.path, args, this.opts(opts));
+  async run(args: string[], opts?: RunOptions): Promise<RunResult<string>> {
+    return this.watch(await run(this.tool.path, args, this.opts(opts)));
   }
 
-  runBuffer(args: string[], opts?: RunOptions): Promise<RunResult<Buffer>> {
-    return runBuffer(this.tool.path, args, this.opts(opts));
+  async runBuffer(args: string[], opts?: RunOptions): Promise<RunResult<Buffer>> {
+    return this.watch(await runBuffer(this.tool.path, args, this.opts(opts)));
+  }
+
+  private watch<T extends RunResult<string> | RunResult<Buffer>>(r: T): T {
+    if (this.onServerConflict && r.stderr) {
+      const conflict = parseAdbServerConflict(r.stderr);
+      if (conflict) {
+        try {
+          this.onServerConflict(conflict);
+        } catch {
+          /* the driver's problem, not the command's */
+        }
+      }
+    }
+    return r;
   }
 
   /** `adb -s S shell '<command>'` — `command` is interpreted by the device's /system/bin/sh. */

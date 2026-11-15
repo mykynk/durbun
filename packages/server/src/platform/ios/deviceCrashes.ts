@@ -26,9 +26,13 @@ import {
   crashFileProcess,
   isCrashFileName,
   isCrashReport,
+  isJetsamFileName,
   isThirdPartyBundle,
+  JETSAM_BUG_TYPE,
   parseIps,
+  parseJetsam,
   type IpsReport,
+  type JetsamReport,
 } from './crashReport';
 import { CRASH_HISTORY_MS } from '../shared/readers';
 import { parseDevicectlFiles, type DevicectlFile, type DevicectlRunner } from './devicectl';
@@ -49,6 +53,11 @@ export interface DeviceCrashWatcherOptions {
    */
   isInteresting(processName: string | undefined): boolean;
   onReport(report: IpsReport, file: string): void;
+  /**
+   * A Jetsam report (iOS killed processes to free memory). Returns true when it concerned one of the
+   * device's apps (the copy is kept for download), false to delete the copy. Absent: Jetsam reports are skipped.
+   */
+  onJetsam?(report: JetsamReport, file: string): boolean;
   /** Outcome of every listing (the device's crash-report reader state). */
   onStatus?(status: { ok: true } | { ok: false; error: string }): void;
   intervalMs?: number;
@@ -150,12 +159,14 @@ export class DeviceCrashWatcher {
     }
     this.status({ ok: true });
     const cutoff = this.now() - (this.opts.lookbackMs ?? CRASH_LOOKBACK_MS);
-    const candidates: Array<{ file: DevicectlFile; when: number; named: boolean }> = [];
+    const candidates: Array<{ file: DevicectlFile; when: number; named: boolean; jetsam: boolean }> = [];
     for (const file of parseDevicectlFiles(r.json)) {
       // iOS moves reports into Retired/ under the same name: one key per report, not per path.
       if (file.isDirectory || PROXIED_DEVICE.test(file.relativePath) || this.seen.has(reportKey(file))) continue;
+      // Memory kills (Jetsam) name the killed processes inside: copied when the session reads them.
+      const jetsam = !!this.opts.onJetsam && (file.bugType === JETSAM_BUG_TYPE || (file.bugType === undefined && isJetsamFileName(file.name)));
       // The listing says the report type (bug_type xattr): only crash reports are worth a copy.
-      if (!isCrashFileName(file.name) || (file.bugType !== undefined && !CRASH_BUG_TYPES.has(file.bugType))) {
+      if (!jetsam && (!isCrashFileName(file.name) || (file.bugType !== undefined && !CRASH_BUG_TYPES.has(file.bugType)))) {
         this.seen.add(reportKey(file));
         continue;
       }
@@ -165,21 +176,22 @@ export class DeviceCrashWatcher {
         continue;
       }
       // Not marked seen: an app installed after the last listing makes it interesting later.
-      const named = this.opts.isInteresting(crashFileProcess(file.name));
-      if (file.bugType === undefined && !named) continue;
-      candidates.push({ file, when, named });
+      const named = !jetsam && this.opts.isInteresting(crashFileProcess(file.name));
+      if (!jetsam && file.bugType === undefined && !named) continue;
+      candidates.push({ file, when, named, jetsam });
     }
     // Reports named after a third-party executable first: other crashes (system daemons, extensions not seen
     // running) must not delay them when a scan has more than it copies.
-    candidates.sort((a, b) => Number(b.named) - Number(a.named) || a.when - b.when);
+    // running) must not delay them when a scan has more than it copies. Memory kills come last.
+    candidates.sort((a, b) => Number(b.named) - Number(a.named) || Number(a.jetsam) - Number(b.jetsam) || a.when - b.when);
     const max = this.opts.maxCopiesPerScan ?? 20;
-    for (const { file } of candidates.slice(0, max)) {
+    for (const { file, jetsam } of candidates.slice(0, max)) {
       if (this.stopped) return;
-      await this.fetch(file);
+      await this.fetch(file, jetsam);
     }
   }
 
-  private async fetch(file: DevicectlFile): Promise<void> {
+  private async fetch(file: DevicectlFile, jetsam = false): Promise<void> {
     const { udid, devicectl, logger, destDir } = this.opts;
     const key = reportKey(file);
     this.seen.add(key);
@@ -216,6 +228,19 @@ export class DeviceCrashWatcher {
       if (st.size <= MAX_REPORT_BYTES) text = await fs.promises.readFile(local, 'utf8');
     } catch (e) {
       logger.debug(`reading ${local}: ${(e as Error).message}`);
+    }
+    if (jetsam) {
+      const kills = text !== undefined ? parseJetsam(text) : null;
+      let kept = false;
+      if (kills && !this.stopped) {
+        try {
+          kept = this.opts.onJetsam?.(kills, local) ?? false;
+        } catch (e) {
+          logger.debug(`jetsam report ${file.name}: ${(e as Error).message}`);
+        }
+      }
+      if (!kept) await fs.promises.rm(local, { force: true }).catch(() => undefined);
+      return;
     }
     const report = text !== undefined ? parseIps(text) : null;
     if (!report || report.incomplete || !isCrashReport(report) || !isThirdPartyBundle(report.bundleId)) {

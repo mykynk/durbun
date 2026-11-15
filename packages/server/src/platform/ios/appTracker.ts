@@ -183,6 +183,26 @@ export class IosAppTracker implements ThirdPartyApps {
     return this.installed.get(id);
   }
 
+  /**
+   * Bundle id of a third-party app's executable ("Runner" → com.mykynk.pati). Several Flutter apps share
+   * "Runner": the one that owns `pid`, else the one with the latest activity.
+   */
+  bundleForExecutable(name: string, pid?: number): string | undefined {
+    const ids = this.byExecutable.get(name);
+    if (!ids?.length) return undefined;
+    if (ids.length === 1) return ids[0];
+    const owner = pid !== undefined ? this.pidOwner.get(pid) : undefined;
+    if (owner && ids.includes(owner)) return owner;
+    const apps = this.opts.getDeviceApps().filter((a) => a.deviceId === this.opts.deviceId && ids.includes(a.id));
+    apps.sort((a, b) => b.lastActivity - a.lastActivity);
+    return apps[0]?.id ?? ids[0];
+  }
+
+  /** Live pids of an app from the last process listing ([] when not running or unknown). */
+  pidsOf(id: string): number[] {
+    return [...(this.pids.get(id) ?? [])];
+  }
+
   /** Executable names of installed third-party apps. */
   executables(): Set<string> {
     return new Set(this.byExecutable.keys());

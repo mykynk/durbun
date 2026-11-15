@@ -24,7 +24,7 @@ import { fail } from '../shared/files';
 import { FlutterErrorGrouper } from '../shared/flutter';
 import { mergeReaders, ReaderReporter, readerDetail } from '../shared/readers';
 import { ScreenRecorder } from '../shared/screenRecord';
-import { Poller } from '../shared/timing';
+import { Poller, sleep } from '../shared/timing';
 import { probeXcodeTools, type XcodeTools } from '../tools';
 import { IosAppTracker, type AppSource } from './appTracker';
 import { IosCrashIndex } from './crashDedupe';
@@ -36,7 +36,7 @@ import { simAppSource } from './simApps';
 import { SimCrashWatcher } from './simCrashes';
 import { runSimAction, SIM_ACTIONS } from './simActions';
 import { parseBootedDevices, simctl, XCRUN, type BootedSimulator } from './simctl';
-import { parseSimLogLine, simLogStreamArgs } from './simlog';
+import { latestVmAnnouncements, parseSimLogLine, SIM_VM_HISTORY, simLogStreamArgs, simVmHistoryArgs } from './simlog';
 
 const POLL_MS = 3000;
 const VIA = 'simctl log stream';
@@ -141,7 +141,7 @@ export class SimulatorSession {
 
   start(): void {
     this.deps.ctx.hub.upsertDevice({ ...this.info });
-    this.startStream();
+    void this.startStreamAfterHistory();
     this.apps.start();
     this.unsubCrashes = this.deps.crashes.register(
       this.sim.udid,
@@ -211,6 +211,30 @@ export class SimulatorSession {
     }
     this.apps.onLog(entry);
     this.flutter.push(entry);
+  }
+
+  /**
+   * A Flutter debug app launched before Dürbün announced its VM service before the stream existed: read the
+   * last minutes' announcements once (so it attaches by itself), then stream. The stream waits for that at
+   * most SIM_VM_HISTORY.waitMs.
+   */
+  private async startStreamAfterHistory(): Promise<void> {
+    const history = this.readVmHistory();
+    await Promise.race([history, sleep(SIM_VM_HISTORY.waitMs)]);
+    if (this.disposed) return;
+    this.startStream();
+  }
+
+  private async readVmHistory(): Promise<void> {
+    const r = await run(XCRUN, ['simctl', 'spawn', this.sim.udid, ...simVmHistoryArgs()], {
+      timeoutMs: SIM_VM_HISTORY.timeoutMs,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    if (this.disposed || !r.stdout) return;
+    const found = latestVmAnnouncements(r.stdout);
+    if (found.length === 0) return;
+    for (const entry of found) this.onEntry(entry);
+    this.batcher.flush();
   }
 
   private startStream(): void {

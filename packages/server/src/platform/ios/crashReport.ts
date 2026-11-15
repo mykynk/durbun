@@ -11,9 +11,11 @@
  * The app's own frames are NOT symbolicated (release binaries are stripped; symbols live in the
  * build's dSYM) — `data.symbolicated` says so and the UI explains it.
  *
- * Only bug types 309 / 109 are crashes. Jetsam (298, memory pressure kills), resource reports
- * (ExcResource, 145/202), stackshots (288), panics (210) and simulated "user fault" corpses
- * (`is_simulated: 1`, ExcUserFault_*) are ignored: they do not name a crashed third-party app reliably.
+ * Only bug types 309 / 109 are crashes. Resource reports (ExcResource, 145/202), stackshots (288),
+ * panics (210) and simulated "user fault" corpses (`is_simulated: 1`, ExcUserFault_*) are ignored: they
+ * do not name a crashed third-party app reliably. Jetsam reports (298, JetsamEvent-*.ips: iOS killed
+ * processes to free memory) are read separately (parseJetsam): every killed process carries `reason`,
+ * the app on screen `"states": ["frontmost"]` — the "it just closed, but there is no crash" case.
  */
 import type { DeviceLogInput } from '../../types';
 import { posixBasename } from '../shared/text';
@@ -575,4 +577,145 @@ export function simulatorUdidOf(r: IpsReport): string | undefined {
     if (m) return m[1]!.toUpperCase();
   }
   return undefined;
+}
+
+/* ───────────────────────────── Jetsam (memory kills) ───────────────────────────── */
+
+export const JETSAM_BUG_TYPE = '298';
+export const JETSAM_TAG = 'jetsam';
+
+/** One process a Jetsam report says iOS killed. */
+export interface JetsamKill {
+  /** Executable name ("Runner"). */
+  name: string;
+  pid?: number;
+  /** "per-process-limit" (over its own memory limit), "vm-pageshortage", "highwater", "fc-thrashing"… */
+  reason: string;
+  /** It was the app on screen. */
+  frontmost: boolean;
+  /** The report's `largestProcess` (the biggest memory user). */
+  largest: boolean;
+}
+
+export interface JetsamReport {
+  ts?: number;
+  incident?: string;
+  osVersion?: string;
+  largestProcess?: string;
+  kills: JetsamKill[];
+}
+
+/** A Jetsam report file ("JetsamEvent-2026-11-02-084012.ips"). */
+export function isJetsamFileName(name: string): boolean {
+  return /^JetsamEvent[-_+.]/.test(posixBasename(name)) && name.toLowerCase().endsWith('.ips');
+}
+
+/** Header bug_type 298 + JSON body with `processes[]`; null for anything else (or a truncated file). */
+export function parseJetsam(text: string): JetsamReport | null {
+  const nl = text.indexOf('\n');
+  if (nl === -1) return null;
+  const header = parseIpsHeader(text.slice(0, nl));
+  if (!header || String(header.bug_type ?? '') !== JETSAM_BUG_TYPE) return null;
+  let body: unknown;
+  try {
+    body = JSON.parse(text.slice(nl + 1).trim()) as unknown;
+  } catch {
+    return null;
+  }
+  if (!isObj(body) || !Array.isArray(body.processes)) return null;
+  const largestProcess = str(body.largestProcess);
+  const kills: JetsamKill[] = [];
+  for (const p of body.processes as unknown[]) {
+    if (!isObj(p)) continue;
+    const name = str(p.name);
+    const reason = str(p.reason);
+    if (!name || !reason) continue; // only killed processes carry a reason
+    const states = Array.isArray(p.states) ? p.states : [];
+    const pid = num(p.pid);
+    kills.push({
+      name,
+      ...(pid !== undefined ? { pid } : {}),
+      reason,
+      frontmost: states.includes('frontmost'),
+      largest: name === largestProcess,
+    });
+  }
+  const headerTs = str(header.timestamp);
+  const bodyTs = str(body.date);
+  const ts = headerTs ? parseUnifiedTimestamp(headerTs) : bodyTs ? parseUnifiedTimestamp(bodyTs) : undefined;
+  const incident = str(header.incident_id) ?? str(body.incident);
+  const osVersion = str(header.os_version) ?? str(body.build);
+  return {
+    ...(ts !== undefined ? { ts } : {}),
+    ...(incident ? { incident } : {}),
+    ...(osVersion ? { osVersion } : {}),
+    ...(largestProcess ? { largestProcess } : {}),
+    kills,
+  };
+}
+
+/** Plain words for the common Jetsam reasons (the raw reason stays in data). */
+const JETSAM_REASONS: Record<string, string> = {
+  'per-process-limit': 'it went over its own memory limit',
+  'vm-pageshortage': 'the device ran short of memory',
+  'vnode-limit': 'too many open files on the device',
+  highwater: 'the device ran short of memory',
+  'fc-thrashing': 'the device was thrashing its file cache',
+  'memory-pressure': 'the device was under memory pressure',
+  'idle-exit': 'it was idle in the background',
+};
+
+export interface JetsamEntryOptions {
+  /** Bundle id of a third-party app's executable (undefined: not one of the device's apps → no entry). */
+  bundleOf(executable: string): string | undefined;
+  /** Display name of an app. */
+  appName?(bundleId: string): string | undefined;
+  watchStart: number;
+  file?: string;
+  reportUrl?: string;
+  now?: number;
+}
+
+/**
+ * Log rows for the third-party apps a Jetsam report killed: 'error' for the app on screen (what the user
+ * saw as a crash), 'warn' for the largest process, 'info' for the others (routine background kills).
+ */
+export function jetsamEntries(r: JetsamReport, opts: JetsamEntryOptions): DeviceLogInput[] {
+  const ts = r.ts ?? opts.now ?? Date.now();
+  const previousLaunch = ts < opts.watchStart;
+  const out: DeviceLogInput[] = [];
+  for (const k of r.kills) {
+    const bundleId = opts.bundleOf(k.name);
+    if (!bundleId) continue;
+    const name = opts.appName?.(bundleId) ?? k.name;
+    const why = JETSAM_REASONS[k.reason] ?? k.reason;
+    const where = k.frontmost ? 'while on screen' : 'in the background';
+    const entry: DeviceLogInput = {
+      ts,
+      level: k.frontmost ? 'error' : k.largest ? 'warn' : 'info',
+      origin: 'crash-report',
+      tag: JETSAM_TAG,
+      message: `${name} was closed by iOS to free memory ${where}: ${why} (Jetsam, ${k.reason})`,
+      process: k.name,
+      data: {
+        origin: 'crash-report',
+        termination: 'jetsam',
+        reason: k.reason,
+        frontmost: k.frontmost,
+        largestProcess: k.largest,
+        bundleId,
+        reportTs: ts,
+        previousLaunch,
+        bugType: JETSAM_BUG_TYPE,
+        ...(k.pid !== undefined ? { pid: k.pid } : {}),
+        ...(r.incident ? { incident: r.incident } : {}),
+        ...(r.osVersion ? { osVersion: r.osVersion } : {}),
+        ...(opts.file ? { file: opts.file } : {}),
+        ...(opts.reportUrl ? { reportUrl: opts.reportUrl } : {}),
+      },
+    };
+    if (k.pid !== undefined && !previousLaunch) entry.pid = k.pid;
+    out.push(entry);
+  }
+  return out;
 }

@@ -69,6 +69,10 @@ const SYSTEM_SAMPLES: [code: string, params: Record<string, string | number>][] 
   ['vm.hotReload', { app: 'Pati' }],
   // Another Dürbün on this Mac (e.g. the Mac app on 9750) owns the device's adb reverse mappings.
   ['sdk.routeElsewhere', { port: 9750 }],
+  // An Android phone on USB and Wi-Fi is one device; pulling the cable moves it to the other link.
+  ['device.transportChanged', { device: 'Galaxy A73', connection: 'Wi-Fi', previous: 'USB' }],
+  // Lines read from the phone's log buffer at connect, from before it was plugged in.
+  ['logs.history', { lines: 214, minutes: 38 }],
 ];
 
 const NOTICE_SAMPLES: [code: string, params: Record<string, string | number> | undefined][] = [
@@ -321,6 +325,7 @@ describe('server codes → i18n', () => {
       'demo.set',
       'device.action',
       'doctor.run',
+      'logs.txt', // a file in the bug report zip
       'marker.add',
       'metrics.watch',
       'mocks.json',
@@ -344,7 +349,7 @@ describe('server codes → i18n', () => {
     // Flow node types ('flow.call', 'device.openUrl', …) are not codes.
     const nodeTypes = new Set(FLOW_NODE_SPECS.map((s) => s.type));
     const literal =
-      /'((?:device|app|logs|driver|demo|action|command|config|settings|replay|vm|server|sdk|metrics|net|params|screenshot|process|marker|import|upload|body|file|har|search|url|method|access|api|mocks|doctor|reader|flow|flowRun|preflight|package|backup|uiPrefs|template|env)\.[A-Za-z][A-Za-z.]*)'/g;
+      /'((?:device|app|logs|driver|demo|action|command|config|settings|replay|vm|server|sdk|metrics|net|params|screenshot|process|marker|import|upload|body|file|har|search|url|method|access|api|mocks|doctor|reader|flow|flowRun|preflight|package|backup|uiPrefs|template|env|export|bugReport)\.[A-Za-z][A-Za-z.]*)'/g;
     const found = new Set<string>();
     for (const root of roots) {
       for (const f of walk(root)) for (const m of readFileSync(f, 'utf8').matchAll(literal)) if (!NOT_CODES.has(m[1]!) && !nodeTypes.has(m[1]!)) found.add(m[1]!);

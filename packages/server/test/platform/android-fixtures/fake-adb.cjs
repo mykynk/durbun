@@ -45,6 +45,7 @@ if (cmd === 'logcat') {
   out(line(c, 4321, 4321, 'E', 'AndroidRuntime', '\tat com.mykynk.pati.MainActivity.onCreate(MainActivity.kt:21)'));
   out(line(c + 120, 612, 700, 'I', 'ActivityManager', 'Process com.mykynk.pati (pid 4321) has died: fg  TOP'));
   out(line(c + 900, 612, 650, 'I', 'ActivityManager', 'Start proc 4500:com.mykynk.pati/u0a190 for next-top-activity {com.mykynk.pati/com.mykynk.pati.MainActivity}'));
+  if (rest.includes('-d')) process.exit(0); // dump: the buffer, then exit
   setInterval(() => {}, 1000);
   return;
 }

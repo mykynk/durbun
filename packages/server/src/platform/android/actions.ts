@@ -1,7 +1,7 @@
 /** Device actions for Android devices/emulators (SPEC §5.5 "Actions"). */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { DeviceActionId, DeviceActionResult, InstalledApp } from '@durbun/protocol';
+import type { DeviceActionId, DeviceActionResult, InstalledApp, LogBufferSizeData } from '@durbun/protocol';
 import type { DriverContext } from '../../types';
 import { failureText, killProcess } from '../exec';
 import { bool, done, ensureDir, fail, isPng, num, saveScreenshot, str, tempFileName, validAppId } from '../shared/files';
@@ -198,8 +198,29 @@ export async function runAndroidAction(
     }
 
     case 'logs-restart': {
+      if (params.bufferSize === undefined) {
+        await t.restartLogs();
+        return done('Log stream restarted');
+      }
+      // Bigger log buffers keep more of the past for the next time the phone is plugged in.
+      if (t.apiLevel !== undefined && t.apiLevel < 21) return fail('Log buffer sizes can be changed from Android 5 on', 'action.unsupported');
+      const size = (str(params, 'bufferSize') ?? DEFAULT_LOG_BUFFER).toUpperCase();
+      const bytes = logBufferBytes(size);
+      if (bytes === undefined || bytes < 64 * 1024 || bytes > 256 * 1024 * 1024) {
+        return fail('bufferSize must be between 64K and 256M (e.g. "16M")', 'action.invalidParams');
+      }
+      const before = parseLogBufferSizes((await adb.run(['-s', serial, 'logcat', '-g'], { timeoutMs: 15_000 })).stdout);
+      const r = await adb.run(['-s', serial, 'logcat', '-G', size], { timeoutMs: 15_000 });
+      const failed = !r.ok || /failed|error|denied|not permitted/i.test(`${r.stdout}\n${r.stderr}`);
+      if (failed) return fail(`Could not change the log buffer size: ${failureText(r)}`);
+      const after = parseLogBufferSizes((await adb.run(['-s', serial, 'logcat', '-g'], { timeoutMs: 15_000 })).stdout);
+      const data: LogBufferSizeData = { before, after, requested: size };
       await t.restartLogs();
-      return done('Log stream restarted');
+      return done(
+        `Log buffers set to ${size} each until the phone restarts (Developer options › Logger buffer sizes keeps a size across restarts)`,
+        'action.done',
+        data,
+      );
     }
 
     case 'appearance': {
@@ -382,4 +403,29 @@ async function startRecording(t: AndroidActionTarget): Promise<RecordingProcess>
       return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file: local });
     },
   };
+}
+
+const DEFAULT_LOG_BUFFER = '16M';
+
+/** "16M" → 16777216, "256K" → 262144. */
+export function logBufferBytes(size: string): number | undefined {
+  const m = /^(\d+)([KM])$/.exec(size.trim().toUpperCase());
+  if (!m) return undefined;
+  return Number(m[1]) * (m[2] === 'M' ? 1024 * 1024 : 1024);
+}
+
+/**
+ * `logcat -g` → bytes per buffer:
+ *   main: ring buffer is 256 KiB (193 KiB consumed, 193 KiB readable), max entry is 5120 B, max payload is 4068 B
+ *   main: ring buffer is 256Kb (191Kb consumed), max entry is 5120b, max payload is 4076b      (Android ≤ 11)
+ */
+export function parseLogBufferSizes(text: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const line of text.split('\n')) {
+    const m = /^\s*(\w+): ring buffer is ([\d.]+)\s*([KMG]?)(?:i?B|b)\b/.exec(line);
+    if (!m) continue;
+    const mult = m[3] === 'G' ? 1024 ** 3 : m[3] === 'M' ? 1024 ** 2 : m[3] === 'K' ? 1024 : 1;
+    out[m[1]!] = Math.round(Number(m[2]) * mult);
+  }
+  return out;
 }

@@ -57,6 +57,7 @@ if (cmd === 'exec-out') {
 if (cmd === 'logcat') {
   if (rest.includes('-c')) process.exit(0);
   process.stdout.write(fs.readFileSync(${JSON.stringify(fixturePath('logcat-epoch.txt'))}));
+  if (rest.includes('-d')) process.exit(0); // dump: the buffer, then exit
   setInterval(() => {}, 1000);
   return;
 }
@@ -130,8 +131,11 @@ describe('AndroidDriver with a fake adb', () => {
     });
     expect(dev.actions).toContain('screenshot');
     expect(dev.actions).not.toContain('location');
-    const logcat = calls().find((c) => c[2] === 'logcat' && !c.includes('-c'))!;
-    expect(logcat).toEqual(['-s', SERIAL, 'logcat', '-v', 'threadtime', '-v', 'epoch', '-v', 'printable', '-T', '500']);
+    // The whole buffer once (older app lines), then the stream from the dump's last line on.
+    const [dump, stream] = calls().filter((c) => c[2] === 'logcat' && !c.includes('-c'));
+    expect(dump).toEqual(['-s', SERIAL, 'logcat', '-d', '-v', 'threadtime', '-v', 'epoch', '-v', 'printable']);
+    expect(stream!.slice(0, 10)).toEqual(['-s', SERIAL, 'logcat', '-v', 'threadtime', '-v', 'epoch', '-v', 'printable', '-T']);
+    expect(stream![10]).toMatch(/^\d{10}\.\d{3}$/);
     expect(ctx.hub.system.map((s) => s.input.code)).toContain('logs.streamStarted');
   });
 
