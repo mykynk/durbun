@@ -199,7 +199,7 @@ describe('export → import and HAR over the real hub', () => {
     expect(JSON.stringify(file)).not.toContain(os.homedir());
     expect(file.deviceApps?.map((a) => a.id)).toEqual([BUNDLE]);
 
-    // The masked file imports like any other; the device apps come along (SRV-01).
+    // The masked file imports like any other; the device apps come along.
     const before = s.hub.getDevices().length;
     const imported = await fetch(`${s.base}/api/import?name=tester-bug.durbun.json`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(file) });
     expect(imported.status).toBe(200);

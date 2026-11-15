@@ -64,7 +64,7 @@ function lowerBoundIn(arr: readonly LogEntry[], id: number): number {
  *   is bumped whenever it changes. `counts`, `size`, `getById` and `findLast` include it.
  * - `headDropped`: entries trimmed from the head of `entries` since the last reset (absolute index = headDropped + i).
  * - `dropped`: entries the memory limit deleted since the last reset (head trims minus the crash records moved to
- *   `kept`, plus kept records evicted). The views tell the user about it (UIF-08).
+ *   `kept`, plus kept records evicted). The views tell the user about it.
  * - `generation`: bumped on reset / removeWhere / out-of-order inserts (arbitrary changes) — drop derived
  *   caches when it changes.
  */
@@ -81,7 +81,7 @@ export class LogStore extends VersionedStore {
   dropped = 0;
   generation = 0;
   /**
-   * Bumped when an entry's level changed in place (a network row took its request's outcome level, UXL-02). Row
+   * Bumped when an entry's level changed in place (a network row took its request's outcome level). Row
    * models re-run their filters on it; ids and order do not change, so it is not a `generation` change.
    */
   levelRevision = 0;

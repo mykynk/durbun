@@ -50,7 +50,7 @@ const errorsOnly = (): RowFilter => ({
   fold: true,
 });
 
-describe('a network row takes its request’s outcome level (UXL-02)', () => {
+describe('a network row takes its request’s outcome level', () => {
   it('the store changes the row and its counts, and only when the level differs', () => {
     const store = new LogStore();
     const r = row('a');

@@ -41,7 +41,7 @@ export class NetworkStore extends VersionedStore {
   order: string[] = [];
   maxEntries: number = DEFAULT_SETTINGS.maxNetworkEntries;
   generation = 0;
-  /** Requests the memory limit deleted (oldest first) since the last reset: the Network tab says so (UIF-08). */
+  /** Requests the memory limit deleted (oldest first) since the last reset: the Network tab says so. */
   dropped = 0;
   /** Distinct requests seen since page load (snapshot included). */
   totalReceived = 0;

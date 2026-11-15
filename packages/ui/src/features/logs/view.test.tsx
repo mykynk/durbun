@@ -370,7 +370,7 @@ describe('clear asks first and says how much goes', () => {
   });
 });
 
-describe('network rows follow the request’s outcome (UXL-02)', () => {
+describe('network rows follow the request’s outcome', () => {
   it('`level:error` shows a request that failed after its row arrived, live', () => {
     setLanguage('en');
     localStorage.setItem('durbun.state.logs.query', JSON.stringify('level:error'));

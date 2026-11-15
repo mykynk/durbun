@@ -379,7 +379,7 @@ describe('React Native over Wi-Fi note', () => {
   });
 });
 
-describe('iPhone with Developer Mode off (PLT-05)', () => {
+describe('iPhone with Developer Mode off', () => {
   const iphone = () =>
     device('ios:00008130-0001A2B3C4D5E6F7', {
       platform: 'ios',
