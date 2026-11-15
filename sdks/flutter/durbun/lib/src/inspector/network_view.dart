@@ -165,8 +165,7 @@ class _NetworkViewState extends State<NetworkView> {
               children: <Widget>[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text(t.sortTitle,
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: c.text)),
+                  child: Text(t.sortTitle, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
                 ),
                 for (final s in NetSort.values)
                   _SortRow(
@@ -319,12 +318,11 @@ class _NetworkViewState extends State<NetworkView> {
   /// outside the default list (then "Clear filters" would not bring it).
   Widget _empty(InspectorStrings t, List<InspectorCall> all, bool filtered) {
     if (all.isEmpty) {
-      return EmptyState(icon: Icons.swap_horiz_rounded, title: t.noRequestsTitle, body: t.noRequestsBody);
+      return EmptyState(title: t.noRequestsTitle, body: t.noRequestsBody);
     }
     final hiddenByHost = _otherHosts();
     if (!filtered && hiddenByHost > 0) {
       return EmptyState(
-        icon: Icons.visibility_off_outlined,
         title: t.onlyOtherHostsTitle,
         body: t.onlyOtherHostsBody(hiddenByHost),
         actionLabel: t.showOtherHosts,
@@ -332,7 +330,6 @@ class _NetworkViewState extends State<NetworkView> {
       );
     }
     return EmptyState(
-      icon: Icons.swap_horiz_rounded,
       title: t.noMatchTitle,
       body: hiddenByHost > 0 ? '${t.noMatchBody} ${t.alsoOtherHosts(hiddenByHost)}' : t.noMatchBody,
       actionLabel: t.clearFilters,
@@ -373,15 +370,13 @@ class _NetworkViewState extends State<NetworkView> {
                   ),
                   if (filtered) ...<Widget>[
                     const SizedBox(width: 10),
-                    Text('${shown.length}/${all.length}',
-                        style: DurbunType.monoStyle(size: 12, color: c.textMeta, weight: FontWeight.w600)),
+                    Text('${shown.length}/${all.length}', style: DurbunType.monoStyle(size: 12, color: c.textSubtle, weight: FontWeight.w600)),
                   ],
                   const SizedBox(width: 4),
                   DIconButton(
                     icon: Icons.sort_rounded,
                     tooltip: sort == kDefaultNetSort ? t.sortTitle : '${t.sortTitle}: ${t.sortName(sort)}',
                     active: sort != kDefaultNetSort,
-                    size: kMinTapTarget,
                     onTap: _openSort,
                   ),
                   // A saved run does not change: nothing to pause.
@@ -390,7 +385,6 @@ class _NetworkViewState extends State<NetworkView> {
                       icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
                       tooltip: _paused ? t.resume : t.pause,
                       active: _paused,
-                      size: kMinTapTarget,
                       onTap: () => setState(() => _paused = !_paused),
                     ),
                 ],
@@ -424,7 +418,7 @@ class _NetworkViewState extends State<NetworkView> {
                 width: double.infinity,
                 color: c.bgPanel,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: Text(t.dropped(widget.store.droppedCalls), style: TextStyle(fontSize: 12, color: c.textMeta)),
+                child: Text(t.dropped(widget.store.droppedCalls), style: TextStyle(fontSize: 13, color: c.textSubtle)),
               ),
           ],
         );
@@ -460,10 +454,8 @@ class _SortRow extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text(label,
-                          style: TextStyle(
-                              fontSize: 14.5, fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: c.text)),
-                      Text(hint, style: TextStyle(fontSize: 11.5, color: c.textMeta)),
+                      Text(label, style: TextStyle(fontSize: 14.5, fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: c.text)),
+                      Text(hint, style: TextStyle(fontSize: 12, color: c.textSubtle)),
                     ],
                   ),
                 ),
@@ -531,7 +523,7 @@ class _HostsSection extends StatelessWidget {
                       // Same title and hint as the sheet's other sections.
                       Text(t.hostsTitle, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: c.text)),
                       const SizedBox(height: 2),
-                      Text(t.hostsHint, style: TextStyle(fontSize: 12, color: c.textMeta)),
+                      Text(t.hostsHint, style: TextStyle(fontSize: 13, color: c.textSubtle)),
                     ],
                   ),
                 ),
@@ -566,7 +558,7 @@ class _HostsSection extends StatelessWidget {
               title: Text(h, maxLines: 1, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: 12.5, color: c.text)),
               secondary: Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
                 if (store.defaultHosts.isNotEmpty && store.isDefaultHost(h)) DBadge(t.defaultHost, tone: BadgeTone.accent),
-                Text('${counts[h]}', style: DurbunType.monoStyle(size: 11.5, color: c.textMeta)),
+                Text('${counts[h]}', style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle)),
               ]),
             ),
         ],
@@ -575,16 +567,12 @@ class _HostsSection extends StatelessWidget {
   }
 }
 
-/// One request: status · method · path (+ badges) over host · source · size · time.
+/// One request, two lines: the status token, then the method and path
+/// with the duration on the right; under them the host, at most one badge
+/// and the size. [compact]: the same row inside the log stream, with the
+/// time of day under the duration.
 class CallRow extends StatelessWidget {
-  const CallRow(
-      {super.key,
-      required this.call,
-      required this.store,
-      this.terms = const <String>[],
-      this.onTap,
-      this.bodyQuery,
-      this.siblings});
+  const CallRow({super.key, required this.call, required this.store, this.terms = const <String>[], this.onTap, this.bodyQuery, this.siblings, this.compact = false});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
@@ -601,6 +589,7 @@ class CallRow extends StatelessWidget {
   /// Set while the list searches bodies: the detail opens on the body with
   /// this text found.
   final String? bodyQuery;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -611,37 +600,34 @@ class CallRow extends StatelessWidget {
         uri == null ? call.url : (uri.path.isEmpty ? '/' : uri.path));
     final q = uri != null && uri.hasQuery ? decodeUrl('?${uri.query}') : '';
     final failed = call.error != null && !call.cancelled;
-    final statusText = call.error != null
-        ? (call.cancelled ? t.cancelledShort : t.failShort)
-        : (call.status?.toString() ?? '···');
-    final statusColor =
-        call.cancelled ? c.textSubtle : c.status(call.status, failed: failed);
-    final cls = statusClass(call);
-    final tint = switch (cls) {
-      '4xx' => c.lvWarnBg,
-      '5xx' || 'fail' => c.lvErrorBg,
-      _ => null,
-    };
+    final pending = call.state == InspectorCallState.pending;
+    final statusText = call.error != null ? (call.cancelled ? t.cancelledShort : t.failShort) : (call.status?.toString() ?? '···');
+    final statusColor = call.cancelled ? c.textMuted : c.status(call.status, failed: failed);
     final ms = call.duration?.inMilliseconds;
-    final timeColor = ms == null
-        ? c.textSubtle
-        : ms >= 3000
-            ? c.danger
-            : ms >= kSlowMs
-                ? c.warning
-                : c.textMuted;
+    final slow = ms != null && ms >= kSlowMs;
+    final timeStyle =
+        DurbunType.monoStyle(size: DurbunType.monoRow, color: ms != null && ms >= 3000 ? c.danger : (slow ? c.warning : c.textMuted), weight: slow ? FontWeight.w600 : FontWeight.w400, height: 1.3);
+    // One badge: why it failed, else that it was mocked, else the GraphQL
+    // operation, else a client other than dart:io.
     final gql = graphqlLabel(call);
+    final Widget? badge = failed
+        ? DBadge(t.shortError(shortErrorKey(call.error)), tone: BadgeTone.danger)
+        : call.mocked
+            ? DBadge(t.mock, tone: BadgeTone.accent, icon: Icons.theater_comedy_outlined)
+            : gql != null
+                ? DBadge(gql, tone: BadgeTone.info, mono: true)
+                : call.source != 'dart:io'
+                    ? _SourceBadge(call)
+                    : null;
     // The size without decoding the body (rows build while scrolling).
     final size = call.responseSize;
-    final mono = DurbunType.monoStyle(size: 13, color: c.text, height: 1.35, weight: FontWeight.w500);
-    final meta = DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.3);
-    final edge = switch (cls) {
-      '4xx' => c.st4xx,
-      '5xx' || 'fail' => c.st5xx,
-      _ => Colors.transparent,
-    };
+    final pathStyle = DurbunType.monoStyle(size: DurbunType.body, color: c.text, height: 1.35, weight: FontWeight.w500);
+    final meta = DurbunType.monoStyle(size: DurbunType.caption + 0.5, color: c.textSubtle, height: 1.3);
+    final host = uri?.host ?? '';
+    final scaled = MediaQuery.textScalerOf(context).scale(meta.fontSize! * meta.height!);
+    final line2 = scaled > 20 ? scaled : 20.0;
     return Material(
-      color: tint ?? Colors.transparent,
+      type: MaterialType.transparency,
       child: InkWell(
         onTap: () {
           FocusManager.instance.primaryFocus?.unfocus();
@@ -653,111 +639,66 @@ class CallRow extends StatelessWidget {
                       call: call, store: store, bodyQuery: bodyQuery, siblings: siblings))));
         },
         child: Container(
-          // The 3 pt edge plus 9 puts the content on the toolbar's 12 pt line.
-          padding: const EdgeInsets.fromLTRB(9, 8, 12, 8),
-          decoration: BoxDecoration(
-              border: Border(
-                  left: BorderSide(color: edge, width: 3),
-                  bottom: BorderSide(color: c.hairline))),
+          padding: EdgeInsets.fromLTRB(12, compact ? 8 : 10, 12, compact ? 8 : 10),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.hairline))),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              // Status over method: the path gets the width.
-              SizedBox(
-                width: 46,
-                child: Column(
-                  children: <Widget>[
-                    StatusPill(text: statusText, color: statusColor, width: 46),
-                    const SizedBox(height: 4),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(call.method,
-                          maxLines: 1,
-                          style: DurbunType.monoStyle(
-                              size: 10.5,
-                              color: c.method(call.method),
-                              weight: FontWeight.w600,
-                              height: 1.2)),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
+              StatusPill(text: statusText, color: statusColor),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text.rich(
-                      TextSpan(
-                        children: <InlineSpan>[
-                          highlightTerms(path, terms, mono, c.hlMark),
-                          if (q.isNotEmpty)
-                            highlightTerms(q, terms,
-                                mono.copyWith(color: c.textSubtle, fontWeight: FontWeight.w400), c.hlMark),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 22),
+                      child: Row(
+                        children: <Widget>[
+                          MethodToken(call.method),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text.rich(
+                              TextSpan(children: <InlineSpan>[
+                                highlightTerms(path, terms, pathStyle, c.hlMark),
+                                if (q.isNotEmpty) highlightTerms(q, terms, pathStyle.copyWith(color: c.textSubtle, fontWeight: FontWeight.w400), c.hlMark),
+                              ]),
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          if (pending) _Elapsed(since: call.ts, style: timeStyle.copyWith(color: c.textSubtle)) else Text(formatDuration(call.duration), style: timeStyle),
                         ],
                       ),
-                      // Two lines, so a match deep in a long path is seen.
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 4),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Expanded(
-                          child: Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: <Widget>[
-                              // When it started, then the host, on one line: a
-                              // host broken mid-word is hard to read, and the
-                              // time stays in view (the host is cut instead).
-                              Text.rich(
-                                  TextSpan(children: <InlineSpan>[
-                                    TextSpan(text: formatTimeOfDay(call.ts), style: meta.copyWith(color: c.textSubtle)),
-                                    if ((uri?.host ?? '').isNotEmpty) ...<InlineSpan>[
-                                      TextSpan(text: '  ', style: meta),
-                                      highlightTerms(uri!.host, terms, meta, c.hlMark),
-                                    ],
-                                  ]),
-                                  maxLines: 1,
-                                  softWrap: false,
-                                  overflow: TextOverflow.ellipsis),
-                              // dart:io is most requests: only the others are marked.
-                              if (call.source != 'dart:io') _SourceBadge(call),
-                              if (gql != null)
-                                DBadge(gql, tone: BadgeTone.warning, mono: true),
-                              if (call.mocked)
-                                DBadge(t.mock,
-                                    tone: BadgeTone.accent,
-                                    icon: Icons.theater_comedy_outlined),
-                              if (failed)
-                                DBadge(t.shortError(shortErrorKey(call.error)),
-                                    tone: BadgeTone.danger),
-                            ],
+                    const SizedBox(height: 3),
+                    // One height for line 2 with or without a badge (a 20 pt
+                    // badge, or the text when it is scaled up): every row is
+                    // the same height.
+                    SizedBox(
+                      height: line2,
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Row(
+                              children: <Widget>[
+                                if (host.isNotEmpty)
+                                  Flexible(
+                                    flex: 3,
+                                    child: Text.rich(highlightTerms(host, terms, meta, c.hlMark), maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
+                                  ),
+                                if (badge != null) ...<Widget>[
+                                  const SizedBox(width: 8),
+                                  Flexible(flex: 2, child: badge),
+                                ],
+                              ],
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(size == null ? '' : formatBytes(size), style: meta),
-                        const SizedBox(width: 8),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(minWidth: 48),
-                          child: Text(
-                            call.state == InspectorCallState.pending
-                                ? '···'
-                                : formatDuration(call.duration),
-                            textAlign: TextAlign.right,
-                            style: DurbunType.monoStyle(
-                                size: 11.5,
-                                color: timeColor,
-                                height: 1.3,
-                                weight: ms != null && ms >= kSlowMs
-                                    ? FontWeight.w600
-                                    : FontWeight.w500),
-                          ),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          if (compact) Text(formatTimeOfDay(call.ts), style: meta) else if (size != null) Text(formatBytes(size), style: meta),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -767,6 +708,45 @@ class CallRow extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Time since a pending request started, counted up once a second (for
+/// half a minute; later the store's next update shows it).
+class _Elapsed extends StatefulWidget {
+  const _Elapsed({required this.since, required this.style});
+
+  final double since;
+  final TextStyle style;
+
+  @override
+  State<_Elapsed> createState() => _ElapsedState();
+}
+
+class _ElapsedState extends State<_Elapsed> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || timer.tick >= 30) timer.cancel();
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ms = DateTime.now().millisecondsSinceEpoch - widget.since;
+    // A clock that moved (or a record from another run): no count.
+    final text = ms < 0 || ms > 10 * 60 * 1000 ? '…' : formatDuration(Duration(milliseconds: ms.round()));
+    return Text(text, maxLines: 1, style: widget.style);
   }
 }
 
@@ -785,13 +765,13 @@ class _SourceBadge extends StatelessWidget {
             ? c.sdkIos
             : c.sdkDart;
     return Container(
-      height: 18,
+      height: 20,
       padding: const EdgeInsets.symmetric(horizontal: 6),
-      decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(DurbunRadius.sm)),
-      child: Text(call.source,
-          style: DurbunType.monoStyle(size: 10, color: color, weight: FontWeight.w600, height: 1.55)),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(DurbunRadius.sm)),
+      child: Center(
+        widthFactor: 1,
+        child: Text(call.source, maxLines: 1, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: DurbunType.caption, color: color, weight: FontWeight.w600, height: 1.2)),
+      ),
     );
   }
 }
@@ -1009,37 +989,23 @@ class _CallDetailPageState extends State<CallDetailPage> {
                 if (!summary)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
-                    child: Text(pathLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.2)),
+                    child: Text(pathLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle, height: 1.2)),
                   ),
               ],
             ),
             actions: <Widget>[
               if (widget.siblings != null) ...<Widget>[
-                DIconButton(
-                    icon: Icons.keyboard_arrow_up_rounded,
-                    tooltip: t.prevRequest,
-                    size: kMinTapTarget,
-                    onTap: prev == null ? null : () => _show(prev)),
-                DIconButton(
-                    icon: Icons.keyboard_arrow_down_rounded,
-                    tooltip: t.nextRequest,
-                    size: kMinTapTarget,
-                    onTap: next == null ? null : () => _show(next)),
+                DIconButton(icon: Icons.keyboard_arrow_up_rounded, tooltip: t.prevRequest, onTap: prev == null ? null : () => _show(prev)),
+                DIconButton(icon: Icons.keyboard_arrow_down_rounded, tooltip: t.nextRequest, onTap: next == null ? null : () => _show(next)),
               ],
               DIconButton(
                   icon: Theme.of(context).platform == TargetPlatform.iOS ? Icons.ios_share_rounded : Icons.share_rounded,
                   tooltip: t.share,
-                  size: kMinTapTarget,
                   onTap: () => unawaited(showShareSheet(context, call, widget.store))),
               if (canReplay && !replayInMenu && !widget.store.readOnly)
                 _replaying
-                    ? const SizedBox(
-                        width: kMinTapTarget,
-                        child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))))
-                    : DIconButton(icon: Icons.replay_rounded, tooltip: t.replay, size: kMinTapTarget, onTap: _replay),
+                    ? const SizedBox(width: kMinTapTarget, child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))))
+                    : DIconButton(icon: Icons.replay_rounded, tooltip: t.replay, onTap: _replay),
               SizedBox.square(
                 dimension: kMinTapTarget,
                 child: PopupMenuButton<String>(
@@ -1094,7 +1060,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
                       _GeneralTab(key: ValueKey<String>('g$k'), call: call, store: widget.store),
                       _HttpTab(key: ValueKey<String>('q$k'), call: call, request: true, memory: _memory, bodyQuery: _bodyQuery),
                       call.state == InspectorCallState.pending
-                          ? EmptyState(icon: Icons.hourglass_empty_rounded, title: t.pending, body: t.waitingResponse)
+                          ? EmptyState(title: t.pending, body: t.waitingResponse)
                           : call.error != null
                               ? _ErrorTab(key: ValueKey<String>('e$k'), call: call)
                               : _HttpTab(key: ValueKey<String>('r$k'), call: call, request: false, memory: _memory, bodyQuery: _bodyQuery),
@@ -1145,11 +1111,7 @@ class _Summary extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      if (host.isNotEmpty)
-                        Text(host,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: DurbunType.monoStyle(size: 11.5, color: c.textMeta, height: 1.3)),
+                      if (host.isNotEmpty) Text(host, maxLines: 1, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle, height: 1.3)),
                       const SizedBox(height: 2),
                       // The whole URL is on General and in the menu.
                       Text.rich(
@@ -1164,27 +1126,29 @@ class _Summary extends StatelessWidget {
                     ],
                   ),
                 ),
-                DIconButton(icon: Icons.copy_rounded, tooltip: t.copyUrl, size: 40, onTap: onCopyUrl),
+                DIconButton(icon: Icons.copy_rounded, tooltip: t.copyUrl, onTap: onCopyUrl),
               ],
             ),
             const SizedBox(height: 8),
             // One row that scrolls: wrapped chips pushed the tabs off short
             // screens.
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
+            EdgeFadeScroller(
               padding: const EdgeInsets.only(right: 8),
               child: Row(
                 spacing: 6,
                 children: <Widget>[
                   if (call.state != InspectorCallState.pending)
-                    _Stat(icon: Icons.timer_outlined, text: formatDuration(call.duration),
-                        color: ms >= 3000 ? c.danger : ms >= kSlowMs ? c.warning : null),
-                  if (call.responseBody != null)
-                    _Stat(icon: Icons.south_rounded, text: formatBytes(call.responseBody!.size)),
-                  if (call.requestBody != null && call.requestBody!.size > 0)
-                    _Stat(icon: Icons.north_rounded, text: formatBytes(call.requestBody!.size)),
-                  if (call.mocked)
-                    _Stat(icon: Icons.theater_comedy_outlined, text: t.mock, color: c.badgeAccent),
+                    _Stat(
+                        icon: Icons.timer_outlined,
+                        text: formatDuration(call.duration),
+                        color: ms >= 3000
+                            ? c.danger
+                            : ms >= kSlowMs
+                                ? c.warning
+                                : null),
+                  if (call.responseBody != null) _Stat(icon: Icons.south_rounded, text: formatBytes(call.responseBody!.size)),
+                  if (call.requestBody != null && call.requestBody!.size > 0) _Stat(icon: Icons.north_rounded, text: formatBytes(call.requestBody!.size)),
+                  if (call.mocked) _Stat(icon: Icons.theater_comedy_outlined, text: t.mock, color: c.accentInk),
                   _Stat(icon: Icons.hub_outlined, text: call.source),
                   _Stat(icon: Icons.schedule_rounded, text: formatClock(call.ts)),
                 ],
@@ -1238,9 +1202,9 @@ EdgeInsets _pagePadding(BuildContext context) =>
 /// the body's view and copy on the right. One height for every part, so
 /// nothing jumps when the part changes.
 Widget _partsRow(Widget leading, [List<Widget> trailing = const <Widget>[]]) => Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 8, 4),
+      padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
       child: SizedBox(
-        height: 34,
+        height: kMinTapTarget,
         child: Row(
           children: <Widget>[
             Flexible(child: Align(alignment: Alignment.centerLeft, child: leading)),
@@ -1295,7 +1259,7 @@ class _GeneralTab extends StatelessWidget {
       if (call.responseBody != null) (t.responseSize, formatBytes(call.responseBody!.size), null),
       if (call.protocol != null) (t.protocol, call.protocol!, null),
       if (call.remoteAddress != null) (t.remoteAddress, call.remoteAddress!, null),
-      if (call.mocked) (t.mock, call.mockRuleId ?? '✓', c.badgeAccent),
+      if (call.mocked) (t.mock, call.mockRuleId ?? t.yes, c.accentInk),
     ];
     final timingRows = <(String, String, Color?)>[
       (
@@ -1470,8 +1434,7 @@ class _HttpTabState extends State<_HttpTab> {
     ];
     final at = parts.indexWhere((p) => p.$1 == _part);
     final index = at < 0 ? 0 : at;
-    final switcher = SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
+    final switcher = EdgeFadeScroller(
       child: DSegmented(
         labels: <String>[for (final p in parts) p.$2],
         counts: <Object?>[for (final p in parts) p.$3],
@@ -1541,7 +1504,7 @@ class _PairsList extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
-    if (pairs.isEmpty) return EmptyState(icon: Icons.list_alt_rounded, title: empty);
+    if (pairs.isEmpty) return EmptyState(title: empty);
     return ListView(
       padding: _pagePadding(context).copyWith(top: 2),
       children: <Widget>[
@@ -1777,6 +1740,15 @@ class _BodyPaneState extends State<BodyPane> {
   /// Kept across Preview and Code.
   late String _query = widget.initialQuery;
 
+  /// The find bar is open (the search button, or a query to show).
+  late bool _find = widget.initialQuery.isNotEmpty;
+  final GlobalKey<JsonTreeViewState> _tree = GlobalKey<JsonTreeViewState>();
+
+  void _closeFind() => setState(() {
+        _find = false;
+        _query = '';
+      });
+
   String? _codeText;
   List<SearchLine> _codeLines = const <SearchLine>[];
 
@@ -1792,6 +1764,9 @@ class _BodyPaneState extends State<BodyPane> {
   }
 
   static const int _maxShownChars = 200 * 1024;
+
+  /// View menu entries that are not modes.
+  static const int _expandAll = 100, _collapseAll = 101;
 
   /// The large body being prepared off the main isolate, and the result
   /// (null while it runs).
@@ -1867,17 +1842,11 @@ class _BodyPaneState extends State<BodyPane> {
       final Widget empty;
       if (b == null) {
         empty = EmptyState(
-          icon: Icons.inbox_outlined,
-          title: widget.dropped
-              ? t.bodiesDropped
-              : (widget.hasBody ? t.bodyNotCaptured : t.noBody),
+          title: widget.dropped ? t.bodiesDropped : (widget.hasBody ? t.bodyNotCaptured : t.noBody),
           body: widget.dropped || widget.hasBody ? null : t.noBodyHint,
         );
       } else {
-        empty = EmptyState(
-            icon: Icons.inbox_outlined,
-            title: b.size > 0 ? t.bodyNotCaptured : t.noBody,
-            body: b.size > 0 ? t.bodyNotCapturedHint : null);
+        empty = EmptyState(title: b.size > 0 ? t.bodyNotCaptured : t.noBody, body: b.size > 0 ? t.bodyNotCapturedHint : null);
       }
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1907,6 +1876,8 @@ class _BodyPaneState extends State<BodyPane> {
     final viewMenu = PopupMenuButton<int>(
       tooltip: t.view,
       onSelected: (i) {
+        if (i == _expandAll) return _tree.currentState?.expandAll();
+        if (i == _collapseAll) return _tree.currentState?.collapseAll();
         setState(() => _mode = i);
         widget.onModeChanged?.call(i);
       },
@@ -1914,7 +1885,7 @@ class _BodyPaneState extends State<BodyPane> {
         PopupMenuItem<int>(
           enabled: false,
           height: 32,
-          child: Text(meta, style: DurbunType.monoStyle(size: 11.5, color: c.textMeta)),
+          child: Text(meta, style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle)),
         ),
         const PopupMenuDivider(),
         for (var i = 0; i < modes.length; i++)
@@ -1922,43 +1893,47 @@ class _BodyPaneState extends State<BodyPane> {
             value: i,
             child: Row(
               children: <Widget>[
-                Icon(modes[i].$2, size: 17, color: i == mode ? c.badgeAccent : c.textMuted),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: Text(modes[i].$1,
-                        style: TextStyle(fontSize: 14, color: c.text, fontWeight: i == mode ? FontWeight.w600 : FontWeight.w400))),
-                if (i == mode) Icon(Icons.check_rounded, size: 17, color: c.badgeAccent),
+                Icon(modes[i].$2, size: 18, color: i == mode ? c.accentInk : c.textMuted),
+                const SizedBox(width: 12),
+                Expanded(child: Text(modes[i].$1, style: TextStyle(fontSize: DurbunType.label, color: c.text, fontWeight: i == mode ? FontWeight.w600 : FontWeight.w400))),
+                if (i == mode) Icon(Icons.check_rounded, size: 18, color: c.accentInk),
               ],
             ),
           ),
+        // The tree's open / close all (its find bar is closed by default).
+        if (mode == 0 && json != null) ...<PopupMenuEntry<int>>[
+          const PopupMenuDivider(),
+          PopupMenuItem<int>(value: _expandAll, child: MenuRow(Icons.unfold_more_rounded, t.expandAll)),
+          PopupMenuItem<int>(value: _collapseAll, child: MenuRow(Icons.unfold_less_rounded, t.collapseAll)),
+        ],
       ],
-      child: Container(
-        height: 30,
-        padding: const EdgeInsets.only(left: 8, right: 6),
-        decoration: ShapeDecoration(
-            color: c.cardBg,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(DurbunRadius.md), side: BorderSide(color: c.border))),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(modes[mode].$2, size: 15, color: c.text),
-            const SizedBox(width: 4),
-            Text(modes[mode].$1, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.text, height: 1.2)),
-            Icon(Icons.expand_more_rounded, size: 16, color: c.textMuted),
-          ],
+      // The mode's icon and a chevron: the part switch keeps the width.
+      child: Semantics(
+        label: '${t.view}: ${modes[mode].$1}',
+        child: SizedBox(
+          height: kMinTapTarget,
+          child: Center(
+            child: Container(
+              height: 32,
+              padding: const EdgeInsets.only(left: 8, right: 4),
+              decoration: ShapeDecoration(color: c.cardBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.md), side: BorderSide(color: c.border))),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(modes[mode].$2, size: 18, color: c.text),
+                  Icon(Icons.expand_more_rounded, size: 18, color: c.textMuted),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
     final header = _partsRow(leading, <Widget>[
-      const SizedBox(width: 6),
+      const SizedBox(width: 4),
+      if (b.isText && !(mode == 0 && isImage)) DIconButton(icon: Icons.search_rounded, tooltip: t.find, active: _find, onTap: () => _find ? _closeFind() : setState(() => _find = true)),
       viewMenu,
-      if (b.isText)
-        DIconButton(
-            icon: Icons.copy_rounded,
-            tooltip: t.copy,
-            size: 32,
-            onTap: () => copyText(context, pretty)),
+      if (b.isText) DIconButton(icon: Icons.copy_rounded, tooltip: t.copy, onTap: () => copyText(context, pretty)),
     ]);
     final Widget content;
     if (preparing && !(mode == 0 && isImage)) {
@@ -1974,6 +1949,10 @@ class _BodyPaneState extends State<BodyPane> {
       );
     } else if (mode == 0 && json != null) {
       content = JsonTreeView(
+          key: _tree,
+          showFind: _find,
+          onCloseFind: _closeFind,
+          showActions: false,
           value: json,
           index: large ? _prep?.index : null,
           // A large body opens one level: tens of thousands of lines at
@@ -2037,7 +2016,7 @@ class _BodyPaneState extends State<BodyPane> {
       if (cut) text = text.substring(0, _maxShownChars);
       final style = DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.3);
       final lines = _codeLinesFor(text, style);
-      final numStyle = DurbunType.monoStyle(size: 10.5, color: c.textSubtle, height: 1.3);
+      final numStyle = DurbunType.monoStyle(size: 11.5, color: c.textSubtle, height: 1.3);
       final gutter = 8.0 + 7.0 * '${lines.isEmpty ? 1 : lines.length}'.length;
       content = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2060,6 +2039,8 @@ class _BodyPaneState extends State<BodyPane> {
           Expanded(
             child: FindableLines(
               linesKey: identityHashCode(lines),
+              showFind: _find,
+              onCloseFind: _closeFind,
               initialQuery: _query,
               onQueryChanged: (v) => _query = v,
               padding: _pagePadding(context).copyWith(left: 4, top: 2),
@@ -2158,7 +2139,7 @@ class _TimingTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Text(t.totalTime, style: TextStyle(color: c.textMeta, fontSize: 12, fontWeight: FontWeight.w500)),
+              Text(t.totalTime, style: TextStyle(color: c.textSubtle, fontSize: 12, fontWeight: FontWeight.w500)),
               const SizedBox(height: 2),
               Text(total == null ? t.pending : formatDuration(call.duration),
                   style: DurbunType.monoStyle(
@@ -2215,9 +2196,7 @@ class _TimingTab extends StatelessWidget {
                                     color: phaseColor(s.phase),
                                     borderRadius: BorderRadius.circular(2))),
                             const SizedBox(width: 8),
-                            Expanded(
-                                child: Text(t.phase(s.phase),
-                                    style: TextStyle(fontSize: 12.5, color: c.text))),
+                            Expanded(child: Text(t.phase(s.phase), style: TextStyle(fontSize: 13, color: c.text))),
                             const SizedBox(width: 8),
                             Text(
                                 s.ms < 0.1 ? '<0.1 ms' : '${s.ms < 10 ? s.ms.toStringAsFixed(1) : s.ms.round()} ms',

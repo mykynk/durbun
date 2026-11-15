@@ -61,6 +61,10 @@ All notable changes to Dürbün are listed here. The format follows
 - An app connected over Wi-Fi moves under the plugged-in phone it runs on once that phone reports it.
 - After the Mac wakes from sleep, Dürbün checks device connections, port forwards and log streams again.
 - A Flutter layout overflow is shown as an error line instead of a crash banner.
+- Flutter in-app panel, new look: the selected tab and the main action in the accent colour, two-line request
+  rows with one status signal, log levels as words, Performance and Statistics led by one large figure,
+  grouped Tools, 44 pt tap targets, readable contrast in light and dark, and a 720 pt wide layout in
+  landscape and on tablets.
 - `durbun_dio`: requests answered by another interceptor, retried after a token refresh or cancelled no
   longer stay "pending". The new `DurbunDioAdapter` wraps the adapter, so every request that reaches the
   network has its own row with the bytes and the time the adapter delivered.

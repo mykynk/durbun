@@ -69,7 +69,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Dürbün has not started'), findsOneWidget);
     expect(find.textContaining('Durbun.run or Durbun.init'), findsOneWidget);
-    expect(find.text('Copy'), findsOneWidget);
+    expect(find.byTooltip('Copy'), findsOneWidget, reason: 'the copy button in the snippet\'s corner');
     await tester.tap(find.widgetWithText(DButton, 'Close'));
     await tester.pumpAndSettle();
     expect(find.text('Dürbün has not started'), findsNothing);

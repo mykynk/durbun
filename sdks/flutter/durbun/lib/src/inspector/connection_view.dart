@@ -162,7 +162,7 @@ class _ConnectionViewState extends State<ConnectionView> {
               ],
               if (!connected && report != null && report.attempts.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),
-                Text(t.attemptsTitle, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.textMeta)),
+                Text(t.attemptsTitle, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.textSubtle)),
                 const SizedBox(height: 4),
                 for (final a in report.attempts)
                   Padding(
@@ -172,7 +172,7 @@ class _ConnectionViewState extends State<ConnectionView> {
               ],
               if (!connected) ...<Widget>[
                 const SizedBox(height: 10),
-                Text(t.keepsTrying, style: TextStyle(fontSize: 12, color: c.textMeta)),
+                Text(t.keepsTrying, style: TextStyle(fontSize: 13, color: c.textSubtle)),
               ],
             ]),
             SectionTitle(t.macAddress),
@@ -210,18 +210,24 @@ class _ConnectionViewState extends State<ConnectionView> {
               ),
               if (_error != null) ...<Widget>[
                 const SizedBox(height: 6),
-                Text(_error!, style: TextStyle(fontSize: 12.5, color: c.danger)),
+                Text(_error!, style: TextStyle(fontSize: 13, color: c.danger)),
               ],
               const SizedBox(height: 8),
-              Text(t.macAddressHelp, style: TextStyle(fontSize: 12.5, height: 1.4, color: c.textMuted)),
+              Text(t.macAddressHelp, style: TextStyle(fontSize: 13, height: 1.4, color: c.textMuted)),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: <Widget>[
-                  DButton(label: t.connect, primary: true, icon: Icons.link_rounded, onTap: _busy ? null : () => _connect(t)),
+                  // The page's main action until connected; then a secondary one.
+                  DButton(
+                      label: t.connect,
+                      kind: connected ? DButtonKind.tonal : DButtonKind.primary,
+                      icon: Icons.link_rounded,
+                      onTap: _busy ? null : () => _connect(t)),
                   if (report?.lanFromPanel ?? false)
                     DButton(
+                      kind: DButtonKind.ghost,
                       label: report?.buildHost != null ? t.useBuildAddress : t.forgetAddress,
                       onTap: _busy ? null : _reset,
                     ),
@@ -236,11 +242,11 @@ class _ConnectionViewState extends State<ConnectionView> {
                         : report.buildHost != null
                             ? t.addressFromBuild(report.buildHost!)
                             : t.addressNone,
-                style: TextStyle(fontSize: 12, color: c.textMeta),
+                style: TextStyle(fontSize: 13, color: c.textSubtle),
               ),
               if (overUsb && report?.lanEndpoint != null) ...<Widget>[
                 const SizedBox(height: 6),
-                Text(t.usbStaysInUse, style: TextStyle(fontSize: 12, color: c.textMeta)),
+                Text(t.usbStaysInUse, style: TextStyle(fontSize: 13, color: c.textSubtle)),
               ],
             ]),
           ],

@@ -4,7 +4,6 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../flutter/backend.dart' show DurbunOffReason, DurbunStartState;
 import '../flutter/durbun.dart' show durbunBackend;
@@ -62,41 +61,37 @@ class InspectorUnavailablePage extends StatelessWidget {
         automaticallyImplyLeading: false,
         shape: Border(bottom: BorderSide(color: c.border)),
         actions: <Widget>[
-          DIconButton(icon: Icons.close_rounded, tooltip: t.close, size: kMinTapTarget, onTap: onClose),
+          DIconButton(icon: Icons.close_rounded, tooltip: t.close, onTap: onClose),
           const SizedBox(width: 4),
         ],
       ),
       body: ListView(
         padding: EdgeInsets.fromLTRB(20, 32, 20, 24 + MediaQuery.paddingOf(context).bottom),
         children: <Widget>[
-          const Center(child: DurbunLogo(size: 56)),
-          const SizedBox(height: 20),
-          Text(title,
-              textAlign: TextAlign.center, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: c.text)),
-          const SizedBox(height: 8),
-          Text(body, textAlign: TextAlign.center, style: TextStyle(fontSize: 14, height: 1.45, color: c.textMuted)),
-          if (state == DurbunStartState.notStarted || state == DurbunStartState.running) ...<Widget>[
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: c.fieldBg,
-                borderRadius: BorderRadius.circular(DurbunRadius.md),
-                border: Border.all(color: c.border),
-              ),
-              child: SelectableText(kDurbunStartSnippet, style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.45)),
+          MaxWidth(
+            width: 480,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                const Center(child: DurbunLogo(size: 48)),
+                const SizedBox(height: 16),
+                Text(title,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: DurbunType.title, fontWeight: FontWeight.w600, color: c.text, height: 1.3)),
+                const SizedBox(height: 6),
+                Text(body,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: DurbunType.body + 1, height: 1.45, color: c.textMuted)),
+                if (state == DurbunStartState.notStarted || state == DurbunStartState.running) ...<Widget>[
+                  const SizedBox(height: 20),
+                  // The copy button sits in the snippet's corner.
+                  CodeBlock(text: kDurbunStartSnippet),
+                ],
+                const SizedBox(height: 24),
+                Align(child: DButton(label: t.close, kind: DButtonKind.ghost, onTap: onClose)),
+              ],
             ),
-            const SizedBox(height: 10),
-            Align(
-              child: DButton(
-                label: t.copy,
-                icon: Icons.copy_rounded,
-                onTap: () => Clipboard.setData(const ClipboardData(text: kDurbunStartSnippet)).catchError((Object _) {}),
-              ),
-            ),
-          ],
-          const SizedBox(height: 24),
-          Align(child: DButton(label: t.close, primary: true, onTap: onClose)),
+          ),
         ],
       ),
     );

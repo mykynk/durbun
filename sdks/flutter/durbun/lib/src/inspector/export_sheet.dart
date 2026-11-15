@@ -252,7 +252,7 @@ class _ExportSheetState extends State<_ExportSheet> {
         );
     Widget hint(String text) => Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-          child: Text(text, style: TextStyle(fontSize: 11.5, height: 1.35, color: c.textMeta)),
+          child: Text(text, style: TextStyle(fontSize: 12, height: 1.35, color: c.textSubtle)),
         );
     // Options scroll (landscape, large text); the button stays pinned.
     return ConstrainedBox(
@@ -272,11 +272,11 @@ class _ExportSheetState extends State<_ExportSheet> {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
                       child: Text(t.exportSession,
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: c.text)),
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
                     ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(t.exportDescription, style: TextStyle(fontSize: 12.5, height: 1.35, color: c.textMeta)),
+                      child: Text(t.exportDescription, style: TextStyle(fontSize: 13, height: 1.35, color: c.textSubtle)),
                     ),
                     label(t.exportScope),
                     Padding(
@@ -334,7 +334,7 @@ class _ExportSheetState extends State<_ExportSheet> {
                   Callout(title: _problem!, tone: CalloutTone.warning),
                   const SizedBox(height: 10),
                 ] else if (calls.isEmpty) ...<Widget>[
-                  Text(t.exportNothing, textAlign: TextAlign.center, style: TextStyle(fontSize: 12.5, color: c.textMeta)),
+                  Text(t.exportNothing, textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: c.textSubtle)),
                   const SizedBox(height: 8),
                 ],
                 DButton(

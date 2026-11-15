@@ -23,10 +23,10 @@ class DurbunColors {
     required this.text,
     required this.textMuted,
     required this.textSubtle,
-    required this.textMeta,
     required this.accent,
     required this.accentSoft,
-    required this.badgeAccent,
+    required this.accentInk,
+    required this.accentFill,
     required this.lvVerbose,
     required this.lvDebug,
     required this.lvInfo,
@@ -79,8 +79,14 @@ class DurbunColors {
   final Brightness brightness;
   final Color bgApp, bgPanel, bgElevated, bgSunken, bgHover, bgActive, bgSelected;
   final Color border, borderStrong;
-  final Color text, textMuted, textSubtle, textMeta;
-  final Color accent, accentSoft, badgeAccent;
+  /// Three text roles, as the desktop: [text], [textMuted], [textSubtle].
+  final Color text, textMuted, textSubtle;
+
+  /// [accent]: lines and marks. [accentSoft]: the tonal fill (selection
+  /// tint, tonal buttons). [accentInk]: accent text and icons on the
+  /// panel's surfaces. [accentFill]: filled surfaces with a white label
+  /// (primary button, selected segment and chip), dark enough for 4.5:1.
+  final Color accent, accentSoft, accentInk, accentFill;
   final Color lvVerbose, lvDebug, lvInfo, lvWarn, lvError, lvFatal;
   final Color lvWarnBg, lvErrorBg, lvFatalBg;
   final Color mGet, mPost, mPut, mPatch, mDelete, mOther;
@@ -103,28 +109,34 @@ class DurbunColors {
   /// Track of a segmented control (the panel's tabs, detail tabs).
   Color get trackBg => bgSunken;
 
-  /// The selected segment, raised from its track.
-  Color get thumbBg => isDark ? bgActive : bgPanel;
-
   /// Grouped cards on the page background.
   Color get cardBg => isDark ? bgElevated : bgPanel;
 
   /// Hairline between rows of a list.
   Color get hairline => border.withValues(alpha: isDark ? 0.7 : 0.9);
 
-  /// Soft shadow under raised segments on light; on dark the surface step
-  /// alone lifts them.
+  /// Label on [accentFill].
+  Color get onAccent => const Color(0xFFFFFFFF);
+
+  /// Label on a [danger] fill (a count of errors): white is too faint on
+  /// the dark theme's light red.
+  Color get onDanger => isDark ? bgApp : const Color(0xFFFFFFFF);
+
+  /// Soft shadow under floating things on light (menus, the bubble); on
+  /// dark a hairline and the surface step lift them instead.
   List<BoxShadow> get raised => isDark
       ? const <BoxShadow>[]
       : <BoxShadow>[
           BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 4, offset: const Offset(0, 1)),
         ];
 
-  /// The one filled button of a sheet ("Done", "Export"): off-white on dark,
-  /// ink on light. The accent stays for selection (switches, checkboxes,
-  /// chosen chips).
-  Color get primaryFill => text;
-  Color get onPrimaryFill => isDark ? bgApp : bgPanel;
+  /// The bubble and toasts over the app.
+  List<BoxShadow> get floating => isDark
+      ? const <BoxShadow>[]
+      : <BoxShadow>[
+          BoxShadow(color: Colors.black.withValues(alpha: 0.16), blurRadius: 16, offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 3, offset: const Offset(0, 1)),
+        ];
 
   static const DurbunColors dark = DurbunColors(
     brightness: Brightness.dark,
@@ -139,14 +151,13 @@ class DurbunColors {
     borderStrong: Color(0xFF2F3647),
     text: Color(0xFFE6E9F0),
     textMuted: Color(0xFF9AA3B5),
-    // Darker / lighter than the desktop's token (6B7488 dark, 8A93A6
-    // light): small text on the phone needs 4.5:1 on every surface it
-    // sits on (bgApp, bgPanel, bgElevated / bgSunken).
-    textSubtle: Color(0xFF7D879B),
-    textMeta: Color(0xFF858EA2),
+    textSubtle: Color(0xFF7F889B),
     accent: Color(0xFF7C6CF2),
     accentSoft: Color(0x2E7C6CF2),
-    badgeAccent: Color(0xFFA397F8),
+    // The desktop's --accent-hover: accent text and icons on dark.
+    accentInk: Color(0xFF9587F7),
+    // White on the desktop's #7C6CF2 is about 4:1; this is 4.7:1.
+    accentFill: Color(0xFF6D5DEB),
     lvVerbose: Color(0xFF7D8799),
     lvDebug: Color(0xFF4EA1FF),
     lvInfo: Color(0xFF3DD68C),
@@ -196,6 +207,9 @@ class DurbunColors {
     tagBgA: 0.14,
   );
 
+  /// Light: the desktop's values, except the level, method, status and
+  /// semantic colours, a few percent darker so small coloured text keeps
+  /// 4.5:1 on its own tint (a status pill, a warning row) and on the page.
   static const DurbunColors light = DurbunColors(
     brightness: Brightness.light,
     bgApp: Color(0xFFF5F6F9),
@@ -209,55 +223,56 @@ class DurbunColors {
     borderStrong: Color(0xFFCDD2DE),
     text: Color(0xFF161A23),
     textMuted: Color(0xFF5B6476),
-    textSubtle: Color(0xFF646D82),
-    textMeta: Color(0xFF5D667A),
+    textSubtle: Color(0xFF636C7F),
     accent: Color(0xFF5B4BE0),
     accentSoft: Color(0x1A5B4BE0),
-    badgeAccent: Color(0xFF4A3ACB),
-    lvVerbose: Color(0xFF6B7488),
-    lvDebug: Color(0xFF1F6FEB),
-    lvInfo: Color(0xFF1A7F4B),
-    lvWarn: Color(0xFFB7791F),
-    lvError: Color(0xFFD93A41),
-    lvFatal: Color(0xFFC2188F),
+    // The desktop's --accent-hover: accent text on light and tinted surfaces.
+    accentInk: Color(0xFF4B3BD0),
+    accentFill: Color(0xFF5B4BE0),
+    lvVerbose: Color(0xFF60687A),
+    lvDebug: Color(0xFF1360D8),
+    lvInfo: Color(0xFF187445),
+    lvWarn: Color(0xFF8A5A12),
+    lvError: Color(0xFFC4262D),
+    lvFatal: Color(0xFFB91788),
     lvWarnBg: Color(0x14B7791F),
     lvErrorBg: Color(0x12D93A41),
     lvFatalBg: Color(0x17C2188F),
-    mGet: Color(0xFF1F6FEB),
-    mPost: Color(0xFF1A7F4B),
-    mPut: Color(0xFFB7791F),
-    mPatch: Color(0xFF7A4CD9),
-    mDelete: Color(0xFFD93A41),
+    mGet: Color(0xFF1360D8),
+    mPost: Color(0xFF187445),
+    mPut: Color(0xFF8A5A12),
+    mPatch: Color(0xFF7748D8),
+    mDelete: Color(0xFFC4262D),
     mOther: Color(0xFF5B6476),
-    st2xx: Color(0xFF1A7F4B),
-    st3xx: Color(0xFF0E7AB8),
-    st4xx: Color(0xFFB7791F),
-    st5xx: Color(0xFFD93A41),
+    st2xx: Color(0xFF187445),
+    st3xx: Color(0xFF0C6CA3),
+    st4xx: Color(0xFF8A5A12),
+    st5xx: Color(0xFFC4262D),
     stPending: Color(0xFF5B6476),
     jsonKey: Color(0xFF1F4FB8),
-    jsonString: Color(0xFF1A7F4B),
+    jsonString: Color(0xFF187445),
     jsonNumber: Color(0xFFA15C00),
-    jsonBool: Color(0xFF7A4CD9),
-    jsonNull: Color(0xFF6B7488),
-    success: Color(0xFF1A7F4B),
-    warning: Color(0xFFB7791F),
-    danger: Color(0xFFD93A41),
-    info: Color(0xFF1F6FEB),
+    jsonBool: Color(0xFF7748D8),
+    jsonNull: Color(0xFF60687A),
+    success: Color(0xFF187445),
+    warning: Color(0xFF8A5A12),
+    danger: Color(0xFFC4262D),
+    info: Color(0xFF1360D8),
     successSoft: Color(0x1A1A7F4B),
     warningSoft: Color(0x1CB7791F),
     dangerSoft: Color(0x17D93A41),
     infoSoft: Color(0x171F6FEB),
     hlMark: Color(0x61FFC400),
     inputBg: Color(0xFFFFFFFF),
-    pickOrange: Color(0xFFC86412),
-    pickYellow: Color(0xFFA68A00),
-    pickGreen: Color(0xFF1A7F4B),
-    pickBlue: Color(0xFF1F6FEB),
-    pickViolet: Color(0xFF7A4CD9),
-    sdkFlutter: Color(0xFF0277BD),
-    sdkAndroid: Color(0xFF1A7F4B),
+    pickOrange: Color(0xFFA3510F),
+    pickYellow: Color(0xFF7D6800),
+    pickGreen: Color(0xFF187445),
+    pickBlue: Color(0xFF1360D8),
+    pickViolet: Color(0xFF7748D8),
+    sdkFlutter: Color(0xFF0A6AA6),
+    sdkAndroid: Color(0xFF187445),
     sdkIos: Color(0xFF3B4252),
-    sdkDart: Color(0xFF0175C2),
+    sdkDart: Color(0xFF0C6CA3),
     tagL: 0.48,
     tagC: 0.13,
     tagBgA: 0.1,
@@ -357,17 +372,38 @@ Color oklch(double l, double c, double hueDeg) {
 
 /// Typography: the desktop uses Inter for UI and JetBrains Mono for data.
 /// The panel keeps the phone's system font (SF / Roboto, close to Inter) and
-/// its monospace (Menlo / Roboto Mono), so it adds no font to the app.
+/// its monospace (Menlo / the system mono), so it adds no font to the app.
+///
+/// Five UI sizes: [caption] meta and hints, [body] text and row meta,
+/// [label] row titles and buttons, [title] page and sheet titles, [figure]
+/// stat figures. Weights 400 and 500; 600 only for titles and status codes.
+/// Mono is for data only (paths, hosts, statuses, sizes, durations, times,
+/// headers, bodies, log text): [monoRow] in rows, [monoBody] in bodies.
 abstract final class DurbunType {
   static const String mono = 'monospace';
-  static const List<String> monoFallback = <String>['Menlo', 'Courier New', 'Courier'];
+  static const List<String> monoFallback = <String>['Menlo', 'Roboto Mono', 'Courier New', 'Courier'];
 
-  static const double xs = 11;
+  static const double caption = 11;
+  static const double body = 13;
+  static const double label = 15;
+  static const double title = 17;
+  static const double figure = 24;
+  static const double monoRow = 12;
+  static const double monoBody = 12.5;
+
+  // Older names of the scale.
+  static const double xs = caption;
   static const double sm = 12;
-  static const double md = 13;
-  static const double lg = 15;
-  static const double xl = 18;
-  static const double logFs = 12.5;
+  static const double md = body;
+  static const double lg = label;
+  static const double xl = title;
+  static const double logFs = monoBody;
+
+  static const List<FontFeature> tabular = <FontFeature>[FontFeature.tabularFigures()];
+
+  /// The UI face with tabular figures.
+  static TextStyle ui({double size = body, Color? color, FontWeight weight = FontWeight.w400, double height = 1.35}) =>
+      TextStyle(fontSize: size, color: color, fontWeight: weight, height: height, fontFeatures: tabular);
 
   static TextStyle monoStyle({double size = logFs, Color? color, FontWeight? weight, double height = 1.45}) =>
       TextStyle(
@@ -377,20 +413,63 @@ abstract final class DurbunType {
         color: color,
         fontWeight: weight,
         height: height,
-        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+        fontFeatures: tabular,
       );
 }
 
 /// Radii. Rounder than the desktop's (4 / 6 / 10): on a phone the panel
-/// sits among the system's own rounded controls. Tags and badges [sm],
-/// rows, fields, chips and buttons [md], cards [lg], sheets [xl]; a part
-/// inside another takes the outer radius minus the gap between them.
+/// sits among the system's own rounded controls. Tags and tokens [sm],
+/// controls (buttons, fields, chips, segments) [md], cards [lg], sheets and
+/// dialogs [xl]; a part inside another takes the outer radius minus the gap
+/// between them.
 abstract final class DurbunRadius {
   static const double sm = 6;
   static const double md = 10;
   static const double lg = 14;
   static const double xl = 20;
   static const double pill = 999;
+}
+
+/// The 4 pt spacing scale and the page's measures.
+abstract final class DurbunSpace {
+  static const double xs = 4;
+  static const double sm = 8;
+  static const double md = 12;
+  static const double lg = 16;
+  static const double xl = 24;
+
+  /// Left and right margin of a page.
+  static const double gutter = 16;
+
+  /// Lists, sheets and pages stop growing past this width (landscape,
+  /// tablets) and sit centred.
+  static const double maxContent = 720;
+}
+
+/// Motion: short, only for state changes (press, select, sheet, expand).
+abstract final class DurbunMotion {
+  static const Duration fast = Duration(milliseconds: 150);
+  static const Duration medium = Duration(milliseconds: 200);
+  static const Duration slow = Duration(milliseconds: 250);
+  static const Curve curve = Curves.easeOutCubic;
+
+  /// [d], or nothing when the system asks for fewer animations.
+  static Duration of(BuildContext context, Duration d) =>
+      (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ? Duration.zero : d;
+}
+
+/// Caps [child] at [DurbunSpace.maxContent] and centres it (landscape,
+/// tablets); a phone in portrait is narrower and sees no change.
+class MaxWidth extends StatelessWidget {
+  const MaxWidth({super.key, required this.child, this.width = DurbunSpace.maxContent});
+
+  final Widget child;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: ConstrainedBox(constraints: BoxConstraints(maxWidth: width), child: child),
+      );
 }
 
 /// Puts the tokens (and a matching Material theme) under the panel.
@@ -409,10 +488,10 @@ class DurbunTheme extends InheritedWidget {
         : DurbunColors.dark;
     final scheme = ColorScheme(
       brightness: c.brightness,
-      primary: c.accent,
-      onPrimary: Colors.white,
-      secondary: c.accent,
-      onSecondary: Colors.white,
+      primary: c.accentFill,
+      onPrimary: c.onAccent,
+      secondary: c.accentFill,
+      onSecondary: c.onAccent,
       error: c.danger,
       onError: Colors.white,
       surface: c.bgPanel,
@@ -452,71 +531,83 @@ class DurbunTheme extends InheritedWidget {
             foregroundColor: c.text,
             elevation: 0,
             scrolledUnderElevation: 0,
-            toolbarHeight: 50,
-            titleTextStyle: TextStyle(color: c.text, fontSize: 16, fontWeight: FontWeight.w600),
+            toolbarHeight: 52,
+            titleTextStyle: TextStyle(color: c.text, fontSize: DurbunType.title, fontWeight: FontWeight.w600, height: 1.2),
             iconTheme: IconThemeData(color: c.text, size: 20),
             actionsIconTheme: IconThemeData(color: c.textMuted, size: 20),
           ),
           actionIconTheme: ActionIconThemeData(
-            backButtonIconBuilder: (_) => const Icon(Icons.arrow_back_ios_new_rounded, size: 19),
-            closeButtonIconBuilder: (_) => const Icon(Icons.close_rounded, size: 22),
+            backButtonIconBuilder: (_) => const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+            closeButtonIconBuilder: (_) => const Icon(Icons.close_rounded, size: 20),
           ),
           snackBarTheme: SnackBarThemeData(
             backgroundColor: c.isDark ? c.bgActive : c.text,
-            contentTextStyle: TextStyle(color: c.isDark ? c.text : c.bgPanel, fontSize: DurbunType.md, fontWeight: FontWeight.w500),
+            contentTextStyle: TextStyle(color: c.isDark ? c.text : c.bgPanel, fontSize: DurbunType.body, fontWeight: FontWeight.w500),
             behavior: SnackBarBehavior.floating,
             elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.lg)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.md)),
           ),
           bottomSheetTheme: BottomSheetThemeData(
             backgroundColor: c.bgPanel,
             surfaceTintColor: Colors.transparent,
             dragHandleColor: c.borderStrong,
             dragHandleSize: const Size(36, 4),
+            constraints: const BoxConstraints(maxWidth: DurbunSpace.maxContent),
             shape: const RoundedRectangleBorder(
                 borderRadius: BorderRadius.vertical(top: Radius.circular(DurbunRadius.xl))),
+          ),
+          dialogTheme: DialogThemeData(
+            backgroundColor: c.bgElevated,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(DurbunRadius.xl),
+                side: c.isDark ? BorderSide(color: c.border) : BorderSide.none),
+            titleTextStyle: TextStyle(color: c.text, fontSize: DurbunType.title, fontWeight: FontWeight.w600, height: 1.3),
+            contentTextStyle: TextStyle(color: c.textMuted, fontSize: DurbunType.body, height: 1.45),
           ),
           popupMenuTheme: PopupMenuThemeData(
             color: c.bgElevated,
             surfaceTintColor: Colors.transparent,
-            elevation: 10,
-            shadowColor: Colors.black.withValues(alpha: 0.4),
+            elevation: c.isDark ? 0 : 8,
+            shadowColor: Colors.black.withValues(alpha: 0.35),
             shape: rounded,
-            textStyle: TextStyle(color: c.text, fontSize: 14),
+            textStyle: TextStyle(color: c.text, fontSize: DurbunType.label),
           ),
           tooltipTheme: TooltipThemeData(
             decoration: BoxDecoration(
                 color: c.isDark ? c.bgActive : c.text,
-                borderRadius: BorderRadius.circular(DurbunRadius.md)),
-            textStyle: TextStyle(color: c.isDark ? c.text : c.bgPanel, fontSize: 12),
+                borderRadius: BorderRadius.circular(DurbunRadius.sm)),
+            textStyle: TextStyle(color: c.isDark ? c.text : c.bgPanel, fontSize: DurbunType.sm),
             waitDuration: const Duration(milliseconds: 500),
           ),
           switchTheme: SwitchThemeData(
             thumbColor: WidgetStateProperty.resolveWith(
-                (s) => s.contains(WidgetState.selected) ? Colors.white : c.textMuted),
+                (s) => s.contains(WidgetState.selected) ? c.onAccent : c.textMuted),
             trackColor: WidgetStateProperty.resolveWith(
-                (s) => s.contains(WidgetState.selected) ? c.accent : c.bgActive),
+                (s) => s.contains(WidgetState.selected) ? c.accentFill : c.bgActive),
             trackOutlineColor: WidgetStateProperty.resolveWith(
-                (s) => s.contains(WidgetState.selected) ? c.accent : c.borderStrong),
+                (s) => s.contains(WidgetState.selected) ? c.accentFill : c.borderStrong),
           ),
           checkboxTheme: CheckboxThemeData(
             fillColor: WidgetStateProperty.resolveWith(
-                (s) => s.contains(WidgetState.selected) ? c.accent : Colors.transparent),
-            checkColor: const WidgetStatePropertyAll<Color>(Colors.white),
+                (s) => s.contains(WidgetState.selected) ? c.accentFill : Colors.transparent),
+            checkColor: WidgetStatePropertyAll<Color>(c.onAccent),
             side: BorderSide(color: c.borderStrong, width: 1.5),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.sm)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.sm - 2)),
           ),
           textButtonTheme: TextButtonThemeData(
             style: TextButton.styleFrom(
-              foregroundColor: c.text,
-              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              foregroundColor: c.accentInk,
+              minimumSize: const Size(44, 44),
+              textStyle: const TextStyle(fontSize: DurbunType.label, fontWeight: FontWeight.w500),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.md)),
             ),
           ),
+          progressIndicatorTheme: ProgressIndicatorThemeData(color: c.accent, linearTrackColor: c.bgActive),
           dividerTheme: DividerThemeData(color: c.border, thickness: 1, space: 1),
         ),
         child: DefaultTextStyle.merge(
-          style: TextStyle(color: c.text, fontSize: DurbunType.md, height: 1.45),
+          style: TextStyle(color: c.text, fontSize: DurbunType.body, height: 1.45),
           child: child,
         ),
       ),
@@ -573,4 +664,68 @@ class _LogoPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_LogoPainter oldDelegate) => false;
+}
+
+/// The logo's binoculars as a line drawing: the panel's mark for empty,
+/// waiting and disconnected states (no tile, the colour of muted text).
+class DurbunMark extends StatelessWidget {
+  const DurbunMark({super.key, this.size = 48, this.color});
+
+  final double size;
+
+  /// Defaults to the subtle text colour.
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+        child: CustomPaint(
+          size: Size.square(size),
+          painter: _MarkPainter(color ?? DurbunColors.of(context).textSubtle),
+        ),
+      );
+}
+
+class _MarkPainter extends CustomPainter {
+  const _MarkPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.scale(size.width / 32, size.height / 32);
+    final line = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    // Eyepieces, barrels and the bridge, then the two lenses.
+    canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(8.4, 5, 4.6, 4.4), const Radius.circular(1.2)), line);
+    canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(19, 5, 4.6, 4.4), const Radius.circular(1.2)), line);
+    canvas.drawPath(
+      Path()
+        ..moveTo(6.2, 19)
+        ..lineTo(7.2, 11.6)
+        ..quadraticBezierTo(7.4, 9.4, 9.6, 9.4)
+        ..lineTo(12.2, 9.4)
+        ..quadraticBezierTo(14.2, 9.4, 14.4, 11.6)
+        ..lineTo(14.6, 14.2)
+        ..lineTo(17.4, 14.2)
+        ..lineTo(17.6, 11.6)
+        ..quadraticBezierTo(17.8, 9.4, 19.8, 9.4)
+        ..lineTo(22.4, 9.4)
+        ..quadraticBezierTo(24.6, 9.4, 24.8, 11.6)
+        ..lineTo(25.8, 19),
+      line,
+    );
+    canvas.drawCircle(const Offset(10.6, 21.4), 5.6, line);
+    canvas.drawCircle(const Offset(21.4, 21.4), 5.6, line);
+    canvas.drawCircle(const Offset(10.6, 21.4), 2.2, line);
+    canvas.drawCircle(const Offset(21.4, 21.4), 2.2, line);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_MarkPainter old) => old.color != color;
 }

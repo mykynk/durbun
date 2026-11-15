@@ -21,50 +21,28 @@ class FilterButton extends StatelessWidget {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     final on = count > 0;
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(DurbunRadius.md),
-      side: BorderSide(color: on ? c.accent.withValues(alpha: 0.7) : c.border),
-    );
-    return Material(
-      color: on ? c.accentSoft : c.cardBg,
-      shape: shape,
-      child: InkWell(
-        customBorder: shape,
-        onTap: onTap,
-        child: Container(
-          height: 32,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(Icons.tune_rounded, size: 16, color: on ? c.badgeAccent : c.text),
-              const SizedBox(width: 6),
-              Text(t.filters,
-                  style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: on ? c.badgeAccent : c.text,
-                      height: 1.2)),
-              if (on) ...<Widget>[
-                const SizedBox(width: 6),
-                Container(
+    final fg = on ? c.accentInk : c.text;
+    return ChipFrame(
+      look: on ? ChipLook.tonal : ChipLook.outline,
+      onTap: onTap,
+      child: ChipLabel(
+        label: t.filters,
+        color: fg,
+        icon: Icons.tune_rounded,
+        trailing: on
+            ? Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Container(
                   height: 18,
                   constraints: const BoxConstraints(minWidth: 18),
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
                   alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                      color: c.accent, borderRadius: BorderRadius.circular(DurbunRadius.pill)),
+                  decoration: BoxDecoration(color: c.accentFill, borderRadius: BorderRadius.circular(DurbunRadius.pill)),
                   child: Text('$count',
-                      style: DurbunType.monoStyle(
-                          size: 10.5,
-                          color: Colors.white,
-                          weight: FontWeight.w600,
-                          height: 1.1)),
+                      style: DurbunType.ui(size: DurbunType.caption, color: c.onAccent, weight: FontWeight.w600, height: 1.1)),
                 ),
-              ],
-            ],
-          ),
-        ),
+              )
+            : null,
       ),
     );
   }
@@ -81,6 +59,8 @@ class ActiveChip extends StatelessWidget {
 
   final String label;
   final VoidCallback onRemove;
+
+  /// A colour dot before the label (a method, a status class).
   final Color? color;
   final bool mono;
 
@@ -88,48 +68,19 @@ class ActiveChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
-    final fg = color ?? c.badgeAccent;
-    return Semantics(
-      button: true,
-      label: '${t.remove}: $label',
-      child: Material(
-        color: (color ?? c.accent).withValues(alpha: 0.14),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(DurbunRadius.md),
-          side: BorderSide(color: (color ?? c.accent).withValues(alpha: 0.5)),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(DurbunRadius.md),
-          onTap: onRemove,
-          // A long tag shrinks with an ellipsis instead of overflowing
-          // (the filter sheet's Wrap, large text).
-          child: Container(
-            height: 32,
-            constraints: const BoxConstraints(maxWidth: 260),
-            padding: const EdgeInsets.only(left: 10, right: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Flexible(
-                  child: Text(label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: mono
-                        ? DurbunType.monoStyle(
-                            size: 11.5,
-                            color: fg,
-                            weight: FontWeight.w600,
-                            height: 1.2)
-                        : TextStyle(
-                            fontSize: 12,
-                            color: fg,
-                            fontWeight: FontWeight.w600,
-                            height: 1.2)),
-                ),
-                const SizedBox(width: 4),
-                Icon(Icons.close_rounded, size: 14, color: fg.withValues(alpha: 0.8)),
-              ],
-            ),
+    return ChipFrame(
+      look: ChipLook.tonal,
+      onTap: onRemove,
+      semanticLabel: '${t.remove}: $label',
+      child: ExcludeSemantics(
+        child: ChipLabel(
+          label: label,
+          color: c.accentInk,
+          mono: mono,
+          dot: color,
+          trailing: Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Icon(Icons.close_rounded, size: 16, color: c.accentInk),
           ),
         ),
       ),
@@ -148,10 +99,10 @@ class FilterRow extends StatelessWidget {
     final c = DurbunColors.of(context);
     return Container(
       color: c.bgPanel,
-      height: 48,
+      height: 52,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
         itemCount: children.length,
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (_, i) => children[i],
@@ -179,15 +130,16 @@ class SheetSection extends StatelessWidget {
         children: <Widget>[
           Text(title,
               style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: c.text)),
+                  fontSize: DurbunType.body,
+                  fontWeight: FontWeight.w600,
+                  color: c.textMuted)),
           if (hint != null) ...<Widget>[
             const SizedBox(height: 2),
-            Text(hint!, style: TextStyle(fontSize: 12, color: c.textMeta)),
+            Text(hint!, style: TextStyle(fontSize: DurbunType.body, color: c.textSubtle)),
           ],
-          const SizedBox(height: 8),
-          Wrap(spacing: 8, runSpacing: 8, children: children),
+          const SizedBox(height: 2),
+          // Chips are 44 pt tall to tap and 32 pt drawn: no run spacing.
+          Wrap(spacing: 8, children: children),
         ],
       ),
     );
@@ -220,15 +172,8 @@ class SheetSwitch extends StatelessWidget {
         child: Row(
           children: <Widget>[
             if (icon != null) ...<Widget>[
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                    color: c.trackBg,
-                    borderRadius: BorderRadius.circular(DurbunRadius.md - 2)),
-                child: Icon(icon, size: 18, color: c.textMuted),
-              ),
-              const SizedBox(width: 12),
+              Icon(icon, size: 22, color: c.textMuted),
+              const SizedBox(width: 14),
             ],
             Expanded(
               child: Column(
@@ -237,7 +182,7 @@ class SheetSwitch extends StatelessWidget {
                   Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: c.text)),
                   if (hint != null)
                     Text(hint!,
-                        style: TextStyle(fontSize: 12, color: c.textMeta)),
+                        style: TextStyle(fontSize: DurbunType.body, color: c.textSubtle)),
                 ],
               ),
             ),
@@ -289,7 +234,7 @@ Future<void> showFilterSheet(
                       Expanded(
                         child: Text(title,
                             style: TextStyle(
-                                fontSize: 18,
+                                fontSize: DurbunType.title,
                                 fontWeight: FontWeight.w600,
                                 color: c.text)),
                       ),
@@ -304,12 +249,15 @@ Future<void> showFilterSheet(
                     ],
                   ),
                 ),
+                // A few dozen rows: built at once (a lazy list would leave
+                // the last ones unbuilt until scrolled to).
                 Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    padding: EdgeInsets.only(
-                        bottom: 16 + MediaQuery.paddingOf(sheet).bottom),
-                    children: build(sheet, changed),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: build(sheet, changed),
+                    ),
                   ),
                 ),
                 Padding(
@@ -369,7 +317,7 @@ Future<void> showQueryHelp(BuildContext context,
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
                 child: Text(t.queryHelp,
                     style: TextStyle(
-                        fontSize: 18,
+                        fontSize: DurbunType.title,
                         fontWeight: FontWeight.w600,
                         color: c.text)),
               ),

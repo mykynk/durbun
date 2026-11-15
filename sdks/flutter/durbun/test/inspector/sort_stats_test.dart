@@ -4,10 +4,10 @@ import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/body.dart' show wireBodyFromPending;
 import 'package:durbun/src/core/protocol.dart';
 import 'package:durbun/src/inspector/filter_ui.dart' show ActiveChip;
-import 'package:durbun/src/inspector/format.dart' show formatTimeOfDay;
 import 'package:durbun/src/inspector/network_model.dart';
 import 'package:durbun/src/inspector/stats.dart';
 import 'package:durbun/src/inspector/store.dart';
+import 'package:durbun/src/inspector/theme.dart' show DurbunMark;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -170,7 +170,7 @@ void main() {
       final newest = all.reversed.toList();
       expect(_onScreen(tester, all), newest, reason: 'the default: newest on top');
       expect(find.byType(ActiveChip), findsNothing, reason: 'the default order is not shown as a chip');
-      expect(find.text('${formatTimeOfDay(1000)}  api.example.com'), findsOneWidget, reason: 'each row says when it started');
+      expect(find.text('api.example.com'), findsWidgets, reason: 'each row names its host');
 
       await tester.tap(find.byTooltip('Sort').first);
       await tester.pumpAndSettle();
@@ -316,7 +316,7 @@ void main() {
       await tester.tap(find.text('Statistics'));
       await tester.pumpAndSettle();
       expect(find.text('Successful'), findsNothing);
-      expect(find.byIcon(Icons.bar_chart_rounded), findsWidgets);
+      expect(find.byType(DurbunMark), findsWidgets, reason: 'the empty state');
     });
   });
 }

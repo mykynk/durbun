@@ -80,7 +80,7 @@ class _SideSummary extends StatelessWidget {
                   children: <Widget>[
                     Text(call.method, style: DurbunType.monoStyle(size: 12, color: c.method(call.method), weight: FontWeight.w600, height: 1.3)),
                     Text(_statusText(call, t), style: DurbunType.monoStyle(size: 12, color: call.cancelled ? c.textSubtle : c.status(call.status, failed: failed), weight: FontWeight.w600, height: 1.3)),
-                    Text('${formatClock(call.ts)} · ${formatDuration(call.duration)}', style: DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.3)),
+                    Text('${formatClock(call.ts)} · ${formatDuration(call.duration)}', style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle, height: 1.3)),
                   ],
                 ),
                 Text(decodeUrlForDisplay(_pathOf(call)), maxLines: 2, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: 12, color: c.text, height: 1.3)),
@@ -129,7 +129,7 @@ class _ComparePickerPageState extends State<ComparePickerPage> {
         backgroundColor: c.bgPanel,
         surfaceTintColor: Colors.transparent,
         titleSpacing: 0,
-        title: Text(t.comparePickTitle, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: c.text)),
+        title: Text(t.comparePickTitle, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
       ),
       body: ListenableBuilder(
         listenable: widget.store,
@@ -156,9 +156,9 @@ class _ComparePickerPageState extends State<ComparePickerPage> {
               Divider(height: 1, color: c.border),
               Expanded(
                 child: all.isEmpty
-                    ? EmptyState(icon: Icons.compare_arrows_rounded, title: t.noOtherRequests, body: t.noOtherRequestsBody)
+                    ? EmptyState(title: t.noOtherRequests, body: t.noOtherRequestsBody)
                     : shown.isEmpty
-                        ? EmptyState(icon: Icons.compare_arrows_rounded, title: t.noMatchTitle, body: t.noMatchBody)
+                        ? EmptyState(title: t.noMatchTitle, body: t.noMatchBody)
                         : ListView(
                             padding: EdgeInsets.only(bottom: 16 + MediaQuery.paddingOf(context).bottom),
                             children: <Widget>[
@@ -193,7 +193,7 @@ class _GroupTitle extends StatelessWidget {
       width: double.infinity,
       color: c.bgSunken,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.textMuted)),
+      child: Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.textMuted)),
     );
   }
 }
@@ -233,9 +233,9 @@ class _CompareCallsPageState extends State<CompareCallsPage> {
         backgroundColor: c.bgPanel,
         surfaceTintColor: Colors.transparent,
         titleSpacing: 0,
-        title: Text(t.compareTitle, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: c.text)),
+        title: Text(t.compareTitle, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
         actions: <Widget>[
-          DIconButton(icon: Icons.swap_vert_rounded, tooltip: t.swap, size: 40, onTap: () => setState(() => _swapped = !_swapped)),
+          DIconButton(icon: Icons.swap_vert_rounded, tooltip: t.swap, onTap: () => setState(() => _swapped = !_swapped)),
           const SizedBox(width: 6),
         ],
       ),
@@ -306,7 +306,7 @@ class _FieldBlock extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: v == null
-                    ? Text(t.missing, style: TextStyle(fontSize: 12.5, color: c.textSubtle))
+                    ? Text(t.missing, style: TextStyle(fontSize: 13, color: c.textSubtle))
                     : Text(v, style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.35)),
               ),
             ],
@@ -327,7 +327,7 @@ class _FieldBlock extends StatelessWidget {
           Text(name,
               style: monoName
                   ? DurbunType.monoStyle(size: 12, color: c.textMuted, weight: FontWeight.w600)
-                  : TextStyle(fontSize: 12, color: c.textMuted, fontWeight: FontWeight.w600)),
+                  : TextStyle(fontSize: 13, color: c.textMuted, fontWeight: FontWeight.w600)),
           // The same on both sides: one value, no A / B.
           if (changed) ...<Widget>[value('A', a), value('B', b)]
           else
@@ -415,11 +415,11 @@ class _HeadersDiff extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
           child: Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
             Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.text)),
-            Text(t.headerStats(diff, rows.length), style: DurbunType.monoStyle(size: 11.5, color: c.textMeta)),
+            Text(t.headerStats(diff, rows.length), style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle)),
           ]),
         ),
         if (shown.isEmpty)
-          Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 4), child: Text(t.headersSame, style: TextStyle(fontSize: 12.5, color: c.textMuted)))
+          Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 4), child: Text(t.headersSame, style: TextStyle(fontSize: 13, color: c.textMuted)))
         else
           for (final r in shown)
             _FieldBlock(
@@ -434,7 +434,7 @@ class _HeadersDiff extends StatelessWidget {
 
     return Column(
       children: <Widget>[
-        _OptionsBar(children: <Widget>[DToggle(label: t.onlyChanges, icon: Icons.difference_outlined, selected: onlyChanges, onTap: () => onOnlyChanges(!onlyChanges))]),
+        _OptionsBar(children: <Widget>[DToggle(label: t.onlyChanges, icon: Icons.difference_outlined, tonal: true, selected: onlyChanges, onTap: () => onOnlyChanges(!onlyChanges))]),
         Divider(height: 1, color: c.border),
         Expanded(
           child: ListView(
@@ -496,18 +496,17 @@ class _BodyDiffState extends State<_BodyDiff> {
     if (_la.kind == BodyKind.binary || _lb.kind == BodyKind.binary) {
       final same = _la.kind == _lb.kind && _la.raw == _lb.raw;
       return EmptyState(
-          icon: Icons.data_object_rounded,
           title: same ? t.binarySame : t.binaryDifferent,
           body: t.binarySizes(formatBytes(_la.size), formatBytes(_lb.size)));
     }
     if (_la.kind == BodyKind.none && _lb.kind == BodyKind.none) {
-      return EmptyState(icon: Icons.data_object_rounded, title: widget.request ? t.noRequestBodies : t.noResponseBodies);
+      return EmptyState(title: widget.request ? t.noRequestBodies : t.noResponseBodies);
     }
     return Column(
       children: <Widget>[
         _OptionsBar(children: <Widget>[
-          DToggle(label: t.onlyChanges, icon: Icons.difference_outlined, selected: widget.onlyChanges, onTap: () => widget.onOnlyChanges(!widget.onlyChanges)),
-          DToggle(label: t.sortKeys, icon: Icons.sort_by_alpha_rounded, selected: widget.sortKeys, onTap: () => widget.onSortKeys(!widget.sortKeys)),
+          DToggle(label: t.onlyChanges, icon: Icons.difference_outlined, tonal: true, selected: widget.onlyChanges, onTap: () => widget.onOnlyChanges(!widget.onlyChanges)),
+          DToggle(label: t.sortKeys, icon: Icons.sort_by_alpha_rounded, tonal: true, selected: widget.sortKeys, onTap: () => widget.onSortKeys(!widget.sortKeys)),
         ]),
         Divider(height: 1, color: c.border),
         Expanded(
@@ -537,7 +536,7 @@ class _BodyDiffState extends State<_BodyDiff> {
                         color: c.bgSunken,
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         alignment: Alignment.center,
-                        child: Text(t.showHidden(row.hidden), style: TextStyle(fontSize: 12, color: c.accent, fontWeight: FontWeight.w600)),
+                        child: Text(t.showHidden(row.hidden), style: TextStyle(fontSize: DurbunType.body, color: c.accentInk, fontWeight: FontWeight.w600)),
                       ),
                     );
                   }
@@ -577,7 +576,7 @@ class _DiffStats extends StatelessWidget {
             Wrap(spacing: 8, children: <Widget>[
               Text('+${result.added}', style: DurbunType.monoStyle(size: 13, color: c.success, weight: FontWeight.w600)),
               Text('−${result.removed}', style: DurbunType.monoStyle(size: 13, color: c.danger, weight: FontWeight.w600)),
-              Text(t.linesChanged, style: TextStyle(fontSize: 12.5, color: c.textMuted)),
+              Text(t.linesChanged, style: TextStyle(fontSize: 13, color: c.textMuted)),
             ]),
           for (final n in notes)
             Padding(padding: const EdgeInsets.only(top: 6), child: Callout(title: n, tone: CalloutTone.warning)),
@@ -602,7 +601,7 @@ class _DiffLine extends StatelessWidget {
       DiffOpType.add => (c.success.withValues(alpha: 0.12), c.success, '+'),
       DiffOpType.equal => (Colors.transparent, c.textSubtle, ' '),
     };
-    final num = DurbunType.monoStyle(size: 10.5, color: c.textSubtle, height: 1.45);
+    final num = DurbunType.monoStyle(size: 11.5, color: c.textSubtle, height: 1.45);
     return Container(
       color: bg,
       padding: const EdgeInsets.symmetric(horizontal: 4),

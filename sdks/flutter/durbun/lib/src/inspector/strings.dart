@@ -217,6 +217,7 @@ class InspectorStrings {
   String statsCancelled(int n) => _('$n iptal', '$n cancelled');
   String get statsAverage => _('Ortalama', 'Average');
   String get statsMedian => _('Ortanca (p50)', 'Median (p50)');
+  String statsSuccessRate(int pct) => _('%$pct başarılı', '$pct% successful');
   String get statsP95 => 'p95';
   String get statsLongest => _('En uzun', 'Longest');
   String statsOverResponses(int n) => _('Yanıt gelen $n istek üzerinden', n == 1 ? 'Over 1 response' : 'Over $n responses');
@@ -243,7 +244,7 @@ class InspectorStrings {
     'With keepPreviousRun on, the next launch shows the run before it here',
   );
   String previousRunCrashes(int n) => _(n == 1 ? 'Bu çalıştırmada çökme var' : 'Bu çalıştırmada $n çökme var', n == 1 ? 'This run crashed' : 'This run crashed $n times');
-  String get previousRunOffHint => _('Kapalı · açınca son açılış burada kalır', 'Off · when on, the last launch stays here');
+  String get previousRunOffHint => _('Açınca son açılış burada kalır', 'When on, the last launch stays here');
   String get previousRunNone => _('Henüz yok', 'None yet');
   String get previousRunOffTitle => _('Önceki çalıştırma kapalı', 'Previous run is off');
   String get previousRunOffBody => _(
@@ -293,9 +294,10 @@ class InspectorStrings {
   String binarySizes(String a, String b) => 'A: $a · B: $b';
   String get noRequestBodies => _('İki istekte de gövde yok', 'Neither request has a body');
   String get noResponseBodies => _('İki yanıtta da gövde yok', 'Neither response has a body');
-  String showHidden(int n) => _('⋯ $n aynı satırı göster', '⋯ show $n unchanged lines');
+  String showHidden(int n) => _('$n aynı satırı göster', 'Show $n unchanged lines');
   String get comparing => _('Karşılaştırılıyor…', 'Comparing…');
   String get yes => _('Evet', 'Yes');
+  String get gotIt => _('Anladım', 'Got it');
   String get responseType => _('Yanıt türü', 'Response type');
   String get errorMessage => _('Hata mesajı', 'Error message');
   List<(String, String)> get netQueryHints => <(String, String)>[
@@ -380,6 +382,8 @@ class InspectorStrings {
   String get hex => 'Hex';
   String get searchJson => _('JSON’da ara…', 'Search JSON…');
   String get findInBody => _('Gövdede bul…', 'Find in body…');
+  String get find => _('Bul', 'Find');
+  String get closeFind => _('Bulmayı kapat', 'Close find');
   String get noMatchShort => _('Bulunamadı', 'No match');
   // Short: it sits inside the find field next to its buttons.
   String get findMinChars => _('≥ 2 harf', '2+ chars');
@@ -686,7 +690,7 @@ class InspectorStrings {
   String get issueLanRefusedTitle => _('Mac bağlantıyı kabul etmiyor', 'The Mac does not accept the connection');
   String issueLanRefusedBody(String host) => _(
     '$host adresindeki Mac yanıt verdi ama Dürbün bağlantı almıyor. Mac’te Dürbün’ü açın ve Ayarlar’da “Yerel ağ (Wi-Fi) bağlantılarına izin ver”i açın.',
-    'The Mac at $host answered, but Dürbün takes no connections. Open Dürbün on the Mac and turn on Settings → “Allow local network (Wi-Fi) connections”.',
+    'The Mac at $host answered, but Dürbün takes no connections. Open Dürbün on the Mac and turn on Settings › “Allow local network (Wi-Fi) connections”.',
   );
   String get issueLanTimeoutTitle => _('Bu adresten yanıt yok', 'No answer from this address');
   String issueLanTimeoutBody(String host) => _(
@@ -697,7 +701,7 @@ class InspectorStrings {
   String issueLanUnreachableBody(String host, {required bool ios}) =>
       _('Telefon $host adresine yol bulamıyor: Mac’ten farklı bir ağda olabilir.', 'The phone finds no route to $host: it may be on another network than the Mac.') +
       (ios
-          ? _(' iPhone’da Ayarlar → Gizlilik ve Güvenlik → Yerel Ağ’da bu uygulamaya izin verin.', ' On the iPhone, allow this app under Settings → Privacy & Security → Local Network.')
+          ? _(' iPhone’da Ayarlar › Gizlilik ve Güvenlik › Yerel Ağ’da bu uygulamaya izin verin.', ' On the iPhone, allow this app under Settings › Privacy & Security › Local Network.')
           : '');
   String get issueLanBadAddressTitle => _('Adres bulunamadı', 'Address not found');
   String issueLanBadAddressBody(String host) => _(
@@ -711,8 +715,8 @@ class InspectorStrings {
       'The app has no internet permission. The developer needs to add android.permission.INTERNET to the main AndroidManifest.xml (release and profile builds).',
     ),
     'ios' => _(
-      'iPhone’da Ayarlar → Gizlilik ve Güvenlik → Yerel Ağ’da bu uygulamaya izin verin.',
-      'On the iPhone, allow this app under Settings → Privacy & Security → Local Network.',
+      'iPhone’da Ayarlar › Gizlilik ve Güvenlik › Yerel Ağ’da bu uygulamaya izin verin.',
+      'On the iPhone, allow this app under Settings › Privacy & Security › Local Network.',
     ),
     _ => _('Uygulamanın ağ izni yok.', 'The app has no network permission.'),
   };
@@ -726,8 +730,8 @@ class InspectorStrings {
   String get macAddress => _('Mac’in adresi (Wi-Fi)', 'Mac’s address (Wi-Fi)');
   String get macAddressHint => _('192.168.1.20 ya da 192.168.1.20:9751', '192.168.1.20 or 192.168.1.20:9751');
   String get macAddressHelp => _(
-    'Adresi Mac’teki Dürbün’de Ayarlar → “Yerel ağ (Wi-Fi) bağlantılarına izin ver” altında bulursunuz. Telefon ve Mac aynı Wi-Fi ağında olmalı.',
-    'Find it in Dürbün on the Mac under Settings → “Allow local network (Wi-Fi) connections”. The phone and the Mac must be on the same Wi-Fi.',
+    'Adresi Mac’teki Dürbün’de Ayarlar › “Yerel ağ (Wi-Fi) bağlantılarına izin ver” altında bulursunuz. Telefon ve Mac aynı Wi-Fi ağında olmalı.',
+    'Find it in Dürbün on the Mac under Settings › “Allow local network (Wi-Fi) connections”. The phone and the Mac must be on the same Wi-Fi.',
   );
   String get connect => _('Bağlan', 'Connect');
   String get addressEmpty => _('Bir adres girin', 'Enter an address');
@@ -820,10 +824,10 @@ class InspectorStrings {
   );
   String get unsupportedTitle => _('Bu platformda çalışmaz', 'Not available on this platform');
   String get unsupportedBody => _('Dürbün web’de bir şey yakalamaz.', 'Dürbün captures nothing on the web.');
-  String get shakeHint => _('Dürbün panelini açmak için telefonu sallayın', 'Shake the phone to open the Dürbün panel');
+  String get shakeHint => _('Dürbün’ü açmak için telefonu sallayın', 'Shake the phone to open the Dürbün panel');
   String get shakeHintSimulator => _(
-    'Simülatörde: Device → Shake. Emülatörde: Extended controls → Virtual sensors → Shake.',
-    'Simulator: Device → Shake. Emulator: Extended controls → Virtual sensors → Shake.',
+    'Simülatör: Device › Shake · Emülatör: Virtual sensors › Shake',
+    'Simulator: Device › Shake · Emulator: Virtual sensors › Shake',
   );
 
   String size(int bytes) => formatBytes(bytes);

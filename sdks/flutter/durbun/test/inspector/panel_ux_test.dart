@@ -6,6 +6,7 @@ import 'package:durbun/src/core/protocol.dart';
 import 'package:durbun/src/inspector/filter_ui.dart' show ActiveChip;
 import 'package:durbun/src/inspector/json_tree.dart' show JsonTreeView;
 import 'package:durbun/src/inspector/store.dart';
+import 'package:durbun/src/inspector/widgets.dart' show ChipFrame, Segment;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -148,7 +149,10 @@ void main() {
       await tester.tap(find.textContaining('/deep'));
       await tester.pumpAndSettle();
       await _tapTab(tester, 'Response');
-      await tester.tap(find.byTooltip('Expand all'));
+      // Expand all is in the view menu.
+      await tester.tap(find.byTooltip('View'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Expand all'));
       await tester.pumpAndSettle();
       final list = find.descendant(of: find.byType(JsonTreeView), matching: find.byType(ListView));
       await tester.scrollUntilVisible(find.textContaining('[ 1 … ]'), 1000,
@@ -187,6 +191,8 @@ void main() {
       await tester.tap(find.textContaining('/log.txt'));
       await tester.pumpAndSettle();
       await _tapTab(tester, 'Response');
+      await tester.tap(find.byTooltip('Find'));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).last, 'needle');
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pumpAndSettle();
@@ -282,6 +288,41 @@ void main() {
       for (final tip in <String>['Share', 'More actions']) {
         expect(tester.getSize(find.byTooltip(tip)).height, greaterThanOrEqualTo(44), reason: tip);
       }
+    });
+
+    testWidgets('chips, segments and the body find button: 44 pt to tap, named for screen readers', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await _phone(tester);
+      final s = _newStore();
+      _request(s, '1', 'https://api.example.com/alpha');
+      _respond(s, '1', text: '{"a":1}');
+      await _open(tester, s);
+      // Filter chips: drawn 32 pt, tapped at 44.
+      for (final label in <String>['Filters', 'Errors only']) {
+        final chip = find.ancestor(of: find.text(label), matching: find.byType(ChipFrame)).first;
+        expect(tester.getSize(chip).height, greaterThanOrEqualTo(44), reason: label);
+      }
+      await tester.tap(find.textContaining('/alpha'));
+      await tester.pumpAndSettle();
+      await _tapTab(tester, 'Response');
+      // The part switch and the body's icon buttons.
+      expect(tester.getSize(find.ancestor(of: find.textContaining('Headers'), matching: find.byType(Segment)).first).height,
+          greaterThanOrEqualTo(44));
+      for (final tip in <String>['Find', 'Copy']) {
+        final button = find.byTooltip(tip);
+        expect(button, findsOneWidget, reason: tip);
+        expect(tester.getSize(button).height, greaterThanOrEqualTo(44), reason: tip);
+      }
+      // The find bar opens from its button and closes with its own button.
+      expect(find.byType(TextField), findsNothing);
+      await tester.tap(find.byTooltip('Find'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.byTooltip('Close find'), findsOneWidget);
+      await tester.tap(find.byTooltip('Close find'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsNothing);
+      semantics.dispose();
     });
   });
 

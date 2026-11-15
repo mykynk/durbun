@@ -80,7 +80,7 @@ class _StatsViewState extends State<StatsView> {
     final t = InspectorStrings.of(context);
     final s = _stats;
     String ms(double? v) => v == null ? '—' : formatDuration(Duration(microseconds: (v * 1000).round()));
-    final note = TextStyle(fontSize: 11.5, color: c.textMeta);
+    final note = TextStyle(fontSize: 12, color: c.textSubtle);
     final scope = _listing.narrowed
         ? ChoiceSegments(
             labels: <String>[t.exportListed, t.exportAll],
@@ -97,7 +97,7 @@ class _StatsViewState extends State<StatsView> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (scope != null) Padding(padding: const EdgeInsets.fromLTRB(12, 12, 12, 0), child: scope),
-          Expanded(child: EmptyState(icon: Icons.bar_chart_rounded, title: t.noRequestsTitle, body: t.noRequestsBody)),
+          Expanded(child: EmptyState(title: t.noRequestsTitle, body: t.noRequestsBody)),
         ],
       );
     }
@@ -130,8 +130,15 @@ class _StatsViewState extends State<StatsView> {
               ListView(
                 padding: pad,
                 children: <Widget>[
+                  // The lead figure; the rest are secondary.
+                  StatTile(
+                      width: double.infinity,
+                      lead: true,
+                      label: t.requests,
+                      value: '${s.requests}',
+                      sub: t.statsSuccessRate((s.success * 100 / s.requests).round())),
+                  const SizedBox(height: 8),
                   _Tiles(children: <Widget Function(double)>[
-                    (w) => StatTile(width: w, label: t.requests, value: '${s.requests}'),
                     (w) => StatTile(width: w, label: t.statsSuccess, value: '${s.success}'),
                     (w) => StatTile(width: w, label: t.statsClientErrors, value: '${s.clientErrors}', color: s.clientErrors > 0 ? c.st4xx : null),
                     (w) => StatTile(width: w, label: t.statsServerErrors, value: '${s.serverErrors}', color: s.serverErrors > 0 ? c.st5xx : null),
@@ -163,7 +170,7 @@ class _StatsViewState extends State<StatsView> {
                             TextSpan(
                                 text: method,
                                 style: DurbunType.monoStyle(size: 12, color: c.method(method), weight: FontWeight.w600, height: 1.2)),
-                            TextSpan(text: '  $n', style: DurbunType.monoStyle(size: 12, color: c.text, height: 1.2)),
+                            TextSpan(text: '  $n', style: DurbunType.ui(size: DurbunType.body, color: c.text, height: 1.2)),
                           ])),
                         ),
                     ],
@@ -173,9 +180,10 @@ class _StatsViewState extends State<StatsView> {
               ListView(
                 padding: pad,
                 children: <Widget>[
+                  StatTile(width: double.infinity, lead: true, label: t.statsMedian, value: ms(s.p50Ms)),
+                  const SizedBox(height: 8),
                   _Tiles(children: <Widget Function(double)>[
                     (w) => StatTile(width: w, label: t.statsAverage, value: ms(s.averageMs)),
-                    (w) => StatTile(width: w, label: t.statsMedian, value: ms(s.p50Ms)),
                     (w) => StatTile(width: w, label: t.statsP95, value: ms(s.p95Ms), color: (s.p95Ms ?? 0) >= 1000 ? c.warning : null),
                     (w) => StatTile(width: w, label: t.statsLongest, value: ms(s.maxMs), color: (s.maxMs ?? 0) >= 3000 ? c.danger : null),
                   ]),
@@ -243,7 +251,11 @@ class _Tiles extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) {
         final columns = box.maxWidth >= 600 ? 3 : 2;
         final w = (box.maxWidth - 8 * (columns - 1)) / columns;
-        return Wrap(spacing: 8, runSpacing: 8, children: <Widget>[for (final b in children) b(w)]);
+        // An odd last tile takes the whole row instead of leaving a hole.
+        final odd = children.length % columns == 1 && children.length > 1;
+        return Wrap(spacing: 8, runSpacing: 8, children: <Widget>[
+          for (var i = 0; i < children.length; i++) children[i](odd && i == children.length - 1 ? box.maxWidth : w),
+        ]);
       });
 }
 
@@ -260,7 +272,7 @@ class _HostRow extends StatelessWidget {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     final avg = host.averageMs;
-    final meta = DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.3);
+    final meta = DurbunType.monoStyle(size: 11.5, color: c.textSubtle, height: 1.3);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Column(

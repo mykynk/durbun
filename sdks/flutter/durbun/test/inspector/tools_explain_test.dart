@@ -24,12 +24,13 @@ void main() {
     await _tools(tester);
     await tester.ensureVisible(find.text('Previous run'));
     await tester.pumpAndSettle();
-    expect(find.text('Off · when on, the last launch stays here'), findsOneWidget);
+    expect(find.text('When on, the last launch stays here'), findsOneWidget);
+    expect(find.text('Off'), findsOneWidget, reason: 'the state is said once, on the right');
     await tester.tap(find.text('Previous run'));
     await tester.pumpAndSettle();
     expect(find.text('Previous run is off'), findsOneWidget);
     expect(find.textContaining('keepPreviousRun: true'), findsWidgets);
-    expect(find.text('Copy'), findsOneWidget);
+    expect(find.byTooltip('Copy'), findsOneWidget);
   });
 
   testWidgets('Device & SDK lists what is not captured', (tester) async {

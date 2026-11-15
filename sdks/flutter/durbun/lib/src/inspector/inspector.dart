@@ -435,10 +435,12 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
           final pos = _bubble ?? Offset(w - size - 16, h * 0.6);
-          final maxX = math.max(4.0, w - size - 12);
+          // Inside the safe area on every side (a notch in landscape too).
+          final minX = pad.left + 4;
+          final maxX = math.max(minX, w - size - 12 - pad.right);
           final maxY = math.max(pad.top + 4, h - size - pad.bottom - 12);
           final clamped = Offset(
-            pos.dx.clamp(4.0, maxX),
+            pos.dx.clamp(minX, maxX),
             pos.dy.clamp(pad.top + 4, maxY),
           );
           return Stack(
@@ -472,6 +474,8 @@ class InspectorBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = InspectorStrings.of(context);
+    // Over the app: the phone's light or dark setting picks the tokens.
+    final c = DurbunColors.of(context);
     return ListenableBuilder(
       listenable: store,
       builder: (context, _) {
@@ -488,12 +492,19 @@ class InspectorBubble extends StatelessWidget {
                 Positioned(
                   left: 4,
                   top: 4,
+                  // A soft shadow on light; on dark a hairline sets it off.
                   child: Container(
+                    foregroundDecoration: c.isDark
+                        ? BoxDecoration(
+                            borderRadius: BorderRadius.circular(size * 0.234),
+                            border: Border.all(color: const Color(0x40FFFFFF)),
+                          )
+                        : null,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(size * 0.234),
-                      boxShadow: const <BoxShadow>[
-                        BoxShadow(color: Color(0x66000000), blurRadius: 10, offset: Offset(0, 3)),
-                      ],
+                      boxShadow: c.isDark
+                          ? const <BoxShadow>[BoxShadow(color: Color(0x80000000), blurRadius: 8, offset: Offset(0, 2))]
+                          : c.floating,
                     ),
                     child: DurbunLogo(size: size),
                   ),
@@ -504,21 +515,24 @@ class InspectorBubble extends StatelessWidget {
                     top: 0,
                     child: Container(
                       key: const ValueKey<String>('durbun-bubble-badge'),
-                      constraints: const BoxConstraints(minWidth: 20),
-                      height: 20,
+                      constraints: const BoxConstraints(minWidth: 22),
+                      height: 22,
                       padding: const EdgeInsets.symmetric(horizontal: 6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6369),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.white, width: 1.5),
+                        color: c.danger,
+                        borderRadius: BorderRadius.circular(11),
+                        // A ring in the page colour keeps it apart from the logo.
+                        border: Border.all(color: c.isDark ? c.bgApp : Colors.white, width: 2),
                       ),
                       alignment: Alignment.center,
                       child: Text(
                         unseen > 99 ? '99+' : '$unseen',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
+                        style: TextStyle(
+                            color: c.onDanger,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            height: 1.1,
+                            fontFeatures: DurbunType.tabular,
                             decoration: TextDecoration.none),
                       ),
                     ),
@@ -557,36 +571,44 @@ class ShakeHint extends StatelessWidget {
             return Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 480),
-                child: Material(
+                // A quiet note, not an alert: a soft shadow on light, a
+                // hairline on dark.
+                child: Container(
                   key: const ValueKey<String>('durbun-shake-hint'),
-                  color: c.bgElevated,
-                  elevation: 6,
-                  shadowColor: const Color(0x66000000),
-                  shape: RoundedRectangleBorder(
+                  decoration: BoxDecoration(
+                    color: c.bgElevated,
                     borderRadius: BorderRadius.circular(DurbunRadius.lg),
-                    side: BorderSide(color: c.border),
+                    border: c.isDark ? Border.all(color: c.borderStrong) : null,
+                    boxShadow: c.floating,
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
-                    child: Row(
-                      children: <Widget>[
-                        const DurbunLogo(size: 32),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(t.shakeHint, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: c.text)),
-                              if (simulator) ...<Widget>[
-                                const SizedBox(height: 2),
-                                Text(t.shakeHintSimulator, style: TextStyle(fontSize: 12, color: c.textMuted)),
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+                      child: Row(
+                        children: <Widget>[
+                          const DurbunLogo(size: 28),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(t.shakeHint,
+                                    style: TextStyle(fontSize: DurbunType.body + 1, fontWeight: FontWeight.w600, color: c.text, height: 1.3)),
+                                if (simulator) ...<Widget>[
+                                  const SizedBox(height: 2),
+                                  Text(t.shakeHintSimulator,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: DurbunType.body - 1, color: c.textMuted, height: 1.35)),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
-                        ),
-                        TextButton(onPressed: onDismiss, child: Text(t.done)),
-                      ],
+                          TextButton(onPressed: onDismiss, child: Text(t.gotIt)),
+                        ],
+                      ),
                     ),
                   ),
                 ),

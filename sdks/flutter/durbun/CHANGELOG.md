@@ -40,6 +40,25 @@
   out left to right, also in right-to-left apps.
 - README: the panel's layout (two tabs and Tools), the web (nothing captured)
   and desktop platforms are described as they work.
+- In-app panel, new look: one type scale, the selected tab, segment and filter
+  chip filled in the accent colour, and every text readable in light and dark
+  (at least 4.5:1 contrast). Buttons, chips and segments are 44 pt to tap.
+- Request rows are two lines: the status, the method and path with the time
+  on the right, then the host, one badge (error kind, mock, GraphQL operation
+  or client) and the size. A pending request counts up its time. Requests in
+  the log stream use the same row.
+- Log rows name the level as a word ("Error", "Warning") instead of a letter;
+  a crash shows its crash badge.
+- Request detail: the body's find bar opens from a search button next to the
+  view menu, so the page keeps two bars over the body; *Expand all* and
+  *Collapse all* are in the view menu.
+- Performance and Statistics lead with one large figure (FPS, request count,
+  median time); a chart with one line no longer repeats its title as a legend.
+- Tools uses plain icons and readable values; empty lists show the Dürbün mark
+  with one line of text; the setup snippets have a copy button in their corner.
+- Landscape and tablets: the panel stops at 720 pt wide, centred, and the
+  floating button stays inside the safe area on every side.
+- The first-launch hint is shorter and closes with *Got it*.
 
 ## 0.2.0
 

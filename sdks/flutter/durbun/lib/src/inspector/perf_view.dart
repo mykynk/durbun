@@ -34,7 +34,6 @@ class PerformanceView extends StatelessWidget {
         final m = store.lastMetric;
         if (m == null) {
           return EmptyState(
-              icon: Icons.speed_rounded,
               title: t.noMetricsTitle,
               body: t.noMetricsBody);
         }
@@ -61,8 +60,10 @@ class PerformanceView extends StatelessWidget {
               builder: (context, box) {
                 final w = (box.maxWidth - 8) / 2;
                 final tiles = <StatTile>[
+                    // The lead figure; the rest are secondary.
                     StatTile(
-                        width: w,
+                        width: box.maxWidth,
+                        lead: true,
                         label: 'FPS',
                         value: m.fps?.toStringAsFixed(0) ?? '—',
                         sub: t.avg(avg((s) => s.fps)?.toStringAsFixed(0)),
@@ -105,8 +106,8 @@ class PerformanceView extends StatelessWidget {
                       StatTile(
                           width: w, label: t.threads, value: '${m.threads}'),
                 ];
-                // Two tiles per row; an odd last tile takes the whole row instead of leaving a hole.
-                if (tiles.length.isOdd) {
+                // Two tiles per row under the lead; an odd last tile takes the whole row instead of leaving a hole.
+                if (tiles.length.isEven) {
                   final last = tiles.removeLast();
                   tiles.add(StatTile(
                       width: box.maxWidth,
@@ -156,7 +157,7 @@ class PerformanceView extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(t.perfWindow(samples.length, refreshRate: rate),
-                style: TextStyle(fontSize: 12, color: c.textMeta)),
+                style: TextStyle(fontSize: 13, color: c.textSubtle)),
           ],
         );
       },
@@ -172,8 +173,11 @@ class StatTile extends StatelessWidget {
       required this.value,
       this.unit,
       this.sub,
-      this.color});
+      this.color,
+      this.lead = false});
 
+  /// The page's main figure: larger, on its own row.
+  final bool lead;
   final double width;
   final String label;
   final String value;
@@ -196,30 +200,30 @@ class StatTile extends StatelessWidget {
         children: <Widget>[
           Text(label,
               style: TextStyle(
-                  fontSize: 11.5,
+                  fontSize: DurbunType.body,
                   color: c.textMuted,
                   fontWeight: FontWeight.w500)),
-          const SizedBox(height: 4),
+          SizedBox(height: lead ? 2 : 4),
           Text.rich(
             TextSpan(
               children: <InlineSpan>[
                 TextSpan(
                     text: value,
-                    style: DurbunType.monoStyle(
-                        size: 24,
-                        weight: FontWeight.w500,
+                    style: DurbunType.ui(
+                        size: lead ? 40 : 22,
+                        weight: FontWeight.w600,
                         color: color ?? c.text,
                         height: 1.1)),
                 if (unit != null)
                   TextSpan(
                       text: ' $unit',
-                      style: TextStyle(fontSize: 12, color: c.textSubtle)),
+                      style: TextStyle(fontSize: DurbunType.body, color: c.textMuted)),
               ],
             ),
           ),
           if (sub != null) ...<Widget>[
             const SizedBox(height: 4),
-            Text(sub!, style: TextStyle(fontSize: 11, color: c.textMeta)),
+            Text(sub!, style: DurbunType.ui(size: DurbunType.caption + 1, color: c.textSubtle)),
           ],
         ],
       ),
@@ -275,10 +279,12 @@ class ChartCard extends StatelessWidget {
             children: <Widget>[
               Text(title,
                   style: TextStyle(
-                      fontSize: 12.5,
+                      fontSize: DurbunType.body,
                       fontWeight: FontWeight.w600,
                       color: c.text)),
-              Wrap(
+              // One series: the title already names it.
+              if (series.length > 1)
+                Wrap(
                 spacing: 8,
                 children: <Widget>[
                   for (final s in series)
@@ -293,7 +299,7 @@ class ChartCard extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(2))),
                         const SizedBox(width: 4),
                         Text(s.label,
-                            style: TextStyle(fontSize: 11, color: c.textMuted)),
+                            style: TextStyle(fontSize: DurbunType.caption + 1, color: c.textMuted)),
                       ],
                     ),
                 ],

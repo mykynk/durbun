@@ -6,6 +6,8 @@
 /// `CupertinoApp` or a bare `WidgetsApp`) and its theme.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/cupertino.dart' show CupertinoLocalizations, DefaultCupertinoLocalizations;
 import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
@@ -50,7 +52,31 @@ class _InspectorPanelHostState extends State<InspectorPanelHost> {
         ),
       ),
     );
-    return panelLocalizations(context, DurbunTheme.wrap(context, panel));
+    // Landscape and tablets: the panel stops at a readable width, centred
+    // on the page colour (which also takes the taps beside it).
+    return panelLocalizations(
+      context,
+      DurbunTheme.wrap(
+        context,
+        Builder(builder: (context) {
+          final mq = MediaQuery.of(context);
+          // The margin beside a capped panel already clears a notch: the
+          // panel keeps only the part of the side insets it still covers.
+          final margin = math.max(0.0, (mq.size.width - DurbunSpace.maxContent) / 2);
+          EdgeInsets inset(EdgeInsets p) => p.copyWith(
+              left: math.max(0.0, p.left - margin), right: math.max(0.0, p.right - margin));
+          return ColoredBox(
+            color: DurbunColors.of(context).bgApp,
+            child: MaxWidth(
+              child: MediaQuery(
+                data: mq.copyWith(padding: inset(mq.padding), viewPadding: inset(mq.viewPadding)),
+                child: panel,
+              ),
+            ),
+          );
+        }),
+      ),
+    );
   }
 }
 

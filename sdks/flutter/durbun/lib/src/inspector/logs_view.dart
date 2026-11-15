@@ -12,7 +12,7 @@ import 'format.dart';
 import 'json_tree.dart';
 import 'live_list.dart';
 import 'network_model.dart';
-import 'network_view.dart' show CallDetailPage;
+import 'network_view.dart' show CallRow;
 import 'share_sheet.dart' show showLogShareSheet;
 import 'store.dart';
 import 'strings.dart';
@@ -354,8 +354,9 @@ class _LogsViewState extends State<LogsView> {
       FilterButton(count: _f.activeCount, onTap: _openFilters),
       Builder(
         builder: (anchor) => DToggle(
-          label: '${_f.minLevel == 'verbose' ? t.level : t.levelAtLeast(t.levelName(_f.minLevel))} ▾',
-          color: _f.minLevel == 'verbose' ? null : c.level(_f.minLevel),
+          label: _f.minLevel == 'verbose' ? t.level : t.levelAtLeast(t.levelName(_f.minLevel)),
+          trailingIcon: Icons.expand_more_rounded,
+          tonal: true,
           selected: _f.minLevel != 'verbose',
           onTap: () => _pickLevel(anchor),
         ),
@@ -396,7 +397,6 @@ class _LogsViewState extends State<LogsView> {
                     icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
                     tooltip: _paused ? t.resume : t.pause,
                     active: _paused,
-                    size: 40,
                     onTap: () => setState(() => _paused = !_paused),
                   ),
                 ],
@@ -407,7 +407,6 @@ class _LogsViewState extends State<LogsView> {
             Expanded(
               child: items.isEmpty
                   ? EmptyState(
-                      icon: _f.errorsOnly || _f.crashes ? Icons.verified_outlined : Icons.notes_rounded,
                       title: nothing ? t.noLogsTitle : t.noMatchTitle,
                       body: nothing ? t.noLogsBody : t.noMatchBody,
                       actionLabel: nothing ? null : t.clearFilters,
@@ -422,7 +421,7 @@ class _LogsViewState extends State<LogsView> {
                       epoch: widget.store.clears,
                       newText: t.newItems,
                       itemBuilder: (context, it) => it.call != null
-                          ? _NetLogRow(call: it.call!, store: widget.store, terms: terms)
+                          ? CallRow(call: it.call!, store: widget.store, terms: terms, compact: true)
                           : LogRow(item: it, terms: terms, onTagAction: _applyTagAction, store: widget.store),
                     ),
             ),
@@ -431,7 +430,7 @@ class _LogsViewState extends State<LogsView> {
                 width: double.infinity,
                 color: c.bgPanel,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: Text(t.dropped(widget.store.droppedLogs), style: TextStyle(fontSize: 11, color: c.textMeta)),
+                child: Text(t.dropped(widget.store.droppedLogs), style: TextStyle(fontSize: 11, color: c.textSubtle)),
               ),
           ],
         );
@@ -491,6 +490,9 @@ String dataPreview(Object? data, {int max = 120}) {
   return s.length > max ? '${s.substring(0, max)}…' : s;
 }
 
+/// One log line: the level as a word, the tag and any marks, the time on
+/// the right; under them the message (up to three lines), its data and
+/// the error's first line. Warnings, errors and crashes are tinted.
 class LogRow extends StatelessWidget {
   const LogRow({super.key, required this.item, this.terms = const <String>[], this.onTagAction, this.store});
 
@@ -509,7 +511,9 @@ class LogRow extends StatelessWidget {
     final t = InspectorStrings.of(context);
     final l = item.log!;
     final tint = l.isCrash ? c.lvFatalBg : c.levelBg(l.level);
-    final mono = DurbunType.monoStyle(size: DurbunType.logFs, color: l.isError ? c.text : c.text, height: 1.4);
+    // Subtle text is too faint on a tinted row.
+    final meta = tint == null ? c.textSubtle : c.textMuted;
+    final mono = DurbunType.monoStyle(size: DurbunType.monoBody, color: c.text, height: 1.45);
     final errorLine = l.error == null ? null : errorHead(l.error!);
     return Material(
       color: tint ?? Colors.transparent,
@@ -523,32 +527,39 @@ class LogRow extends StatelessWidget {
           if (action != null) onTagAction?.call(action.$1, action.$2);
         },
         child: Container(
-          // The 3 pt edge plus 9 puts the text on the toolbar's 12 pt line.
-          padding: const EdgeInsets.fromLTRB(9, 8, 12, 8),
-          decoration: BoxDecoration(
-            border: Border(
-              left: BorderSide(color: l.isCrash ? c.lvFatal : (tint != null ? c.level(l.level) : Colors.transparent), width: 3),
-              bottom: BorderSide(color: c.hairline),
-            ),
-          ),
+          padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.hairline))),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Wrap(
-                spacing: 6,
-                runSpacing: 3,
-                crossAxisAlignment: WrapCrossAlignment.center,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(formatClock(l.ts), style: DurbunType.monoStyle(size: 11, color: c.textSubtle, height: 1.2)),
-                  if (l.isEvent)
-                    DBadge(t.event, tone: BadgeTone.accent, icon: Icons.outlined_flag_rounded)
-                  else
-                    LevelBadge(l.level),
-                  if (l.tag != null) TagChip(l.tag!, maxWidth: 150),
-                  if (l.isCrash) DBadge(t.crash, tone: BadgeTone.danger, icon: Icons.bolt_rounded),
-                  if (l.kind == 'flutter-error') DBadge('Flutter', tone: BadgeTone.danger),
-                  if (l.native) DBadge(t.native, icon: Icons.memory_rounded),
-                  if (item.repeats > 1) DBadge('×${item.repeats}', tone: BadgeTone.info, mono: true),
+                  Expanded(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: <Widget>[
+                        // A crash says so instead of its level.
+                        if (l.isEvent)
+                          DBadge(t.event, tone: BadgeTone.accent, icon: Icons.outlined_flag_rounded)
+                        else if (l.isCrash)
+                          DBadge(t.crash, tone: BadgeTone.danger, icon: Icons.bolt_rounded)
+                        else
+                          LevelBadge(l.level),
+                        if (l.tag != null) TagChip(l.tag!, maxWidth: 150),
+                        if (l.kind == 'flutter-error') const DBadge('Flutter', tone: BadgeTone.danger),
+                        if (l.native) DBadge(t.native, icon: Icons.memory_rounded),
+                        if (item.repeats > 1) DBadge('×${item.repeats}', tone: BadgeTone.info, mono: true),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(formatClock(l.ts), style: DurbunType.monoStyle(size: DurbunType.caption + 0.5, color: meta, height: 1.2)),
+                  ),
                 ],
               ),
               const SizedBox(height: 4),
@@ -556,77 +567,17 @@ class LogRow extends StatelessWidget {
                 TextSpan(
                   children: <InlineSpan>[
                     highlightTerms(rowPreview(l.message), terms, l.isEvent ? mono.copyWith(fontWeight: FontWeight.w600) : mono, c.hlMark),
-                    if (l.data != null) TextSpan(text: '  ${dataPreview(l.data)}', style: mono.copyWith(color: c.textMuted, fontSize: 11.5)),
+                    if (l.data != null) TextSpan(text: '  ${dataPreview(l.data)}', style: mono.copyWith(color: c.textMuted, fontSize: DurbunType.monoRow)),
                   ],
                 ),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
               ),
               if (errorLine != null && errorLine.isNotEmpty && errorLine != l.message)
-                Text(errorLine, maxLines: 2, overflow: TextOverflow.ellipsis, style: mono.copyWith(color: c.lvError, fontSize: 12)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A request inside the log stream.
-class _NetLogRow extends StatelessWidget {
-  const _NetLogRow({required this.call, required this.store, this.terms = const <String>[]});
-
-  final InspectorCall call;
-  final DurbunInspectorStore store;
-  final List<String> terms;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = DurbunColors.of(context);
-    final t = InspectorStrings.of(context);
-    final uri = call.uri;
-    final failed = call.error != null && !call.cancelled;
-    final status = call.error != null ? (call.cancelled ? t.cancelledShort : t.failShort) : (call.status?.toString() ?? '···');
-    final tint = switch (statusClass(call)) {
-      '4xx' => c.lvWarnBg,
-      '5xx' || 'fail' => c.lvErrorBg,
-      _ => null,
-    };
-    return Material(
-      color: tint ?? Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          FocusManager.instance.primaryFocus?.unfocus();
-          Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (routeContext) => DurbunTheme.wrap(
-                  routeContext, CallDetailPage(call: call, store: store))));
-        },
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.hairline))),
-          // Wraps instead of overflowing on narrow phones and large text.
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Wrap(
-                spacing: 6,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: <Widget>[
-                  Text(formatClock(call.ts), style: DurbunType.monoStyle(size: 11, color: c.textSubtle, height: 1.2)),
-                  Icon(Icons.swap_vert_rounded, size: 15, color: c.textSubtle),
-                  Text(call.method, style: DurbunType.monoStyle(size: 12, color: c.method(call.method), weight: FontWeight.w600, height: 1.3)),
-                  StatusPill(text: status, color: call.cancelled ? c.textSubtle : c.status(call.status, failed: failed), width: null),
-                  if (call.state != InspectorCallState.pending)
-                    Text(formatDuration(call.duration), style: DurbunType.monoStyle(size: 11, color: c.textMeta, height: 1.3)),
-                ],
-              ),
-              const SizedBox(height: 2),
-              Text.rich(
-                highlightTerms(decodeUrl(uri == null ? call.url : '${uri.host}${uri.path}'), terms,
-                    DurbunType.monoStyle(size: 12, color: c.textMuted, height: 1.3), c.hlMark),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(errorLine, maxLines: 2, overflow: TextOverflow.ellipsis, style: mono.copyWith(color: c.lvError, fontSize: DurbunType.monoRow)),
+                ),
             ],
           ),
         ),
@@ -671,10 +622,16 @@ class _LogDetailPageState extends State<LogDetailPage> {
         titleSpacing: 0,
         title: Row(
           children: <Widget>[
-            if (l.isEvent) DBadge(t.event, tone: BadgeTone.accent, icon: Icons.outlined_flag_rounded) else LevelBadge(l.level),
-            const SizedBox(width: 8),
-            if (l.tag != null) Flexible(child: TagChip(l.tag!, maxWidth: 180)),
-            if (l.isCrash) ...<Widget>[const SizedBox(width: 6), DBadge(t.crash, tone: BadgeTone.danger, icon: Icons.bolt_rounded)],
+            // A crash says so instead of its level.
+            Flexible(
+              flex: 0,
+              child: l.isEvent
+                  ? DBadge(t.event, tone: BadgeTone.accent, icon: Icons.outlined_flag_rounded)
+                  : l.isCrash
+                      ? DBadge(t.crash, tone: BadgeTone.danger, icon: Icons.bolt_rounded)
+                      : LevelBadge(l.level, size: DurbunType.label),
+            ),
+            if (l.tag != null) ...<Widget>[const SizedBox(width: 8), Flexible(child: TagChip(l.tag!, maxWidth: 180))],
           ],
         ),
         actions: <Widget>[
@@ -691,12 +648,11 @@ class _LogDetailPageState extends State<LogDetailPage> {
                 ],
               ),
             ),
-          DIconButton(icon: Icons.copy_rounded, tooltip: t.copy, size: kMinTapTarget, onTap: () => copyText(context, logAsText(l))),
+          DIconButton(icon: Icons.copy_rounded, tooltip: t.copy, onTap: () => copyText(context, logAsText(l))),
           if (store != null)
             DIconButton(
                 icon: Theme.of(context).platform == TargetPlatform.iOS ? Icons.ios_share_rounded : Icons.share_rounded,
                 tooltip: t.shareLogTitle,
-                size: kMinTapTarget,
                 onTap: () => unawaited(showLogShareSheet(context, l, store))),
           const SizedBox(width: 6),
         ],
@@ -709,12 +665,11 @@ class _LogDetailPageState extends State<LogDetailPage> {
             child: Text(
               <String>[
                 formatClock(l.ts),
-                if (l.isEvent) t.event else t.levelName(l.level),
                 if (l.native) t.nativeLayer else 'Dart',
                 if (l.kind != null && l.kind != 'text') switch (l.kind) { 'crash' => t.crash, 'flutter-error' => 'Flutter', final k => k! },
                 if (widget.repeats > 1) t.repeated(widget.repeats),
               ].join(' · '),
-              style: DurbunType.monoStyle(size: 11.5, color: c.textMeta),
+              style: DurbunType.ui(size: DurbunType.body, color: c.textMuted),
             ),
           ),
           if (tabs.length > 1)
@@ -813,7 +768,7 @@ class StackTraceView extends StatelessWidget {
         if (more > 0)
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text(InspectorStrings.of(context).moreFrames(more), style: TextStyle(fontSize: 11.5, color: c.textMeta)),
+            child: Text(InspectorStrings.of(context).moreFrames(more), style: TextStyle(fontSize: 12, color: c.textSubtle)),
           ),
       ],
     );

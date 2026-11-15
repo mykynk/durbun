@@ -31,18 +31,21 @@ void main() {
     expect(find.textContaining('heap'), findsNothing);
     final tiles = tester.widgetList<StatTile>(find.byType(StatTile)).toList();
     expect(tiles.map((t) => t.label), <String>['FPS', 'Janky frames', 'Build', 'Raster', 'Memory', 'CPU', 'Threads']);
-    expect(tiles.last.width, greaterThan(tiles.first.width * 1.5));
-    expect(tiles[tiles.length - 2].width, tiles.first.width);
+    expect(tiles.first.lead, isTrue, reason: 'FPS leads, on its own row');
+    expect(tiles[1].width, lessThan(tiles.first.width * 0.6), reason: 'the rest two per row');
+    expect(tiles.last.width, tiles[1].width, reason: 'six secondary tiles: three full rows');
   });
 
-  testWidgets('an even number of tiles keeps two per row', (tester) async {
+  testWidgets('under the lead, an odd last tile takes the whole row', (tester) async {
     final s = DurbunInspectorStore(notifyDelay: Duration.zero)
       ..ingest(buildMetric(fps: 60, memoryMB: 210, cpu: 12));
     await openPerformance(tester, s);
 
     final tiles = tester.widgetList<StatTile>(find.byType(StatTile)).toList();
     expect(tiles, hasLength(6));
-    expect(tiles.map((t) => t.width).toSet(), hasLength(1));
+    // FPS leads; five secondary tiles: two rows of two, the last one alone across.
+    expect(tiles.last.width, tiles.first.width);
+    expect(tiles.sublist(1, 5).map((t) => t.width).toSet(), hasLength(1));
   });
 
   testWidgets('a 120 Hz screen: the chart line and the note use 120 FPS and 8.3 ms', (tester) async {

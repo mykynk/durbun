@@ -46,7 +46,7 @@ void main() {
     await tester.tap(find.byTooltip('Logs').first);
     await tester.pumpAndSettle();
     // Logs: the Firebase calls are not rows of the stream either.
-    expect(find.textContaining('api.example.com/v1/accounts'), findsOneWidget);
+    expect(find.text('/v1/accounts'), findsOneWidget);
     expect(find.textContaining('firebasestorage'), findsNothing);
 
     await tester.tap(find.byTooltip('Network').first);

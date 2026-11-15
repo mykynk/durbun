@@ -47,8 +47,16 @@ Future<void> _openResponse(WidgetTester tester, DurbunInspectorStore store) asyn
   await tester.pumpAndSettle();
 }
 
+/// Opens the body's find bar (closed until its search button is tapped).
+Future<void> _openFind(WidgetTester tester) async {
+  if (find.byTooltip('Close find').evaluate().isNotEmpty) return;
+  await tester.tap(find.byTooltip('Find'));
+  await tester.pumpAndSettle();
+}
+
 /// Types into the find field and waits out the debounce.
 Future<void> _find(WidgetTester tester, String text) async {
+  await _openFind(tester);
   await tester.enterText(find.byType(TextField).last, text);
   await tester.pump(const Duration(milliseconds: 250));
   await tester.pumpAndSettle();
@@ -195,6 +203,7 @@ void main() {
       final body = _bigJson(items: 3600);
       expect(body.length, greaterThan(200 * 1024));
       await _openResponse(tester, _store(body));
+      await _openFind(tester);
       final before = _state(tester).searches;
       for (final q in ['ş', 'şa', 'şan', 'şanl', 'şanlı']) {
         await tester.enterText(find.byType(TextField).last, q);
@@ -289,6 +298,6 @@ void main() {
 
     testWidgets('request detail opened from the Network list', (tester) => openAndPullTheRowAway(tester, 'Network', '/v1/branches'));
     testWidgets('log detail opened from the Logs stream', (tester) => openAndPullTheRowAway(tester, 'Logs', 'Sepet açıldı'));
-    testWidgets('request detail opened from a row of the Logs stream', (tester) => openAndPullTheRowAway(tester, 'Logs', 'api.example.com/v1/branches'));
+    testWidgets('request detail opened from a row of the Logs stream', (tester) => openAndPullTheRowAway(tester, 'Logs', '/v1/branches'));
   });
 }

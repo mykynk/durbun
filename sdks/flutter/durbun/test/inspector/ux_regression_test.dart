@@ -70,7 +70,7 @@ void main() {
       await _open(tester, store);
       await tester.tap(find.byTooltip('Pause'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Level ▾'));
+      await tester.tap(find.text('Level'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Warning+').last);
       await tester.pumpAndSettle();
@@ -343,7 +343,7 @@ void main() {
       final store = _manyLogs(2)
         ..ingest(buildNetRequest(id: '1', ts: 1000.5, method: 'GET', url: 'https://a.io/ping', headers: const []));
       await _open(tester, store);
-      expect(find.textContaining('a.io/ping'), findsOneWidget);
+      expect(find.text('/ping'), findsOneWidget);
       await tester.tap(find.text('Filters'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(find.text('Show requests in the stream'), 120,
@@ -352,15 +352,15 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('a.io/ping'), findsNothing);
+      expect(find.text('/ping'), findsNothing);
       expect(find.widgetWithText(ActiveChip, 'Requests hidden'), findsOneWidget);
       expect(tester.getTopLeft(find.widgetWithText(ActiveChip, 'Requests hidden')).dx,
-          lessThan(tester.getTopRight(find.text('Level ▾')).dx + 30),
+          lessThan(tester.getTopRight(find.text('Level')).dx + 50),
           reason: 'active chips come right after the Filters button and the level menu, before the quick toggles');
       // Its start is on screen (checked above); the test font is wide.
       await tester.tapAt(tester.getTopLeft(find.widgetWithText(ActiveChip, 'Requests hidden')) + const Offset(12, 15));
       await tester.pumpAndSettle();
-      expect(find.textContaining('a.io/ping'), findsOneWidget);
+      expect(find.text('/ping'), findsOneWidget);
     });
   });
 }

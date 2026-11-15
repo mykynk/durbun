@@ -18,6 +18,7 @@ import 'stats_view.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
+import 'widgets.dart' show ListRow;
 
 Future<void> showToolsSheet(BuildContext context, DurbunInspectorStore store) {
   FocusManager.instance.primaryFocus?.unfocus();
@@ -118,9 +119,9 @@ class _ToolsSheet extends StatelessWidget {
                               '${app?['name'] ?? t.title}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: c.text),
+                              style: TextStyle(fontSize: DurbunType.title, fontWeight: FontWeight.w600, color: c.text, height: 1.25),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 2),
                             Text(
                               <String>[
                                 if (app?['version'] != null) '${app!['version']}${app['build'] != null ? ' (${app['build']})' : ''}',
@@ -129,7 +130,7 @@ class _ToolsSheet extends StatelessWidget {
                               ].join(' · '),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: DurbunType.monoStyle(size: 11.5, color: c.textMeta, height: 1.35),
+                              style: DurbunType.ui(size: DurbunType.body, color: c.textMuted, height: 1.35),
                             ),
                             const SizedBox(height: 8),
                             _ConnectionStatus(
@@ -266,13 +267,20 @@ Future<bool> confirmClear(BuildContext context) async {
         return AlertDialog(
           backgroundColor: c.bgElevated,
           surfaceTintColor: Colors.transparent,
-          title: Text(t.clearConfirmTitle, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: c.text)),
-          content: Text(t.clearConfirmBody, style: TextStyle(fontSize: 14, height: 1.4, color: c.textMuted)),
+          title: Text(t.clearConfirmTitle),
+          content: Text(t.clearConfirmBody),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           actions: <Widget>[
-            TextButton(onPressed: () => Navigator.of(dialog).pop(false), child: Text(t.cancel)),
+            TextButton(
+              onPressed: () => Navigator.of(dialog).pop(false),
+              style: TextButton.styleFrom(foregroundColor: c.textMuted),
+              child: Text(t.cancel),
+            ),
             TextButton(
               onPressed: () => Navigator.of(dialog).pop(true),
-              style: TextButton.styleFrom(foregroundColor: c.danger),
+              style: TextButton.styleFrom(
+                  foregroundColor: c.danger,
+                  textStyle: const TextStyle(fontSize: DurbunType.label, fontWeight: FontWeight.w600)),
               child: Text(t.clear),
             ),
           ],
@@ -330,7 +338,7 @@ class _Group extends StatelessWidget {
       child: Column(
         children: <Widget>[
           for (var i = 0; i < children.length; i++) ...<Widget>[
-            if (i > 0) Padding(padding: const EdgeInsets.only(left: 56), child: Divider(height: 1, color: c.hairline)),
+            if (i > 0) Padding(padding: const EdgeInsets.only(left: 52), child: Divider(height: 1, color: c.hairline)),
             children[i],
           ],
         ],
@@ -362,56 +370,16 @@ class _ToolRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    final tone = destructive ? c.danger : c.textMuted;
-    return InkWell(
+    // A plain icon, no tile; only Clear speaks in red.
+    return ListRow(
+      icon: icon,
+      iconColor: destructive ? c.danger : c.textMuted,
+      title: label,
+      titleColor: destructive ? c.danger : null,
+      subtitle: hint,
+      value: value == null || value!.isEmpty ? null : value,
+      chevron: chevron,
       onTap: onTap,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 52),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-          child: Row(
-            children: <Widget>[
-              // One quiet tile for every tool; only Clear speaks in red.
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                    color: destructive ? c.dangerSoft : c.trackBg,
-                    borderRadius: BorderRadius.circular(DurbunRadius.md - 2)),
-                child: Icon(icon, size: 18, color: tone),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(label,
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: destructive ? c.danger : c.text)),
-                    if (hint != null) Text(hint!, style: TextStyle(fontSize: 12, color: c.textMeta)),
-                  ],
-                ),
-              ),
-              if (value != null && value!.isNotEmpty)
-                // Ends where the others end, next to the chevron.
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 170),
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: Text(value!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.right,
-                        style: DurbunType.monoStyle(size: 12, color: c.textMeta, height: 1.2)),
-                  ),
-                ),
-              if (chevron) ...<Widget>[
-                const SizedBox(width: 4),
-                Icon(Icons.chevron_right_rounded, size: 20, color: c.textSubtle),
-              ],
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

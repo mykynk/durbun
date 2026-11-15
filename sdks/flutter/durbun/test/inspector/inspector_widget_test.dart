@@ -127,7 +127,7 @@ void main() {
 
     expect(find.text('Sepet açıldı'), findsOneWidget, reason: 'two identical lines are one row');
     expect(find.text('×2'), findsOneWidget);
-    expect(find.textContaining('api.example.com/v1/orders'), findsOneWidget, reason: 'requests are rows of the log stream');
+    expect(find.text('/v1/orders'), findsOneWidget, reason: 'requests are rows of the log stream');
     expect(find.text('Crash'), findsOneWidget);
 
     await tester.ensureVisible(find.text('Errors only'));
@@ -199,7 +199,6 @@ void main() {
     await tester.fling(find.byType(TabBarView), const Offset(-500, 0), 1500);
     await tester.pumpAndSettle();
     expect(find.text('Sepet açıldı'), findsOneWidget, reason: 'swiped to Logs');
-    expect(find.text('/charge'), findsNothing);
 
     store.ingest(buildLog(level: 'info', message: 'while away', tag: 'cart', ts: 1400));
     await tester.fling(find.byType(TabBarView), const Offset(500, 0), 1500);

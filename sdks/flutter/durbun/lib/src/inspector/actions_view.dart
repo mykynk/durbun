@@ -134,7 +134,7 @@ class _AppToolsViewState extends State<AppToolsView> {
             children: <Widget>[
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                child: Text(_label(t, a), style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: c.text)),
+                child: Text(_label(t, a), style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
               ),
               for (final o in options)
                 ListTile(
@@ -165,7 +165,7 @@ class _AppToolsViewState extends State<AppToolsView> {
             padding: const EdgeInsets.all(12),
             children: <Widget>[
               const SizedBox(height: 24),
-              EmptyState(icon: Icons.tune_rounded, title: t.noToolsTitle, body: t.noToolsBody),
+              EmptyState(title: t.noToolsTitle, body: t.noToolsBody),
             ],
           );
         }
@@ -227,7 +227,7 @@ class _AppToolsViewState extends State<AppToolsView> {
         trailing = Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 140),
-            child: Text(shown, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, color: c.textMeta)),
+            child: Text(shown, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, color: c.textSubtle)),
           ),
           Icon(Icons.chevron_right_rounded, size: 20, color: c.textSubtle),
         ]);

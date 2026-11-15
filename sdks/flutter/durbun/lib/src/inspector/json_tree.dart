@@ -152,7 +152,10 @@ class JsonTreeView extends StatefulWidget {
       this.initialQuery = '',
       this.onQueryChanged,
       this.index,
-      this.autoDepth = 3});
+      this.autoDepth = 3,
+      this.showFind = true,
+      this.onCloseFind,
+      this.showActions = true});
 
   final Object? value;
 
@@ -168,11 +171,19 @@ class JsonTreeView extends StatefulWidget {
   final String initialQuery;
   final ValueChanged<String>? onQueryChanged;
 
+  /// See [FindableLines.showFind] and [FindableLines.onCloseFind].
+  final bool showFind;
+  final VoidCallback? onCloseFind;
+
+  /// Expand all / collapse all in the find bar; off where a menu offers
+  /// them ([JsonTreeViewState.expandAll]).
+  final bool showActions;
+
   @override
-  State<JsonTreeView> createState() => _JsonTreeViewState();
+  State<JsonTreeView> createState() => JsonTreeViewState();
 }
 
-class _JsonTreeViewState extends State<JsonTreeView> {
+class JsonTreeViewState extends State<JsonTreeView> {
   final Set<String> _collapsed = <String>{};
   final Set<String> _opened = <String>{};
   bool _all = false;
@@ -184,9 +195,9 @@ class _JsonTreeViewState extends State<JsonTreeView> {
   late JsonSearchIndex _index = widget.index ?? JsonSearchIndex(widget.value);
 
   @override
-  void didUpdateWidget(JsonTreeView old) {
-    super.didUpdateWidget(old);
-    if (!identical(old.value, widget.value)) {
+  void didUpdateWidget(JsonTreeView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.value, widget.value)) {
       _index = widget.index ?? JsonSearchIndex(widget.value);
       _rev++;
     }
@@ -248,6 +259,23 @@ class _JsonTreeViewState extends State<JsonTreeView> {
     return out;
   }
 
+  /// Opens every container.
+  void expandAll() => setState(() {
+        _rev++;
+        _all = true;
+        _collapsed.clear();
+      });
+
+  /// Closes every container but the root.
+  void collapseAll() => setState(() {
+        _rev++;
+        _all = false;
+        _opened.clear();
+        _collapsed
+          ..clear()
+          ..addAll(allContainerPaths(widget.value).where((p) => p != r'$'));
+      });
+
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
@@ -261,29 +289,14 @@ class _JsonTreeViewState extends State<JsonTreeView> {
       textStyle: _style(c),
       prefixWidth: 14,
       buildLines: (folded) => _build(folded, c),
-      actions: <Widget>[
-        DIconButton(
-          icon: Icons.unfold_more_rounded,
-          tooltip: t.expandAll,
-          onTap: () => setState(() {
-            _rev++;
-            _all = true;
-            _collapsed.clear();
-          }),
-        ),
-        DIconButton(
-          icon: Icons.unfold_less_rounded,
-          tooltip: t.collapseAll,
-          onTap: () => setState(() {
-            _rev++;
-            _all = false;
-            _opened.clear();
-            _collapsed
-              ..clear()
-              ..addAll(allContainerPaths(widget.value).where((p) => p != r'$'));
-          }),
-        ),
-      ],
+      showFind: widget.showFind,
+      onCloseFind: widget.onCloseFind,
+      actions: !widget.showActions
+          ? const <Widget>[]
+          : <Widget>[
+              DIconButton(icon: Icons.unfold_more_rounded, tooltip: t.expandAll, onTap: expandAll),
+              DIconButton(icon: Icons.unfold_less_rounded, tooltip: t.collapseAll, onTap: collapseAll),
+            ],
       rowBuilder: (context, i, first, spans) {
         final l = _lines[i];
         final text = Text.rich(spans, maxLines: 1, softWrap: false, overflow: TextOverflow.clip);

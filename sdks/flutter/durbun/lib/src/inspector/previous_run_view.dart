@@ -5,7 +5,6 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import 'home.dart';
 import 'logs_view.dart' show LogDetailPage, errorHead;
@@ -32,35 +31,30 @@ class PreviousRunOffView extends StatelessWidget {
     return ListView(
       padding: EdgeInsets.fromLTRB(20, 28, 20, 24 + MediaQuery.paddingOf(context).bottom),
       children: <Widget>[
-        Icon(Icons.history_rounded, size: 40, color: c.textSubtle),
-        const SizedBox(height: 14),
-        Text(t.previousRunOffTitle,
-            textAlign: TextAlign.center, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
-        const SizedBox(height: 8),
-        Text(t.previousRunOffBody,
-            textAlign: TextAlign.center, style: TextStyle(fontSize: 14, height: 1.45, color: c.textMuted)),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: c.fieldBg,
-            borderRadius: BorderRadius.circular(DurbunRadius.md),
-            border: Border.all(color: c.border),
-          ),
-          child: SelectableText(kKeepPreviousRunSnippet,
-              style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.45)),
-        ),
-        const SizedBox(height: 10),
-        Align(
-          child: DButton(
-            label: t.copy,
-            icon: Icons.copy_rounded,
-            onTap: () => Clipboard.setData(const ClipboardData(text: kKeepPreviousRunSnippet)).catchError((Object _) {}),
+        MaxWidth(
+          width: 480,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              const Center(child: DurbunMark(size: 44)),
+              const SizedBox(height: 14),
+              Text(t.previousRunOffTitle,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: DurbunType.title, fontWeight: FontWeight.w600, color: c.text)),
+              const SizedBox(height: 6),
+              Text(t.previousRunOffBody,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: DurbunType.body + 1, height: 1.45, color: c.textMuted)),
+              const SizedBox(height: 20),
+              // The copy button sits in the snippet's corner.
+              const CodeBlock(text: kKeepPreviousRunSnippet),
+              const SizedBox(height: 16),
+              Text(t.previousRunOffStorage,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: DurbunType.body, height: 1.4, color: c.textSubtle)),
+            ],
           ),
         ),
-        const SizedBox(height: 16),
-        Text(t.previousRunOffStorage,
-            textAlign: TextAlign.center, style: TextStyle(fontSize: 12.5, height: 1.4, color: c.textMeta)),
       ],
     );
   }
@@ -147,7 +141,7 @@ class _PreviousRunPageState extends State<PreviousRunPage> {
                     ],
                   ),
                 )
-              : EmptyState(icon: Icons.history_rounded, title: t.previousRunEmptyTitle, body: t.previousRunEmptyBody),
+              : EmptyState(title: t.previousRunEmptyTitle, body: t.previousRunEmptyBody),
         );
       },
     );
@@ -187,9 +181,9 @@ class _RunBanner extends StatelessWidget {
           Text(info,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.text)),
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.text)),
           const SizedBox(height: 2),
-          Text(t.previousRunNote, style: TextStyle(fontSize: 11.5, color: c.textMeta)),
+          Text(t.previousRunNote, style: TextStyle(fontSize: 12, color: c.textSubtle)),
           if (crashes.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
             _CrashCallout(crash: crashes.last, count: crashes.length),
@@ -251,7 +245,7 @@ class _CrashCallout extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                   Text(t.previousRunOpenCrash,
-                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.danger)),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.danger)),
                   Icon(Icons.chevron_right_rounded, size: 20, color: c.danger),
                 ],
               ),

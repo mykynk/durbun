@@ -154,8 +154,8 @@ class _Header extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 4),
-          if (onTools != null) DIconButton(icon: Icons.grid_view_outlined, tooltip: t.tools, size: kMinTapTarget, onTap: onTools),
-          DIconButton(icon: Icons.close_rounded, tooltip: t.close, size: kMinTapTarget, onTap: onClose),
+          if (onTools != null) DIconButton(icon: Icons.grid_view_outlined, tooltip: t.tools, onTap: onTools),
+          DIconButton(icon: Icons.close_rounded, tooltip: t.close, onTap: onClose),
         ],
       ),
     );

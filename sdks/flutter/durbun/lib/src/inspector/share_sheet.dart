@@ -237,17 +237,17 @@ class _ReportSheetState extends State<_ReportSheet> {
                   children: <Widget>[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                      child: Text(widget.title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: c.text)),
+                      child: Text(widget.title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-                      child: Text(widget.description, style: TextStyle(fontSize: 12.5, height: 1.35, color: c.textMeta)),
+                      child: Text(widget.description, style: TextStyle(fontSize: 13, height: 1.35, color: c.textSubtle)),
                     ),
                     ...widget.options,
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: SectionTitle(t.preview,
-                          trailing: Text(shareBytes(utf8.encode(widget.report).length), style: DurbunType.monoStyle(size: 11, color: c.textMeta))),
+                          trailing: Text(shareBytes(utf8.encode(widget.report).length), style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle))),
                     ),
                     // What the teammate gets, exactly.
                     Container(

@@ -114,7 +114,7 @@ class _JwtSheet extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Text('JWT', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: c.text)),
+                Text('JWT', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
                 const SizedBox(width: 10),
                 if (exp != null)
                   Flexible(
@@ -132,7 +132,7 @@ class _JwtSheet extends StatelessWidget {
                 ),
               ],
             ),
-            Text(t.jwtNotVerified, style: TextStyle(fontSize: 11.5, color: c.textMeta)),
+            Text(t.jwtNotVerified, style: TextStyle(fontSize: 12, color: c.textSubtle)),
             SectionTitle(t.jwtClaims),
             KeyValueTable(rows: rows(jwt.claims)),
             SectionTitle(t.jwtHeader),

@@ -42,7 +42,7 @@ class MocksView extends StatelessWidget {
               padding: _pad(context),
               children: <Widget>[
                 const SizedBox(height: 24),
-                EmptyState(icon: Icons.theater_comedy_outlined, title: t.noMocksTitle, body: connected ? t.noMocksConnected : t.noMocksOffline),
+                EmptyState(title: t.noMocksTitle, body: connected ? t.noMocksConnected : t.noMocksOffline),
               ],
             );
           }
@@ -199,7 +199,7 @@ class InfoView extends StatelessWidget {
                                 if (app?['version'] != null) '${app!['version']}${app['build'] != null ? ' (${app['build']})' : ''}',
                                 if (app?['id'] != null) '${app!['id']}',
                               ].join(' · '),
-                              style: DurbunType.monoStyle(size: 11.5, color: c.textMeta),
+                              style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle),
                             ),
                           ],
                         ),
@@ -291,10 +291,10 @@ class InfoView extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: <Widget>[
                                 Text(rows[i].$1, style: TextStyle(fontSize: 13, color: c.text, fontWeight: FontWeight.w500)),
-                                Text(rows[i].$2, style: DurbunType.monoStyle(size: 11, color: c.textMeta)),
+                                Text(rows[i].$2, style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle)),
                                 if (rows[i].$4 != null) ...<Widget>[
                                   const SizedBox(height: 2),
-                                  Text(rows[i].$4!, style: TextStyle(fontSize: 11.5, color: c.textMuted)),
+                                  Text(rows[i].$4!, style: TextStyle(fontSize: 12, color: c.textMuted)),
                                 ],
                               ],
                             ),
@@ -307,7 +307,7 @@ class InfoView extends StatelessWidget {
               SectionTitle(t.notCapturedTitle),
               Padding(
                 padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
-                child: Text(t.notCapturedIntro, style: TextStyle(fontSize: 12.5, height: 1.4, color: c.textMuted)),
+                child: Text(t.notCapturedIntro, style: TextStyle(fontSize: 13, height: 1.4, color: c.textMuted)),
               ),
               _Card(
                 padding: EdgeInsets.zero,
@@ -327,7 +327,7 @@ class InfoView extends StatelessWidget {
                               children: <Widget>[
                                 Text(missing[i].$1, style: TextStyle(fontSize: 13, color: c.text, fontWeight: FontWeight.w500)),
                                 const SizedBox(height: 2),
-                                Text(missing[i].$2, style: TextStyle(fontSize: 11.5, height: 1.35, color: c.textMuted)),
+                                Text(missing[i].$2, style: TextStyle(fontSize: 12, height: 1.35, color: c.textMuted)),
                               ],
                             ),
                           ),
@@ -377,12 +377,12 @@ class _InfoRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          SizedBox(width: 104, child: Text(label, style: TextStyle(fontSize: 12.5, color: c.textMuted))),
+          SizedBox(width: 104, child: Text(label, style: TextStyle(fontSize: 13, color: c.textMuted))),
           if (dot != null) ...<Widget>[
             Padding(padding: const EdgeInsets.only(top: 6), child: Container(width: 7, height: 7, decoration: BoxDecoration(color: dot, shape: BoxShape.circle))),
             const SizedBox(width: 6),
           ],
-          Expanded(child: Text(value, style: TextStyle(fontSize: 12.5, color: color ?? c.text))),
+          Expanded(child: Text(value, style: TextStyle(fontSize: 13, color: color ?? c.text))),
         ],
       ),
     );

@@ -154,6 +154,7 @@ class FindBar extends StatelessWidget {
       this.hint,
       this.capped = false,
       this.tooShort = false,
+      this.autofocus = false,
       this.trailing = const <Widget>[]});
 
   final TextEditingController controller;
@@ -172,6 +173,7 @@ class FindBar extends StatelessWidget {
 
   /// The query is shorter than the minimum.
   final bool tooShort;
+  final bool autofocus;
   final List<Widget> trailing;
 
   @override
@@ -198,6 +200,7 @@ class FindBar extends StatelessWidget {
               controller: controller,
               onChanged: onChanged,
               onSubmitted: onSubmitted,
+              autofocus: autofocus,
               trailing: !searching
                   ? null
                   : Padding(
@@ -212,8 +215,8 @@ class FindBar extends StatelessWidget {
                     ),
             ),
           ),
-          DIconButton(icon: Icons.keyboard_arrow_up_rounded, tooltip: t.prevMatch, size: 36, onTap: total > 0 ? onPrev : null),
-          DIconButton(icon: Icons.keyboard_arrow_down_rounded, tooltip: t.nextMatch, size: 36, onTap: total > 0 ? onNext : null),
+          DIconButton(icon: Icons.keyboard_arrow_up_rounded, tooltip: t.prevMatch, onTap: total > 0 ? onPrev : null),
+          DIconButton(icon: Icons.keyboard_arrow_down_rounded, tooltip: t.nextMatch, onTap: total > 0 ? onNext : null),
           ...trailing,
         ],
       ),
@@ -244,7 +247,9 @@ class FindableLines extends StatefulWidget {
       this.hint,
       this.note,
       this.minChars = 2,
-      this.debounce = const Duration(milliseconds: 200)});
+      this.debounce = const Duration(milliseconds: 200),
+      this.showFind = true,
+      this.onCloseFind});
 
   final Object linesKey;
   final List<SearchLine> Function(String foldedQuery) buildLines;
@@ -266,6 +271,13 @@ class FindableLines extends StatefulWidget {
   /// Shorter queries do not search (one letter matches almost everything).
   final int minChars;
   final Duration debounce;
+
+  /// False: no find bar while the query is empty (the body pane opens it
+  /// from its search button, so the page keeps two bars over the text).
+  final bool showFind;
+
+  /// Adds a close button to the find bar; closing clears the query.
+  final VoidCallback? onCloseFind;
 
   @override
   State<FindableLines> createState() => FindableLinesState();
@@ -424,19 +436,35 @@ class FindableLinesState extends State<FindableLines> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        FindBar(
-          controller: _field,
-          onChanged: _onChanged,
-          onSubmitted: _onSubmitted,
-          total: tooShort ? 0 : _occ.length,
-          current: _current,
-          capped: _occ.length >= 5000,
-          tooShort: tooShort,
-          hint: widget.hint,
-          onPrev: () => _step(-1),
-          onNext: () => _step(1),
-          trailing: widget.actions,
-        ),
+        if (widget.showFind || _field.text.isNotEmpty)
+          FindBar(
+            controller: _field,
+            onChanged: _onChanged,
+            onSubmitted: _onSubmitted,
+            total: tooShort ? 0 : _occ.length,
+            current: _current,
+            capped: _occ.length >= 5000,
+            tooShort: tooShort,
+            hint: widget.hint,
+            autofocus: !widget.showFind && _field.text.isEmpty,
+            onPrev: () => _step(-1),
+            onNext: () => _step(1),
+            trailing: <Widget>[
+              ...widget.actions,
+              if (widget.onCloseFind != null)
+                DIconButton(
+                  icon: Icons.close_rounded,
+                  tooltip: InspectorStrings.of(context).closeFind,
+                  onTap: () {
+                    if (_field.text.isNotEmpty) {
+                      _field.clear();
+                      _onChanged('');
+                    }
+                    widget.onCloseFind!();
+                  },
+                ),
+            ],
+          ),
         if (widget.note?.call(_applied, _occ.length) case final String note)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
