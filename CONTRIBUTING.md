@@ -84,8 +84,9 @@ All parts share one version and are released together, by hand from a maintainer
    changelog entries under a new `## [X.Y.Z] - YYYY-MM-DD` heading (and `## X.Y.Z` in the Flutter
    changelogs). Merge to `main`.
 2. Run `npm run release:check` on `main`. It runs every check a release needs, one after the other: a clean
-   tree on `main`, a tag that does not exist yet, the versions, the changelog section dated today, type
-   checks, tests and builds of every part, the Flutter, Android and iOS SDKs, `pub publish --dry-run`,
+   tree on `main`, a tag that does not exist yet, no signing keys or `.env` files in git, the versions, the
+   changelog section dated today (with an empty `## [Unreleased]` kept above it), the latest Electron patch
+   of its major version, type checks, tests and builds of every part, the Flutter, Android and iOS SDKs, `pub publish --dry-run`,
    `npm pack --dry-run` and `pod lib lint`. It changes nothing and stops at the first problem with what to
    do; `npm run release:check -- --from <step>` continues from there (`--list` shows the steps,
    `--rehearse` tries it on another branch without the git and date checks).
@@ -101,7 +102,8 @@ All parts share one version and are released together, by hand from a maintainer
 4. Only now tag and push: `git tag -a vX.Y.Z -m "Dürbün X.Y.Z"` and `git push origin vX.Y.Z`. A pushed tag
    never moves: Swift Package Manager caches it.
 5. Draft the GitHub release with the version's changelog section as notes
-   (`node scripts/release-notes.mjs X.Y.Z > notes.md`) and attach the DMG and ZIP files, both
+   (`node scripts/release-notes.mjs X.Y.Z > notes.md` adds which DMG is for which Mac, the SDK lines to
+   upgrade to and how to check the checksums) and attach the DMG and ZIP files, both
    `durbun-update-mac-*.json` feeds and `SHA256SUMS.txt`:
    `gh release create vX.Y.Z --draft --verify-tag --title "Dürbün X.Y.Z" --notes-file notes.md …`.
    The Mac app looks for updates at `releases/latest/download/durbun-update-mac-<arch>.json`, so a draft or

@@ -278,6 +278,10 @@ export interface Strings {
   replace: string;
   moveFailedTitle: string;
   moveFailedMessage(error: string): string;
+  verboseLog: string;
+  verboseRestartTitle(on: boolean): string;
+  verboseRestartMessage: string;
+  summaryLine(devices: number, apps: number): string;
   unresponsiveTitle: string;
   unresponsiveMessage: string;
   wait: string;
@@ -375,7 +379,7 @@ const tr: Strings = {
   uiCrashedMessage: (reason) => `Pencerenin içeriği kısa sürede birkaç kez beklenmedik şekilde kapandı (${reason}). Sunucu çalışmaya ve yakalamaya devam ediyor.`,
   notificationsUnavailable: 'macOS bildirimleri bu (imzasız) sürümde gösterilemedi; bunun yerine Dock simgesi işaretlenir.',
   settings: 'Ayarlar…',
-  docs: 'Dürbün Belgeleri',
+  docs: 'Dürbün Kılavuzları',
   reportIssue: 'Sorun Bildir…',
   checkUpdates: 'Güncellemeleri Denetle…',
   licenses: 'Lisanslar',
@@ -425,13 +429,13 @@ const tr: Strings = {
   autoCheckNo: 'Denetleme',
   file: 'Dosya',
   openFile: 'Aç…',
-  openFileMessage: 'Bir Dürbün paketi, yedeği ya da oturum kaydı seçin',
+  openFileMessage: 'Bir Dürbün paketi, yedeği, oturum kaydı ya da HAR dosyası seçin',
   openFailedTitle: 'Dosya açılamadı',
   openFailedMessage: (name, problem) =>
     ({
       tooLarge: `${name} 500 MB'tan büyük; Dürbün en fazla 500 MB içe aktarır.`,
       unreadable: `${name} okunamadı. Dosyanın yerinde olduğunu ve Dürbün'ün okuyabildiğini kontrol edin.`,
-      unsupported: `${name} bir Dürbün dosyası değil. Dürbün .durbun paketlerini ve yedeklerini, .durbun.json oturum kayıtlarını açar.`,
+      unsupported: `${name} bir Dürbün dosyası değil. Dürbün .durbun paketlerini ve yedeklerini, .durbun.json oturum kayıtlarını ve .har dosyalarını açar.`,
     })[problem],
   copyDiagnostics: 'Tanılama Bilgisini Kopyala',
   diagnosticsCopiedTitle: 'Tanılama bilgisi kopyalandı',
@@ -461,6 +465,10 @@ const tr: Strings = {
   replace: 'Değiştir',
   moveFailedTitle: 'Dürbün taşınamadı',
   moveFailedMessage: (error) => `${error}\n\nDürbün'ü Uygulamalar klasörüne kendiniz sürükleyebilirsiniz.`,
+  verboseLog: 'Ayrıntılı Tanılama Günlüğü',
+  verboseRestartTitle: (on) => (on ? 'Ayrıntılı günlük, Dürbün yeniden başlayınca açılır' : 'Ayrıntılı günlük, Dürbün yeniden başlayınca kapanır'),
+  verboseRestartMessage: 'Dürbün şimdi yeniden başlatılsın mı? Yakalama birkaç saniye durur; bağlı uygulamalar kendiliğinden yeniden bağlanır.',
+  summaryLine: (devices, apps) => `${devices} cihaz · ${apps} uygulama`,
   unresponsiveTitle: 'Dürbün penceresi yanıt vermiyor',
   unresponsiveMessage: 'Sunucu çalışmaya ve yakalamaya devam ediyor. Bekleyebilir ya da pencereyi yeniden yükleyebilirsiniz; yeniden yüklemede donmaya yol açmış olabilecek kayıtlı arama sıfırlanır.',
   wait: 'Bekle',
@@ -558,7 +566,7 @@ const en: Strings = {
   uiCrashedMessage: (reason) => `The window content closed unexpectedly several times in a short while (${reason}). The server keeps running and capturing.`,
   notificationsUnavailable: 'macOS notifications could not be shown by this (unsigned) build; the Dock icon is marked instead.',
   settings: 'Settings…',
-  docs: 'Dürbün Documentation',
+  docs: 'Dürbün Guides',
   reportIssue: 'Report an Issue…',
   checkUpdates: 'Check for Updates…',
   licenses: 'Licenses',
@@ -608,13 +616,13 @@ const en: Strings = {
   autoCheckNo: "Don't Check",
   file: 'File',
   openFile: 'Open…',
-  openFileMessage: 'Choose a Dürbün package, backup or session recording',
+  openFileMessage: 'Choose a Dürbün package, backup, session recording or HAR file',
   openFailedTitle: 'The file could not be opened',
   openFailedMessage: (name, problem) =>
     ({
       tooLarge: `${name} is larger than 500 MB, the most Dürbün imports.`,
       unreadable: `${name} could not be read. Check that the file is still there and that Dürbün may read it.`,
-      unsupported: `${name} is not a Dürbün file. Dürbün opens .durbun packages and backups and .durbun.json session recordings.`,
+      unsupported: `${name} is not a Dürbün file. Dürbün opens .durbun packages and backups, .durbun.json session recordings and .har files.`,
     })[problem],
   copyDiagnostics: 'Copy Diagnostic Info',
   diagnosticsCopiedTitle: 'Diagnostic info copied',
@@ -644,6 +652,10 @@ const en: Strings = {
   replace: 'Replace',
   moveFailedTitle: 'Dürbün could not be moved',
   moveFailedMessage: (error) => `${error}\n\nYou can drag Dürbün to the Applications folder yourself.`,
+  verboseLog: 'Verbose Diagnostic Log',
+  verboseRestartTitle: (on) => (on ? 'Verbose logging starts when Dürbün restarts' : 'Verbose logging stops when Dürbün restarts'),
+  verboseRestartMessage: 'Restart Dürbün now? Capture stops for a few seconds; connected apps reconnect on their own.',
+  summaryLine: (devices, apps) => `${devices} ${devices === 1 ? 'device' : 'devices'} · ${apps} ${apps === 1 ? 'app' : 'apps'}`,
   unresponsiveTitle: 'The Dürbün window is not responding',
   unresponsiveMessage: 'The server keeps running and capturing. You can wait or reload the window; a reload resets the saved search that may have caused the hang.',
   wait: 'Wait',

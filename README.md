@@ -314,8 +314,9 @@ state, single-instance lock and logs), `DURBUN_DEMO=1` or `DURBUN_DEBUG=1`.
    - `~/.durbun`: settings (`settings.json`), mock rules (`mocks.json`), flows (`flows/`), run history
      (`flow-runs/`), environments (`environments.json`), backup settings (`backup.json`) and temporary files.
      Backups you wrote into another folder stay there.
-   - `~/Library/Application Support/Dürbün`: window state, interface preferences, the diagnostic log and
-     crash dumps.
+   - `~/Library/Application Support/Dürbün`: window state, interface preferences, the app's own settings
+     (`desktop.json`), the diagnostic log and crash dumps.
+   - `~/Library/Preferences/dev.durbun.desktop.plist`: what macOS keeps for the app.
 3. Remove the SDK packages from your apps.
 
 ## Development

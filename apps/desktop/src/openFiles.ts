@@ -3,12 +3,15 @@
  * Electron import, so it is unit-tested). macOS reports them with 'open-file', also before the app is
  * ready; they wait in a queue until the UI is loaded and asks for them. The UI then imports each one through
  * its own "Import a file" path (a package or flow file asks what to bring in, a session recording opens as
- * an imported device), so a file opened here behaves exactly like one dropped on the window.
+ * an imported device, a HAR file is imported as network traffic), so a file opened here behaves exactly like
+ * one dropped on the window.
  */
 import path from 'node:path';
 
-/** What the window's import accepts: Dürbün packages and backups, and session recordings / flow files. */
-export const OPENABLE = /\.(durbun|json)$/i;
+/** What the window's import accepts: Dürbün packages and backups, session recordings / flow files, HAR files. */
+export const OPENABLE = /\.(durbun|json|har)$/i;
+/** File → Open… filter (extensions without the dot). */
+export const OPEN_EXTENSIONS = ['durbun', 'json', 'har'];
 
 /** The server's import limit (packages/server/src/http/api.ts IMPORT_LIMIT_BYTES). */
 export const MAX_OPEN_BYTES = 500 * 1024 * 1024;

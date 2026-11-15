@@ -17,7 +17,7 @@
  *  - the window only ever loads the local server; links open in the default browser
  *  - Dürbün files open from Finder and File → Open… (openFiles.ts); updates only after a yes (updateFlow.ts)
  */
-import { app, autoUpdater, BrowserWindow, clipboard, crashReporter, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell, Tray, type WebContents } from 'electron';
+import { app, autoUpdater, BrowserWindow, clipboard, crashReporter, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, screen, session, shell, Tray, type WebContents } from 'electron';
 import { execFile } from 'node:child_process';
 import { accessSync, constants as fsConstants, existsSync, promises as fsp, readFileSync } from 'node:fs';
 import os from 'node:os';
@@ -26,7 +26,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { splashUrl, statusPageUrl, syncFullScreen, TRAFFIC_LIGHTS } from './chrome';
 import { applyLoginShellEnv, SHELL_ENV_TIMEOUT_MS, type ShellEnvKey, type ShellEnvResult } from './env';
 import { pickLanguage, STRINGS, type Strings } from './i18n';
-import { createPrefsStore } from './desktopPrefs';
+import { createPrefsStore, parsePrefsPatch, prefsView, startupOptions } from './desktopPrefs';
 import { diagnosticsText, issueUrl, lastLines, shortLocation } from './diagnostics';
 import { createQuitFlow } from './lifecycle';
 import { installFileLog, pruneCrashDumps, type FileLog, type ScopedLogger } from './log';
@@ -34,7 +34,8 @@ import { appMenuTemplate, serverLabel, trayMenuTemplate, trayNeedsAttention, typ
 import { decideNavigation, isAllowedPermission, isAllowedRequest, isAppUrl, REQUEST_FILTER_URLS } from './navigation';
 import { attachNotices, bundledServerVersion, serverWarnings } from './notices';
 import { createNotifier, type Notifier, type NotifyRequest } from './notifier';
-import { createOpenQueue, readOpened } from './openFiles';
+import { createOpenQueue, OPEN_EXTENSIONS, readOpened } from './openFiles';
+import { parseSummary, sameSummary, SUMMARY_INTERVAL_MS, type Summary } from './summary';
 import { devIconPath, serverPaths } from './paths';
 import { DEFAULT_HTTP_PORT, DEFAULT_SDK_PORT, isPortFree, parsePortEnv, probeDurbun, proveDurbun, watchAttached, type DurbunProbe } from './ports';
 import { createReloadGuard, resolveFailure, type FailureChoice } from './recovery';
@@ -55,6 +56,8 @@ interface EmbeddedServer {
   notices?: unknown[];
   sdkListening: boolean;
   stop(): Promise<void>;
+  /** After the Mac wakes: drivers check their streams (absent in older bundles). */
+  onSystemResume?(): void;
 }
 interface ServerModule {
   startServer(
@@ -182,18 +185,14 @@ function run(): void {
       showWindow();
       if (win && !win.isDestroyed() && appOrigin) win.webContents.send('durbun:command', 'settings');
     },
-    openDocs: () => openExternal(`${REPO_URL}#readme`),
+    openDocs: () => openExternal(`${REPO_URL}/tree/main/docs/guides`),
     reportIssue: () => void reportIssue(),
     copyDiagnostics: () => void copyDiagnostics(),
     checkForUpdates: () => void updates.check('manual'),
     restartToUpdate: () => void updates.offerRestart(),
-    setAutoUpdateCheck: (on) => {
-      void updates.setAutoCheck(on).then(() => {
-        refreshMenus();
-        if (on) void autoUpdateTick();
-      });
-    },
-    setOpenAtLogin: (on) => void setOpenAtLogin(on),
+    setAutoUpdateCheck: (on) => void setAutoUpdateCheck(on).then(notifyPrefsChanged),
+    setOpenAtLogin: (on) => void setOpenAtLogin(on).then(notifyPrefsChanged),
+    setVerboseLog: (on) => void setVerboseLog(on),
     openFile: () => void pickFiles(),
     openLicenses: () => {
       const dir = app.isPackaged ? path.join(process.resourcesPath, 'legal') : path.resolve(app.getAppPath(), '..', '..');
@@ -269,8 +268,10 @@ function run(): void {
   async function autoUpdateTick(): Promise<void> {
     if (!app.isPackaged || selfTestFile || isQuitting()) return;
     if (shouldAskAutoCheck(prefs.get(), app.isPackaged) && win && !win.isDestroyed() && win.isVisible() && win.isFocused()) {
+      const before = prefs.get().autoUpdateCheck;
       await updates.askAboutAutoCheck();
       refreshMenus();
+      if (prefs.get().autoUpdateCheck !== before) notifyPrefsChanged();
     }
     if (autoCheckDue(prefs.get(), Date.now())) await updates.check('auto');
   }
@@ -334,7 +335,7 @@ function run(): void {
     const parent = win && !win.isDestroyed() && win.isVisible() ? win : undefined;
     const opts: Electron.OpenDialogOptions = {
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Dürbün', extensions: ['durbun', 'json'] }],
+      filters: [{ name: 'Dürbün, HAR', extensions: OPEN_EXTENSIONS }],
       message: t.openFileMessage,
     };
     const { canceled, filePaths } = parent ? await dialog.showOpenDialog(parent, opts) : await dialog.showOpenDialog(opts);
@@ -428,11 +429,85 @@ function run(): void {
       const settings = app.getLoginItemSettings();
       openAtLogin = settings.openAtLogin;
       log.info(`open at login: ${on ? 'on' : 'off'} (${settings.status ?? '?'})`);
-      if (on && settings.status === 'requires-approval') await box({ type: 'info', message: t.loginApprovalTitle, detail: t.loginApprovalMessage, buttons: [t.ok] });
+      // Not awaited: the Settings row gets its answer while the note is on screen.
+      if (on && settings.status === 'requires-approval') void box({ type: 'info', message: t.loginApprovalTitle, detail: t.loginApprovalMessage, buttons: [t.ok] });
     } catch (err) {
       log.warn(`open at login: ${(err as Error).message}`);
     }
     refreshMenus();
+  }
+
+  async function setAutoUpdateCheck(on: boolean): Promise<void> {
+    await updates.setAutoCheck(on);
+    refreshMenus();
+    if (on) void autoUpdateTick();
+  }
+
+  /** The login item as macOS sees it now (the user may have changed it in System Settings). */
+  function readOpenAtLogin(): boolean {
+    if (!app.isPackaged) return false;
+    try {
+      openAtLogin = app.getLoginItemSettings().openAtLogin;
+    } catch {
+      /* keep the last known value */
+    }
+    return openAtLogin;
+  }
+
+  const currentPrefs = () => prefsView(prefs.get(), { openAtLogin: readOpenAtLogin(), available: app.isPackaged });
+
+  /** The UI's Settings rows read the values again after a change made in the menus. */
+  function notifyPrefsChanged(): void {
+    if (win && !win.isDestroyed() && appOrigin && uiLoaded) win.webContents.send('durbun:command', 'prefs-changed');
+  }
+
+  ipcMain.handle('durbun:prefs-get', (event) => (isTrustedSender(event.sender, event.senderFrame?.url) ? currentPrefs() : null));
+  ipcMain.handle('durbun:prefs-set', async (event, raw: unknown) => {
+    if (!isTrustedSender(event.sender, event.senderFrame?.url)) return null;
+    const patch = parsePrefsPatch(raw);
+    // Setting automatic checks here is the user's answer: the one-time question is not asked afterwards.
+    if (patch.autoUpdateCheck !== undefined) await setAutoUpdateCheck(patch.autoUpdateCheck);
+    if (patch.openAtLogin !== undefined) await setOpenAtLogin(patch.openAtLogin);
+    refreshMenus();
+    return currentPrefs();
+  });
+
+  /** Help → Verbose Diagnostic Log: the server's logger is set up at start, so it asks to restart. */
+  async function setVerboseLog(on: boolean): Promise<void> {
+    await prefs.update({ verboseLog: on });
+    refreshMenus();
+    const { response } = await box({ type: 'question', message: t.verboseRestartTitle(on), detail: t.verboseRestartMessage, buttons: [t.restartNow, t.later], defaultId: 0, cancelId: 1 });
+    if (response !== 0) return;
+    log.info(`restarting for verbose logging ${on ? 'on' : 'off'}`);
+    app.relaunch();
+    app.quit();
+  }
+
+  /* ───────────── menu-bar summary (summary.ts) ───────────── */
+
+  let summary: Summary | undefined;
+  /** The server on this port has no /api/summary (an older Dürbün): not asked again until the server changes. */
+  let summaryUnsupportedPort: number | undefined;
+  async function refreshSummary(): Promise<void> {
+    const port = state.kind === 'running' || state.kind === 'attached' ? state.port : undefined;
+    let next: Summary | undefined;
+    if (port && port !== summaryUnsupportedPort) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/summary`, { signal: AbortSignal.timeout(3_000) });
+        const body = res.ok ? await res.json().catch(() => null) : null;
+        const parsed = parseSummary(res.status, body);
+        if (parsed === 'unsupported') {
+          summaryUnsupportedPort = port;
+          log.info(`the server on port ${port} has no summary; the menu-bar line is left out`);
+        } else next = parsed;
+      } catch {
+        next = undefined;
+      }
+    }
+    if (!sameSummary(summary, next)) {
+      summary = next;
+      refreshMenus();
+    }
   }
 
   /** Once: closing the window does not stop Dürbün (users took it for a quit and left the SDK port open). */
@@ -506,18 +581,31 @@ function run(): void {
 
   const refreshMenus = () => {
     Menu.setApplicationMenu(
-      Menu.buildFromTemplate(appMenuTemplate(t, handlers, { canOpenInBrowser: appOrigin !== null, autoUpdateCheck: prefs.get().autoUpdateCheck, update: updatePhase, openAtLogin })),
+      Menu.buildFromTemplate(
+        appMenuTemplate(t, handlers, { canOpenInBrowser: appOrigin !== null, autoUpdateCheck: prefs.get().autoUpdateCheck, update: updatePhase, openAtLogin, verboseLog: prefs.get().verboseLog }),
+      ),
     );
     if (tray && !tray.isDestroyed()) {
-      tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(t, state, handlers, { update: updatePhase, openAtLogin })));
+      const trayMenu = Menu.buildFromTemplate(trayMenuTemplate(t, state, handlers, { update: updatePhase, openAtLogin, summary }));
+      // Opening the menu asks for fresh counts (they show the next time it opens or on the next tick).
+      trayMenu.on('menu-will-show', () => void refreshSummary());
+      tray.setContextMenu(trayMenu);
       tray.setToolTip(`Dürbün — ${serverLabel(t, state)}`);
       if (trayImages) tray.setImage(trayNeedsAttention(state) ? trayImages.attention : trayImages.plain);
     }
   };
 
   const setState = (next: ServerState) => {
+    const portOf = (s: ServerState) => (s.kind === 'running' || s.kind === 'attached' ? s.port : undefined);
+    // Another server (attached ↔ own, or another port): its counts and its support for them start over.
+    const serverChanged = portOf(next) !== portOf(state) || next.kind !== state.kind;
     state = next;
+    if (serverChanged) {
+      summaryUnsupportedPort = undefined;
+      summary = undefined;
+    }
     refreshMenus();
+    if (serverChanged) void refreshSummary();
   };
 
   const currentTheme = (): Theme => winState.theme ?? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
@@ -870,10 +958,11 @@ function run(): void {
     } catch (err) {
       return fail(`${(err as Error).message}`);
     }
-    const httpPort = parsePortEnv(process.env.DURBUN_PORT, DEFAULT_HTTP_PORT);
-    const sdkPort = parsePortEnv(process.env.DURBUN_SDK_PORT, DEFAULT_SDK_PORT);
+    // Environment first (a second copy, tests), then desktop.json (an app started from Finder), then defaults.
+    const startup = startupOptions(process.env, prefs.get(), { httpPort: DEFAULT_HTTP_PORT, sdkPort: DEFAULT_SDK_PORT }, parsePortEnv);
+    const { httpPort, sdkPort, verbose } = startup;
+    if (startup.source.httpPort === 'prefs' || startup.source.sdkPort === 'prefs') log.info(`ports from desktop.json: HTTP ${httpPort}, SDK ${sdkPort}`);
     const uiDir = existsSync(path.join(paths.uiDir, 'index.html')) ? paths.uiDir : undefined;
-    const verbose = Boolean(process.env.DURBUN_DEBUG);
     // "Is it a real Dürbün?": the server's own health check (GET /api/health), plus a semver version and
     // the Dürbün UI (or its no-UI page) at "/" before the window is handed to it.
     const health = (port: number) => (typeof mod.probeServer === 'function' ? mod.probeServer(port) : probeDurbun(port));
@@ -1046,6 +1135,17 @@ function run(): void {
       }
     }
     signatureRead = readSignature();
+    setInterval(() => void refreshSummary(), SUMMARY_INTERVAL_MS).unref();
+    // Lid closed and opened: device streams may be half dead; the server checks them (when it can).
+    powerMonitor.on('suspend', () => log.info('the Mac goes to sleep'));
+    powerMonitor.on('resume', () => {
+      log.info('the Mac woke up');
+      try {
+        server?.onSystemResume?.();
+      } catch (err) {
+        log.warn(`resume handling failed: ${(err as Error).message}`);
+      }
+    });
     // Crashpad keeps every minidump: the old ones go (30 days, newest 20 kept).
     void pruneCrashDumps(app.getPath('crashDumps')).then((n) => n > 0 && log.info(`removed ${n} old crash dump(s)`));
     if (!app.isPackaged && process.platform === 'darwin') {

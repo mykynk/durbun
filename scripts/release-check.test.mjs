@@ -4,16 +4,14 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { changelogProblems, localDate, nextSteps, parseArgs, releaseSteps, runSteps, selectSteps } from './release-check.mjs';
-import { changelogDate, changelogSection } from './release-notes.mjs';
+import { changelogProblems, electronPatchProblems, localDate, nextSteps, parseArgs, releaseSteps, runSteps, selectSteps, trackedSecrets } from './release-check.mjs';
+import { changelogDate, changelogSection, releaseBody } from './release-notes.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const CHANGELOG = `# Changelog
 
 ## [Unreleased]
-
-- next
 
 ## [0.3.0] - 2026-11-20
 
@@ -48,8 +46,28 @@ test('the changelog check wants the section, a date and today', () => {
   assert.match(changelogProblems(CHANGELOG, '0.3.0', '2026-11-21')[0], /dated 2026-11-20; the release goes out today, 2026-11-21/);
   assert.deepEqual(changelogProblems(CHANGELOG, '0.3.0', '2026-11-21', { rehearse: true }), []);
   assert.match(changelogProblems(CHANGELOG, '0.4.0', '2026-11-21')[0], /no "## \[0.4.0\] - YYYY-MM-DD" section/);
-  assert.match(changelogProblems('## [0.4.0]\n- x\n', '0.4.0', '2026-11-21')[0], /has no date/);
+  assert.match(changelogProblems('## [Unreleased]\n\n## [0.4.0]\n- x\n', '0.4.0', '2026-11-21')[0], /has no date/);
   assert.match(localDate(new Date(2026, 0, 5)), /^2026-01-05$/);
+  // "## [Unreleased]" stays on top, empty: entries left there, or a missing heading, are problems.
+  assert.match(changelogProblems(CHANGELOG.replace('## [Unreleased]\n', '## [Unreleased]\n\n- forgotten\n'), '0.3.0', '2026-11-20')[0], /still has entries under "## \[Unreleased\]"/);
+  assert.match(changelogProblems(CHANGELOG.replace('## [Unreleased]\n\n', ''), '0.3.0', '2026-11-20')[0], /no "## \[Unreleased\]" heading/);
+});
+
+test('the release text ends with the install and upgrade lines', () => {
+  const body = releaseBody(CHANGELOG, '0.3.0');
+  assert.ok(body.startsWith('### Added\n- In-app updates\n\n---'));
+  for (const line of ['Durbun-0.3.0-arm64.dmg', 'Durbun-0.3.0-x64.dmg', 'durbun: ^0.3.0', 'io.github.mykynk:durbun:0.3.0', "pod 'Durbun', '~> 0.3.0'", '@durbun/react-native@0.3.0', 'SHA256SUMS.txt']) assert.ok(body.includes(line), line);
+  assert.equal(releaseBody(CHANGELOG, '0.9.9'), '');
+});
+
+test('signing keys and secrets in git are found; examples are not', () => {
+  assert.deepEqual(trackedSecrets(['AuthKey_ABC123.p8', 'certs/dev.p12', 'apps/.env', '.env.local', '.env.example', 'src/key.ts', 'README.md', '']), ['AuthKey_ABC123.p8', 'certs/dev.p12', 'apps/.env', '.env.local']);
+});
+
+test('Electron must be on the latest patch of its major', () => {
+  assert.deepEqual(electronPatchProblems('45.3.2', '["45.2.1","45.3.2","45.4.0-beta.1"]'), []);
+  assert.match(electronPatchProblems('45.2.1', '"45.3.2"')[0], /Electron 45\.3\.2 is out; the app pins 45\.2\.1/);
+  assert.match(electronPatchProblems('45.2.1', 'not json')[0], /could not be read/);
 });
 
 test('options: --from, --skip, --rehearse, unknown ones refused', () => {
@@ -68,7 +86,7 @@ test('options: --from, --skip, --rehearse, unknown ones refused', () => {
 test('every check a release needs is in the list, Flutter with --concurrency=2 one suite at a time', () => {
   const steps = releaseSteps('0.3.0');
   const ids = steps.map((s) => s.id);
-  for (const id of ['git-clean', 'git-main', 'tag-free', 'versions', 'changelog', 'typecheck', 'test', 'build', 'desktop', 'flutter-durbun', 'pub-dry-run', 'android', 'ios', 'pod-lint']) assert.ok(ids.includes(id), id);
+  for (const id of ['git-clean', 'git-main', 'tag-free', 'secrets', 'versions', 'electron', 'changelog', 'typecheck', 'test', 'build', 'desktop', 'flutter-durbun', 'pub-dry-run', 'android', 'ios', 'pod-lint']) assert.ok(ids.includes(id), id);
   assert.ok(ids.indexOf('flutter-idle') < ids.indexOf('flutter-durbun'));
   const flutterTests = steps.flatMap((s) => s.run ?? []).filter(([cmd, args]) => cmd === 'flutter' && args[0] === 'test');
   assert.equal(flutterTests.length, 2);

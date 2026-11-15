@@ -1,0 +1,5 @@
+/* Turkish texts of the macOS permission prompts (Info.plist has the English ones). */
+"NSLocalNetworkUsageDescription" = "Dürbün, LAN'ı açtığınızda yerel ağdaki uygulamalarınızın bağlanmasını bekler ve Wi-Fi hata ayıklamasındaki Android cihazlarla konuşur.";
+"NSDocumentsFolderUsageDescription" = "Dürbün, Belgeler klasöründe duran araçları (adb, flutter) çalıştırır ve seçtiğiniz yedek ve dışa aktarma dosyalarını okuyup yazar.";
+"NSDesktopFolderUsageDescription" = "Dürbün, Masaüstü'nde duran araçları çalıştırır ve seçtiğiniz yedek ve dışa aktarma dosyalarını okuyup yazar.";
+"NSDownloadsFolderUsageDescription" = "Dürbün, İndirilenler klasöründen açtığınız Dürbün dosyalarını ve HAR dosyalarını okur, dışa aktarmaları oraya kaydeder.";

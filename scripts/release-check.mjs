@@ -32,6 +32,10 @@ export function localDate(d = new Date()) {
 /** Problems with the version's CHANGELOG.md section ([] when it is ready). */
 export function changelogProblems(text, version, today, { rehearse = false } = {}) {
   const problems = [];
+  // An empty "## [Unreleased]" stays on top: the next version's entries go there.
+  const unreleased = /^## \[Unreleased\][^\n]*\n([\s\S]*?)(?=^## \[|(?![\s\S]))/m.exec(text);
+  if (!unreleased) problems.push('CHANGELOG.md has no "## [Unreleased]" heading. Keep it, empty, above the release section: the next entries go there.');
+  else if (unreleased[1].split('\n').some((l) => l.trim() && !/^\[[^\]]+\]: /.test(l))) problems.push(`CHANGELOG.md still has entries under "## [Unreleased]". Move them into "## [${version}]".`);
   if (!changelogSection(text, version)) problems.push(`CHANGELOG.md has no "## [${version}] - YYYY-MM-DD" section with entries. Move the entries of the release under that heading.`);
   else {
     const date = changelogDate(text, version);
@@ -39,6 +43,36 @@ export function changelogProblems(text, version, today, { rehearse = false } = {
     else if (!rehearse && date !== today) problems.push(`The "## [${version}]" heading in CHANGELOG.md is dated ${date}; the release goes out today, ${today}.`);
   }
   return problems;
+}
+
+/** Tracked files that look like signing keys or secrets (App Store Connect keys, certificates, .env files). */
+export function trackedSecrets(files) {
+  return files.filter((f) => f && (/\.(p8|p12|pfx|cer|pem|key|mobileprovision|provisionprofile)$/i.test(f) || /(^|\/)AuthKey_[^/]*$/.test(f) || /(^|\/)\.env(\.[^/]*)?$/.test(f)) && !/(^|\/)\.env\.example$/.test(f));
+}
+
+/**
+ * Electron ships Chromium security fixes in patch releases: the release uses the newest patch of its major.
+ * `npmOut` is `npm view electron@<major> version --json` (one version or a list).
+ */
+export function electronPatchProblems(installed, npmOut) {
+  let list;
+  try {
+    const parsed = JSON.parse(npmOut);
+    list = Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return ['The answer of npm about Electron could not be read; run again, or --skip electron.'];
+  }
+  const parse = (v) => String(v).replace(/^[^\d]*/, '').split('-')[0].split('.').map(Number);
+  const newer = (a, b) => {
+    for (let i = 0; i < 3; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+    return false;
+  };
+  const stable = list.filter((v) => typeof v === 'string' && !v.includes('-'));
+  const latest = stable.reduce((best, v) => (!best || newer(parse(v), parse(best)) ? v : best), undefined);
+  if (!latest) return [];
+  return newer(parse(latest), parse(installed))
+    ? [`Electron ${latest} is out; the app pins ${installed}. Raise "electron" in apps/desktop/package.json to ${latest}, install it in apps/desktop, run the Mac app tests, then run this check again.`]
+    : [];
 }
 
 /**
@@ -71,11 +105,30 @@ export function releaseSteps(version) {
         return remote.out.trim() ? [`Tag v${version} already exists on GitHub. Raise the version instead.`] : [];
       },
     },
+    {
+      id: 'secrets',
+      title: 'No signing keys or secrets in the repository',
+      check: ({ sh }) => {
+        const found = trackedSecrets(sh('git', ['ls-files']).out.split('\n'));
+        return found.length ? [`These tracked files look like keys or secrets: ${found.join(', ')}. Remove them from git (and rotate the key) before a public tag.`] : [];
+      },
+    },
     { id: 'versions', title: `Every part carries version ${version}`, run: [['node', ['scripts/check-versions.mjs']]], fix: 'Write the version everywhere with `node scripts/check-versions.mjs --write X.Y.Z`.' },
     {
       id: 'changelog',
       title: 'CHANGELOG.md has the release section',
       check: ({ rehearse }) => changelogProblems(readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'), version, localDate(), { rehearse }),
+    },
+    {
+      id: 'electron',
+      title: 'Electron has the latest patch of its major version',
+      check: ({ sh }) => {
+        const installed = JSON.parse(readFileSync(path.join(root, 'apps/desktop/package.json'), 'utf8')).devDependencies?.electron ?? '';
+        const major = String(installed).replace(/^[^\d]*/, '').split('.')[0];
+        const view = sh('npm', ['view', `electron@${major}`, 'version', '--json']);
+        if (view.status !== 0) return ['npm could not be asked for the latest Electron patch. Check the connection and run again, or --skip electron.'];
+        return electronPatchProblems(installed, view.out);
+      },
     },
     { id: 'typecheck', title: 'Type checks (protocol, server, UI, JS SDK)', run: [['npm', ['run', 'typecheck']]] },
     { id: 'test', title: 'Server, UI and JS SDK tests', run: [['npm', ['test']]] },

@@ -25,3 +25,9 @@ DerivedData/
 # Mac app (apps/desktop)
 apps/desktop/out/
 apps/desktop/release/
+# Keys and local secrets never belong in the repository.
+*.p8
+*.p12
+*.cer
+AuthKey_*
+.env*

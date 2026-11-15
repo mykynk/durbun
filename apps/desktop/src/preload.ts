@@ -63,6 +63,22 @@ const bridge = {
    * Files opened from Finder or File → Open… that wait for the UI ({ name, text } each). The main process
    * sends the 'open-file' command when there are some; the UI also asks once when it starts.
    */
+  /**
+   * The Mac app's own settings for the UI's Settings rows. `get` and `set` resolve to the current values
+   * ({ autoUpdateCheck: boolean | null (not asked yet), openAtLogin, openAtLoginAvailable }); a change made
+   * in the menus arrives as the 'prefs-changed' command, so the UI reads them again.
+   */
+  prefs: {
+    get(): Promise<unknown> {
+      return ipcRenderer.invoke('durbun:prefs-get');
+    },
+    set(patch: { autoUpdateCheck?: unknown; openAtLogin?: unknown }): Promise<unknown> {
+      const clean: { autoUpdateCheck?: boolean; openAtLogin?: boolean } = {};
+      if (typeof patch?.autoUpdateCheck === 'boolean') clean.autoUpdateCheck = patch.autoUpdateCheck;
+      if (typeof patch?.openAtLogin === 'boolean') clean.openAtLogin = patch.openAtLogin;
+      return ipcRenderer.invoke('durbun:prefs-set', clean);
+    },
+  },
   takeOpenedFiles(): Promise<{ name: string; text: string }[]> {
     return ipcRenderer.invoke('durbun:take-opened-files').then((files: unknown) =>
       Array.isArray(files) ? files.filter((f): f is { name: string; text: string } => !!f && typeof f.name === 'string' && typeof f.text === 'string') : [],

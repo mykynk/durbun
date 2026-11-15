@@ -321,8 +321,9 @@ tek kopya kilidi ve günlükler), `DURBUN_DEMO=1`, `DURBUN_DEBUG=1`.
    - `~/.durbun`: ayarlar (`settings.json`), mock kuralları (`mocks.json`), akışlar (`flows/`), çalıştırma
      geçmişi (`flow-runs/`), ortamlar (`environments.json`), yedekleme ayarları (`backup.json`) ve geçici
      dosyalar. Başka bir klasöre yazdığınız yedekler orada kalır.
-   - `~/Library/Application Support/Dürbün`: pencere durumu, arayüz tercihleri, tanılama günlüğü ve çökme
-     dökümleri.
+   - `~/Library/Application Support/Dürbün`: pencere durumu, arayüz tercihleri, uygulamanın kendi ayarları
+     (`desktop.json`), tanılama günlüğü ve çökme dökümleri.
+   - `~/Library/Preferences/dev.durbun.desktop.plist`: macOS'in uygulama için tuttuğu tercihler.
 3. Uygulamalarınıza eklediğiniz SDK paketlerini kaldırın.
 
 ## Geliştirme

@@ -2,11 +2,13 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createPrefsStore, parseDesktopPrefs, readDesktopPrefs } from '../src/desktopPrefs';
+import { createPrefsStore, parseDesktopPrefs, parsePrefsPatch, prefsView, readDesktopPrefs, startupOptions } from '../src/desktopPrefs';
+import { parsePortEnv } from '../src/ports';
+import { parseSummary, sameSummary } from '../src/summary';
 import { diagnosticsText, doctorLines, issueUrl, lastLines, maskSecrets, shortLocation } from '../src/diagnostics';
 import { STRINGS } from '../src/i18n';
 import { installFileLog, pruneCrashDumps, rotatedName } from '../src/log';
-import { createOpenQueue, isOpenable, readOpened } from '../src/openFiles';
+import { createOpenQueue, isOpenable, OPEN_EXTENSIONS, readOpened } from '../src/openFiles';
 import { badgedInside, renderTrayBitmap } from '../src/trayIcon';
 
 const tmp = (name: string) => mkdtempSync(path.join(os.tmpdir(), `durbun-${name}-`));
@@ -30,10 +32,12 @@ describe('desktop.json', () => {
 });
 
 describe('files opened from Finder', () => {
-  it('accepts Dürbün packages, backups and session recordings', () => {
+  it('accepts Dürbün packages, backups, session recordings and HAR files', () => {
     expect(isOpenable('/x/team.durbun')).toBe(true);
     expect(isOpenable('/x/durbun-2026.durbun.json')).toBe(true);
-    expect(isOpenable('/x/trace.har')).toBe(false);
+    expect(isOpenable('/x/trace.HAR')).toBe(true);
+    expect(OPEN_EXTENSIONS).toEqual(['durbun', 'json', 'har']);
+    expect(isOpenable('/x/notes.txt')).toBe(false);
     expect(isOpenable('/x/app.ipa')).toBe(false);
   });
   it('queues paths once each, oldest first, bounded', () => {
@@ -54,7 +58,8 @@ describe('files opened from Finder', () => {
     expect(await readOpened('/a/s.durbun.json', fs(10, '{"format":"durbun-session"}'))).toEqual({ name: 's.durbun.json', text: '{"format":"durbun-session"}' });
     expect(await readOpened('/a/big.durbun', fs(600 * 1024 * 1024, ''))).toEqual({ name: 'big.durbun', error: 'tooLarge' });
     expect(await readOpened('/a/gone.durbun', fs(1, new Error('ENOENT')))).toEqual({ name: 'gone.durbun', error: 'unreadable' });
-    expect(await readOpened('/a/x.har', fs(1, '{}'))).toEqual({ name: 'x.har', error: 'unsupported' });
+    expect(await readOpened('/a/x.har', fs(1, '{"log":{}}'))).toEqual({ name: 'x.har', text: '{"log":{}}' });
+    expect(await readOpened('/a/x.zip', fs(1, ''))).toEqual({ name: 'x.zip', error: 'unsupported' });
   });
   it('every problem has a Turkish and an English message', () => {
     for (const t of [STRINGS.tr, STRINGS.en]) for (const p of ['tooLarge', 'unreadable', 'unsupported'] as const) expect(t.openFailedMessage('a.durbun', p)).toContain('a.durbun');
@@ -197,5 +202,50 @@ describe('menu-bar icon attention dot', () => {
       expect(alpha(badged, 35, i)).toBe(0);
       expect(alpha(badged, i, 0)).toBe(0);
     }
+  });
+});
+
+describe('Settings bridge values', () => {
+  it('null until asked; Open at Login only where it works', () => {
+    expect(prefsView({}, { openAtLogin: false, available: true })).toEqual({ autoUpdateCheck: null, openAtLogin: false, openAtLoginAvailable: true });
+    expect(prefsView({ autoUpdateCheck: false }, { openAtLogin: true, available: true })).toEqual({ autoUpdateCheck: false, openAtLogin: true, openAtLoginAvailable: true });
+    expect(prefsView({ autoUpdateCheck: true }, { openAtLogin: true, available: false })).toEqual({ autoUpdateCheck: true, openAtLogin: false, openAtLoginAvailable: false });
+  });
+  it('a patch keeps only known boolean keys', () => {
+    expect(parsePrefsPatch({ autoUpdateCheck: true, openAtLogin: 'yes', httpPort: 1 })).toEqual({ autoUpdateCheck: true });
+    expect(parsePrefsPatch(null)).toEqual({});
+    expect(parsePrefsPatch([true])).toEqual({});
+  });
+});
+
+describe('ports and verbose logging for an app started from Finder', () => {
+  const defaults = { httpPort: 9750, sdkPort: 9751 };
+  it('environment first, then desktop.json, then the defaults', () => {
+    expect(startupOptions({}, {}, defaults, parsePortEnv)).toEqual({ httpPort: 9750, sdkPort: 9751, verbose: false, source: { httpPort: 'default', sdkPort: 'default' } });
+    expect(startupOptions({}, { httpPort: 9850, sdkPort: 9851, verboseLog: true }, defaults, parsePortEnv)).toMatchObject({ httpPort: 9850, sdkPort: 9851, verbose: true, source: { httpPort: 'prefs' } });
+    expect(startupOptions({ DURBUN_PORT: '9950', DURBUN_DEBUG: '1' }, { httpPort: 9850 }, defaults, parsePortEnv)).toMatchObject({ httpPort: 9950, sdkPort: 9751, verbose: true, source: { httpPort: 'env', sdkPort: 'default' } });
+    // A broken variable falls through to the file.
+    expect(startupOptions({ DURBUN_SDK_PORT: 'abc' }, { sdkPort: 9851 }, defaults, parsePortEnv).sdkPort).toBe(9851);
+  });
+  it('desktop.json keeps only real ports', () => {
+    expect(parseDesktopPrefs({ httpPort: 70000, sdkPort: 9751.5, verboseLog: 'yes' })).toEqual({});
+    expect(parseDesktopPrefs({ httpPort: 9850, verboseLog: false })).toEqual({ httpPort: 9850, verboseLog: false });
+  });
+});
+
+describe('menu-bar summary', () => {
+  it('reads the counts, stops on 404, shows nothing on anything else', () => {
+    expect(parseSummary(200, { devices: 2, apps: 3 })).toEqual({ devices: 2, apps: 3 });
+    expect(parseSummary(404, null)).toBe('unsupported');
+    expect(parseSummary(500, null)).toBeUndefined();
+    expect(parseSummary(200, { devices: -1, apps: 3 })).toBeUndefined();
+    expect(parseSummary(200, { devices: '2', apps: 3 })).toBeUndefined();
+    expect(sameSummary({ devices: 1, apps: 1 }, { devices: 1, apps: 1 })).toBe(true);
+    expect(sameSummary(undefined, { devices: 0, apps: 0 })).toBe(false);
+  });
+  it('says it in both languages, with English plurals', () => {
+    expect(STRINGS.en.summaryLine(1, 1)).toBe('1 device · 1 app');
+    expect(STRINGS.en.summaryLine(2, 0)).toBe('2 devices · 0 apps');
+    expect(STRINGS.tr.summaryLine(2, 3)).toBe('2 cihaz · 3 uygulama');
   });
 });

@@ -37,6 +37,8 @@ module.exports = {
   extraResources: [
     { from: '../../LICENSE', to: 'legal/LICENSE' },
     { from: 'out/THIRD_PARTY_NOTICES.txt', to: 'legal/THIRD_PARTY_NOTICES.txt' },
+    // Turkish texts of the permission prompts below (English ones are in Info.plist).
+    { from: 'build/tr.lproj/InfoPlist.strings', to: 'tr.lproj/InfoPlist.strings' },
   ],
   asar: true,
   npmRebuild: false,
@@ -66,13 +68,20 @@ module.exports = {
     // Finder opens Dürbün files with the app (double click, Open With, a drop on the Dock icon; main.ts
     // 'open-file'): .durbun packages and backups are Dürbün's own type, session recordings (.durbun.json)
     // are JSON to macOS (it knows one extension per file), so Dürbün is offered for JSON in Open With
-    // without becoming the default JSON app.
+    // without becoming the default JSON app; HAR files are offered the same way.
+    // The permission prompts macOS may show say why: the local network (LAN mode, Wi-Fi debugging) and
+    // the Documents, Desktop and Downloads folders (tools kept there, backups and exports).
     extendInfo: {
       NSCameraUsageDescription: null,
       NSMicrophoneUsageDescription: null,
       NSAudioCaptureUsageDescription: null,
       NSBluetoothAlwaysUsageDescription: null,
       NSBluetoothPeripheralUsageDescription: null,
+      NSLocalNetworkUsageDescription:
+        'Dürbün waits for your apps on the local network when you turn on LAN, and talks to Android devices over Wi-Fi debugging.',
+      NSDocumentsFolderUsageDescription: 'Dürbün runs tools kept in Documents (adb, flutter) and reads and writes the backups and exports you choose.',
+      NSDesktopFolderUsageDescription: 'Dürbün runs tools kept on the Desktop and reads and writes the backups and exports you choose.',
+      NSDownloadsFolderUsageDescription: 'Dürbün reads the Dürbün and HAR files you open from Downloads and saves exports there.',
       UTExportedTypeDeclarations: [
         {
           UTTypeIdentifier: 'dev.durbun.package',
@@ -81,9 +90,19 @@ module.exports = {
           UTTypeTagSpecification: { 'public.filename-extension': ['durbun'] },
         },
       ],
+      // HAR has no system type; declared here so Finder can offer Dürbün for it.
+      UTImportedTypeDeclarations: [
+        {
+          UTTypeIdentifier: 'dev.durbun.har',
+          UTTypeDescription: 'HTTP Archive',
+          UTTypeConformsTo: ['public.json'],
+          UTTypeTagSpecification: { 'public.filename-extension': ['har'] },
+        },
+      ],
       CFBundleDocumentTypes: [
         { CFBundleTypeName: 'Dürbün Package', CFBundleTypeRole: 'Viewer', LSHandlerRank: 'Owner', LSItemContentTypes: ['dev.durbun.package'] },
         { CFBundleTypeName: 'Dürbün Session Recording', CFBundleTypeRole: 'Viewer', LSHandlerRank: 'Alternate', LSItemContentTypes: ['public.json'] },
+        { CFBundleTypeName: 'HTTP Archive', CFBundleTypeRole: 'Viewer', LSHandlerRank: 'Alternate', LSItemContentTypes: ['dev.durbun.har'] },
       ],
     },
   },

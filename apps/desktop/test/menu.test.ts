@@ -19,6 +19,7 @@ const handlers = (): MenuHandlers => ({
   setOpenAtLogin: vi.fn(),
   openFile: vi.fn(),
   copyDiagnostics: vi.fn(),
+  setVerboseLog: vi.fn(),
 });
 
 function flatten(items: MenuItemConstructorOptions[]): MenuItemConstructorOptions[] {
@@ -62,7 +63,7 @@ describe('app menu', () => {
     (settings.click as () => void)();
     expect(h.openSettings).toHaveBeenCalledOnce();
     for (const [label, fn] of [
-      ['Dürbün Belgeleri', h.openDocs],
+      ['Dürbün Kılavuzları', h.openDocs],
       ['Sorun Bildir…', h.reportIssue],
       ['Güncellemeleri Denetle…', h.checkForUpdates],
       ['Tanılama Bilgisini Kopyala', h.copyDiagnostics],
@@ -158,6 +159,20 @@ describe('updates, login item and files in the menus', () => {
   });
   it('File → Open… takes ⌘O (the UI does not use it)', () => {
     expect(find(appMenuTemplate(STRINGS.en, handlers(), { canOpenInBrowser: true }), 'Open…')!.accelerator).toBe('CmdOrCtrl+O');
+  });
+  it('the tray shows the device and app counts while a server runs, nothing without them', () => {
+    const t = STRINGS.tr;
+    const running = trayMenuTemplate(t, { kind: 'running', port: 9750, warnings: [] }, handlers(), { summary: { devices: 2, apps: 3 } });
+    expect(running.find((i) => i.label === '2 cihaz · 3 uygulama')?.enabled).toBe(false);
+    expect(trayMenuTemplate(t, { kind: 'running', port: 9750, warnings: [] }, handlers()).map((i) => i.label)).not.toContain('2 cihaz · 3 uygulama');
+    expect(trayMenuTemplate(t, { kind: 'failed', error: 'x' }, handlers(), { summary: { devices: 2, apps: 3 } }).map((i) => i.label)).not.toContain('2 cihaz · 3 uygulama');
+  });
+  it('Help → Verbose Diagnostic Log is a checkbox', () => {
+    const h = handlers();
+    const item = find(appMenuTemplate(STRINGS.en, h, { canOpenInBrowser: true, verboseLog: true }), 'Verbose Diagnostic Log')!;
+    expect(item).toMatchObject({ type: 'checkbox', checked: true });
+    (item.click as (i: { checked: boolean }) => void)({ checked: false });
+    expect(h.setVerboseLog).toHaveBeenCalledWith(false);
   });
   it('the tray shows a running download and marks warnings and failures', () => {
     const items = trayMenuTemplate(STRINGS.en, { kind: 'running', port: 9750, warnings: [] }, handlers(), { update: { kind: 'downloading', version: '0.3.0' }, openAtLogin: true });

@@ -89,6 +89,9 @@ All notable changes to Dürbün are listed here. The format follows
   copies the diagnostics with secrets masked. About lists the Electron, Chromium, Node and server versions.
 - Mac app: closing the window says once that capture continues in the menu bar; **Open at Login**; the
   menu-bar icon shows a dot for warnings; a copy opened from the disk image offers to move to Applications.
+- Mac app: the menu bar shows how many devices and apps are connected; **Help → Dürbün Guides** opens the
+  guides; **Help → Verbose Diagnostic Log**; macOS permission prompts (local network, Documents, Desktop,
+  Downloads) say why Dürbün asks, in English and Turkish.
 - Flutter in-app panel: **Tools → Mac connection** says why the app is not connected to the Mac and what to
   do next, with the addresses tried; debug builds print the same once in the console.
 - Flutter in-app panel: the Mac's Wi-Fi address can be typed in at run time. It is kept for later launches,

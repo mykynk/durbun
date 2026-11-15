@@ -4,6 +4,7 @@
  */
 import type { MenuItemConstructorOptions } from 'electron';
 import type { Strings } from './i18n';
+import type { Summary } from './summary';
 import type { UpdatePhase } from './updateFlow';
 
 export interface MenuHandlers {
@@ -24,6 +25,8 @@ export interface MenuHandlers {
   /** File → Open…: a Dürbün package, backup or session recording. */
   openFile(): void;
   copyDiagnostics(): void;
+  /** Help → Verbose Diagnostic Log (asks to restart). */
+  setVerboseLog(on: boolean): void;
   openLicenses(): void;
 }
 
@@ -33,6 +36,7 @@ export interface MenuOptions {
   autoUpdateCheck?: boolean;
   update?: UpdatePhase;
   openAtLogin?: boolean;
+  verboseLog?: boolean;
 }
 
 /** The update item: what it does follows the update's phase (a download shows here while it runs). */
@@ -121,6 +125,7 @@ export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: MenuOptions):
         { label: t.docs, click: () => h.openDocs() },
         { label: t.reportIssue, click: () => h.reportIssue() },
         { label: t.copyDiagnostics, click: () => h.copyDiagnostics() },
+        { label: t.verboseLog, type: 'checkbox', checked: opts.verboseLog === true, click: (item) => h.setVerboseLog(Boolean(item?.checked)) },
         { type: 'separator' },
         { label: t.openInBrowser, enabled: opts.canOpenInBrowser, click: () => h.openInBrowser() },
         { label: t.openDataDir, click: () => h.openDataDir() },
@@ -156,12 +161,18 @@ export function trayNeedsAttention(s: ServerState): boolean {
   return s.kind === 'failed' || ((s.kind === 'running' || s.kind === 'attached') && s.warnings.length > 0);
 }
 
-export function trayMenuTemplate(t: Strings, s: ServerState, h: MenuHandlers, opts: { update?: UpdatePhase; openAtLogin?: boolean } = {}): MenuItemConstructorOptions[] {
+export function trayMenuTemplate(
+  t: Strings,
+  s: ServerState,
+  h: MenuHandlers,
+  opts: { update?: UpdatePhase; openAtLogin?: boolean; summary?: Summary } = {},
+): MenuItemConstructorOptions[] {
   const items: MenuItemConstructorOptions[] = [
     { label: t.show, click: () => h.showWindow() },
     { type: 'separator' },
     { label: serverLabel(t, s), enabled: false },
   ];
+  if (opts.summary && (s.kind === 'running' || s.kind === 'attached')) items.push({ label: t.summaryLine(opts.summary.devices, opts.summary.apps), enabled: false });
   if ((s.kind === 'running' || s.kind === 'attached') && s.warnings.length > 0) {
     items.push({ label: t.warnings(s.warnings.length), submenu: s.warnings.map((w) => ({ label: w.length > 120 ? w.slice(0, 117) + '…' : w, enabled: false })) });
   }

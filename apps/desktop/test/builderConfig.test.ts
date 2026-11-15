@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -47,5 +47,15 @@ describe('electron-builder.config.cjs', () => {
     const files = [config.mac.icon, config.mac.entitlements, config.mac.entitlementsInherit, ...config.extraResources.map((r: { from: string }) => r.from)];
     // out/ is produced by scripts/build.mjs; the rest are sources in the repository.
     for (const f of files.filter((f: string) => !f.startsWith('out/'))) expect(existsSync(path.join(appDir, f)), f).toBe(true);
+  });
+
+  it('every permission prompt text has a Turkish twin, and Dürbün files, recordings and HAR open from Finder', () => {
+    const info = loadConfig({}).mac.extendInfo as Record<string, any>;
+    const keys = Object.keys(info).filter((k) => /^NS\w+UsageDescription$/.test(k) && typeof info[k] === 'string');
+    expect(keys.sort()).toEqual(['NSDesktopFolderUsageDescription', 'NSDocumentsFolderUsageDescription', 'NSDownloadsFolderUsageDescription', 'NSLocalNetworkUsageDescription']);
+    const tr = readFileSync(path.join(appDir, 'build', 'tr.lproj', 'InfoPlist.strings'), 'utf8');
+    for (const k of keys) expect(tr, k).toMatch(new RegExp(`^"${k}" = ".+";$`, 'm'));
+    const types = info.CFBundleDocumentTypes.flatMap((d: { LSItemContentTypes: string[] }) => d.LSItemContentTypes);
+    expect(types).toEqual(['dev.durbun.package', 'public.json', 'dev.durbun.har']);
   });
 });
