@@ -38,6 +38,7 @@ export type { DurbunApi, DurbunLogOptions, DurbunNetworkApi } from './durbun.js'
 export type { DurbunHeaders, DurbunNetworkCall, DurbunRequestReport, DurbunResponseReport } from './manual.js';
 export type { NavigationContainerRefLike } from './navigation.js';
 export type { DurbunOptions } from './options.js';
+export type { DurbunStorage } from './crashStore.js';
 export type { LogOptions } from './client.js';
 export type { ActionHandle, ActionHandler, DurbunAction } from './actions.js';
 export type { DeviceHints, LogLevel, MockAction, MockRule } from './protocol.js';

@@ -5,7 +5,7 @@
  */
 import type { AppActionDescriptor } from './protocol.js';
 import type { Runtime } from './env.js';
-import { loadReactNative, isDevBuild } from './env.js';
+import { loadReactNative, isDevBuild, rnNativeModule } from './env.js';
 import { sharedState } from './shared.js';
 import { g, type AnyRecord } from './util.js';
 
@@ -158,12 +158,38 @@ export function builtInActions(runtime: Runtime): Array<{ descriptor: AppActionD
         },
       });
     }
-    const devMenu = rn && rn.NativeModules && (rn.NativeModules.DevMenu as AnyRecord | undefined);
+    const devMenu = rnNativeModule(rn, 'DevMenu');
     if (devMenu && typeof devMenu.show === 'function') {
       out.push({
         descriptor: { id: 'rn.devMenu', kind: 'button', label: 'Open dev menu', group: 'react-native' },
         handler: () => {
           devMenu.show();
+          return null;
+        },
+      });
+    }
+    const nativeDevSettings = rnNativeModule(rn, 'DevSettings');
+    if (nativeDevSettings && typeof nativeDevSettings.toggleElementInspector === 'function') {
+      out.push({
+        descriptor: { id: 'rn.elementInspector', kind: 'button', label: 'Toggle element inspector', group: 'react-native' },
+        handler: () => {
+          nativeDevSettings.toggleElementInspector();
+          return null;
+        },
+      });
+    }
+    // React Native DevTools (0.76 and later): opens on the machine running Metro.
+    const openDebugger =
+      devSettings && typeof devSettings.openDebugger === 'function'
+        ? () => devSettings.openDebugger()
+        : nativeDevSettings && typeof nativeDevSettings.openDebugger === 'function'
+          ? () => nativeDevSettings.openDebugger()
+          : undefined;
+    if (openDebugger) {
+      out.push({
+        descriptor: { id: 'rn.openDebugger', kind: 'button', label: 'Open debugger', group: 'react-native' },
+        handler: () => {
+          openDebugger();
           return null;
         },
       });

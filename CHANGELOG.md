@@ -55,6 +55,8 @@ All notable changes to Dürbün are listed here. The format follows
 - A response too large to receive no longer stays pending: the request ends with a note that says so, and
   Dürbün writes a line when it drops a message from an app because it is too large or unreadable.
 - React Native console lines on Android no longer show twice (once from the SDK, once from logcat).
+- React Native: large text responses fetched as Blobs no longer stall the app; the platform decodes them, and
+  where it cannot, decoding runs in short slices.
 - An app connected over Wi-Fi moves under the plugged-in phone it runs on once that phone reports it.
 - After the Mac wakes from sleep, Dürbün checks device connections, port forwards and log streams again.
 - A Flutter layout overflow is shown as an error line instead of a crash banner.
@@ -82,6 +84,7 @@ All notable changes to Dürbün are listed here. The format follows
 - The SDK guides point to the Mac app's "Allow local network (Wi-Fi) connections" setting for Wi-Fi.
 - React Native / JS SDK: while Dürbün is closed the SDK stops reading bodies after 30 seconds and keeps at
   most about 8 MB waiting; the oldest bodies are dropped before any request row.
+- React Native / JS SDK: FPS measurement stops while the app is in the background.
 - `npm run app:release` stops when the Developer ID or notarization variables are missing
   (`DURBUN_ALLOW_UNSIGNED=1` for a deliberate ad-hoc build) and verifies the built apps.
   `scripts/check-versions.mjs` covers lockfiles, the no-op SDK and the install snippets in the docs, and can
@@ -187,6 +190,11 @@ All notable changes to Dürbün are listed here. The format follows
   answer.
 - React Native / JS SDK: when no connection is made within 10 seconds, one console note lists the addresses
   tried and the fix for the device, and a line confirms when it connects.
+- React Native: a fatal JS error that ends the app before it reaches Dürbün shows on the next launch as
+  "Previous launch crashed — …". iOS keeps it in React Native's Settings; on Android pass a store with the
+  new `crashStorage` option (MMKV or AsyncStorage); `crashStorage: false` turns it off.
+- React Native: "Toggle element inspector" and "Open debugger" actions in development builds; new-architecture
+  apps without the interop layer are identified correctly and get the dev menu action.
 - Android and iOS SDKs: when no desktop connects within about 10 seconds, one console line says what was
   tried, the likely reason and the next step. `Durbun.connectionStatus` gives the same in code, for a status
   label in the app's debug menu (iOS also posts a notification when it changes).

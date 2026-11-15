@@ -7,7 +7,8 @@ import { appActions, builtInActions, type ActionHandler } from './actions.js';
 import { utf8Length, type BodyConfig } from './body.js';
 import { Connection, DEFAULT_TIMING, type ConnectionTiming, type WebSocketConstructor } from './connection.js';
 import { installConsolePatch, quietly, type ConsoleMethod } from './console.js';
-import { describeEnvironment, detectRuntime, devServerOrigin, type EnvironmentInfo, type Runtime } from './env.js';
+import { CrashStore, previousLaunchLog, toStoredCrash } from './crashStore.js';
+import { describeEnvironment, detectRuntime, devServerOrigin, isDevBuild, type EnvironmentInfo, type Runtime } from './env.js';
 import { installErrorHandlers, isRejectionWarning, type ErrorReport } from './errors.js';
 import { installFetchPatch } from './fetch.js';
 import { formatArgs } from './format.js';
@@ -35,7 +36,7 @@ import {
   type ServerWelcome,
 } from './protocol.js';
 import { RingBuffer } from './ringBuffer.js';
-import { clearTimer, errorMessage, g, originOfUrl, randomId, setTimer, type AnyRecord, type TimerHandle } from './util.js';
+import { clearRepeating, clearTimer, errorMessage, g, originOfUrl, randomId, setRepeating, setTimer, type AnyRecord, type TimerHandle } from './util.js';
 import { SDK_NAME, SDK_VERSION } from './version.js';
 import { installXhrPatch } from './xhr.js';
 
@@ -117,6 +118,9 @@ export class DurbunClient implements NetworkHost {
   /** No desktop answered the first attempt: launch requests stop waiting for mock rules. */
   private firstAttemptFailed = false;
   private mockGate: { promise: Promise<void>; release: () => void } | undefined;
+  private crashStore: CrashStore | undefined;
+  private crashWatch: TimerHandle | undefined;
+  private crashQuietChecks = 0;
 
   constructor(
     options: DurbunOptions = {},
@@ -185,6 +189,7 @@ export class DurbunClient implements NetworkHost {
       this.networkCaptured = xhr.length > 0 || fetchPatches.length > 0;
     }
     if (this.opts.captureErrors) this.errorsCaptured = install('error', () => installErrorHandlers(this, this.runtime, g)).length > 0;
+    if (this.errorsCaptured) this.loadPreviousCrashes();
 
     this.conn = new Connection(
       this.opts.urls,
@@ -218,6 +223,9 @@ export class DurbunClient implements NetworkHost {
     this.releaseMockGate();
     clearTimer(this.hintTimer);
     this.hintTimer = undefined;
+    clearRepeating(this.crashWatch);
+    this.crashWatch = undefined;
+    this.crashStore = undefined;
     try {
       this.metrics?.stop();
     } catch {
@@ -334,7 +342,59 @@ export class DurbunClient implements NetworkHost {
       kind: report.fatal ? 'crash' : 'text',
     };
     if (report.location) msg.data = { location: report.location };
+    // A dev build shows a red box and keeps running, so a crash sent live needs no stored copy; a release build
+    // ends right after the error handlers return, before the socket may have sent anything.
+    if (report.fatal && this.crashStore && !(isDevBuild() === true && this.isConnected && this.buffer.size === 0)) {
+      // Written first: the process may end as soon as the error handlers return.
+      quietly(() => {
+        this.crashStore?.save(toStoredCrash(msg));
+        this.watchCrashDelivery();
+      });
+    }
     this.emit(msg);
+  }
+
+  /* ────────────────────────────── crashes of earlier launches ────────────────────────────── */
+
+  private loadPreviousCrashes(): void {
+    quietly(() => {
+      try {
+        this.crashStore = CrashStore.resolve(this.opts.crashStorage, this.runtime);
+        const store = this.crashStore;
+        store?.load((crashes) => {
+          if (!this.started || this.crashStore !== store) return;
+          for (const crash of crashes) this.emit(previousLaunchLog(crash));
+          this.watchCrashDelivery();
+        });
+      } catch (e) {
+        this.debug('reading crashes of earlier launches failed', e);
+      }
+    });
+  }
+
+  /**
+   * Forgets the stored crashes once the desktop has them: connected, nothing left to send, for two checks in
+   * a row (the app outlived the crash, e.g. a dev build's red box). Runs only while a crash is pending.
+   */
+  private watchCrashDelivery(): void {
+    if (this.crashWatch !== undefined || !this.crashStore || !this.crashStore.hasPending) return;
+    this.crashQuietChecks = 0;
+    this.crashWatch = setRepeating(() => {
+      const store = this.crashStore;
+      if (!this.started || !store || !store.hasPending) {
+        clearRepeating(this.crashWatch);
+        this.crashWatch = undefined;
+        return;
+      }
+      const conn = this.conn;
+      const sent = !!conn && conn.isActive && this.buffer.size === 0 && conn.bufferedAmount === 0;
+      this.crashQuietChecks = sent ? this.crashQuietChecks + 1 : 0;
+      if (this.crashQuietChecks >= 2) {
+        store.delivered();
+        clearRepeating(this.crashWatch);
+        this.crashWatch = undefined;
+      }
+    }, this.timing.crashCheckMs ?? DEFAULT_TIMING.crashCheckMs ?? 1_000);
   }
 
   /**

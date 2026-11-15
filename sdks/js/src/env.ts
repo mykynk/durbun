@@ -78,10 +78,25 @@ function rnConstants(platform: AnyRecord | undefined): AnyRecord {
 }
 
 /** URL the JS bundle was loaded from (Metro dev server) — gives the dev machine's host and often the app id. */
+/**
+ * A React Native native module by name: `NativeModules` (old architecture and the interop layer), else
+ * `TurboModuleRegistry.get` (new architecture without the interop layer).
+ */
+export function rnNativeModule(rn: AnyRecord | undefined, name: string): AnyRecord | undefined {
+  return attempt(() => {
+    if (!rn) return undefined;
+    const nm = rn.NativeModules as AnyRecord | undefined;
+    const legacy = nm && (nm[name] as AnyRecord | undefined);
+    if (legacy && typeof legacy === 'object') return legacy;
+    const registry = rn.TurboModuleRegistry as AnyRecord | undefined;
+    const turbo = registry && typeof registry.get === 'function' ? registry.get(name) : undefined;
+    return turbo && typeof turbo === 'object' ? (turbo as AnyRecord) : undefined;
+  }, undefined);
+}
+
 export function rnScriptUrl(rn: AnyRecord | undefined = loadReactNative()): string | undefined {
   return attempt(() => {
-    const nm = rn && rn.NativeModules;
-    const sc = nm && nm.SourceCode;
+    const sc = rnNativeModule(rn, 'SourceCode');
     if (!sc) return undefined;
     if (typeof sc.scriptURL === 'string') return sc.scriptURL;
     if (typeof sc.getConstants === 'function') {

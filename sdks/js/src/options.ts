@@ -1,4 +1,5 @@
 import type { WebSocketConstructor } from './connection.js';
+import type { DurbunStorage } from './crashStore.js';
 import { discoverHosts, type Runtime } from './env.js';
 import { DEFAULT_HTTP_PORT, type DeviceHints } from './protocol.js';
 
@@ -39,6 +40,13 @@ export interface DurbunOptions {
    * `unhandledrejection`, Node the uncaught-exception monitor.
    */
   captureErrors?: boolean;
+  /**
+   * Where a fatal JS error is kept until the desktop has it, so a crash that ends the app before it reaches
+   * the desktop shows on the next launch ("Previous launch crashed — …"). Any store with `getItem` /
+   * `setItem` (and optionally `removeItem`), sync or async: AsyncStorage, `localStorage`, or a wrapped MMKV.
+   * Default: React Native's `Settings` on iOS; nothing elsewhere. `false` turns it off.
+   */
+  crashStorage?: DurbunStorage | false;
   /** Send JS heap / FPS samples (default true). */
   captureMetrics?: boolean;
   /** Outgoing messages kept while the desktop is not connected (default 5000, oldest dropped first). */
@@ -72,6 +80,7 @@ export interface ResolvedOptions {
   /** Milliseconds, 0–10 000. */
   waitForDesktop: number;
   captureErrors: boolean;
+  crashStorage?: DurbunStorage | false;
   captureMetrics: boolean;
   maxBufferedMessages: number;
   appId?: string;
@@ -137,6 +146,7 @@ export function resolveOptions(options: DurbunOptions, runtime: Runtime): Resolv
     waitForDesktop:
       typeof options.waitForDesktop === 'number' && isFinite(options.waitForDesktop) ? Math.min(MAX_WAIT_FOR_DESKTOP_MS, Math.max(0, Math.floor(options.waitForDesktop))) : 0,
     captureErrors: options.captureErrors !== false,
+    crashStorage: options.crashStorage === false ? false : options.crashStorage && typeof options.crashStorage === 'object' ? options.crashStorage : undefined,
     captureMetrics: options.captureMetrics !== false,
     maxBufferedMessages: max,
     appId: typeof options.appId === 'string' && options.appId ? options.appId : undefined,

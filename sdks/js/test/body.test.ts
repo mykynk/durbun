@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   base64Decode,
+  base64DecodeAsync,
   base64Encode,
   bodyFromBase64,
+  bodyFromBase64Async,
   bodyFromBlob,
+  incompleteTailStart,
+  utf8DecodeAsync,
   bodyFromBytes,
   bodyFromString,
   captureRequestBody,
@@ -221,5 +225,136 @@ describe('request bodies', () => {
     const captured = captureRequestBody(rnForm, 'multipart/form-data', CFG);
     expect(captured).toMatchObject({ encoding: 'utf8' });
     expect(JSON.parse((captured as { data: string }).data).username).toBe('yusuf');
+  });
+});
+
+/** React Native Blob: no arrayBuffer(); read through FileReader. */
+function rnBlob(data: Buffer, type: string): Record<string, unknown> & { size: number } {
+  return {
+    _data: data,
+    size: data.length,
+    type,
+    slice(start: number, end: number) {
+      return rnBlob(data.subarray(start, end), type);
+    },
+  };
+}
+
+/** React Native's FileReader: decodes text natively when asked (`readAsText`), else gives a data URL. */
+function fakeFileReader(calls: string[], withText = true) {
+  class Reader {
+    result: string | null = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    readAsDataURL(blob: { _data: Buffer; type: string }) {
+      calls.push(`dataURL:${blob._data.length}`);
+      setTimeout(() => {
+        this.result = `data:${blob.type || 'application/octet-stream'};base64,${blob._data.toString('base64')}`;
+        this.onload?.();
+      }, 0);
+    }
+  }
+  class TextReader extends Reader {
+    readAsText(blob: { _data: Buffer }) {
+      calls.push(`text:${blob._data.length}`);
+      setTimeout(() => {
+        this.result = blob._data.toString('utf8');
+        this.onload?.();
+      }, 0);
+    }
+  }
+  return withText ? TextReader : Reader;
+}
+
+describe('React Native Blob responses', () => {
+  const FR = g.FileReader;
+  const TD = g.TextDecoder;
+  afterEach(() => {
+    g.FileReader = FR;
+    g.TextDecoder = TD;
+  });
+
+  it('text types are decoded by the platform (readAsText), limited to the body limit', async () => {
+    const calls: string[] = [];
+    g.FileReader = fakeFileReader(calls);
+    const json = Buffer.from(JSON.stringify({ name: 'Dürbün', list: Array.from({ length: 50 }, (_, i) => i) }));
+    expect(await bodyFromBlob(rnBlob(json, 'application/json'), undefined, CFG)).toEqual({ encoding: 'utf8', data: json.toString(), size: json.length });
+    expect(calls).toEqual([`text:${json.length}`]);
+    // Cut inside "ü" (2 bytes): the half character is dropped, not shown as U+FFFD.
+    const cut = json.indexOf(Buffer.from('ü')) + 1;
+    const body = await bodyFromBlob(rnBlob(json, 'application/json'), undefined, { captureBodies: true, maxBodyBytes: cut });
+    expect(body).toEqual({ encoding: 'utf8', data: json.subarray(0, cut - 1).toString(), size: json.length, truncated: true });
+    expect(calls[1]).toBe(`text:${cut}`);
+  });
+
+  it('binary types are passed through as base64 without decoding, cut to whole 3-byte groups', async () => {
+    const calls: string[] = [];
+    g.FileReader = fakeFileReader(calls);
+    const png = Buffer.from(Array.from({ length: 100 }, (_, i) => (i * 37) & 0xff));
+    expect(await bodyFromBlob(rnBlob(png, 'image/png'), undefined, CFG)).toEqual({ encoding: 'base64', data: png.toString('base64'), size: 100 });
+    expect(calls).toEqual(['dataURL:100']);
+    // A Blob that cannot be sliced: the data URL is cut before anything is decoded.
+    const unsliceable = { ...rnBlob(png, 'image/png'), slice: undefined };
+    const body = await bodyFromBlob(unsliceable as never, undefined, { captureBodies: true, maxBodyBytes: 10 });
+    expect(body).toEqual({ encoding: 'base64', data: png.subarray(0, 9).toString('base64'), size: 100, truncated: true });
+  });
+
+  it('without readAsText or TextDecoder the data URL is decoded in slices', async () => {
+    const calls: string[] = [];
+    g.FileReader = fakeFileReader(calls, false);
+    delete g.TextDecoder;
+    const text = 'Dürbün ğüşiöç 🔭 '.repeat(20_000);
+    const data = Buffer.from(text);
+    const body = await bodyFromBlob(rnBlob(data, 'text/plain'), undefined, CFG);
+    expect(body).toEqual({ encoding: 'utf8', data: text, size: data.length });
+    expect(calls).toEqual([`dataURL:${data.length}`]);
+    // No content type: sniffed like any other body.
+    expect(await bodyFromBlob(rnBlob(Buffer.from([0, 1, 2, 3]), ''), undefined, CFG)).toEqual({ encoding: 'base64', data: 'AAECAw==', size: 4 });
+  });
+
+  it('base64DecodeAsync equals base64Decode, honours the byte cap and yields between slices', async () => {
+    const bytes = Buffer.from(Array.from({ length: 70_000 }, (_, i) => (i * 7919) & 0xff));
+    const b64 = bytes.toString('base64');
+    let ticks = 0;
+    const counter = setInterval(() => ticks++, 0);
+    try {
+      const decoded = await base64DecodeAsync(b64, Infinity, 0);
+      expect(Buffer.from(decoded).equals(bytes)).toBe(true);
+      expect(ticks).toBeGreaterThan(0);
+    } finally {
+      clearInterval(counter);
+    }
+    expect(Buffer.from(await base64DecodeAsync(b64, 1000)).equals(bytes.subarray(0, 1000))).toBe(true);
+    const messy = b64.slice(0, 400).replace(/(.{76})/g, '$1\n').replace(/\+/g, '-');
+    expect(Buffer.from(await base64DecodeAsync(messy, Infinity, 0)).equals(Buffer.from(base64Decode(messy)))).toBe(true);
+  });
+
+  it('utf8DecodeAsync (pure JS) equals Buffer on text and invalid bytes, cut anywhere', async () => {
+    delete g.TextDecoder;
+    const samples = [
+      Buffer.from('a'.repeat(8191) + '€' + 'b'.repeat(9000) + '🔭'.repeat(5000)),
+      Buffer.from(Array.from({ length: 40_000 }, (_, i) => (i * 131 + (i >> 3)) & 0xff)),
+      Buffer.concat([Buffer.alloc(8190, 0x61), Buffer.from([0xf0, 0x9f, 0x94, 0xad, 0x80, 0x80, 0xe2, 0x82]), Buffer.alloc(9000, 0x62)]),
+    ];
+    for (const sample of samples) expect(await utf8DecodeAsync(sample, 0)).toBe(sample.toString('utf8'));
+  });
+
+  it('incompleteTailStart finds a character cut at the end', () => {
+    const euro = Buffer.from('a€'); // 61 e2 82 ac
+    expect(incompleteTailStart(euro)).toBe(4);
+    expect(incompleteTailStart(euro.subarray(0, 3))).toBe(1);
+    expect(incompleteTailStart(euro.subarray(0, 2))).toBe(1);
+    expect(incompleteTailStart(Buffer.from([0x61, 0x80, 0x80, 0x80, 0x80]))).toBe(5);
+    expect(incompleteTailStart(Buffer.from([]))).toBe(0);
+  });
+
+  it('bodyFromBase64Async matches bodyFromBase64 when nothing is cut', async () => {
+    const cases: Array<[string, string | undefined]> = [
+      [Buffer.from('{"a":"ş"}').toString('base64'), 'application/json'],
+      [Buffer.from([137, 80, 78, 71]).toString('base64'), 'image/png'],
+      [Buffer.from('plain').toString('base64'), undefined],
+    ];
+    for (const [b64, ct] of cases) expect(await bodyFromBase64Async(b64, ct, CFG)).toEqual(bodyFromBase64(b64, ct, CFG));
+    expect(await bodyFromBase64Async('AAAA', 'image/png', { captureBodies: false, maxBodyBytes: 10 })).toEqual({ encoding: 'utf8', data: '', size: 3, truncated: true });
   });
 });

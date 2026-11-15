@@ -1,6 +1,8 @@
 /**
  * Body capture: turns request/response payloads into `WireBody`s without consuming the app's own
- * streams. Pure JS UTF-8 / base64 codecs (Hermes lacks parts of TextDecoder/btoa on older versions).
+ * streams. Pure JS UTF-8 / base64 codecs (Hermes lacks parts of TextDecoder/btoa on older versions);
+ * React Native Blobs are decoded by the platform where it can (`FileReader.readAsText`), and the pure-JS
+ * fallback works in short slices so it never holds up a frame.
  */
 import { isTextContentType, type WireBody } from './protocol.js';
 import { g, isPromiseLike, setTimer, clearTimer, type AnyRecord } from './util.js';
@@ -197,15 +199,19 @@ export function base64Encode(bytes: Uint8Array): string {
   return parts.join('');
 }
 
-/** Lenient decoder: ignores whitespace and invalid characters, accepts URL-safe alphabet and missing padding. */
-export function base64Decode(input: string): Uint8Array {
+function base64Lookup(): Int16Array {
   if (!B64_LOOKUP) {
     B64_LOOKUP = new Int16Array(256).fill(-1);
     for (let i = 0; i < B64.length; i++) B64_LOOKUP[B64.charCodeAt(i)] = i;
     B64_LOOKUP['-'.charCodeAt(0)] = 62;
     B64_LOOKUP['_'.charCodeAt(0)] = 63;
   }
-  const lookup = B64_LOOKUP;
+  return B64_LOOKUP;
+}
+
+/** Lenient decoder: ignores whitespace and invalid characters, accepts URL-safe alphabet and missing padding. */
+export function base64Decode(input: string): Uint8Array {
+  const lookup = base64Lookup();
   const out = new Uint8Array(Math.floor((input.length * 3) / 4) + 3);
   let p = 0;
   let acc = 0;
@@ -223,6 +229,95 @@ export function base64Decode(input: string): Uint8Array {
     }
   }
   return out.subarray(0, p);
+}
+
+/* ────────────────────────────── Decoding off the hot path ────────────────────────────── */
+
+/**
+ * Pure-JS decoding (React Native without a native TextDecoder) runs in slices of at most this many
+ * milliseconds; between slices the JS thread is handed back so a large body never holds up a frame.
+ */
+export const DECODE_SLICE_MS = 4;
+/** Work items (characters / bytes) between two clock checks. */
+const DECODE_STEP = 8 * 1024;
+
+const nextTick = (): Promise<void> => new Promise<void>((resolve) => setTimer(resolve, 0));
+
+/**
+ * `base64Decode` that stops after `maxBytes` decoded bytes and yields to the event loop every
+ * `DECODE_SLICE_MS` (same lenient rules). Small inputs decode synchronously.
+ */
+export async function base64DecodeAsync(input: string, maxBytes = Infinity, sliceMs = DECODE_SLICE_MS): Promise<Uint8Array> {
+  const lookup = base64Lookup();
+  const cap = Math.max(0, Math.min(Math.floor((input.length * 3) / 4) + 3, maxBytes));
+  const out = new Uint8Array(cap);
+  let p = 0;
+  let acc = 0;
+  let bits = 0;
+  let i = 0;
+  let sliceStart = Date.now();
+  while (i < input.length && p < cap) {
+    const end = Math.min(input.length, i + DECODE_STEP);
+    for (; i < end && p < cap; i++) {
+      const code = input.charCodeAt(i);
+      if (code === 61 /* = */) {
+        i = input.length;
+        break;
+      }
+      const v = code < 256 ? lookup[code] : -1;
+      if (v < 0) continue;
+      acc = (acc << 6) | v;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        out[p++] = (acc >> bits) & 0xff;
+      }
+    }
+    if (i < input.length && p < cap && Date.now() - sliceStart >= sliceMs) {
+      await nextTick();
+      sliceStart = Date.now();
+    }
+  }
+  return out.subarray(0, p);
+}
+
+/** Start of a trailing UTF-8 sequence that the data ends in the middle of (or `bytes.length`). */
+export function incompleteTailStart(bytes: Uint8Array): number {
+  const len = bytes.length;
+  for (let back = 1; back <= 3 && back <= len; back++) {
+    const b = bytes[len - back];
+    if ((b & 0xc0) === 0x80) continue; // continuation byte: keep looking for its lead
+    const need = b >= 0xf0 && b < 0xf5 ? 4 : b >= 0xe0 && b < 0xf0 ? 3 : b >= 0xc2 && b < 0xe0 ? 2 : 1;
+    return need > back ? len - back : len;
+  }
+  return len;
+}
+
+/**
+ * `utf8Decode` that never blocks the JS thread for long: a native `TextDecoder` decodes in one call; the
+ * pure-JS decoder works through the bytes in slices of `DECODE_SLICE_MS`, cut between characters.
+ */
+export async function utf8DecodeAsync(bytes: Uint8Array, sliceMs = DECODE_SLICE_MS): Promise<string> {
+  const TD = g.TextDecoder;
+  if (typeof TD === 'function' || bytes.length <= DECODE_STEP) return utf8Decode(bytes);
+  const parts: string[] = [];
+  let start = 0;
+  let sliceStart = Date.now();
+  while (start < bytes.length) {
+    let end = Math.min(bytes.length, start + DECODE_STEP);
+    if (end < bytes.length) {
+      // Never split a character: a sequence crossing the cut goes whole into the next part.
+      const cut = start + incompleteTailStart(bytes.subarray(start, end));
+      if (cut > start) end = cut;
+    }
+    parts.push(utf8Decode(bytes.subarray(start, end)));
+    start = end;
+    if (start < bytes.length && Date.now() - sliceStart >= sliceMs) {
+      await nextTick();
+      sliceStart = Date.now();
+    }
+  }
+  return parts.join('');
 }
 
 /** Base64 length → decoded byte count (without decoding). */
@@ -391,21 +486,32 @@ export function viewToBytes(view: ArrayBufferView): Uint8Array {
   return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
 }
 
-/** Reads up to `maxBytes` of a Blob: `arrayBuffer()` (web/Node) or `FileReader.readAsDataURL` (React Native). */
-export function readBlobPrefix(
-  blob: BlobLike,
-  maxBytes: number,
-  timeoutMs = 10_000,
-): Promise<{ bytes?: Uint8Array; base64?: string } | undefined> {
+export interface BlobPrefix {
+  bytes?: Uint8Array;
+  base64?: string;
+  /** Decoded by the platform (`FileReader.readAsText`); only when text was asked for. */
+  text?: string;
+}
+
+/**
+ * Reads up to `maxBytes` of a Blob: `arrayBuffer()` (web/Node), otherwise `FileReader` (React Native):
+ * `readAsText` when `asText` is set (the platform decodes, nothing runs on the JS thread), else
+ * `readAsDataURL`.
+ */
+export function readBlobPrefix(blob: BlobLike, maxBytes: number, timeoutMs = 10_000, asText = false): Promise<BlobPrefix | undefined> {
   let part: BlobLike = blob;
+  let whole = blob.size <= maxBytes;
   try {
-    if (blob.size > maxBytes && typeof blob.slice === 'function') part = blob.slice(0, Math.max(0, maxBytes));
+    if (!whole && typeof blob.slice === 'function') {
+      part = blob.slice(0, Math.max(0, maxBytes));
+      whole = true;
+    }
   } catch {
     part = blob;
   }
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (value: { bytes?: Uint8Array; base64?: string } | undefined) => {
+    const finish = (value: BlobPrefix | undefined) => {
       if (settled) return;
       settled = true;
       clearTimer(timer);
@@ -426,9 +532,16 @@ export function readBlobPrefix(
         return;
       }
       const reader = new FR();
+      // Only a read limited to the prefix is decoded as text (an unsliceable large Blob goes through
+      // the data URL, which is cut before decoding).
+      const text = asText && whole && typeof reader.readAsText === 'function';
       reader.onload = () => {
         const result = reader.result;
         if (typeof result === 'string') {
+          if (text) {
+            finish({ text: result });
+            return;
+          }
           const comma = result.indexOf(',');
           finish({ base64: comma >= 0 ? result.slice(comma + 1) : '' });
         } else if (isArrayBufferLike(result)) {
@@ -436,11 +549,60 @@ export function readBlobPrefix(
         } else finish(undefined);
       };
       reader.onerror = () => finish(undefined);
-      reader.readAsDataURL(part);
+      if (text) reader.readAsText(part, 'UTF-8');
+      else reader.readAsDataURL(part);
     } catch {
       finish(undefined);
     }
   });
+}
+
+/**
+ * `bodyFromBase64` for data read from a Blob: decodes at most `maxBodyBytes`, passes binary data
+ * through without decoding, and decodes text in slices that never block the JS thread for long.
+ */
+export async function bodyFromBase64Async(b64: string, contentType: string | undefined, cfg: BodyConfig, totalSize?: number): Promise<WireBody> {
+  const decodedLength = base64DecodedLength(b64);
+  const size = Math.max(totalSize ?? decodedLength, decodedLength);
+  if (!cfg.captureBodies) return sizeOnly(size);
+  const max = Math.max(0, cfg.maxBodyBytes);
+  const truncated = size > max;
+  const passThrough = (): WireBody => {
+    // Whole 3-byte groups only, so the prefix is valid base64 of at most `max` bytes.
+    const data = decodedLength <= max ? b64 : b64.slice(0, Math.floor(max / 3) * 4);
+    const body: WireBody = { encoding: 'base64', data, size };
+    if (truncated || decodedLength > max) body.truncated = true;
+    return body;
+  };
+  // No content type: sniff the first 2 KB like `isTextual` does.
+  const binary = contentType ? !isTextual(contentType) : !looksLikeText(base64Decode(b64.slice(0, 2732)));
+  // Plain base64 (RN data URLs) is passed through; the check runs on binary data only.
+  if (binary && /^[A-Za-z0-9+/]*={0,2}$/.test(b64)) return passThrough();
+  let bytes = await base64DecodeAsync(b64, max);
+  if (binary) {
+    // Not plain base64 (whitespace, URL-safe alphabet): re-encode the decoded prefix.
+    const body: WireBody = { encoding: 'base64', data: base64Encode(bytes), size };
+    if (truncated) body.truncated = true;
+    return body;
+  }
+  if (truncated) bytes = bytes.subarray(0, incompleteTailStart(bytes));
+  const body: WireBody = { encoding: 'utf8', data: await utf8DecodeAsync(bytes), size };
+  if (truncated) body.truncated = true;
+  return body;
+}
+
+/** Text decoded by the platform from a prefix of `size` bytes: drops a character cut in half at the end. */
+function bodyFromDecodedText(text: string, size: number, maxBytes: number): WireBody {
+  const truncated = size > maxBytes;
+  let data = text;
+  if (truncated) {
+    let end = data.length;
+    for (let k = 0; k < 3 && end > 0 && data.charCodeAt(end - 1) === 0xfffd; k++) end--;
+    if (end < data.length) data = data.slice(0, end);
+  }
+  const body: WireBody = { encoding: 'utf8', data, size };
+  if (truncated) body.truncated = true;
+  return body;
 }
 
 /** Captures a Blob as a WireBody (async, never consumes the blob). */
@@ -449,10 +611,12 @@ export function bodyFromBlob(blob: BlobLike, contentType: string | undefined, cf
   if (size === 0) return Promise.resolve(undefined);
   if (!cfg.captureBodies) return Promise.resolve(sizeOnly(size));
   const ct = contentType || (typeof blob.type === 'string' && blob.type ? blob.type : undefined);
-  return readBlobPrefix(blob, Math.max(0, cfg.maxBodyBytes)).then((res) => {
+  const max = Math.max(0, cfg.maxBodyBytes);
+  return readBlobPrefix(blob, max, undefined, isTextual(ct)).then((res) => {
     if (!res) return undefined;
+    if (res.text !== undefined) return bodyFromDecodedText(res.text, size, max);
     if (res.bytes) return bodyFromBytes(res.bytes, ct, cfg, size);
-    if (res.base64 !== undefined) return bodyFromBase64(res.base64, ct, cfg, size);
+    if (res.base64 !== undefined) return bodyFromBase64Async(res.base64, ct, cfg, size);
     return undefined;
   });
 }

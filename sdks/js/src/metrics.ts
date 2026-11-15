@@ -1,9 +1,10 @@
 /**
  * Periodic `metric` samples: JS heap (Hermes instrumented stats, Chrome `performance.memory`, Node
  * `process.memoryUsage`), Node CPU/RSS, and JS-thread FPS / janky frames via requestAnimationFrame
- * (React Native and browsers — the same signal as RN's "JS FPS" perf monitor).
+ * (React Native and browsers — the same signal as RN's "JS FPS" perf monitor), paused in the background.
  */
 import type { SdkMetric } from './protocol.js';
+import { loadReactNative } from './env.js';
 import { clearRepeating, g, setRepeating, type AnyRecord, type TimerHandle } from './util.js';
 
 const MB = 1024 * 1024;
@@ -44,6 +45,11 @@ export function metricsSupported(): boolean {
   return readHeapMB() !== undefined || typeof g.requestAnimationFrame === 'function';
 }
 
+/**
+ * Counts every frame while the app is in the foreground (exact `fps` and `jankyFrames` per sample interval). No
+ * frame callbacks run while the app is in the background (React Native `AppState` not active, hidden page);
+ * coming back starts a fresh measurement, so the time away is not counted as jank.
+ */
 export class MetricsSampler {
   private timer: TimerHandle | undefined;
   private raf: unknown;
@@ -56,6 +62,8 @@ export class MetricsSampler {
   private lastCpu: { user: number; system: number } | undefined;
   private lastCpuAt = 0;
   private running = false;
+  private background = false;
+  private unwatchVisibility: (() => void) | undefined;
 
   constructor(private readonly emit: (sample: SdkMetric) => void) {}
 
@@ -65,7 +73,8 @@ export class MetricsSampler {
     this.running = true;
     this.windowStart = Date.now();
     this.primeCpu();
-    this.startFrames();
+    this.watchVisibility();
+    if (!this.background) this.startFrames();
     this.timer = setRepeating(() => {
       const sample = this.sample();
       if (sample) this.emit(sample);
@@ -76,17 +85,19 @@ export class MetricsSampler {
     this.running = false;
     clearRepeating(this.timer);
     this.timer = undefined;
-    if (this.raf !== undefined && typeof g.cancelAnimationFrame === 'function') {
-      try {
-        g.cancelAnimationFrame(this.raf);
-      } catch {
-        // ignore
-      }
+    this.stopFrames();
+    try {
+      this.unwatchVisibility?.();
+    } catch {
+      // ignore
     }
-    this.raf = undefined;
-    this.frames = 0;
-    this.janky = 0;
-    this.lastFrameTs = 0;
+    this.unwatchVisibility = undefined;
+    this.background = false;
+  }
+
+  /** Whether a frame callback is currently requested. */
+  get countingFrames(): boolean {
+    return this.raf !== undefined;
   }
 
   /** Builds one sample from everything measured since the previous one. */
@@ -117,11 +128,11 @@ export class MetricsSampler {
     const raf = g.requestAnimationFrame;
     if (typeof raf !== 'function') return;
     const onFrame = (ts: number) => {
-      if (!this.running) return;
+      if (!this.running || this.background) return;
       const t = typeof ts === 'number' && ts > 0 ? ts : Date.now();
       if (this.lastFrameTs > 0) {
         const delta = t - this.lastFrameTs;
-        // Gaps over 1 s (app in background, debugger pause) start a fresh measurement instead of counting as jank.
+        // Gaps over 1 s (debugger pause and the like) start a fresh measurement instead of counting as jank.
         if (delta > 0 && delta <= 1000) {
           this.frames++;
           if (delta < this.windowMinDelta) this.windowMinDelta = delta;
@@ -139,6 +150,64 @@ export class MetricsSampler {
       this.raf = raf(onFrame);
     } catch {
       this.raf = undefined;
+    }
+  }
+
+  private stopFrames(): void {
+    if (this.raf !== undefined && typeof g.cancelAnimationFrame === 'function') {
+      try {
+        g.cancelAnimationFrame(this.raf);
+      } catch {
+        // ignore
+      }
+    }
+    this.raf = undefined;
+    this.frames = 0;
+    this.janky = 0;
+    this.lastFrameTs = 0;
+  }
+
+  /** Stops frame callbacks while the app is in the background (React Native AppState, hidden web page). */
+  private watchVisibility(): void {
+    const set = (hidden: boolean) => {
+      if (!this.running || hidden === this.background) return;
+      this.background = hidden;
+      if (hidden) this.stopFrames();
+      else {
+        // A fresh measurement: the time away is neither frames nor jank.
+        this.frames = 0;
+        this.janky = 0;
+        this.windowMinDelta = Infinity;
+        this.windowStart = Date.now();
+        this.startFrames();
+      }
+    };
+    try {
+      const rn = loadReactNative();
+      const appState = rn && (rn.AppState as AnyRecord | undefined);
+      if (appState && typeof appState.addEventListener === 'function') {
+        this.background = typeof appState.currentState === 'string' && appState.currentState !== 'active' && appState.currentState !== 'unknown';
+        const onChange = (state: unknown) => set(state !== 'active');
+        const sub = appState.addEventListener('change', onChange);
+        this.unwatchVisibility = () => {
+          if (sub && typeof sub.remove === 'function') sub.remove();
+          else if (typeof appState.removeEventListener === 'function') appState.removeEventListener('change', onChange);
+        };
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      const doc = g.document;
+      if (doc && typeof doc.addEventListener === 'function' && typeof doc.visibilityState === 'string') {
+        this.background = doc.visibilityState === 'hidden';
+        const onChange = () => set(doc.visibilityState === 'hidden');
+        doc.addEventListener('visibilitychange', onChange);
+        this.unwatchVisibility = () => doc.removeEventListener('visibilitychange', onChange);
+      }
+    } catch {
+      // ignore
     }
   }
 

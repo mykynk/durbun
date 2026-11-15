@@ -154,11 +154,11 @@ returns the matching rule; answer with `rule.action` and report it with `call.re
 |---|---|
 | **console.\*** | `log/info/debug/warn/error/trace/assert/dir/table`; `%s %d %o %c` formatting, objects → JSON data, Errors → stack traces. `captureConsole: 'auto'` (default): when Dürbün already receives the device's own log stream (Android logcat, iOS simulator), console lines are **not sent again**, so rows are not duplicated. |
 | **SDK logs** | `Durbun.log/debug/info/warn/error`, `Durbun.event`. |
-| **Network** | Everything that goes through `XMLHttpRequest`: React Native `fetch`, axios and others. Method, URL, headers, request and response bodies (text/JSON as text, binary as base64, FormData field summary, Blobs), status code, timings (wait / receive), errors, timeouts and cancellations. In browsers and Node, native `fetch` is captured too; each request is reported **once**. Body limits come from Dürbün's settings (default 1 MB). Responses that stay open (server-sent events, NDJSON, media streams) are shown as soon as their headers arrive, with the size only. Metro's and Dürbün's own traffic is ignored. |
+| **Network** | Everything that goes through `XMLHttpRequest`: React Native `fetch`, axios and others. Method, URL, headers, request and response bodies (text/JSON as text, binary as base64, FormData field summary, Blobs), status code, timings (wait / receive), errors, timeouts and cancellations. In browsers and Node, native `fetch` is captured too; each request is reported **once**. Body limits come from Dürbün's settings (default 1 MB). Responses that stay open (server-sent events, NDJSON, media streams) are shown as soon as their headers arrive, with the size only. In React Native, text responses that arrive as a `Blob` (what `fetch` uses) are decoded by the platform (`FileReader.readAsText`), not on the JS thread. Metro's and Dürbün's own traffic is ignored. |
 | **Mocks** | Rules from Dürbün's Mocks tab: *respond* (a fake response, the network is never hit), *delay* (then the real request; the app's own timeout still applies), *fail* (the platform's natural error, `Network request failed` in React Native). In React Native, a binary (base64) mock body cannot be delivered intact to a `blob` response (what `fetch` uses) unless it is valid UTF-8, because React Native's `Blob` only holds text: such a request goes to the network instead and Dürbün shows a warning line saying why. Text, JSON and `arraybuffer` responses are mocked as usual. |
-| **Errors** | Uncaught errors via `ErrorUtils` (the previous handler chain is kept): fatal ones appear as **crash** rows. In React Native, unhandled promise rejections in dev builds, read from React Native's own rejection tracker (LogBox in 0.71–0.81, the "Uncaught (in promise)" error in 0.82 and later, the console warning before 0.71); LogBox still shows them. React Native does not track rejections in release builds, so none are reported there. On the web, `error` and `unhandledrejection`; in Node, `uncaughtExceptionMonitor`. |
-| **Performance** | JS heap (Hermes), JS-thread FPS and janky frame count (the "JS FPS" of the RN perf monitor). |
-| **Actions** | "Reload JS", "Open dev menu" and Appearance (system / light / dark) in development mode, plus your own via `Durbun.addAction`, for example a dump of AsyncStorage (below). |
+| **Errors** | Uncaught errors via `ErrorUtils` (the previous handler chain is kept): fatal ones appear as **crash** rows. A fatal error that ends the app before it reaches Dürbün is sent on the next launch as "Previous launch crashed — …" (see `crashStorage` below). In React Native, unhandled promise rejections in dev builds, read from React Native's own rejection tracker (LogBox in 0.71–0.81, the "Uncaught (in promise)" error in 0.82 and later, the console warning before 0.71); LogBox still shows them. React Native does not track rejections in release builds, so none are reported there. On the web, `error` and `unhandledrejection`; in Node, `uncaughtExceptionMonitor`. |
+| **Performance** | JS heap (Hermes), JS-thread FPS and janky frame count (the "JS FPS" of the RN perf monitor). FPS measurement stops while the app is in the background. |
+| **Actions** | "Reload JS", "Open dev menu", "Toggle element inspector", "Open debugger" (React Native DevTools, 0.76 and later) and Appearance (system / light / dark) in development mode, where the app's React Native version has them, plus your own via `Durbun.addAction`, for example a dump of AsyncStorage (below). |
 
 **What a JS SDK cannot see:** React Native `<Image>` downloads and requests made by native modules (Firebase and
 similar) never pass through the JS layer, so they are not captured (report your own clients with
@@ -188,12 +188,37 @@ Durbun.addAction({ id: 'app.dumpStorage', label: 'Dump AsyncStorage', group: 'st
 | `captureNetwork` / `captureErrors` / `captureMetrics` | `true` | |
 | `waitForDesktop` | `0` | Milliseconds (at most 10 000). Requests made this soon after `start()` wait for Dürbün's mock rules, so mocks apply to launch requests (remote config, login). They stop waiting as soon as the rules arrive or no Dürbün answers. Even at `0`, a request made while Dürbün is answering waits for it (up to 0.8 s). |
 | `maxBufferedMessages` | `5000` | Number of messages kept while disconnected. |
+| `crashStorage` | iOS: React Native `Settings`; elsewhere none | Where a fatal JS error is kept until Dürbün has it, so a crash that ends the app first shows on the next launch. Any store with `getItem` / `setItem` (and optionally `removeItem`), sync or async. `false` turns it off. See below. |
 | `appId` / `appName` / `appVersion` | auto | Package id / display name. In React Native they are read from Metro's bundle URL and `AppRegistry`; in Expo, from `expo-application` or the app config (see Expo above). Mock rules are scoped by app id. |
 | `device` | auto | For example `{ name: "Jane's iPhone" }`. |
 | `ignoreUrls` | `[]` | URLs that are never captured or mocked (substring or RegExp). |
 | `redactHeaders` | `[]` | Header names (case-insensitive) whose values show as `••••` in Dürbün, for example `['Authorization', 'Cookie']`. The request sent to the server is unchanged. |
 | `WebSocket` | global | Implementation for runtimes without a global WebSocket. |
 | `debug` | `false` | Print SDK diagnostics to the console. |
+
+### Crashes on the next launch
+
+In a release build (`enabled: true`), a fatal JS error ends the app right after the error handlers run, often
+before the report has left the device. The SDK therefore writes the last three fatal errors to a small store and
+sends them on the next launch, marked `previousLaunch`; once Dürbün has them they are removed. Dev builds keep
+running behind the red box, so there a crash that already reached Dürbün is not stored.
+
+On iOS the SDK uses React Native's `Settings` (the app's user defaults) when no store is given. React Native has no
+built-in store on Android, so pass one there. A synchronous store (MMKV) is the most reliable, because the write
+must finish before the app ends; an asynchronous one (AsyncStorage) usually does too:
+
+```js
+import { MMKV } from 'react-native-mmkv';
+const storage = new MMKV({ id: 'durbun' });
+
+Durbun.start({
+  crashStorage: { getItem: (k) => storage.getString(k), setItem: (k, v) => storage.set(k, v), removeItem: (k) => storage.delete(k) },
+});
+// or: crashStorage: AsyncStorage (from @react-native-async-storage/async-storage)
+```
+
+Native crashes (Java / Kotlin / Objective-C / Swift) are not JS errors: Dürbün shows them from the device's own
+crash records while the phone is connected to the Mac.
 
 ## Release safety
 

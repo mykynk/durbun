@@ -33,6 +33,8 @@ export interface ConnectionTiming {
   connectHintMs?: number;
   /** Client: bodies are still read this long after start, or after the desktop went away. */
   noDesktopGraceMs?: number;
+  /** Client: how often a pending crash report is checked for delivery. */
+  crashCheckMs?: number;
 }
 
 export const DEFAULT_TIMING: ConnectionTiming = {
@@ -43,6 +45,7 @@ export const DEFAULT_TIMING: ConnectionTiming = {
   idleTimeoutMs: 45_000,
   connectHintMs: 10_000,
   noDesktopGraceMs: 30_000,
+  crashCheckMs: 1_000,
 };
 
 export interface ConnectionHandlers {
