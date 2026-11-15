@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -41,6 +42,36 @@ class FakeNativeAdapter implements HttpClientAdapter {
         return ResponseBody.fromString(json, 200, headers: {
           Headers.contentTypeHeader: ['application/json; charset=utf-8'],
           Headers.contentLengthHeader: ['${utf8.encode(json).length}'],
+        });
+      case '/raw':
+        // Whitespace and key order as the server sent them.
+        return ResponseBody.fromString('{ "b" : 2,\n  "a": 1 }', 200, headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        });
+      case '/secret':
+        final auth = options.headers['authorization'];
+        if (auth == 'Bearer fresh') {
+          return ResponseBody.fromString('{"ok":true}', 200, headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          });
+        }
+        return ResponseBody.fromString('{"error":"expired"}', 401, headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        });
+      case '/broken':
+        final controller = StreamController<Uint8List>();
+        controller
+          ..add(Uint8List.fromList(utf8.encode('{"part":')))
+          ..addError(const SocketException('Connection reset (native)'));
+        unawaited(controller.close());
+        return ResponseBody(controller.stream, 200, headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        });
+      case '/slow':
+        final controller = StreamController<Uint8List>();
+        controller.add(Uint8List.fromList(utf8.encode('{"items":[')));
+        return ResponseBody(controller.stream, 200, headers: {
+          Headers.contentTypeHeader: ['application/json'],
         });
       case '/missing':
         return ResponseBody.fromString('{"error":"nope"}', 404, headers: {
@@ -97,6 +128,32 @@ void main() {
     conn.send({'type': 'mocks', 'rules': rules});
     await Future<void>.delayed(const Duration(milliseconds: 150));
   }
+
+  /// Every row for a URL ending in [suffix]: (request, end) in send order.
+  Future<List<(Map<String, Object?>, Map<String, Object?>)>> rows(String suffix, int count) async {
+    final reqs = await conn.waitForCount(
+      (m) => m['type'] == 'net.request' && (m['url']! as String).endsWith(suffix),
+      count,
+    );
+    return [for (final r in reqs) (r, await conn.waitForNetEnd(r['id']! as String))];
+  }
+
+  /// The usual token refresh: on a 401, set a fresh token and send the same
+  /// request again, answering the first call with the second's response.
+  Interceptor refresher(Dio dio) => InterceptorsWrapper(
+    onError: (err, handler) async {
+      if (err.response?.statusCode == 401) {
+        final options = err.requestOptions..headers['authorization'] = 'Bearer fresh';
+        handler.resolve(await dio.fetch<Object?>(options));
+        return;
+      }
+      handler.next(err);
+    },
+  );
+
+  Dio wrappedDio(FakeNativeAdapter adapter) =>
+      Dio(BaseOptions(baseUrl: 'https://api.example.com'))
+        ..httpClientAdapter = DurbunDioAdapter(adapter);
 
   Dio nativeDio(FakeNativeAdapter adapter) {
     final dio = Dio(BaseOptions(baseUrl: 'https://api.example.com'))
@@ -275,6 +332,178 @@ void main() {
     expect((body['data']! as String).length, lessThanOrEqualTo(1000));
     final declared = int.parse(res.headers.value(Headers.contentLengthHeader)!);
     expect(body['size'], declared, reason: 'the size comes from content-length');
+  });
+
+  test('interceptor: a request answered by another interceptor still ends', () async {
+    final adapter = FakeNativeAdapter();
+    final dio = Dio(BaseOptions(baseUrl: 'https://api.example.com'))..httpClientAdapter = adapter;
+    dio.interceptors
+      ..add(refresher(dio))
+      ..add(DurbunDioInterceptor(dio: dio));
+    final res = await dio.get<Map<String, dynamic>>(
+      '/secret?via=interceptor',
+      options: Options(headers: {'authorization': 'Bearer old'}),
+    );
+    expect(res.data, {'ok': true});
+    final both = await rows('/secret?via=interceptor', 2);
+    final (_, first) = both[0];
+    expect(first['type'], 'net.error');
+    expect(first['error'], contains('DurbunDioAdapter'));
+    final (_, second) = both[1];
+    expect(second['status'], 200);
+  });
+
+  group('DurbunDioAdapter', () {
+    test('a token refresh shows both requests, each with its own ending', () async {
+      final adapter = FakeNativeAdapter();
+      final dio = wrappedDio(adapter);
+      dio.interceptors.add(refresher(dio));
+      final res = await dio.get<Map<String, dynamic>>(
+        '/secret?via=adapter',
+        options: Options(headers: {'authorization': 'Bearer old'}),
+      );
+      expect(res.data, {'ok': true});
+      expect(adapter.calls, 2);
+      final both = await rows('/secret?via=adapter', 2);
+      final (firstReq, first) = both[0];
+      expect(first['type'], 'net.response');
+      expect(first['status'], 401);
+      expect((first['body']! as Map)['data'], '{"error":"expired"}');
+      expect(firstReq['headers'], anyElement(equals(['authorization', 'Bearer old'])));
+      final (secondReq, second) = both[1];
+      expect(second['status'], 200);
+      expect(secondReq['headers'], anyElement(equals(['authorization', 'Bearer fresh'])));
+    });
+
+    test('the body is the bytes the adapter delivered, with their size', () async {
+      final dio = wrappedDio(FakeNativeAdapter());
+      final res = await dio.get<Map<String, dynamic>>('/raw');
+      expect(res.data, {'b': 2, 'a': 1});
+      final (req, end) = await net('/raw');
+      expect(req['source'], 'dio');
+      const wire = '{ "b" : 2,\n  "a": 1 }';
+      final body = end['body']! as Map;
+      expect(body['data'], wire);
+      expect(body['size'], utf8.encode(wire).length);
+    });
+
+    test('an interceptor on the same Dio does not report twice', () async {
+      final dio = wrappedDio(FakeNativeAdapter());
+      dio.interceptors.add(DurbunDioInterceptor(dio: dio));
+      await dio.get<Map<String, dynamic>>('/users?via=both');
+      await net('/users?via=both');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(
+        conn.ofType('net.request').where((m) => (m['url']! as String).endsWith('/users?via=both')),
+        hasLength(1),
+      );
+    });
+
+    test('an error status whose body Dio drops still ends', () async {
+      final dio = wrappedDio(FakeNativeAdapter());
+      await expectLater(
+        dio.get<Object?>('/missing?drop=1', options: Options(receiveDataWhenStatusError: false)),
+        throwsA(isA<DioException>()),
+      );
+      final (_, end) = await net('/missing?drop=1');
+      expect(end['type'], 'net.response');
+      expect(end['status'], 404);
+    });
+
+    test('transport errors, broken bodies and cancels end the row', () async {
+      final dio = wrappedDio(FakeNativeAdapter());
+      await expectLater(dio.get<Object?>('/down?via=adapter'), throwsA(isA<DioException>()));
+      final (_, down) = await net('/down?via=adapter');
+      expect(down['type'], 'net.error');
+      expect(down['error'], contains('Connection refused (native)'));
+
+      await expectLater(dio.get<Object?>('/broken'), throwsA(isA<DioException>()));
+      final (_, broken) = await net('/broken');
+      expect(broken['type'], 'net.error');
+      expect(broken['error'], contains('Connection reset (native)'));
+
+      final token = CancelToken();
+      final pending = dio.get<Object?>('/slow', cancelToken: token);
+      await conn.waitFor((m) => m['type'] == 'net.request' && (m['url']! as String).endsWith('/slow'));
+      token.cancel();
+      await expectLater(pending, throwsA(isA<DioException>()));
+      final (_, slow) = await net('/slow');
+      expect(slow['type'], 'net.error');
+      expect(slow['cancelled'], isTrue);
+    });
+
+    test('mock rules: respond without calling the adapter, fail with DioException', () async {
+      await setMocks([
+        {
+          'id': 'mock-adapter',
+          'enabled': true,
+          'method': 'GET',
+          'url': '/adapter-profile',
+          'match': 'contains',
+          'action': {'type': 'respond', 'status': 200, 'body': '{"name":"Mock Ada"}'},
+          'createdAt': 1,
+        },
+        {
+          'id': 'mock-adapter-missing',
+          'enabled': true,
+          'method': 'GET',
+          'url': '/adapter-gone',
+          'match': 'contains',
+          'action': {'type': 'respond', 'status': 404, 'body': '{"error":"gone"}'},
+          'createdAt': 2,
+        },
+        {
+          'id': 'mock-adapter-dns',
+          'enabled': true,
+          'method': '*',
+          'url': '/adapter-pay',
+          'match': 'contains',
+          'action': {'type': 'fail', 'error': 'dns'},
+          'createdAt': 3,
+        },
+      ]);
+      final adapter = FakeNativeAdapter();
+      final dio = wrappedDio(adapter);
+      final profile = await dio.get<Map<String, dynamic>>('/adapter-profile');
+      expect(profile.data, {'name': 'Mock Ada'});
+      expect(profile.headers.value('x-durbun-mock'), 'mock-adapter');
+      final (_, mocked) = await net('/adapter-profile');
+      expect(mocked['mocked'], isTrue);
+      expect(mocked['mockRuleId'], 'mock-adapter');
+
+      await expectLater(
+        dio.get<Object?>('/adapter-gone'),
+        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 404)),
+      );
+      final (_, gone) = await net('/adapter-gone');
+      expect(gone['status'], 404);
+
+      await expectLater(
+        dio.post<Object?>('/adapter-pay'),
+        throwsA(isA<DioException>().having((e) => e.type, 'type', DioExceptionType.connectionError)),
+      );
+      final (_, failed) = await net('/adapter-pay');
+      expect(failed['type'], 'net.error');
+      expect(failed['mocked'], isTrue);
+      expect(adapter.calls, 0);
+      await setMocks(const []);
+    });
+
+    test('bodies stop at the desktop limit while the app gets everything', () async {
+      conn.send({'type': 'config', 'config': FakeDesktop.defaultConfig(maxBodyBytes: 1000)});
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (DurbunNetwork.maxBodyBytes != 1000 && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      addTearDown(() => conn.send({'type': 'config', 'config': FakeDesktop.defaultConfig()}));
+      final res = await wrappedDio(FakeNativeAdapter()).get<Map<String, dynamic>>('/big?via=adapter');
+      expect((res.data!['items'] as List), hasLength(2000));
+      final (_, end) = await net('/big?via=adapter');
+      final body = end['body']! as Map;
+      expect(body['truncated'], isTrue);
+      expect((body['data']! as String).length, lessThanOrEqualTo(1000));
+      expect(body['size'], int.parse(res.headers.value(Headers.contentLengthHeader)!));
+    });
   });
 
   group('bodyBytesForReport', () {

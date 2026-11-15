@@ -150,9 +150,18 @@ class JsonTreeView extends StatefulWidget {
       required this.value,
       this.padding = const EdgeInsets.fromLTRB(12, 4, 12, 24),
       this.initialQuery = '',
-      this.onQueryChanged});
+      this.onQueryChanged,
+      this.index,
+      this.autoDepth = 3});
 
   final Object? value;
+
+  /// The search index of [value] when it was built elsewhere (off the main
+  /// isolate for a large body).
+  final JsonSearchIndex? index;
+
+  /// Containers this deep or deeper start closed (a large body opens less).
+  final int autoDepth;
   final EdgeInsets padding;
 
   /// Find text to start with (kept by the body pane across modes).
@@ -172,13 +181,13 @@ class _JsonTreeViewState extends State<JsonTreeView> {
   /// then (and when the query changes).
   int _rev = 0;
   List<JsonLine> _lines = const <JsonLine>[];
-  late JsonSearchIndex _index = JsonSearchIndex(widget.value);
+  late JsonSearchIndex _index = widget.index ?? JsonSearchIndex(widget.value);
 
   @override
   void didUpdateWidget(JsonTreeView old) {
     super.didUpdateWidget(old);
     if (!identical(old.value, widget.value)) {
-      _index = JsonSearchIndex(widget.value);
+      _index = widget.index ?? JsonSearchIndex(widget.value);
       _rev++;
     }
   }
@@ -202,7 +211,7 @@ class _JsonTreeViewState extends State<JsonTreeView> {
     if (folded.isNotEmpty) opened.addAll(_index.pathsToMatches(folded));
     // A match inside a container the user closed opens it again.
     final collapsed = folded.isEmpty ? _collapsed : _collapsed.difference(opened);
-    _lines = flattenJson(widget.value, collapsed: collapsed, opened: opened, autoDepth: _all ? 1 << 20 : 3);
+    _lines = flattenJson(widget.value, collapsed: collapsed, opened: opened, autoDepth: _all ? 1 << 20 : widget.autoDepth);
     final base = _style(c);
     return <SearchLine>[
       for (final l in _lines) SearchLine(_segments(l, base, c), indent: l.depth * 14.0),

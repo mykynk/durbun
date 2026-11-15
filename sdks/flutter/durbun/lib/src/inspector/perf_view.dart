@@ -6,20 +6,27 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../flutter/metrics.dart' show displayRefreshRate;
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
 class PerformanceView extends StatelessWidget {
-  const PerformanceView({super.key, required this.store});
+  const PerformanceView({super.key, required this.store, this.refreshRate});
 
   final DurbunInspectorStore store;
+
+  /// The screen's refresh rate (Hz); default: the display's, as used for
+  /// counting janky frames.
+  final double? refreshRate;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
+    final rate = refreshRate ?? displayRefreshRate(View.maybeOf(context)?.display);
+    final budgetMs = 1000 / rate;
     return ListenableBuilder(
       listenable: store,
       builder: (context, _) {
@@ -39,9 +46,9 @@ class PerformanceView extends StatelessWidget {
         final jankTotal =
             samples.fold<int>(0, (s, x) => s + (x.jankyFrames ?? 0));
         // Color only when the frame rate drops.
-        final fpsColor = m.fps == null || m.fps! >= 55
+        final fpsColor = m.fps == null || m.fps! >= rate * 0.92
             ? null
-            : (m.fps! >= 40
+            : (m.fps! >= rate * 0.67
                     ? c.warning
                     : c.danger);
         String ms(double? v) => v == null ? '—' : v.toStringAsFixed(1);
@@ -121,8 +128,8 @@ class PerformanceView extends StatelessWidget {
               ],
               marks: <bool>[for (final s in samples) (s.jankyFrames ?? 0) > 0],
               markColor: c.warning,
-              guide: 60,
-              minTop: 60,
+              guide: rate,
+              minTop: rate,
             ),
             const SizedBox(height: 12),
             ChartCard(
@@ -135,8 +142,8 @@ class PerformanceView extends StatelessWidget {
                 ChartSeries(t.rasterTime, c.textSubtle,
                     <double?>[for (final s in samples) s.frameRasterMs]),
               ],
-              guide: 16.7,
-              minTop: 20,
+              guide: budgetMs,
+              minTop: math.max(20, budgetMs * 1.2),
             ),
             const SizedBox(height: 12),
             ChartCard(
@@ -148,7 +155,7 @@ class PerformanceView extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            Text(t.perfWindow(samples.length),
+            Text(t.perfWindow(samples.length, refreshRate: rate),
                 style: TextStyle(fontSize: 12, color: c.textMeta)),
           ],
         );

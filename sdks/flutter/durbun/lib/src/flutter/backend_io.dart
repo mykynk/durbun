@@ -21,6 +21,7 @@ import '../inspector/store.dart';
 import 'backend.dart';
 import 'commands.dart';
 import 'error_hooks.dart';
+import 'lifecycle.dart';
 import 'metrics.dart';
 import 'native_bridge.dart';
 
@@ -77,6 +78,7 @@ class IoDurbunBackend implements DurbunBackend {
   DurbunOptions? _options;
   FlutterErrorHooks? _errors;
   FlutterMetrics? _metrics;
+  AppLifecycleWatcher? _lifecycle;
   PrintCapture? _printCapture;
   Timer? _guardian;
   DebugPrintCallback? _originalDebugPrint;
@@ -184,6 +186,8 @@ class IoDurbunBackend implements DurbunBackend {
         if (options.metrics) {
           _metrics = FlutterMetrics(client, local: options.inspector)..start();
         }
+        _lifecycle = AppLifecycleWatcher(client, logChanges: options.captureLifecycle)
+          ..ensureAttached();
         _guardian = client.startPeriodicTimer(
           const Duration(seconds: 2),
           _checkHooks,
@@ -226,6 +230,7 @@ class IoDurbunBackend implements DurbunBackend {
       }
       _errors?.ensureInstalled();
       _metrics?.ensureAttached();
+      _lifecycle?.ensureAttached();
     } catch (_) {}
   }
 
@@ -467,6 +472,8 @@ class IoDurbunBackend implements DurbunBackend {
     if (native != null) await native.stop();
     _metrics?.dispose();
     _metrics = null;
+    _lifecycle?.dispose();
+    _lifecycle = null;
     _errors?.dispose();
     _errors = null;
     if (_ourDebugPrint != null && identical(debugPrint, _ourDebugPrint)) {

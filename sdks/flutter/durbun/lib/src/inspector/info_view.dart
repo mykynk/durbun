@@ -171,6 +171,15 @@ class InfoView extends StatelessWidget {
             (t.srcCrashes, t.srcCrashesDetail, caps.contains('crash'), caps.contains('crash') ? t.srcCrashesHint : t.srcErrorsOff),
             (t.srcMetrics, 'FPS · jank · ${t.memory}', caps.contains('metrics'), caps.contains('metrics') ? null : t.srcMetricsOff),
           ];
+          final missing = <(String, String)>[
+            (t.ncIsolates, t.ncIsolatesWhy),
+            (t.ncDeveloperLog, t.ncDeveloperLogWhy),
+            (t.ncNativeHttp, t.ncNativeHttpWhy),
+            if (platform != 'ios') (t.ncAndroidNative, t.ncAndroidNativeWhy),
+            (t.ncWebView, t.ncWebViewWhy),
+            (t.ncWebSocket, t.ncWebSocketWhy),
+            (t.ncEarlyClients, t.ncEarlyClientsWhy),
+          ];
           return ListView(
             padding: _pad(context),
             children: <Widget>[
@@ -237,7 +246,8 @@ class InfoView extends StatelessWidget {
                     color: connected ? c.success : c.textMuted,
                     dot: connected ? c.success : c.textSubtle,
                   ),
-                  if (connected && config != null)
+                  // Before a desktop connects: the app's own setting.
+                  if (config != null)
                     _InfoRow(t.bodyCapture, config['captureBodies'] == false ? t.off : '${t.on} · ${formatBytes(((config['maxBodyBytes'] as num?) ?? 0).toInt())}'),
                   _InfoRow(t.kept, '${t.logs} ${store.logs.length} · ${t.network} ${store.calls.length} · ${formatBytes(store.bodyBytes)}'),
                 ],
@@ -286,6 +296,38 @@ class InfoView extends StatelessWidget {
                                   const SizedBox(height: 2),
                                   Text(rows[i].$4!, style: TextStyle(fontSize: 11.5, color: c.textMuted)),
                                 ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+              SectionTitle(t.notCapturedTitle),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
+                child: Text(t.notCapturedIntro, style: TextStyle(fontSize: 12.5, height: 1.4, color: c.textMuted)),
+              ),
+              _Card(
+                padding: EdgeInsets.zero,
+                children: <Widget>[
+                  for (var i = 0; i < missing.length; i++)
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                      decoration: BoxDecoration(border: i == 0 ? null : Border(top: BorderSide(color: c.border))),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Icon(Icons.visibility_off_outlined, size: 16, color: c.textSubtle),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(missing[i].$1, style: TextStyle(fontSize: 13, color: c.text, fontWeight: FontWeight.w500)),
+                                const SizedBox(height: 2),
+                                Text(missing[i].$2, style: TextStyle(fontSize: 11.5, height: 1.35, color: c.textMuted)),
                               ],
                             ),
                           ),

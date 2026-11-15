@@ -38,6 +38,13 @@ abstract class Transport {
   /// [TransportCore.setEndpoints]).
   void setEndpoints(List<TransportEndpoint> endpoints);
 
+  /// The app went to / came back from the background (see
+  /// [TransportCore.setBackground]).
+  void setBackground(bool background);
+
+  /// Tries again now with the fast backoff (see [TransportCore.retryNow]).
+  void retryNow();
+
   /// Completes with true once everything sent so far reached the desktop's
   /// socket, false on timeout or when not connected long enough.
   Future<bool> flush(Duration timeout);
@@ -113,6 +120,13 @@ abstract class _BatchingTransport extends Transport {
       _enqueue(<Object?>['endpoints', <Object?>[for (final e in endpoints) e.toMap()]]);
 
   @override
+  void setBackground(bool background) =>
+      _enqueue(<Object?>['background', background]);
+
+  @override
+  void retryNow() => _enqueue(const <Object?>['retry']);
+
+  @override
   Future<bool> flush(Duration timeout) {
     if (_closed) return Future<bool>.value(false);
     final token = ++_flushToken;
@@ -155,6 +169,10 @@ void _applyBatch(TransportCore core, List<Object?> batch) {
           for (final e in command[1] as List<Object?>)
             TransportEndpoint.fromMap(e as Map<Object?, Object?>),
         ]);
+      case 'background':
+        core.setBackground(command[1] == true);
+      case 'retry':
+        core.retryNow();
     }
   }
 }

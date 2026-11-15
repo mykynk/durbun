@@ -77,6 +77,22 @@ class FrameStatsAggregator {
   }
 }
 
+/// The refresh rate (Hz) of [display] (default: the first view's), 60 when
+/// unknown: the frame budget for jank counting and the in-app panel's FPS
+/// chart both come from it.
+double displayRefreshRate([ui.Display? display]) {
+  try {
+    var d = display;
+    if (d == null) {
+      final views = ui.PlatformDispatcher.instance.views;
+      if (views.isNotEmpty) d = views.first.display;
+    }
+    final rate = d?.refreshRate;
+    if (rate != null && rate.isFinite && rate >= 10) return rate;
+  } catch (_) {}
+  return 60;
+}
+
 /// Returns the scheduler binding once a Flutter binding exists, without
 /// throwing (and without tripping "break on exceptions" while polling).
 SchedulerBinding? schedulerBindingOrNull() {
@@ -175,7 +191,7 @@ class FlutterMetrics {
   void _tick() {
     if (_disposed || !_wanted) return;
     if (!_timingsAttached) ensureAttached();
-    final frames = _frames.takeSample(refreshRate: _refreshRate());
+    final frames = _frames.takeSample(refreshRate: displayRefreshRate());
     final process = _process.sample();
     client.metric(
       buildMetric(
@@ -188,17 +204,6 @@ class FlutterMetrics {
         frameRasterMs: frames?.avgRasterMs,
       ),
     );
-  }
-
-  double _refreshRate() {
-    try {
-      final views = ui.PlatformDispatcher.instance.views;
-      if (views.isNotEmpty) {
-        final rate = views.first.display.refreshRate;
-        if (rate.isFinite && rate >= 10) return rate;
-      }
-    } catch (_) {}
-    return 60;
   }
 
   void dispose() {

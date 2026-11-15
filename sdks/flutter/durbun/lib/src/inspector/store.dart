@@ -146,6 +146,12 @@ class InspectorBody {
       isText ? (_display ??= prettyJson?.call(data) ?? data) : null;
   String? _display;
 
+  /// Keeps [text] as [displayText] when it was made elsewhere (a large body
+  /// is pretty-printed off the main isolate).
+  void cacheDisplayText(String? text) {
+    if (text != null && isText) _display ??= text;
+  }
+
   /// Set by the inspector UI (format.dart) so this file needs no formatter.
   static String? Function(String text)? prettyJson;
 

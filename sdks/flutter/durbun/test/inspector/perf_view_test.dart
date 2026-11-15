@@ -44,4 +44,26 @@ void main() {
     expect(tiles, hasLength(6));
     expect(tiles.map((t) => t.width).toSet(), hasLength(1));
   });
+
+  testWidgets('a 120 Hz screen: the chart line and the note use 120 FPS and 8.3 ms', (tester) async {
+    tester.view.display.refreshRate = 120;
+    addTearDown(tester.view.display.resetRefreshRate);
+    final s = DurbunInspectorStore(notifyDelay: Duration.zero)
+      ..ingest(buildMetric(fps: 118, jankyFrames: 2, frameBuildMs: 6, frameRasterMs: 7, memoryMB: 210));
+    await openPerformance(tester, s);
+
+    final charts = tester.widgetList<ChartCard>(find.byType(ChartCard)).toList();
+    expect(charts[0].guide, 120);
+    expect(charts[0].minTop, 120, reason: '118 FPS fits under the top');
+    expect(charts[1].guide, closeTo(8.33, 0.01));
+    // 118 of 120 is not a drop: no warning color on the tile.
+    expect(tester.widget<StatTile>(find.byType(StatTile).first).color, isNull);
+    await tester.dragUntilVisible(
+      find.textContaining('Dashed line'),
+      find.ancestor(of: find.byType(ChartCard).first, matching: find.byType(Scrollable)).first,
+      const Offset(0, -200),
+    );
+    expect(find.textContaining('120 FPS'), findsOneWidget);
+    expect(find.textContaining('8.3 ms'), findsOneWidget);
+  });
 }

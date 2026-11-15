@@ -204,21 +204,26 @@ class _ToolsSheet extends StatelessWidget {
                     showExportSheet(nav.context, store);
                   },
                 ),
-                if (journal != null && previous != null)
-                  _ToolRow(
-                    icon: Icons.history_rounded,
-                    label: t.previousRun,
-                    hint: t.previousRunHint,
-                    value: t.spanAgo(t.spanShort(DateTime.now().difference(previous.savedAt))),
-                    onTap: () {
-                      final nav = Navigator.of(context);
-                      nav.pop();
-                      nav.push(MaterialPageRoute<void>(
-                        builder: (routeContext) =>
-                            DurbunTheme.wrap(routeContext, PreviousRunPage(journal: journal, current: store)),
-                      ));
-                    },
-                  ),
+                // Always listed: off, it says so and how to turn it on.
+                _ToolRow(
+                  icon: Icons.history_rounded,
+                  label: t.previousRun,
+                  hint: journal == null ? t.previousRunOffHint : t.previousRunHint,
+                  value: journal == null
+                      ? t.off
+                      : previous == null
+                          ? t.previousRunNone
+                          : t.spanAgo(t.spanShort(DateTime.now().difference(previous.savedAt))),
+                  onTap: () {
+                    if (journal == null) return open(t.previousRun, const PreviousRunOffView());
+                    final nav = Navigator.of(context);
+                    nav.pop();
+                    nav.push(MaterialPageRoute<void>(
+                      builder: (routeContext) =>
+                          DurbunTheme.wrap(routeContext, PreviousRunPage(journal: journal, current: store)),
+                    ));
+                  },
+                ),
               ]),
               const SizedBox(height: 16),
               _Group(children: <Widget>[

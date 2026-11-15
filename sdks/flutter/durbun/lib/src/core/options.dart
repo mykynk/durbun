@@ -28,6 +28,9 @@ class DurbunOptions {
     this.useBackgroundIsolate = true,
     this.inspector = true,
     this.slackWebhook,
+    this.maxBodyBytes,
+    this.captureBodies,
+    this.captureLifecycle = true,
   });
 
   /// Whether the SDK runs. `null` (default):
@@ -95,8 +98,9 @@ class DurbunOptions {
   final bool useBackgroundIsolate;
 
   /// Keeps the last logs, requests and metrics on the device for the in-app
-  /// inspector (`DurbunInspector`), with or without a desktop. Bounded: about
-  /// 2,000 log lines, 300 requests and 24 MB of bodies.
+  /// inspector (`DurbunInspector`), with or without a desktop. Bounded: by
+  /// default 2,000 log lines, 1,000 requests and 24 MB of bodies (see
+  /// `DurbunInspector.maxLogs`, `maxRequests`, `maxBodyBytes`).
   final bool inspector;
 
   /// Slack incoming webhook for the in-app panel's "Send to Slack": a log
@@ -108,6 +112,24 @@ class DurbunOptions {
   /// (`--dart-define=DURBUN_SLACK_WEBHOOK=$DURBUN_SLACK_WEBHOOK`, or a
   /// git-ignored `--dart-define-from-file`). It is compiled into that build.
   final String? slackWebhook;
+
+  /// Request and response bodies are kept up to this many bytes each (the
+  /// rest is cut and marked as cut) until a desktop connects; the desktop's
+  /// own setting is used from then on. At most 10 MiB. `null` (default):
+  /// 1 MiB. Raise it when testers use the in-app panel without a Mac and
+  /// need to read large responses.
+  final int? maxBodyBytes;
+
+  /// Whether request and response bodies are captured at all (sizes are
+  /// always kept). `false`: never, even when a desktop asks for them; for
+  /// teams that want the panel and the desktop without any body leaving the
+  /// app's memory. `null` / `true` (default): captured until the desktop says
+  /// otherwise.
+  final bool? captureBodies;
+
+  /// Send a log line (tag `lifecycle`) each time the app goes to the
+  /// background or comes back (`AppLifecycleState.paused`, `.resumed`, …).
+  final bool captureLifecycle;
 
   /// Copy with some fields replaced.
   DurbunOptions copyWith({
@@ -128,6 +150,9 @@ class DurbunOptions {
     bool? useBackgroundIsolate,
     bool? inspector,
     String? slackWebhook,
+    int? maxBodyBytes,
+    bool? captureBodies,
+    bool? captureLifecycle,
   }) {
     return DurbunOptions(
       enabled: enabled ?? this.enabled,
@@ -147,6 +172,9 @@ class DurbunOptions {
       useBackgroundIsolate: useBackgroundIsolate ?? this.useBackgroundIsolate,
       inspector: inspector ?? this.inspector,
       slackWebhook: slackWebhook ?? this.slackWebhook,
+      maxBodyBytes: maxBodyBytes ?? this.maxBodyBytes,
+      captureBodies: captureBodies ?? this.captureBodies,
+      captureLifecycle: captureLifecycle ?? this.captureLifecycle,
     );
   }
 }

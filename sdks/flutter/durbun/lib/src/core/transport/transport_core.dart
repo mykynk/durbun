@@ -6,8 +6,12 @@
 /// then the optional Wi-Fi host) plus, on iOS physical devices, a listener on
 /// 127.0.0.1:9752–9755 for the desktop's usbmux tunnel. Whichever completes
 /// hello → welcome first becomes active; the others are closed. Reconnects
-/// forever with 0.5 s → 3 s backoff; while disconnected the last N outgoing
-/// messages are kept in a ring buffer and flushed on (re)connect.
+/// with 0.5 s → 3 s backoff; after two minutes without a desktop the rounds
+/// slow down to about every 30 s (with jitter), and they stop while the app
+/// is in the background. Coming back to the foreground or a new desktop
+/// address tries again at once (the iOS USB listener never sleeps). While
+/// disconnected the last N outgoing messages are kept in a ring buffer and
+/// flushed on (re)connect.
 library;
 
 import 'dart:async';
@@ -142,6 +146,8 @@ class TransportConfig {
     this.offlineGraceMs = 30000,
     this.minBackoffMs = 500,
     this.maxBackoffMs = 3000,
+    this.idleAfterMs = 120000,
+    this.idleMaxBackoffMs = 30000,
     this.handshakeTimeoutMs = 5000,
     this.silenceTimeoutMs = 60000,
   });
@@ -166,6 +172,12 @@ class TransportConfig {
   final int offlineGraceMs;
   final int minBackoffMs;
   final int maxBackoffMs;
+
+  /// After failing this long without a break, rounds slow down towards
+  /// [idleMaxBackoffMs] (±20 % jitter) so an app used without a desktop
+  /// does not wake up every few seconds.
+  final int idleAfterMs;
+  final int idleMaxBackoffMs;
   final int handshakeTimeoutMs;
 
   /// Close a connection that was pinged before but has been silent this long.
@@ -180,6 +192,8 @@ class TransportConfig {
     'offlineGraceMs': offlineGraceMs,
     'minBackoffMs': minBackoffMs,
     'maxBackoffMs': maxBackoffMs,
+    'idleAfterMs': idleAfterMs,
+    'idleMaxBackoffMs': idleMaxBackoffMs,
     'handshakeTimeoutMs': handshakeTimeoutMs,
     'silenceTimeoutMs': silenceTimeoutMs,
   };
@@ -198,6 +212,8 @@ class TransportConfig {
     offlineGraceMs: (m['offlineGraceMs'] as num).toInt(),
     minBackoffMs: (m['minBackoffMs'] as num).toInt(),
     maxBackoffMs: (m['maxBackoffMs'] as num).toInt(),
+    idleAfterMs: (m['idleAfterMs'] as num?)?.toInt() ?? 120000,
+    idleMaxBackoffMs: (m['idleMaxBackoffMs'] as num?)?.toInt() ?? 30000,
     handshakeTimeoutMs: (m['handshakeTimeoutMs'] as num).toInt(),
     silenceTimeoutMs: (m['silenceTimeoutMs'] as num).toInt(),
   );
@@ -247,6 +263,17 @@ class TransportCore {
   bool _pumping = false;
   bool _pumpScheduled = false;
   final Set<Completer<void>> _sleepers = <Completer<void>>{};
+
+  /// Current wait between failed rounds (see [_nextBackoff]).
+  int _backoff = 0;
+
+  /// When the current run of failed rounds started (stopwatch ms), or null.
+  int? _failingSinceMs;
+
+  /// The app is in the background: no client rounds until it comes back.
+  bool _background = false;
+  Completer<void>? _foregroundWaiter;
+  final math.Random _random = math.Random();
   final List<_FlushWaiter> _flushWaiters = <_FlushWaiter>[];
 
   bool get isConnected => _active != null;
@@ -306,12 +333,50 @@ class TransportCore {
     if (_stopped) return;
     _endpoints = List<TransportEndpoint>.of(endpoints);
     _generation++;
+    _failingSinceMs = null;
+    _backoff = config.minBackoffMs;
     final active = _active;
     if (active != null && active.via.startsWith('tcp ') &&
         !_endpoints.any((e) => active.via == 'tcp $e')) {
       active.close('the desktop address changed');
     }
     _wake();
+  }
+
+  /// The app went to the background (no client rounds: no wake-ups while
+  /// nobody looks) or came back (tries again at once, fast backoff). An
+  /// active connection is not touched; the USB listener keeps listening.
+  void setBackground(bool background) {
+    if (_stopped || background == _background) return;
+    _background = background;
+    if (!background) {
+      final waiter = _foregroundWaiter;
+      _foregroundWaiter = null;
+      if (waiter != null && !waiter.isCompleted) waiter.complete();
+      retryNow();
+    }
+  }
+
+  /// Starts a new round now with the fast backoff (e.g. the panel's
+  /// Connect with the same address).
+  void retryNow() {
+    if (_stopped) return;
+    _failingSinceMs = null;
+    _backoff = config.minBackoffMs;
+    _wake();
+  }
+
+  /// The wait after a failed round: doubles up to [TransportConfig.maxBackoffMs];
+  /// after [TransportConfig.idleAfterMs] of failures up to
+  /// [TransportConfig.idleMaxBackoffMs], with ±20 % jitter so many phones do
+  /// not knock in step.
+  int _nextBackoff(int current) {
+    final since = _failingSinceMs;
+    final idle = since != null && _clock.elapsedMilliseconds - since >= config.idleAfterMs;
+    if (!idle) return math.min(current * 2, config.maxBackoffMs);
+    final base = math.min(math.max(current, config.maxBackoffMs) * 2, config.idleMaxBackoffMs);
+    final jitter = 0.8 + _random.nextDouble() * 0.4;
+    return math.max(config.minBackoffMs, (base * jitter).round());
   }
 
   /// Ends every pending backoff sleep (the client loop tries again now).
@@ -348,6 +413,8 @@ class TransportCore {
     _sleepers.clear();
     final hw = _helloWaiter;
     if (hw != null && !hw.isCompleted) hw.complete();
+    final fw = _foregroundWaiter;
+    if (fw != null && !fw.isCompleted) fw.complete();
     final lost = _activeLost;
     if (lost != null && !lost.isCompleted) lost.complete();
     for (final c in _connections.toList()) {
@@ -372,24 +439,30 @@ class TransportCore {
   /* ───────────────────────── connection management ───────────────────────── */
 
   Future<void> _clientLoop() async {
-    var backoff = config.minBackoffMs;
+    _backoff = config.minBackoffMs;
     while (!_stopped) {
       if (_active != null) {
         await (_activeLost ??= Completer<void>()).future;
         if (_stopped) break;
-        backoff = config.minBackoffMs;
-        await _sleep(backoff);
+        _backoff = config.minBackoffMs;
+        _failingSinceMs = null;
+        await _sleep(_backoff);
         continue;
       }
       if (_hello == null) {
         await (_helloWaiter ??= Completer<void>()).future;
         continue;
       }
+      if (_background) {
+        await (_foregroundWaiter ??= Completer<void>()).future;
+        continue;
+      }
       final endpoints = _endpoints;
       final generation = _generation;
       if (endpoints.isEmpty) {
-        // Listener-only mode: just wait while the listener does the work.
-        await _sleep(config.maxBackoffMs);
+        // Listener-only mode: no rounds; the listener does the work and
+        // retryNow/setEndpoints wake this loop.
+        await _sleep(config.idleMaxBackoffMs);
         continue;
       }
       var connected = false;
@@ -403,23 +476,33 @@ class TransportCore {
       }
       if (_stopped) break;
       if (connected || _active != null) {
-        backoff = config.minBackoffMs;
+        _backoff = config.minBackoffMs;
+        _failingSinceMs = null;
         continue;
       }
       if (generation != _generation) {
         // The endpoints changed mid-round: start over with the new ones.
-        backoff = config.minBackoffMs;
+        _backoff = config.minBackoffMs;
         continue;
       }
+      _failingSinceMs ??= _clock.elapsedMilliseconds;
       _emit(<Object?>[TransportEvents.roundFailed, attempts, generation]);
-      await _sleep(backoff);
+      final wait = _backoff;
+      await _sleep(wait);
       if (generation != _generation) {
-        backoff = config.minBackoffMs;
+        _backoff = config.minBackoffMs;
         continue;
       }
-      backoff = math.min(backoff * 2, config.maxBackoffMs);
+      // retryNow() during the sleep reset the backoff: keep that.
+      if (_backoff == wait) _backoff = _nextBackoff(wait);
     }
   }
+
+  /// Test hook: the wait the client loop uses after its next failed round.
+  int get debugBackoffMs => _backoff;
+
+  /// Test hook: whether client rounds are paused (app in the background).
+  bool get debugInBackground => _background;
 
   /// Null when connected, else why not: `(kind, detail)` (see [AttemptKind]).
   Future<(String, String)?> _attempt(TransportEndpoint endpoint) async {

@@ -5,6 +5,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import 'home.dart';
 import 'logs_view.dart' show LogDetailPage, errorHead;
@@ -14,6 +15,56 @@ import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
 import 'widgets.dart';
+
+/// The line that turns the previous run on.
+const String kKeepPreviousRunSnippet =
+    'builder: (context, child) =>\n    DurbunInspector(keepPreviousRun: true, child: child!),';
+
+/// "Previous run" while `keepPreviousRun` is off: what it would show, where
+/// it is kept, and the line a developer adds.
+class PreviousRunOffView extends StatelessWidget {
+  const PreviousRunOffView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    return ListView(
+      padding: EdgeInsets.fromLTRB(20, 28, 20, 24 + MediaQuery.paddingOf(context).bottom),
+      children: <Widget>[
+        Icon(Icons.history_rounded, size: 40, color: c.textSubtle),
+        const SizedBox(height: 14),
+        Text(t.previousRunOffTitle,
+            textAlign: TextAlign.center, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
+        const SizedBox(height: 8),
+        Text(t.previousRunOffBody,
+            textAlign: TextAlign.center, style: TextStyle(fontSize: 14, height: 1.45, color: c.textMuted)),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: c.fieldBg,
+            borderRadius: BorderRadius.circular(DurbunRadius.md),
+            border: Border.all(color: c.border),
+          ),
+          child: SelectableText(kKeepPreviousRunSnippet,
+              style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.45)),
+        ),
+        const SizedBox(height: 10),
+        Align(
+          child: DButton(
+            label: t.copy,
+            icon: Icons.copy_rounded,
+            onTap: () => Clipboard.setData(const ClipboardData(text: kKeepPreviousRunSnippet)).catchError((Object _) {}),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(t.previousRunOffStorage,
+            textAlign: TextAlign.center, style: TextStyle(fontSize: 12.5, height: 1.4, color: c.textMeta)),
+      ],
+    );
+  }
+}
 
 class PreviousRunPage extends StatefulWidget {
   const PreviousRunPage({super.key, required this.journal, required this.current});

@@ -406,12 +406,13 @@ void main() {
       expect(find.text('Nothing saved from the previous run'), findsOneWidget);
     });
 
-    testWidgets('no previous run: no row', (tester) async {
+    testWidgets('no previous run yet: the row says so', (tester) async {
       final store = _newStore();
       RunJournal.register(store, _FakeJournal(null));
       await openTools(tester, store);
-      await tester.scrollUntilVisible(find.text('Export session'), 120, scrollable: find.byType(Scrollable).last);
-      expect(find.text('Previous run'), findsNothing);
+      await tester.scrollUntilVisible(find.text('Previous run'), 120, scrollable: find.byType(Scrollable).last);
+      expect(find.text('None yet'), findsOneWidget);
+      expect(find.text('Requests and logs of the last launch'), findsOneWidget);
     });
 
     testWidgets('keepPreviousRun turns the writing on and off; leaving the app flushes', (tester) async {

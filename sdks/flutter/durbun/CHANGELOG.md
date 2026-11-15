@@ -14,6 +14,32 @@
   of nothing; a debug build says it in the console too.
 - A one-time "Shake the phone to open the Dürbün panel" hint on the first
   launch (`DurbunInspector(showHint: false)` turns it off).
+- `DurbunNavigatorObserver`: each screen change is sent as a `navigation`
+  event (`{from, to}`, route names only), the same event the other Dürbün SDKs
+  send. App lifecycle changes arrive as log lines with the tag `lifecycle`
+  (`DurbunOptions(captureLifecycle: false)` turns them off).
+- New `DurbunOptions.maxBodyBytes` (body limit until a desktop connects, at
+  most 10 MB) and `DurbunOptions.captureBodies` (`false`: never capture
+  bodies, whatever the desktop asks). The panel shows the body setting in use
+  without a Mac too.
+- Fewer connection attempts while no desktop answers: after two minutes they
+  slow down to about one every 30 seconds, and none are made while the app is
+  in the background. Returning to the app or entering an address tries at once.
+- In-app panel: large bodies (256 KB or more) are prepared in the background
+  instead of freezing the app; the JSON tree opens one level deep and the Code
+  view shows the first 200 KB until **Show all**.
+- In-app panel: **Previous run** is listed under Tools even while it is off,
+  with what it does and the line that turns it on. It stays off by default
+  because it writes captured traffic to the phone's storage.
+- In-app panel: the Device & SDK page lists what is not captured (background
+  isolates, `dart:developer` `log()`, clients with their own network stack,
+  WebView, WebSocket messages and more) and why.
+- In-app panel: the performance charts follow the screen's refresh rate (for
+  example 120 FPS and 8.3 ms), as the janky frame count already did.
+- In-app panel: in apps in other languages the panel uses English and is laid
+  out left to right, also in right-to-left apps.
+- README: the panel's layout (two tabs and Tools), the web (nothing captured)
+  and desktop platforms are described as they work.
 
 ## 0.2.0
 

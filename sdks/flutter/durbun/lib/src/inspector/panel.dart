@@ -59,11 +59,18 @@ class _InspectorPanelHostState extends State<InspectorPanelHost> {
 /// keeps its Turkish texts), the framework's English defaults where it has
 /// none (`CupertinoApp`, `WidgetsApp`). Only these three: the app's other
 /// delegates are not loaded again.
+///
+/// The panel speaks Turkish or English only, so in an app in any other
+/// language it takes the English defaults (not, say, Arabic tooltips next
+/// to English text), and it is always laid out left to right: in a
+/// right-to-left app the English text does not run right to left.
 Widget panelLocalizations(BuildContext context, Widget child) {
-  final locale = Localizations.maybeLocaleOf(context) ?? WidgetsBinding.instance.platformDispatcher.locale;
-  final material = Localizations.of<MaterialLocalizations>(context, MaterialLocalizations);
-  final cupertino = Localizations.of<CupertinoLocalizations>(context, CupertinoLocalizations);
-  final widgets = Localizations.of<WidgetsLocalizations>(context, WidgetsLocalizations);
+  final appLocale = Localizations.maybeLocaleOf(context) ?? WidgetsBinding.instance.platformDispatcher.locale;
+  final own = appLocale.languageCode == 'tr' || appLocale.languageCode == 'en';
+  final locale = own ? appLocale : const Locale('en');
+  final material = own ? Localizations.of<MaterialLocalizations>(context, MaterialLocalizations) : null;
+  final cupertino = own ? Localizations.of<CupertinoLocalizations>(context, CupertinoLocalizations) : null;
+  final widgets = own ? Localizations.of<WidgetsLocalizations>(context, WidgetsLocalizations) : null;
   return Localizations(
     locale: locale,
     delegates: <LocalizationsDelegate<dynamic>>[
@@ -71,7 +78,7 @@ Widget panelLocalizations(BuildContext context, Widget child) {
       _Given<CupertinoLocalizations>(cupertino ?? const DefaultCupertinoLocalizations()),
       _Given<WidgetsLocalizations>(widgets ?? const DefaultWidgetsLocalizations()),
     ],
-    child: child,
+    child: Directionality(textDirection: TextDirection.ltr, child: child),
   );
 }
 

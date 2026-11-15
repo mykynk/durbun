@@ -39,6 +39,9 @@ Future<void> main() async {
 class DurbunExampleApp extends StatelessWidget {
   const DurbunExampleApp({super.key});
 
+  /// Kept across rebuilds: an observer belongs to one navigator.
+  static final DurbunNavigatorObserver screens = DurbunNavigatorObserver();
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -47,6 +50,8 @@ class DurbunExampleApp extends StatelessWidget {
       // open the panel, with or without a Mac. Nothing is drawn over the app;
       // `DurbunInspector(showBubble: true, ...)` adds a floating button.
       builder: DurbunInspector.builder,
+      // Screen changes as `navigation` events (named routes only).
+      navigatorObservers: [screens],
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF7C6CF2)),

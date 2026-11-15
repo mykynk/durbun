@@ -144,7 +144,9 @@ sensors → Shake*). The first launch shows a short "Shake the phone to open the
 Dürbün panel" hint at the bottom of the screen, once per install
 (`DurbunInspector(showHint: false, …)` turns it off). No Mac connection is
 required, so a tester can inspect the app on their own phone. The panel carries the desktop's design (colors, level
-and status colors, tag colors, light and dark theme) and its tabs:
+and status colors, tag colors, light and dark theme). It has two tabs, **Network** and **Logs**, and a **Tools**
+button (top right) that opens Mac connection, App tools, Mocks (only while the desktop is connected), Performance,
+Statistics, Device & SDK, Export session, Previous run and Clear:
 
 - **Logs:** a live stream (newest at the bottom; it stops following when you
   scroll up and resumes with "↓ N new"), V D I W E level toggles, the quick
@@ -174,17 +176,22 @@ and status colors, tag colors, light and dark theme) and its tabs:
   list follows new requests), slowest first, largest response first, and errors
   first. In a sorted list, rows you are reading stay in place while you scroll
   down; new requests wait on top behind "↑ N new".
-- **Mocks:** the rules that come from the desktop and how many times each was
-  applied. Rules last only as long as the connection, so on the phone the tab
-  has content only while the desktop is connected.
-- **Performance:** tiles for FPS, janky frames, build/raster time, memory
-  (resident memory of the app process, with its peak), and CPU and threads
-  where the platform reports them, plus charts for FPS, frame time and memory.
-  The Dart heap is not shown on the phone: reading it needs the Dart VM
-  Service, which release builds do not have.
-- **Device:** the app, the device, the captured layers (Dart / Kotlin / Swift),
-  the desktop connection, and "What is captured?": whether each data source is
-  on and, if not, why.
+- **Mocks** (under Tools): the rules that come from the desktop and how many
+  times each was applied. Rules last only as long as the connection, so the
+  row appears only while the desktop is connected.
+- **Performance** (under Tools): tiles for FPS, janky frames, build/raster time,
+  memory (resident memory of the app process, with its peak), and CPU and
+  threads where the platform reports them, plus charts for FPS, frame time and
+  memory. The dashed lines follow the screen's refresh rate (120 FPS and 8.3 ms
+  on a 120 Hz phone), the same budget janky frames are counted against. The
+  Dart heap is not shown on the phone: reading it needs the Dart VM Service,
+  which release builds do not have.
+- **Device & SDK** (under Tools): the app, the device, the captured layers
+  (Dart / Kotlin / Swift), the desktop connection, the body setting in use,
+  "What is captured?" (whether each data source is on and, if not, why) and
+  "What is not captured?" (background isolates, `dart:developer` `log()`,
+  clients with their own network stack, other native libraries on Android,
+  WebView, WebSocket messages, clients created before the SDK).
 - **Statistics** (under Tools), in scrollable tabs: *Summary* (request count;
   successful, 4xx, 5xx, connection errors (timeouts included) and pending
   requests; methods), *Duration* (average, median (p50), p95, longest), *Data*
@@ -201,7 +208,8 @@ and status colors, tag colors, light and dark theme) and its tabs:
   (`durbun-export`) and sent as a file through the system share sheet. Exports
   older than a day are deleted on the next export. If the share sheet cannot be
   opened, an export smaller than 512 KB is copied to the clipboard.
-- **Previous run** (opt-in, off by default): with
+- **Previous run** (opt-in, off by default; while off, Tools lists it as *Off*
+  and shows what it does and the line to add): with
   `DurbunInspector(keepPreviousRun: true, child: child!)`, requests (headers and
   the first 16 KB of each body) and logs are written, masked as in an export, to
   the app's cache folder (`durbun-run`) at most once a second; a crash is written
@@ -209,7 +217,9 @@ and status colors, tag colors, light and dark theme) and its tabs:
   Logs tabs of that run, read-only. If it crashed, this is stated at the top and
   the crash opens with one tap. Only the last run is kept (at most 2 × 4 MB).
   File errors never reach the app, startup is not delayed (the file is read when
-  the page opens), and nothing is written on the web.
+  the page opens), and nothing is written on the web. It stays off by default
+  because it writes captured traffic to the phone's storage in every build that
+  runs Dürbün; turn it on where that is fine for your app.
 
 The panel shows the same messages the desktop receives. When the desktop is
 connected, both work side by side. The app's own native logs (Android logcat,
@@ -263,6 +273,11 @@ Limits and settings:
   captured and still reach the desktop. In the panel they are hidden, the filter
   row says "N on other hosts", and they become visible once ticked under
   Network → Filters → Hosts. If the list is empty, all hosts are shown.
+- Text bodies of 256 KB or more are parsed and pretty-printed in the
+  background ("Preparing the body…") and the JSON tree opens one level deep;
+  the Code view shows the first 200 KB until you tap **Show all**.
+- The panel speaks Turkish or English. In an app in any other language it uses
+  English and is laid out left to right, also in right-to-left apps.
 - **Find in body…** works in request and response bodies (preview and code),
   with a match count, previous/next buttons and scrolling to the match. When
   "Search bodies too" is on in the Network list, the search opens pre-filled
@@ -415,6 +430,34 @@ Durbun.addAction(DurbunAction.button(
 The same actions are in the in-app panel under Tools → App tools, so a tester
 can use them on the phone without the Mac.
 
+### Screens and app lifecycle
+
+Add `DurbunNavigatorObserver` to your navigator and each screen change is sent
+as a `navigation` event (`{from, to}`, route names only; arguments are never
+sent), the same event the other Dürbün SDKs send, so logs and requests can be
+read next to the screen they happened on:
+
+```dart
+final screens = DurbunNavigatorObserver(); // one instance, not one per build
+
+MaterialApp(
+  navigatorObservers: [screens],
+  builder: DurbunInspector.builder,
+);
+// With go_router, give it to the router instead:
+GoRouter(observers: [screens], routes: [...]);
+```
+
+Only pages count (dialogs and bottom sheets do not change the screen), and only
+pages with a name: use named routes, `RouteSettings(name: ...)`, or
+`DurbunNavigatorObserver(routeName: (route) => ...)`. One observer serves one
+navigator; give each nested navigator (go_router `ShellRoute`) its own. The
+panel's own `/durbun` route is never reported.
+
+Each time the app goes to the background or comes back, a log line with the tag
+`lifecycle` is sent (`AppLifecycleState.inactive`, `.hidden`, `.paused`,
+`.resumed`). `DurbunOptions(captureLifecycle: false)` turns these lines off.
+
 ### If you already use a logging package
 
 Packages that write with `print` are captured already. To keep levels and tags,
@@ -491,7 +534,13 @@ the same under Tools → Mac connection and on the Device & SDK page.
 
 While there is no connection, the SDK buffers the last 5,000 messages, retries
 with a backoff from 0.5 s to 3 s, and sends the buffered messages in order once
-connected (a warning line reports how many overflowed). If no desktop has ever
+connected. After two minutes without a desktop the attempts slow down to about
+one every 30 seconds, and while the app is in the background none are made, so
+a test phone that is never plugged in does not keep waking up. Coming back to
+the app, typing an address under Tools → Mac connection (or tapping Connect
+again) tries at once; on iOS devices the USB listener answers the desktop at
+any time. On Android over USB, the desktop is found at the next attempt (at
+most about 30 s, at once when you return to the app) (a warning line reports how many overflowed). If no desktop has ever
 connected, or none has been present for more than 30 seconds, the waiting
 messages take up at most about 8 MB: past that, the oldest bodies are dropped
 (request rows and logs stay, and the body is shown as truncated). The in-app
@@ -513,8 +562,12 @@ rules are on their way).
   (default 1 MB, at most 10 MB), and gzip bodies also stop inflating at that
   limit. Messages from the native layer reach Dart in small batches through a
   bounded buffer.
-- There is no native layer on the web or on desktop platforms; the Dart side
-  still works.
+- On desktop platforms (macOS, Windows, Linux) there is no native layer; the
+  Dart side (dart:io HTTP, logs, errors, metrics) works. A sandboxed macOS app
+  needs the `com.apple.security.network.client` entitlement to open outgoing
+  connections, the one to the desktop included.
+- On the web nothing is captured and the panel does not open (it shows a page
+  that says so); every API stays safe to call.
 - Hot restart: the native layer restarts with a new session.
 - When a connection drops, the mock rules that connection sent are dropped at
   once in every layer (Dart, OkHttp, URLSession); the desktop sends them again
@@ -545,14 +598,19 @@ rules are on their way).
 | `useBackgroundIsolate` | `true` | Runs the transport layer in a background isolate |
 | `inspector` | `true` | Keeps recent logs, requests and metrics on the phone for the in-app panel (`DurbunInspector`) |
 | `slackWebhook` | `null` | Slack incoming webhook for the panel's [Send to Slack](#send-to-slack); `null` reads `--dart-define=DURBUN_SLACK_WEBHOOK` |
+| `maxBodyBytes` | `null` (1 MB) | Body limit per request/response until a desktop connects (at most 10 MB); then the desktop's setting applies. Raise it when testers read large responses in the panel without a Mac |
+| `captureBodies` | `null` | `false`: bodies are never captured (sizes stay), even if the desktop asks for them; `null`/`true`: captured until the desktop says otherwise |
+| `captureLifecycle` | `true` | A log line (tag `lifecycle`) each time the app goes to the background or comes back (`AppLifecycleState.paused`, `.resumed`, …) |
 
 ## Limitations
 
 - On Android, **cronet_http / Dio's `NativeAdapter`** use neither dart:io nor
-  OkHttp. For Dio, add `DurbunDioInterceptor(dio: dio)` from the
-  [`durbun_dio`](https://pub.dev/packages/durbun_dio) package as the **last** interceptor. On iOS these run on URLSession and are
-  captured by the native layer (`DurbunDioInterceptor` does not report those
-  requests a second time).
+  OkHttp. For Dio, wrap the adapter with `DurbunDioAdapter` from the
+  [`durbun_dio`](https://pub.dev/packages/durbun_dio) package
+  (`dio.httpClientAdapter = DurbunDioAdapter(NativeAdapter())`); the older
+  `DurbunDioInterceptor(dio: dio)`, added as the **last** interceptor, still
+  works. On iOS these run on URLSession and are captured by the native layer
+  (`durbun_dio` does not report those requests a second time).
 - **Not captured:** on Android, package:http's `CronetClient` and
   `package:ok_http` (it builds its own OkHttp client, so `DurbunInterceptor`
   cannot be added); on every platform, gRPC (`package:grpc` speaks HTTP/2 over
@@ -566,7 +624,12 @@ rules are on their way).
 - `HttpClient`s created **before** `Durbun.run/init` are not wrapped.
 - WebSocket: only the handshake (101) is visible, not the messages.
 - `dart:developer` `log()` calls come not from the SDK but from the desktop's Dart
-  VM Service connection (debug).
+  VM Service connection (debug builds, USB or simulator). Dart has no hook for
+  them inside the app: they never reach the panel, a Wi-Fi-only desktop or a
+  release build. Reading them in the app would mean connecting to the app's own
+  VM Service, which would stop `flutter run` / `flutter attach` from starting
+  its debugger connection, so the SDK does not do it. Use `Durbun.log`, `print`
+  or `debugPrint` for lines you need on the phone.
 - FPS is reported only while frames are drawn (an idle app does not show "0 FPS").
 - iOS `os_log` / `Logger` / `NSLog` lines are read from the app's own log store
   every few seconds (every second while the panel is open or the lines are going

@@ -53,6 +53,11 @@ All notable changes to Dürbün are listed here. The format follows
   no longer collapse into one row.
 - An app's session export holds the same lines as the app's view shows, device lines included.
 - A Flutter layout overflow is shown as an error line instead of a crash banner.
+- `durbun_dio`: requests answered by another interceptor, retried after a token refresh or cancelled no
+  longer stay "pending". The new `DurbunDioAdapter` wraps the adapter, so every request that reaches the
+  network has its own row with the bytes and the time the adapter delivered.
+- Flutter in-app panel: opening a large body (256 KB or more) no longer freezes the app; the performance
+  chart uses the display's real refresh rate; the panel stays left to right in right-to-left apps.
 - Secondary text has more contrast in both themes.
 - Slack: when Slack limits the rate, the message says how long to wait.
 - iOS SDK: URLSessions that differ only in their additional headers (a new token after each login) share one
@@ -86,6 +91,8 @@ All notable changes to Dürbün are listed here. The format follows
   IPv6. A browser keeps interface preferences per address, so they start fresh at the new one.
 - Flows: a regular expression that can take very long on some inputs is marked in the editor, and every
   match has a time limit.
+- Flutter SDK: while no desktop answers, connection attempts slow down after two minutes to about one
+  every 30 seconds and stop while the app is in the background; returning to the app tries at once.
 
 ### Added
 
@@ -152,6 +159,11 @@ All notable changes to Dürbün are listed here. The format follows
   the phone, without the Mac.
 - Flutter: `Durbun.showInspector()` without a running SDK opens a page that says why and what to do, and the
   first launch shows a one-time "shake to open" hint (`DurbunInspector(showHint: false)` turns it off).
+- Flutter: `DurbunNavigatorObserver` sends screen changes as `navigation` events, and app lifecycle changes
+  arrive as log lines; `DurbunOptions.maxBodyBytes` and `captureBodies` set the body limit and body capture
+  from code.
+- Flutter in-app panel: the Device & SDK page lists what is not captured (background isolates, native HTTP
+  stacks, WebView, WebSocket messages), and Tools always shows **Previous run** with how to turn it on.
 - React Native: `waitForDesktop` lets mock rules apply to requests made at launch;
   `Durbun.network.begin` reports requests from clients the SDK cannot see (file downloads, gRPC-web);
   `Durbun.trackNavigation(ref)` sends screen changes as events; an Appearance action (system, light, dark);

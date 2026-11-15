@@ -1,3 +1,13 @@
+## Unreleased
+
+- New `DurbunDioAdapter(inner)`: wraps your adapter (`NativeAdapter`, cronet_http) and reports every request
+  that reaches the network, retries included. Every row ends, whatever other interceptors do. The response body
+  and size are the bytes the adapter delivered, and the time runs until the last byte. Mock rules apply there
+  too. This is now the recommended setup.
+- `DurbunDioInterceptor`: a request that another interceptor answers and sends again (a token refresh) no longer
+  stays "pending"; its row ends with a note when the retry starts. It also stays out of the way of a
+  `DurbunDioAdapter` on the same Dio.
+
 ## 0.2.0
 
 - Requires `durbun: ^0.2.0`. No changes of its own: every Dürbün part

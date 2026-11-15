@@ -112,7 +112,7 @@ class DurbunClient implements HttpCaptureHost {
   final Set<String> _redacted;
   late final Transport _transport;
 
-  SdkConfig _config = SdkConfig.defaults;
+  late SdkConfig _config = _appConfig(options);
   bool _configKnown = false;
   List<MockRule> _mocks = const <MockRule>[];
   String? _appId;
@@ -160,6 +160,21 @@ class DurbunClient implements HttpCaptureHost {
   /// After this long without a first connection, debug builds print once
   /// why (see [connectionHintForConsole]).
   static const Duration kConsoleHintAfter = Duration(seconds: 10);
+
+  /// The config used until the desktop sends its own: the protocol
+  /// defaults with [DurbunOptions.maxBodyBytes] / [DurbunOptions.captureBodies].
+  static SdkConfig _appConfig(DurbunOptions options) {
+    const d = SdkConfig.defaults;
+    final limit = options.maxBodyBytes;
+    return SdkConfig(
+      captureBodies: options.captureBodies ?? d.captureBodies,
+      maxBodyBytes: limit == null
+          ? d.maxBodyBytes
+          : math.max(0, math.min(limit, kMaxBodyBytesCeiling)),
+      metricsIntervalMs: d.metricsIntervalMs,
+      deviceLogsAvailable: d.deviceLogsAvailable,
+    );
+  }
 
   /* ───────────────────────────── lifecycle ───────────────────────────── */
 
@@ -318,7 +333,11 @@ class DurbunClient implements HttpCaptureHost {
   void setDesktopHost(String? host) {
     if (_disposed) return;
     final value = host == null || host.trim().isEmpty ? null : host.trim();
-    if (value == _panelHost) return;
+    if (value == _panelHost) {
+      // Same address again (the panel's Connect): try it now.
+      if (!_connection.connected) retryConnectNow();
+      return;
+    }
     _panelHost = value;
     _endpointGeneration++;
     _attempts = const <ConnectAttempt>[];
@@ -328,6 +347,24 @@ class DurbunClient implements HttpCaptureHost {
       _transport.setEndpoints(_endpoints());
     } catch (_) {}
     _notifyReport();
+  }
+
+  /// The app went to the background (true) or came back (false). In the
+  /// background no connection attempts are made; back in the foreground
+  /// the next one starts at once. An open connection is not touched.
+  void setAppInBackground(bool background) {
+    if (_disposed) return;
+    try {
+      _transport.setBackground(background);
+    } catch (_) {}
+  }
+
+  /// Tries to reach the desktop now instead of after the current wait.
+  void retryConnectNow() {
+    if (_disposed) return;
+    try {
+      _transport.retryNow();
+    } catch (_) {}
   }
 
   /// Why the app is (not) connected, for the in-app panel.
@@ -737,7 +774,16 @@ class DurbunClient implements HttpCaptureHost {
     }
   }
 
-  void _setConfig(SdkConfig config) {
+  void _setConfig(SdkConfig desktop) {
+    // `captureBodies: false` in the options holds whatever the desktop says.
+    final config = options.captureBodies == false && desktop.captureBodies
+        ? SdkConfig(
+            captureBodies: false,
+            maxBodyBytes: desktop.maxBodyBytes,
+            metricsIntervalMs: desktop.metricsIntervalMs,
+            deviceLogsAvailable: desktop.deviceLogsAvailable,
+          )
+        : desktop;
     _config = config;
     _configKnown = true;
     for (final l in List<void Function(SdkConfig)>.of(_configListeners)) {

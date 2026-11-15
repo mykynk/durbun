@@ -1,7 +1,8 @@
 name: durbun_dio
 description: >-
-  Dio interceptor for Dürbün: reports requests made through adapters that
-  bypass dart:io (NativeAdapter, cronet_http) and applies the desktop's mocks.
+  Dio adapter wrapper and interceptor for Dürbün: reports requests made
+  through adapters that bypass dart:io (NativeAdapter, cronet_http) and
+  applies the desktop's mocks.
 version: 0.2.0
 homepage: https://github.com/mykynk/durbun
 repository: https://github.com/mykynk/durbun/tree/HEAD/sdks/flutter/durbun_dio

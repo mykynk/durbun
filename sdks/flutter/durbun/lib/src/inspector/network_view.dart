@@ -4,6 +4,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -1700,6 +1701,41 @@ Future<void> _showValue(BuildContext context, String name, String value) {
   );
 }
 
+/// Text bodies from this size on are parsed and pretty-printed on a
+/// background isolate (a "Preparing" state shows meanwhile), so opening a
+/// 1 MB JSON does not freeze the app or the panel.
+const int kLargeBodyChars = 256 * 1024;
+
+/// A large body made ready off the main isolate: its JSON value, pretty
+/// text and search index (nulls when it is not JSON).
+class PreparedBody {
+  const PreparedBody({this.json, this.pretty, this.index});
+
+  final Object? json;
+  final String? pretty;
+  final JsonSearchIndex? index;
+}
+
+/// Parses [data] as JSON, pretty-prints it and indexes it for search.
+PreparedBody prepareBodySync(String data) {
+  final s = data.trimLeft();
+  if (!s.startsWith('{') && !s.startsWith('[')) return const PreparedBody();
+  try {
+    final json = jsonDecode(data);
+    return PreparedBody(
+      json: json,
+      pretty: const JsonEncoder.withIndent('  ').convert(json),
+      index: JsonSearchIndex(json),
+    );
+  } catch (_) {
+    return const PreparedBody();
+  }
+}
+
+/// [prepareBodySync] on a background isolate (the result is handed over,
+/// not copied).
+Future<PreparedBody> prepareBodyInBackground(String data) => Isolate.run(() => prepareBodySync(data));
+
 /// A body with Preview (JSON tree, image, form), Code and Hex views; the
 /// view is picked from a menu next to the part switch ([leading]).
 class BodyPane extends StatefulWidget {
@@ -1756,6 +1792,27 @@ class _BodyPaneState extends State<BodyPane> {
   }
 
   static const int _maxShownChars = 200 * 1024;
+
+  /// The large body being prepared off the main isolate, and the result
+  /// (null while it runs).
+  InspectorBody? _prepOf;
+  PreparedBody? _prep;
+
+  /// The code view shows the whole text, not its first 200 KB.
+  bool _showAll = false;
+
+  void _startPrepare(InspectorBody b) {
+    _prepOf = b;
+    _prep = null;
+    _showAll = false;
+    void done(PreparedBody p) {
+      if (!mounted || !identical(_prepOf, b)) return;
+      b.cacheDisplayText(p.pretty);
+      setState(() => _prep = p);
+    }
+
+    unawaited(prepareBodyInBackground(b.data).then(done, onError: (Object _) => done(const PreparedBody())));
+  }
 
   /// The body's bytes, decoded once per body (base64 images, hex view): a
   /// new list on every rebuild also made the image decode again.
@@ -1828,7 +1885,11 @@ class _BodyPaneState extends State<BodyPane> {
       );
     }
     final kind = bodyKindLabel(widget.contentType, b);
-    final json = _parsedJson(b);
+    final large = b.isText && b.data.length >= kLargeBodyChars;
+    if (large && !identical(_prepOf, b)) _startPrepare(b);
+    final preparing = large && _prep == null;
+    final json = large ? _prep?.json : _parsedJson(b);
+    final pretty = large ? (_prep?.pretty ?? b.data) : (b.displayText ?? b.data);
     final isImage =
         (widget.contentType ?? '').toLowerCase().startsWith('image/') &&
             !b.isText;
@@ -1897,12 +1958,27 @@ class _BodyPaneState extends State<BodyPane> {
             icon: Icons.copy_rounded,
             tooltip: t.copy,
             size: 32,
-            onTap: () => copyText(context, b.displayText ?? b.data)),
+            onTap: () => copyText(context, pretty)),
     ]);
     final Widget content;
-    if (mode == 0 && json != null) {
+    if (preparing && !(mode == 0 && isImage)) {
+      content = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(height: 12),
+            Text(t.preparingBody, style: TextStyle(fontSize: 13, color: c.textMuted)),
+          ],
+        ),
+      );
+    } else if (mode == 0 && json != null) {
       content = JsonTreeView(
           value: json,
+          index: large ? _prep?.index : null,
+          // A large body opens one level: tens of thousands of lines at
+          // once would freeze the panel.
+          autoDepth: large ? 1 : 3,
           initialQuery: _query,
           onQueryChanged: (v) => _query = v,
           padding: _pagePadding(context).copyWith(top: 4, left: 8));
@@ -1955,9 +2031,9 @@ class _BodyPaneState extends State<BodyPane> {
         ],
       );
     } else {
-      final full = mode == 1 ? (b.displayText ?? b.data) : b.data;
+      final full = mode == 1 ? pretty : b.data;
       var text = full;
-      final cut = text.length > _maxShownChars;
+      final cut = !_showAll && text.length > _maxShownChars;
       if (cut) text = text.substring(0, _maxShownChars);
       final style = DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.3);
       final lines = _codeLinesFor(text, style);
@@ -1966,10 +2042,21 @@ class _BodyPaneState extends State<BodyPane> {
       content = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          if (cut || b.truncated)
+          if (b.truncated)
             Padding(
                 padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
                 child: Callout(tone: CalloutTone.warning, title: t.truncated(formatBytes(b.size)))),
+          if (cut)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+              child: Row(
+                children: <Widget>[
+                  Expanded(child: Callout(title: t.largeBodyNote(formatBytes(_maxShownChars)))),
+                  const SizedBox(width: 8),
+                  DButton(label: t.showAll, onTap: () => setState(() => _showAll = true)),
+                ],
+              ),
+            ),
           Expanded(
             child: FindableLines(
               linesKey: identityHashCode(lines),

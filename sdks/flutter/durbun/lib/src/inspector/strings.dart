@@ -58,6 +58,12 @@ class InspectorStrings {
   String get noMatchBody => _('Aramayı ya da filtreleri değiştirin', 'Change the search or the filters');
   String get copied => _('Kopyalandı', 'Copied');
   String get copy => _('Kopyala', 'Copy');
+  String get preparingBody => _('Gövde hazırlanıyor…', 'Preparing the body…');
+  String get showAll => _('Tümünü göster', 'Show all');
+  String largeBodyNote(String shown) => _(
+    'Telefonu yavaşlatmamak için ilk $shown gösteriliyor. Tümünü göstermek biraz sürebilir.',
+    'The first $shown is shown so the phone stays fast. Showing all of it can take a moment.',
+  );
   String get on => _('Açık', 'On');
   String get clearSearch => _('Aramayı temizle', 'Clear search');
   String get queryHelp => _('Arama ifadeleri', 'Search words');
@@ -237,6 +243,17 @@ class InspectorStrings {
     'With keepPreviousRun on, the next launch shows the run before it here',
   );
   String previousRunCrashes(int n) => _(n == 1 ? 'Bu çalıştırmada çökme var' : 'Bu çalıştırmada $n çökme var', n == 1 ? 'This run crashed' : 'This run crashed $n times');
+  String get previousRunOffHint => _('Kapalı · açınca son açılış burada kalır', 'Off · when on, the last launch stays here');
+  String get previousRunNone => _('Henüz yok', 'None yet');
+  String get previousRunOffTitle => _('Önceki çalıştırma kapalı', 'Previous run is off');
+  String get previousRunOffBody => _(
+    'Açık olduğunda uygulama, kapandıktan ya da çöktükten sonraki ilk açılışta son çalıştırmanın isteklerini, loglarını ve çökmesini burada gösterir. Bunu geliştirici açar: DurbunInspector’a keepPreviousRun: true eklenir.',
+    'When it is on, the first launch after the app closes or crashes shows the last run’s requests, logs and crash here. A developer turns it on by adding keepPreviousRun: true to DurbunInspector.',
+  );
+  String get previousRunOffStorage => _(
+    'Kayıt, uygulamanın önbellek klasöründeki en fazla iki 4 MB’lık dosyada tutulur. Gizli değerler maskelenir; her gövdenin ilk 16 KB’ı saklanır.',
+    'It is kept in at most two 4 MB files in the app’s cache folder. Secret values are masked; each body keeps its first 16 KB.',
+  );
   String get previousRunOpenCrash => _('Çökmeyi aç', 'Open the crash');
   String previousRunStarted(String time) => _('Başlangıç $time', 'Started $time');
   String get previousRunNote => _(
@@ -542,7 +559,15 @@ class InspectorStrings {
   String avg(String? v) => _('ort. ${v ?? '—'}', 'avg ${v ?? '—'}');
   String peak(String v) => _('en yüksek $v MB', 'peak $v MB');
   String inWindow(int n) => _('pencerede $n', '$n in window');
-  String perfWindow(int n) => _('Son $n saniye. Kesikli çizgi: 60 FPS ve 16,7 ms kare bütçesi.', 'Last $n seconds. Dashed line: 60 FPS and the 16.7 ms frame budget.');
+  String perfWindow(int n, {double refreshRate = 60}) {
+    final hz = refreshRate.round();
+    final budget = 1000 / refreshRate;
+    final ms = budget.toStringAsFixed(1);
+    return _(
+      'Son $n saniye. Kesikli çizgi: ekranın $hz FPS hızı ve ${ms.replaceAll('.', ',')} ms kare bütçesi. Bu süreyi aşan kareler takılma sayılır.',
+      'Last $n seconds. Dashed line: the screen’s $hz FPS rate and the $ms ms frame budget. Frames that take longer count as janky.',
+    );
+  }
 
   /* device / info */
   String get desktop => _('Masaüstü', 'Desktop');
@@ -553,14 +578,14 @@ class InspectorStrings {
   String get kept => _('Telefonda', 'On the phone');
   String get offlineTitle => _('Mac olmadan da çalışır', 'Works without the Mac');
   String get offlineBody => _(
-    'Her şey bu telefonda tutulur. Masaüstü bağlanınca aynı veriler orada da akar; mock kuralları ve gövde ayarı yalnızca masaüstünden gelir.',
-    'Everything is kept on this phone. When the desktop connects the same data streams there too; mock rules and the body setting only come from the desktop.',
+    'Her şey bu telefonda tutulur. Masaüstü bağlanınca aynı veriler orada da akar. Mock kuralları yalnızca masaüstünden gelir. Mac yokken gövde sınırını geliştirici DurbunOptions(maxBodyBytes: …) ile değiştirebilir; masaüstü bağlanınca onun ayarı geçerli olur.',
+    'Everything is kept on this phone. When the desktop connects the same data streams there too. Mock rules only come from the desktop. Without a Mac a developer can change the body limit with DurbunOptions(maxBodyBytes: …); once the desktop connects, its setting applies.',
   );
   String get whatYouSee => _('Neler görünüyor?', 'What is captured?');
   String get srcDartHttp => _('Dart HTTP istekleri', 'Dart HTTP requests');
   String get srcNetworkOff => _('DurbunOptions(captureNetwork: false) ile kapatılmış', 'Turned off with DurbunOptions(captureNetwork: false)');
   String get srcDio => _('Dio (NativeAdapter dahil)', 'Dio (NativeAdapter included)');
-  String get srcDioHint => _('Varsayılan Dio, dart:io üzerinden zaten yakalanır. NativeAdapter için durbun_dio ekleyin.', 'Plain Dio is captured through dart:io. Add durbun_dio for NativeAdapter.');
+  String get srcDioHint => _('Varsayılan Dio, dart:io üzerinden zaten yakalanır. NativeAdapter için durbun_dio paketindeki DurbunDioAdapter’ı kullanın.', 'Plain Dio is captured through dart:io. For NativeAdapter use DurbunDioAdapter from durbun_dio.');
   String get srcOkHttp => _('Android OkHttp', 'Android OkHttp');
   String get srcOkHttpHint => _('Native kodunuzdaki istemciye DurbunInterceptor() eklenince görünür', 'Shows once DurbunInterceptor() is added to your native client');
   String get srcUrlSession => _('iOS URLSession', 'iOS URLSession');
@@ -575,6 +600,46 @@ class InspectorStrings {
   String get srcCrashesHint => _('Native çökmeler bir sonraki açılışta gelir', 'Native crashes arrive on the next launch');
   String get srcErrorsOff => _('DurbunOptions(captureErrors: false) ile kapatılmış', 'Turned off with DurbunOptions(captureErrors: false)');
   String get srcMetrics => _('Performans ölçümleri', 'Performance samples');
+  String get notCapturedTitle => _('Neler görünmüyor?', 'What is not captured?');
+  String get notCapturedIntro => _(
+    'Aradığınız bir istek ya da log listede yoksa sebep bunlardan biri olabilir. Bir hata değildir, Dürbün bu kaynakları göremez.',
+    'If a request or log you look for is not in the list, it may be one of these. This is not a bug: Dürbün cannot see these sources.',
+  );
+  String get ncIsolates => _('Arka plan isolate’leri', 'Background isolates');
+  String get ncIsolatesWhy => _(
+    'compute, Isolate.run ve arka plan bildirimleri gibi işlerdeki Durbun.log satırları ve HTTP istekleri gelmez. Yalnızca uygulamanın ana isolate’i görünür.',
+    'Durbun.log lines and HTTP requests from work such as compute, Isolate.run or background notification handlers do not arrive. Only the app’s main isolate is seen.',
+  );
+  String get ncDeveloperLog => _('dart:developer log()', 'dart:developer log()');
+  String get ncDeveloperLogWhy => _(
+    'Bu satırları yalnızca masaüstü gösterir, hata ayıklama derlemesinde Dart VM bağlantısıyla. Panelde ve release derlemede görünmezler. Görmek için Durbun.log, print ya da debugPrint kullanın.',
+    'Only the desktop shows these lines, through its Dart VM connection in debug builds. They do not appear in the panel or in release builds. Use Durbun.log, print or debugPrint to see them here.',
+  );
+  String get ncNativeHttp => _('Kendi ağ katmanı olan istemciler', 'Clients with their own network stack');
+  String get ncNativeHttpWhy => _(
+    'Android’de cronet_http ve ok_http, her yerde gRPC ve doğrudan Socket kullanan kod. Geliştirici bunları DurbunNetwork.begin ile kendisi bildirebilir; Dio için durbun_dio paketi vardır.',
+    'cronet_http and ok_http on Android, gRPC and code that uses Socket directly everywhere. A developer can report these with DurbunNetwork.begin; for Dio there is the durbun_dio package.',
+  );
+  String get ncAndroidNative => _('Android’de diğer native kütüphaneler', 'Other native libraries on Android');
+  String get ncAndroidNativeWhy => _(
+    'Firebase, reklam ya da görsel kütüphanelerinin kendi istekleri, OkHttp istemcilerine DurbunInterceptor eklenmedikçe görünmez.',
+    'Requests made by Firebase, ad or image libraries themselves do not show unless their OkHttp client gets DurbunInterceptor.',
+  );
+  String get ncWebView => _('WebView', 'WebView');
+  String get ncWebViewWhy => _(
+    'WebView içindeki sayfanın istekleri ve konsol satırları yakalanmaz.',
+    'Requests and console lines of the page inside a WebView are not captured.',
+  );
+  String get ncWebSocket => _('WebSocket mesajları', 'WebSocket messages');
+  String get ncWebSocketWhy => _(
+    'Yalnızca bağlantının açılışı (101) görünür, gidip gelen mesajlar görünmez.',
+    'Only the opening of the connection (101) shows, not the messages sent and received.',
+  );
+  String get ncEarlyClients => _('SDK’dan önce açılan istemciler', 'Clients opened before the SDK');
+  String get ncEarlyClientsWhy => _(
+    'Durbun.run ya da Durbun.init çağrılmadan önce oluşturulan HttpClient’lar yakalanmaz.',
+    'HttpClients created before Durbun.run or Durbun.init is called are not captured.',
+  );
   String get srcMetricsOff => _('DurbunOptions(metrics: false) ile kapatılmış', 'Turned off with DurbunOptions(metrics: false)');
 
   /* Mac connection (Tools → Mac connection) */
