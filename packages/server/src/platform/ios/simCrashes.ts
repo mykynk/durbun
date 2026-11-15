@@ -4,7 +4,7 @@
  * A report belongs to simulator <udid> when its coalition is "com.apple.CoreSimulator.SimDevice.<udid>"
  * (macOS 26+ anonymizes paths to "/Volumes/VOLUME/*") or a path contains CoreSimulator/Devices/<udid>/.
  * One watcher per driver serves every booted simulator; matched reports are cached so a simulator that
- * boots later still gets the last 24 h. Each report reaches a simulator once: rebooting it does not
+ * boots later still gets the last 7 days (CRASH_LOOKBACK_MS). Each report reaches a simulator once: rebooting it does not
  * report the same crashes again (its earlier log entries are still in the hub).
  */
 import fs from 'node:fs';
@@ -75,7 +75,7 @@ export class SimCrashWatcher {
   }
 
   /**
-   * Deliver crash reports of simulator `udid` (the last 24 h first, then new ones); `onStatus` hears after
+   * Deliver crash reports of simulator `udid` (the last 7 days first, then new ones); `onStatus` hears after
    * every pass whether the folders could be read.
    */
   register(udid: string, listener: SimCrashListener, onStatus?: SimCrashStatusListener): () => void {

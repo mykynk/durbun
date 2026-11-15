@@ -347,7 +347,7 @@ describe('DropboxWatcher', () => {
     vi.useRealTimers();
   });
 
-  it('reads the last 24 h once, third-party only, de-duplicated, then only new records', async () => {
+  it('reads the last 7 days once, third-party only, de-duplicated, then only new records', async () => {
     const t = setup();
     // The live logcat crash of 11:43:02.640 (already in the hub).
     t.crashes.add({
@@ -365,9 +365,10 @@ describe('DropboxWatcher', () => {
     });
     await t.watcher.pollNow();
     expect(t.calls[0]).toBe(LIST_CMD);
-    // Prints are filtered to the exact second of each new record; the 2-day-old WhatsApp crash is not read.
+    // Prints are filtered to the exact second of each new record; the 2-day-old WhatsApp crash is asked for too
+    // (7 days back), though the device no longer prints it.
     expect(t.calls.slice(1)).toEqual([
-      `dumpsys dropbox --print data_app_crash 2026-11-01 18:02:44; echo ${DROPBOX_SEP}; dumpsys dropbox --print data_app_crash 2026-11-02 11:43:03`,
+      `dumpsys dropbox --print data_app_crash 2026-10-31 09:12:00; echo ${DROPBOX_SEP}; dumpsys dropbox --print data_app_crash 2026-11-01 18:02:44; echo ${DROPBOX_SEP}; dumpsys dropbox --print data_app_crash 2026-11-02 11:43:03`,
       'dumpsys dropbox --print data_app_anr 2026-11-02 11:44:58',
       'dumpsys dropbox --print data_app_native_crash 2026-11-02 11:43:10',
       `dumpsys dropbox --print SYSTEM_TOMBSTONE 2026-11-02 10:15:20; echo ${DROPBOX_SEP}; dumpsys dropbox --print SYSTEM_TOMBSTONE 2026-11-02 11:43:11`,
@@ -406,7 +407,7 @@ describe('DropboxWatcher', () => {
     await t.watcher.pollNow();
     // The device matches `date.contains(arg)` against its own formatting.
     expect(t.calls.slice(1)).toEqual([
-      `dumpsys dropbox --print data_app_crash ${ar('2026-11-01 18:02:44')}; echo ${DROPBOX_SEP}; dumpsys dropbox --print data_app_crash ${ar('2026-11-02 11:43:03')}`,
+      `dumpsys dropbox --print data_app_crash ${ar('2026-10-31 09:12:00')}; echo ${DROPBOX_SEP}; dumpsys dropbox --print data_app_crash ${ar('2026-11-01 18:02:44')}; echo ${DROPBOX_SEP}; dumpsys dropbox --print data_app_crash ${ar('2026-11-02 11:43:03')}`,
       `dumpsys dropbox --print data_app_anr ${ar('2026-11-02 11:44:58')}`,
       `dumpsys dropbox --print data_app_native_crash ${ar('2026-11-02 11:43:10')}`,
       `dumpsys dropbox --print SYSTEM_TOMBSTONE ${ar('2026-11-02 10:15:20')}; echo ${DROPBOX_SEP}; dumpsys dropbox --print SYSTEM_TOMBSTONE ${ar('2026-11-02 11:43:11')}`,
@@ -418,6 +419,34 @@ describe('DropboxWatcher', () => {
     // Same cursor keys whatever the digits: switching the phone's language does not re-read records.
     expect([...t.cursor.seen.keys()]).toEqual([...ascii.cursor.seen.keys()]);
     expect(t.readers.at(-1)).toEqual({ status: 'ok' });
+  });
+
+  it('reads 7 days back, not older, and at most maxRecordsPerTag records of one tag (the newest)', async () => {
+    const header = (date: string) => `${date} data_app_crash (text, 1655 bytes)\n    Process: com.mykynk.pati/PID: 1/UID: 10190 ...`;
+    const list = (dates: string[]) =>
+      DROPBOX_TAGS.map((tag) => `Drop box contents: 9 entries\n\nSearching for: ${tag}\n\n${tag === 'data_app_crash' ? dates.map(header).join('\n') : '(No entries found.)'}\n`).join(
+        `${DROPBOX_SEP}\n`,
+      );
+    // The device printed the records (their content does not matter here).
+    const prints = (cmd: string) => (/^dumpsys dropbox --print/.test(cmd) ? ok('Drop box contents: 9 entries\n') : undefined);
+    const week = setup({ listing: list(['2026-10-26 11:59:00', '2026-10-26 12:01:00', '2026-11-01 08:00:00']), shell: prints });
+    await week.watcher.pollNow();
+    // 8 days and a minute old: skipped; 6 days 23 h 59 min old: read.
+    expect(week.calls.slice(1)).toEqual([`dumpsys dropbox --print data_app_crash 2026-10-26 12:01:00; echo ${DROPBOX_SEP}; dumpsys dropbox --print data_app_crash 2026-11-01 08:00:00`]);
+
+    const saved = DROPBOX_TIMING.maxRecordsPerTag;
+    DROPBOX_TIMING.maxRecordsPerTag = 2;
+    try {
+      const many = setup({ listing: list(['2026-10-30 10:00:00', '2026-10-31 10:00:00', '2026-11-01 10:00:00', '2026-11-02 10:00:00']), shell: prints });
+      await many.watcher.pollNow();
+      expect(many.calls.slice(1)).toEqual([`dumpsys dropbox --print data_app_crash 2026-11-01 10:00:00; echo ${DROPBOX_SEP}; dumpsys dropbox --print data_app_crash 2026-11-02 10:00:00`]);
+      // The older ones are not asked for again.
+      const before = many.calls.length;
+      await many.watcher.pollNow();
+      expect(many.calls.slice(before)).toEqual([LIST_CMD]);
+    } finally {
+      DROPBOX_TIMING.maxRecordsPerTag = saved;
+    }
   });
 
   it('a native crash seen live counts once, though dropbox files it twice (native_crash + tombstone)', async () => {

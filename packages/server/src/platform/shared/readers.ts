@@ -5,6 +5,14 @@
  */
 import type { DeviceInfo, DeviceReaderState } from '@durbun/protocol';
 
+/**
+ * How far back crash records are read when a device connects (Android dropbox, iOS .ips on devices and
+ * simulators): a crash from Friday still shows when the phone is plugged in on Monday. The devices bound the
+ * amount themselves (dropbox keeps a few days within a quota, iOS keeps a limited number of reports), and
+ * each reader caps what one pass reads.
+ */
+export const CRASH_HISTORY_MS = 7 * 24 * 3600_000;
+
 /** Per-reader-id merge (what the hub does on upsertDevice / patchDevice). */
 export function mergeReaders(prev: DeviceInfo['readers'], patch: DeviceInfo['readers']): DeviceInfo['readers'] {
   return patch ? { ...prev, ...patch } : prev;

@@ -74,6 +74,21 @@ const UNTRUSTED = {
   code: 'device.untrusted',
   detail: 'Unlock the device and tap "Trust" on the "Trust This Computer?" prompt.',
 };
+/**
+ * `devicectl list devices` says Developer Mode is off (iOS 16+): logs and crash reports still work, but starting,
+ * stopping, installing apps, opening URLs, screenshots and recordings need it (developer disk image services).
+ */
+export const DEVELOPER_MODE_OFF = {
+  code: 'device.developerModeOff',
+  detail:
+    'Developer Mode is off on this iPhone, so apps cannot be started, stopped or installed and screenshots and recordings do not work. ' +
+    'Turn it on in Settings → Privacy & Security → Developer Mode and restart the iPhone (if the switch is not there, connect the iPhone to Xcode once).',
+} as const;
+/** Device actions that fail while Developer Mode is off. */
+const DEVELOPER_MODE_ACTIONS = new Set<DeviceActionId>(['app-launch', 'app-stop', 'app-restart', 'app-install', 'open-url', 'screenshot', 'screen-record']);
+/** Failures that are about the input, not the device (Developer Mode does not explain them). */
+const INPUT_FAILURES = new Set(['action.invalidParams', 'action.fileNotFound', 'action.unsupportedFile', 'action.appNotFound', 'action.toolMissing', 'action.recording.busy', 'action.recording.notRunning']);
+
 const SYSLOG_MISSING = {
   code: 'logs.idevicesyslogMissing',
   detail: 'idevicesyslog was not found — install libimobiledevice (brew install libimobiledevice) or Flutter',
@@ -550,6 +565,7 @@ class IosDeviceSession {
     const d = parseDevicectlDevices(r.json).find((x) => x.udid === this.udid);
     if (!d) return;
     if (d.developerMode) this.developerMode = d.developerMode;
+    this.applyDeveloperMode();
     const patch: Partial<DeviceInfo> = {};
     if (d.marketingName && d.marketingName !== this.info.model) patch.model = d.marketingName;
     if (d.osVersion && !this.info.osVersion) patch.osVersion = d.osVersion;
@@ -558,6 +574,18 @@ class IosDeviceSession {
       this.parser.setDeviceName(d.name);
     }
     if (Object.keys(patch).length) this.patch(patch);
+  }
+
+  /**
+   * A trusted, online iPhone with Developer Mode off says so at device level (stateCode / stateDetail, the device
+   * stays online); the note goes once Developer Mode is reported on. Another state explanation (untrusted) wins.
+   */
+  private applyDeveloperMode(): void {
+    if (this.disposed || !this.trusted) return;
+    const off = this.developerMode === 'disabled';
+    const shown = this.info.stateCode === DEVELOPER_MODE_OFF.code;
+    if (off && !shown && !this.info.stateCode) this.patch({ stateCode: DEVELOPER_MODE_OFF.code, stateDetail: DEVELOPER_MODE_OFF.detail });
+    else if (!off && shown) this.patch({ stateCode: undefined, stateDetail: undefined });
   }
 
   /** Untrusted: poll the pair record (the Listen 'Paired' event also triggers onPaired). */
@@ -588,6 +616,7 @@ class IosDeviceSession {
     this.logsStatus = syslogTool ? 'starting' : 'unavailable';
     if (syslogTool) this.startSyslog();
     this.startAppWatch();
+    this.applyDeveloperMode();
   }
 
   /* ───────────── logs ───────────── */
@@ -838,6 +867,11 @@ class IosDeviceSession {
     );
     // The app list changed: the new app's lines and pids are known now, not at the next periodic listing.
     if (result.ok && (action === 'app-install' || action === 'app-uninstall')) this.apps?.relistNow();
+    // Developer Mode is known to be off: that is why the device refused, say how to fix it (raw error kept).
+    if (!result.ok && this.developerMode === 'disabled' && DEVELOPER_MODE_ACTIONS.has(action) && !INPUT_FAILURES.has(result.code ?? '')) {
+      const raw = result.error ?? result.message;
+      return fail(`${DEVELOPER_MODE_OFF.detail}${raw ? ` (${raw})` : ''}`, 'action.developerModeOff');
+    }
     return result;
   }
 

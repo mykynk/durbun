@@ -54,9 +54,13 @@ function fakeDevicectl(opts: { failCopies?: number } = {}) {
 }
 
 describe('DeviceCrashWatcher (devicectl systemCrashLogs)', () => {
-  it('copies the last 24 h of crash reports of installed apps, once', async () => {
+  it('copies the last 7 days of crash reports of installed apps, once', async () => {
     const dest = path.join(tmp(), 'crash', UDID);
     const fake = fakeDevicectl();
+    // A report a minute over 7 days old stays on the device.
+    const old = JSON.parse(fixture('ios-devicectl-crashlogs.json')) as { result: { files: unknown[] } };
+    old.result.files.push({ name: 'Runner-2026-10-26-115900.ips', relativePath: 'Runner-2026-10-26-115900.ips', metadata: { lastModDate: '2026-10-26T11:59:00.000Z', size: 100 } });
+    fake.setListing(old as unknown as Record<string, unknown>);
     const reports: Array<{ report: IpsReport; file: string }> = [];
     const w = new DeviceCrashWatcher({
       udid: UDID,
@@ -70,13 +74,14 @@ describe('DeviceCrashWatcher (devicectl systemCrashLogs)', () => {
     await w.scan();
     expect(fake.calls[0]).toEqual(['device', 'info', 'files', '--device', UDID, '--domain-type', 'systemCrashLogs']);
     const copies = fake.calls.filter((c) => c[1] === 'copy');
-    // Oldest first; JetsamEvent / Analytics / folders / > 24 h / not-installed (Instagram) are skipped.
+    // Oldest first; JetsamEvent / Analytics / folders / > 7 days / not-installed (Instagram) are skipped.
     expect(copies.map((c) => c[c.indexOf('--source') + 1])).toEqual([
+      'Runner-2026-10-29-091200.ips',
       'MobileSafari-2026-11-02-091201.ips',
       'Mahalle-2026-11-02-100514.ips',
       'Runner-2026-11-02-114258.ips',
     ]);
-    expect(copies[0]).toEqual([
+    expect(copies[1]).toEqual([
       'device',
       'copy',
       'from',
@@ -95,9 +100,9 @@ describe('DeviceCrashWatcher (devicectl systemCrashLogs)', () => {
     expect(fs.existsSync(reports[1]!.file)).toBe(true);
     // Second scan: nothing new.
     await w.scan();
-    expect(fake.calls.filter((c) => c[1] === 'copy')).toHaveLength(3);
+    expect(fake.calls.filter((c) => c[1] === 'copy')).toHaveLength(4);
     // A new file appears.
-    const listing = JSON.parse(fixture('ios-devicectl-crashlogs.json')) as { result: { files: unknown[] } };
+    const listing = old;
     listing.result.files.push({ name: 'Runner-2026-11-02-115900.ips', relativePath: 'Runner-2026-11-02-115900.ips', metadata: { lastModDate: '2026-11-02T08:59:01.000Z', size: 100 } });
     fake.setListing(listing as unknown as Record<string, unknown>);
     await w.scan();
@@ -108,7 +113,8 @@ describe('DeviceCrashWatcher (devicectl systemCrashLogs)', () => {
 
   it('retries failed copies (up to 3 times) and treats listing failures as data', async () => {
     const dest = path.join(tmp(), 'crash', UDID);
-    const fake = fakeDevicectl({ failCopies: 1 });
+    // Both Runner reports of the last 7 days fail once.
+    const fake = fakeDevicectl({ failCopies: 2 });
     const reports: IpsReport[] = [];
     const w = new DeviceCrashWatcher({
       udid: UDID,

@@ -170,7 +170,7 @@ export class SimulatorSession {
       copy = undefined;
     }
     // An app extension's report (com.x.app.Widget) belongs to its installed host app (com.x.app): the
-    // first app listing must be in (reports of the last 24 h arrive right at boot).
+    // first app listing must be in (reports of the last days arrive right at boot).
     await this.apps.whenListed(APPS_WAIT_MS);
     if (this.disposed) return;
     const host = this.apps.reportApp(report);

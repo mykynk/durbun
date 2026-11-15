@@ -446,6 +446,38 @@ describe('IosDeviceDriver · readers, report links and de-duplication', () => {
     await waitFor(() => liveChildCount() === 0, 5000);
   });
 
+  it('explains Developer Mode off at device level and on the actions that need it', async () => {
+    const dctl = devicectlFake({ developerMode: 'disabled' });
+    const driver = new IosDeviceDriver({ socketPath: mux.socketPath, devicectl: dctl.run, timing });
+    mux.pair(UDID, false);
+    mux.attach({ deviceId: 5, udid: UDID });
+    await driver.start(ctx);
+    const dev = await waitFor(() => (ctx.hub.devices.get(ID)?.stateCode === 'device.developerModeOff' ? ctx.hub.devices.get(ID) : undefined));
+    expect(dev).toMatchObject({ state: 'online', stateDetail: expect.stringContaining('Settings → Privacy & Security → Developer Mode') });
+    // The device refuses (the fake devicectl fails every launch): the reply says why and how to fix it.
+    const launch = await driver.runAction(ID, 'app-launch', { appId: 'com.mykynk.mahalle' });
+    expect(launch).toMatchObject({ ok: false, code: 'action.developerModeOff' });
+    expect(launch.message).toMatch(/^Developer Mode is off on this iPhone.*\(.+\)$/s);
+    // Input problems keep their own explanation.
+    expect(await driver.runAction(ID, 'app-launch', { appId: '' })).toMatchObject({ ok: false, code: 'action.invalidParams' });
+    await driver.stop();
+    await waitFor(() => liveChildCount() === 0, 5000);
+  });
+
+  it('no Developer Mode note when it is on', async () => {
+    const dctl = devicectlFake({ developerMode: 'enabled' });
+    const driver = new IosDeviceDriver({ socketPath: mux.socketPath, devicectl: dctl.run, timing });
+    mux.pair(UDID, false);
+    mux.attach({ deviceId: 5, udid: UDID });
+    await driver.start(ctx);
+    await waitFor(() => readersOf(ctx, ID)?.crashReports?.status === 'ok');
+    expect(ctx.hub.devices.get(ID)?.stateCode).toBeUndefined();
+    const launch = await driver.runAction(ID, 'app-launch', { appId: 'com.mykynk.mahalle' });
+    expect(launch.code).not.toBe('action.developerModeOff');
+    await driver.stop();
+    await waitFor(() => liveChildCount() === 0, 5000);
+  });
+
   it('without devicectl the device says crash reports need Xcode', async () => {
     const driver = new IosDeviceDriver({ socketPath: mux.socketPath, useDevicectl: false });
     mux.pair(UDID, false);

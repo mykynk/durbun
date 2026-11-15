@@ -3,7 +3,8 @@
  *   xcrun devicectl device info files --device <udid> --domain-type systemCrashLogs
  *   xcrun devicectl device copy from  --device <udid> --domain-type systemCrashLogs \
  *        --source <relativePath> --destination <tempDir>/crash/<udid>/<name>
- * On connect the last 24 h are read, then new files every 60 s. Handled files are remembered per device
+ * On connect the last 7 days are read (CRASH_HISTORY_MS, at most `maxCopiesPerScan` reports a pass), then new
+ * files every 60 s. Handled files are remembered per device
  * by the driver (`seen`), so re-plugging a device does not report its crashes again; only .ips crash
  * reports of third-party apps become log entries. A file the listing marks as a crash (bug_type 309/109)
  * is copied whatever its name: app extensions' reports are named after the extension's executable, and
@@ -29,9 +30,11 @@ import {
   parseIps,
   type IpsReport,
 } from './crashReport';
+import { CRASH_HISTORY_MS } from '../shared/readers';
 import { parseDevicectlFiles, type DevicectlFile, type DevicectlRunner } from './devicectl';
 
-export const CRASH_LOOKBACK_MS = 24 * 3600_000;
+/** How far back reports are read (shared with Android's dropbox reader). */
+export const CRASH_LOOKBACK_MS = CRASH_HISTORY_MS;
 const MAX_REPORT_BYTES = 8 * 1024 * 1024;
 
 export interface DeviceCrashWatcherOptions {

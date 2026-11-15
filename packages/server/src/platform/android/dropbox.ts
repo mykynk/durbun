@@ -21,6 +21,7 @@ import { sleep } from '../shared/timing';
 import type { Adb } from './adb';
 import { basePackage, type CrashAppMeta } from './deviceApps';
 import { asciiDigits, deviceLocalToEpoch, type DeviceClock } from './deviceClock';
+import { CRASH_HISTORY_MS } from '../shared/readers';
 import { READER_CODES, type ReaderReport } from './readers';
 
 export const DROPBOX_TAGS = ['data_app_crash', 'data_app_anr', 'data_app_native_crash', 'SYSTEM_TOMBSTONE'] as const;
@@ -37,8 +38,10 @@ export const DROPBOX_TIMING = {
   intervalMs: 30_000,
   /** Wait before matching a fresh record against live logcat crashes (grouping holds them ~0.4–2 s). */
   settleMs: 1500,
-  /** On connect: records of the last 24 h. */
-  lookbackMs: 24 * 3600_000,
+  /** On connect: records of the last 7 days (as far as the device keeps them; shared with iOS). */
+  lookbackMs: CRASH_HISTORY_MS,
+  /** At most this many records of one tag are read in a pass (the newest; older ones are skipped for good). */
+  maxRecordsPerTag: 50,
   /** When the dropbox service refuses us (OEM restriction). */
   unavailableIntervalMs: 5 * 60_000,
   /** More distinct seconds than this in one tag → print the whole tag once instead. */
@@ -612,6 +615,12 @@ export class DropboxWatcher {
       let list2 = wanted.get(h.tag);
       if (!list2) wanted.set(h.tag, (list2 = []));
       list2.push(h);
+    }
+    // A device that kept many records (7 days of a crashing build): the newest of each tag, the rest skipped.
+    for (const hs of wanted.values()) {
+      if (hs.length <= DROPBOX_TIMING.maxRecordsPerTag) continue;
+      hs.sort((a, b) => (deviceLocalToEpoch(a.date, deps.clock) ?? 0) - (deviceLocalToEpoch(b.date, deps.clock) ?? 0));
+      for (const h of hs.splice(0, hs.length - DROPBOX_TIMING.maxRecordsPerTag)) deps.cursor.seen.set(dropboxKey(h), deviceLocalToEpoch(h.date, deps.clock) ?? now);
     }
     this.prune(now);
     if (!wanted.size) {
