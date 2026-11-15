@@ -4,7 +4,7 @@
   "description": "Dürbün SDK for React Native and JavaScript apps — streams logs, network and errors to the Dürbün desktop app",
   "license": "MIT",
   "author": "Muhammed Yusuf Kaynak (https://github.com/mykynk)",
-  "homepage": "https://github.com/mykynk/durbun/tree/HEAD/sdks/js#readme",
+  "homepage": "https://appnify.dev/durbun/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mykynk/durbun.git",
@@ -48,7 +48,7 @@
     "access": "public"
   },
   "files": ["dist", "noop.js", "noop.d.ts", "README.md", "LICENSE"],
-  "keywords": ["react-native", "logging", "network", "debugger", "inspector", "durbun"],
+  "keywords": ["react-native", "expo", "logging", "network", "network-inspector", "mock", "debugger", "inspector", "durbun"],
   "engines": {
     "node": ">=18"
   },

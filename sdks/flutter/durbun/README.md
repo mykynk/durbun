@@ -14,6 +14,12 @@ The package also ships an in-app inspector, so you can read everything on the
 phone itself, with or without a Mac. The inspector UI is available in English
 and Turkish and follows the app's (or the phone's) language.
 
+<p>
+  <img src="screenshots/network.webp" width="230" alt="Requests in the in-app panel">
+  <img src="screenshots/response.webp" width="230" alt="A response body as a JSON tree">
+  <img src="screenshots/logs.webp" width="230" alt="Logs, errors and requests in one stream">
+</p>
+
 - [Installation](#installation)
 - [In-app inspector](#in-app-inspector-no-mac-needed)
 - [Release, Firebase and store builds](#release-firebase-and-store-builds)

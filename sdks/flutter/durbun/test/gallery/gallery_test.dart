@@ -2,8 +2,9 @@
 //
 // Skipped unless DURBUN_GALLERY_DIR is set:
 //   DURBUN_GALLERY_DIR=/tmp/panel flutter test test/gallery --concurrency=2 -r failures-only
+// DURBUN_GALLERY_LANG=en renders the panel in English (default: tr).
 //
-// Phone size 390 x 844 at pixel ratio 2, Turkish, light and dark. Real fonts
+// Phone size 390 x 844 at pixel ratio 2, light and dark. Real fonts
 // are read from disk at test time (Roboto and Material Icons from the Flutter
 // SDK cache, a monospace face from the system); nothing is copied into the
 // package. Writes <name>-<theme>.png per screen, contact sheets of four
@@ -37,7 +38,10 @@ import 'pati_seed.dart';
 final String? _outDir = Platform.environment['DURBUN_GALLERY_DIR'];
 final bool _skip = _outDir == null || _outDir!.isEmpty;
 
-final InspectorStrings tr = InspectorStrings.forLanguage('tr');
+final String _lang = Platform.environment['DURBUN_GALLERY_LANG'] == 'en' ? 'en' : 'tr';
+
+/// The panel's texts in the gallery's language (the flows find controls by them).
+final InspectorStrings tr = InspectorStrings.forLanguage(_lang);
 const Size kPhone = Size(390, 844);
 const Size kLandscape = Size(844, 390);
 const Size kTablet = Size(834, 1194);
@@ -163,7 +167,7 @@ Widget patiApp({DurbunInspectorStore? store, bool keepPreviousRun = false, bool 
       key: _frame,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        locale: const Locale('tr'),
+        locale: Locale(_lang),
         supportedLocales: const <Locale>[Locale('tr'), Locale('en')],
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
         theme: ThemeData(colorSchemeSeed: const Color(0xFFE07A3F)),
@@ -227,7 +231,7 @@ void gallery(String name, Future<void> Function(WidgetTester tester) body,
       tester.view.viewPadding = FakeViewPadding(top: landscape ? 0 : 94, bottom: landscape ? 42 : 68, left: landscape ? 94 : 0);
       tester.platformDispatcher.platformBrightnessTestValue = dark ? Brightness.dark : Brightness.light;
       tester.platformDispatcher.textScaleFactorTestValue = textScale;
-      tester.platformDispatcher.localeTestValue = const Locale('tr');
+      tester.platformDispatcher.localeTestValue = Locale(_lang);
       addTearDown(tester.view.reset);
       addTearDown(tester.platformDispatcher.clearAllTestValues);
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

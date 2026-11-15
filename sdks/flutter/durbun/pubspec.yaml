@@ -3,9 +3,20 @@ description: >-
   Network, log and crash inspector for Flutter apps: an in-app panel on the
   phone and live streaming to the Dürbün Mac app, with mocks and native capture.
 version: 0.2.0
-homepage: https://github.com/mykynk/durbun
+homepage: https://appnify.dev/durbun/
 repository: https://github.com/mykynk/durbun/tree/HEAD/sdks/flutter/durbun
 issue_tracker: https://github.com/mykynk/durbun/issues
+screenshots:
+  - description: Requests in the in-app panel, with status, duration and size.
+    path: screenshots/network.webp
+  - description: A response body as a JSON tree.
+    path: screenshots/response.webp
+  - description: Logs, errors, crashes and requests in one stream.
+    path: screenshots/logs.webp
+  - description: Frame rate, frame times, memory and CPU.
+    path: screenshots/performance.webp
+  - description: Tools - Mac connection, statistics, export and the previous run.
+    path: screenshots/tools.webp
 topics:
   - debugging
   - network
