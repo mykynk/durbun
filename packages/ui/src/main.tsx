@@ -11,6 +11,7 @@ import { initDocumentEffects } from './app/bootstrap';
 import { startConnection } from './data';
 import { App } from './App';
 import { AppBoundary } from './components/ErrorBoundary';
+import './shell/desktopOpenFiles';
 
 initDocumentEffects();
 startConnection();

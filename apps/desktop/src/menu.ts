@@ -4,6 +4,7 @@
  */
 import type { MenuItemConstructorOptions } from 'electron';
 import type { Strings } from './i18n';
+import type { UpdatePhase } from './updateFlow';
 
 export interface MenuHandlers {
   showWindow(): void;
@@ -16,19 +17,50 @@ export interface MenuHandlers {
   openDocs(): void;
   reportIssue(): void;
   checkForUpdates(): void;
+  /** While an update waits to be installed: asks before restarting. */
+  restartToUpdate(): void;
+  setAutoUpdateCheck(on: boolean): void;
+  setOpenAtLogin(on: boolean): void;
+  /** File → Open…: a Dürbün package, backup or session recording. */
+  openFile(): void;
+  copyDiagnostics(): void;
   openLicenses(): void;
 }
 
-export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: { canOpenInBrowser: boolean }): MenuItemConstructorOptions[] {
+export interface MenuOptions {
+  canOpenInBrowser: boolean;
+  /** undefined until the user answered (shown unticked). */
+  autoUpdateCheck?: boolean;
+  update?: UpdatePhase;
+  openAtLogin?: boolean;
+}
+
+/** The update item: what it does follows the update's phase (a download shows here while it runs). */
+export function updateMenuItem(t: Strings, h: MenuHandlers, phase: UpdatePhase = { kind: 'idle' }): MenuItemConstructorOptions {
+  switch (phase.kind) {
+    case 'checking':
+      return { label: t.checkingUpdates, enabled: false };
+    case 'downloading':
+      return { label: t.updateDownloadingMenu(phase.version), enabled: false };
+    case 'ready':
+      return { label: t.updateReadyMenu, click: () => h.restartToUpdate() };
+    default:
+      return { label: t.checkUpdates, click: () => h.checkForUpdates() };
+  }
+}
+
+export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: MenuOptions): MenuItemConstructorOptions[] {
   return [
     {
       label: t.appName,
       submenu: [
         { role: 'about', label: t.about },
-        { label: t.checkUpdates, click: () => h.checkForUpdates() },
+        updateMenuItem(t, h, opts.update),
+        { label: t.checkUpdatesAuto, type: 'checkbox', checked: opts.autoUpdateCheck === true, click: (item) => h.setAutoUpdateCheck(Boolean(item?.checked)) },
         { type: 'separator' },
         // ⌘, is the UI's own shortcut (it works while the window is focused): shown here, not registered.
         { label: t.settings, accelerator: 'CmdOrCtrl+,', registerAccelerator: false, click: () => h.openSettings() },
+        { label: t.openAtLogin, type: 'checkbox', checked: opts.openAtLogin === true, click: (item) => h.setOpenAtLogin(Boolean(item?.checked)) },
         { type: 'separator' },
         { role: 'services', label: t.services },
         { type: 'separator' },
@@ -37,6 +69,12 @@ export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: { canOpenInBr
         { role: 'unhide', label: t.showAll },
         { type: 'separator' },
         { label: t.quit, accelerator: 'CmdOrCtrl+Q', click: () => h.quit() },
+      ],
+    },
+    {
+      label: t.file,
+      submenu: [
+        { label: t.openFile, accelerator: 'CmdOrCtrl+O', click: () => h.openFile() },
       ],
     },
     {
@@ -82,6 +120,7 @@ export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: { canOpenInBr
       submenu: [
         { label: t.docs, click: () => h.openDocs() },
         { label: t.reportIssue, click: () => h.reportIssue() },
+        { label: t.copyDiagnostics, click: () => h.copyDiagnostics() },
         { type: 'separator' },
         { label: t.openInBrowser, enabled: opts.canOpenInBrowser, click: () => h.openInBrowser() },
         { label: t.openDataDir, click: () => h.openDataDir() },
@@ -112,7 +151,12 @@ export function serverLabel(t: Strings, s: ServerState): string {
   }
 }
 
-export function trayMenuTemplate(t: Strings, s: ServerState, h: MenuHandlers): MenuItemConstructorOptions[] {
+/** Warnings or a failed start: the menu-bar icon carries a dot so they are seen without opening the menu. */
+export function trayNeedsAttention(s: ServerState): boolean {
+  return s.kind === 'failed' || ((s.kind === 'running' || s.kind === 'attached') && s.warnings.length > 0);
+}
+
+export function trayMenuTemplate(t: Strings, s: ServerState, h: MenuHandlers, opts: { update?: UpdatePhase; openAtLogin?: boolean } = {}): MenuItemConstructorOptions[] {
   const items: MenuItemConstructorOptions[] = [
     { label: t.show, click: () => h.showWindow() },
     { type: 'separator' },
@@ -122,9 +166,11 @@ export function trayMenuTemplate(t: Strings, s: ServerState, h: MenuHandlers): M
     items.push({ label: t.warnings(s.warnings.length), submenu: s.warnings.map((w) => ({ label: w.length > 120 ? w.slice(0, 117) + '…' : w, enabled: false })) });
   }
   if (s.kind === 'failed') items.push({ label: s.error.length > 120 ? s.error.slice(0, 117) + '…' : s.error, enabled: false });
+  items.push({ label: t.openInBrowser, enabled: s.kind === 'running' || s.kind === 'attached', click: () => h.openInBrowser() });
+  if (opts.update && opts.update.kind !== 'idle' && opts.update.kind !== 'checking') items.push({ type: 'separator' }, updateMenuItem(t, h, opts.update));
   items.push(
-    { label: t.openInBrowser, enabled: s.kind === 'running' || s.kind === 'attached', click: () => h.openInBrowser() },
     { type: 'separator' },
+    { label: t.openAtLogin, type: 'checkbox', checked: opts.openAtLogin === true, click: (item) => h.setOpenAtLogin(Boolean(item?.checked)) },
     { label: t.trayQuit, click: () => h.quit() },
   );
   return items;

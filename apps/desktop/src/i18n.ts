@@ -216,15 +216,68 @@ export interface Strings {
   reportIssue: string;
   checkUpdates: string;
   licenses: string;
+  checkUpdatesAuto: string;
+  checkingUpdates: string;
+  updateDownloadingMenu(version: string): string;
+  updateReadyMenu: string;
   updateAvailableTitle(version: string): string;
-  updateAvailableMessage(current: string): string;
-  download: string;
+  updateInstallMessage(current: string, size?: string): string;
+  updateManualMessage(current: string, reason: string, arch: string): string;
+  updateManualReason(reason: 'development' | 'unsigned' | 'location'): string;
+  whatsNew: string;
+  downloadAndInstall: string;
+  downloadDiskImage: string;
+  readWhatsNew: string;
+  skipVersion: string;
   later: string;
+  ok: string;
+  cancel: string;
+  closeDialog: string;
+  openReleases: string;
   upToDateTitle: string;
   upToDateMessage(version: string): string;
-  noReleaseMessage: string;
+  updateNoFeedMessage: string;
   updateCheckFailedTitle: string;
   updateCheckFailedMessage(error: string): string;
+  updateDownloadingTitle(version: string): string;
+  updateDownloadingMessage: string;
+  updateReadyTitle(version: string): string;
+  updateReadyMessage: string;
+  restartNow: string;
+  updateFailedTitle: string;
+  updateFailedMessage(error: string, arch: string): string;
+  autoCheckTitle: string;
+  autoCheckMessage: string;
+  autoCheckYes: string;
+  autoCheckNo: string;
+  file: string;
+  openFile: string;
+  openFileMessage: string;
+  openFailedTitle: string;
+  openFailedMessage(name: string, problem: 'tooLarge' | 'unreadable' | 'unsupported'): string;
+  copyDiagnostics: string;
+  diagnosticsCopiedTitle: string;
+  diagnosticsCopiedMessage: string;
+  reportIssueTitle: string;
+  reportIssueMessage: string;
+  openForm: string;
+  aboutCredits(versions: string): string;
+  closeNoteTitle: string;
+  closeNoteMessage(lan: boolean): string;
+  openAtLogin: string;
+  loginApprovalTitle: string;
+  loginApprovalMessage: string;
+  moveTitle: string;
+  moveMessage(where: string): string;
+  moveWhere(kind: 'diskImage' | 'translocated' | 'folder', folder?: string): string;
+  moveNow: string;
+  notNow: string;
+  doNotAskAgain: string;
+  moveReplaceTitle: string;
+  moveReplaceMessage: string;
+  replace: string;
+  moveFailedTitle: string;
+  moveFailedMessage(error: string): string;
   unresponsiveTitle: string;
   unresponsiveMessage: string;
   wait: string;
@@ -326,15 +379,88 @@ const tr: Strings = {
   reportIssue: 'Sorun Bildir…',
   checkUpdates: 'Güncellemeleri Denetle…',
   licenses: 'Lisanslar',
+  checkUpdatesAuto: 'Güncellemeleri Otomatik Denetle',
+  checkingUpdates: 'Güncellemeler Denetleniyor…',
+  updateDownloadingMenu: (version) => `Dürbün ${version} İndiriliyor…`,
+  updateReadyMenu: 'Güncellemeyi Kurmak İçin Yeniden Başlat…',
   updateAvailableTitle: (version) => `Dürbün ${version} yayında`,
-  updateAvailableMessage: (current) => `Kullandığınız sürüm ${current}. Yeni sürüm tarayıcıda açılan sayfadan indirilir.`,
-  download: 'İndirme Sayfasını Aç',
+  updateInstallMessage: (current, size) =>
+    `Kullandığınız sürüm ${current}. Yeni sürüm şimdi indirilip kurulsun mu? Dürbün onu${size ? ` (${size})` : ''} arka planda indirir ve yeniden başlamadan önce size sorar.`,
+  updateManualMessage: (current, reason, arch) =>
+    `Kullandığınız sürüm ${current}. ${reason} Bu Mac için disk görüntüsü (${arch}) tarayıcınızda iner: açın, Dürbün'den çıkın ve yeni Dürbün'ü Uygulamalar klasörüne sürükleyin.`,
+  updateManualReason: (reason) =>
+    ({
+      development: 'Bu bir geliştirme derlemesi; kendini güncelleyemez.',
+      unsigned: 'Bu kopya Developer ID ile imzalı değil (yerel bir derleme); kendi yerine yenisini kuramaz.',
+      location: 'Bu kopya disk görüntüsünden ya da yazamadığı bir klasörden çalışıyor; kendi yerine yenisini kuramaz.',
+    })[reason],
+  whatsNew: 'Yenilikler:',
+  downloadAndInstall: 'İndir ve Kur',
+  downloadDiskImage: 'Disk Görüntüsünü İndir',
+  readWhatsNew: 'Yenilikleri Oku',
+  skipVersion: 'Bu Sürümü Atla',
   later: 'Sonra',
+  ok: 'Tamam',
+  cancel: 'Vazgeç',
+  closeDialog: 'Kapat',
+  openReleases: 'Sürümler Sayfasını Aç',
   upToDateTitle: 'Dürbün güncel',
   upToDateMessage: (version) => `${version} en son sürüm.`,
-  noReleaseMessage: 'Henüz yayınlanmış bir sürüm yok.',
+  updateNoFeedMessage: 'Son sürümde bu Mac için güncelleme bilgisi yok. Tüm indirmeler sürümler sayfasında.',
   updateCheckFailedTitle: 'Güncellemeler denetlenemedi',
-  updateCheckFailedMessage: (error) => `GitHub'a ulaşılamadı (${error}). İnternet bağlantınızı kontrol edip yeniden deneyin.`,
+  updateCheckFailedMessage: (error) => `GitHub'daki güncelleme bilgisi okunamadı (${error}). İnternet bağlantınızı kontrol edip yeniden deneyin ya da sürümler sayfasına bakın.`,
+  updateDownloadingTitle: (version) => `Dürbün ${version} indiriliyor`,
+  updateDownloadingMessage: 'Bu sırada Dürbün çalışmaya devam eder; indirme bitince yeniden başlamadan önce size sorar.',
+  updateReadyTitle: (version) => `Dürbün ${version} kurulmaya hazır`,
+  updateReadyMessage:
+    'Bitirmek için şimdi yeniden başlatılsın mı? Dürbün yeniden başlarken yakalama birkaç saniye durur; bağlı uygulamalar kendiliğinden yeniden bağlanır. Sonra derseniz yeni sürüm Dürbün bir sonraki açılışında kurulur.',
+  restartNow: 'Şimdi Yeniden Başlat',
+  updateFailedTitle: 'Güncelleme kurulamadı',
+  updateFailedMessage: (error, arch) =>
+    `Dürbün şu anki sürümle çalışmaya devam ediyor. Bunun yerine bu Mac için disk görüntüsünü (${arch}) indirip yeni Dürbün'ü Uygulamalar klasörüne sürükleyebilirsiniz.\n\nAyrıntı: ${error}`,
+  autoCheckTitle: 'Güncellemeler otomatik denetlensin mi?',
+  autoCheckMessage:
+    "Dürbün günde bir kez GitHub'daki sürümler sayfasından tek bir dosya (son sürümün numarası ve notları) okuyarak yeni sürüm olup olmadığına bakabilir. Bu istek hiçbir kimlik bilgisi taşımaz; sizinle, Mac'inizle ya da uygulamalarınızla ilgili hiçbir şey gönderilmez. Yeni sürümü indirmek ve kurmak her zaman onayınızı bekler.\n\nBu seçimi istediğiniz zaman Dürbün → Güncellemeleri Otomatik Denetle menüsünden değiştirebilirsiniz.",
+  autoCheckYes: 'Otomatik Denetle',
+  autoCheckNo: 'Denetleme',
+  file: 'Dosya',
+  openFile: 'Aç…',
+  openFileMessage: 'Bir Dürbün paketi, yedeği ya da oturum kaydı seçin',
+  openFailedTitle: 'Dosya açılamadı',
+  openFailedMessage: (name, problem) =>
+    ({
+      tooLarge: `${name} 500 MB'tan büyük; Dürbün en fazla 500 MB içe aktarır.`,
+      unreadable: `${name} okunamadı. Dosyanın yerinde olduğunu ve Dürbün'ün okuyabildiğini kontrol edin.`,
+      unsupported: `${name} bir Dürbün dosyası değil. Dürbün .durbun paketlerini ve yedeklerini, .durbun.json oturum kayıtlarını açar.`,
+    })[problem],
+  copyDiagnostics: 'Tanılama Bilgisini Kopyala',
+  diagnosticsCopiedTitle: 'Tanılama bilgisi kopyalandı',
+  diagnosticsCopiedMessage:
+    'Sürümler, macOS, portlar, araç denetimi ve son 200 günlük satırı panoda; token, çerez ve URL sorgu değerleri maskelendi. Raporunuza yapıştırın ve göndermeden önce gözden geçirin.',
+  reportIssueTitle: 'Hata bildirim formu tarayıcınızda açılacak',
+  reportIssueMessage:
+    'Sürüm ve ortam bilgisi formda hazır. Tanılama bilgisi (araç denetimi ve son 200 günlük satırı; gizli değerler maskelendi) panoda: formdaki Logs alanına yapıştırın ve göndermeden önce gözden geçirin.',
+  openForm: 'Formu Aç',
+  aboutCredits: (versions) => `Android ve iOS için canlı log, ağ ve performans izleyici\n${versions}`,
+  closeNoteTitle: 'Dürbün menü çubuğunda çalışmaya devam ediyor',
+  closeNoteMessage: (lan) =>
+    `Pencereyi kapatmak yakalamayı durdurmaz: cihazlar ve uygulamalar bağlı kalır.${lan ? ' LAN açık olduğu için SDK portuna yerel ağınızdan erişilebilir.' : ''} Pencereyi menü çubuğundaki dürbün simgesinden ya da Dock'tan yeniden açabilirsiniz. Dürbün'ü durdurmak için Dürbün'den Çık'ı (⌘Q) seçin.`,
+  openAtLogin: 'Girişte Aç',
+  loginApprovalTitle: "Dürbün'ün girişte açılmasına izin verin",
+  loginApprovalMessage: 'macOS bunun için Sistem Ayarları → Genel → Giriş Öğeleri bölümünde onayınızı istiyor.',
+  moveTitle: 'Dürbün, Uygulamalar klasörüne taşınsın mı?',
+  moveMessage: (where) =>
+    `Dürbün şu anda ${where} çalışıyor. Uygulamalar klasöründe disk görüntüsü çıkarıldıktan sonra da çalışır, girişte açılabilir ve kendini güncelleyebilir. Taşındıktan sonra Dürbün yeniden başlar.`,
+  moveWhere: (kind, folder) =>
+    kind === 'diskImage' ? 'disk görüntüsünden' : kind === 'translocated' ? "macOS'in oluşturduğu geçici bir kopyadan (App Translocation)" : `${folder ?? 'başka bir'} klasöründen`,
+  moveNow: 'Uygulamalar Klasörüne Taşı',
+  notNow: 'Şimdi Değil',
+  doNotAskAgain: 'Bir daha sorma',
+  moveReplaceTitle: 'Uygulamalar klasöründe başka bir Dürbün var',
+  moveReplaceMessage: "Bu kopyayla değiştirilsin mi? Diğer kopya Çöp Sepeti'ne taşınır.",
+  replace: 'Değiştir',
+  moveFailedTitle: 'Dürbün taşınamadı',
+  moveFailedMessage: (error) => `${error}\n\nDürbün'ü Uygulamalar klasörüne kendiniz sürükleyebilirsiniz.`,
   unresponsiveTitle: 'Dürbün penceresi yanıt vermiyor',
   unresponsiveMessage: 'Sunucu çalışmaya ve yakalamaya devam ediyor. Bekleyebilir ya da pencereyi yeniden yükleyebilirsiniz; yeniden yüklemede donmaya yol açmış olabilecek kayıtlı arama sıfırlanır.',
   wait: 'Bekle',
@@ -436,15 +562,88 @@ const en: Strings = {
   reportIssue: 'Report an Issue…',
   checkUpdates: 'Check for Updates…',
   licenses: 'Licenses',
+  checkUpdatesAuto: 'Check for Updates Automatically',
+  checkingUpdates: 'Checking for Updates…',
+  updateDownloadingMenu: (version) => `Downloading Dürbün ${version}…`,
+  updateReadyMenu: 'Restart to Install the Update…',
   updateAvailableTitle: (version) => `Dürbün ${version} is available`,
-  updateAvailableMessage: (current) => `You are using ${current}. The new version downloads from the page that opens in your browser.`,
-  download: 'Open Download Page',
+  updateInstallMessage: (current, size) =>
+    `You are using ${current}. Download and install the new version now? Dürbün downloads it${size ? ` (${size})` : ''} in the background and asks before it restarts.`,
+  updateManualMessage: (current, reason, arch) =>
+    `You are using ${current}. ${reason} The disk image for this Mac (${arch}) downloads in your browser: open it, quit Dürbün and drag the new Dürbün to Applications.`,
+  updateManualReason: (reason) =>
+    ({
+      development: 'This is a development build, so it cannot update itself.',
+      unsigned: 'This copy has no Developer ID signature (a local build), so it cannot replace itself.',
+      location: 'This copy runs from the disk image or from a folder it cannot write to, so it cannot replace itself.',
+    })[reason],
+  whatsNew: "What's new:",
+  downloadAndInstall: 'Download and Install',
+  downloadDiskImage: 'Download Disk Image',
+  readWhatsNew: "Read What's New",
+  skipVersion: 'Skip This Version',
   later: 'Later',
+  ok: 'OK',
+  cancel: 'Cancel',
+  closeDialog: 'Close',
+  openReleases: 'Open Releases Page',
   upToDateTitle: 'Dürbün is up to date',
   upToDateMessage: (version) => `${version} is the latest version.`,
-  noReleaseMessage: 'No version has been published yet.',
+  updateNoFeedMessage: 'The latest release has no update information for this Mac. The releases page lists every download.',
   updateCheckFailedTitle: 'Could not check for updates',
-  updateCheckFailedMessage: (error) => `GitHub could not be reached (${error}). Check your internet connection and try again.`,
+  updateCheckFailedMessage: (error) => `The update information on GitHub could not be read (${error}). Check your internet connection and try again, or look at the releases page.`,
+  updateDownloadingTitle: (version) => `Dürbün ${version} is downloading`,
+  updateDownloadingMessage: 'Dürbün keeps working meanwhile and asks before it restarts once the download is done.',
+  updateReadyTitle: (version) => `Dürbün ${version} is ready to install`,
+  updateReadyMessage:
+    'Restart now to finish? Capture stops for a few seconds while Dürbün restarts; connected apps reconnect on their own. If you choose Later, the new version is installed the next time Dürbün starts.',
+  restartNow: 'Restart Now',
+  updateFailedTitle: 'The update could not be installed',
+  updateFailedMessage: (error, arch) =>
+    `Dürbün keeps running the current version. You can download the disk image for this Mac (${arch}) instead and drag the new Dürbün to Applications.\n\nDetails: ${error}`,
+  autoCheckTitle: 'Check for updates automatically?',
+  autoCheckMessage:
+    "Once a day Dürbün can read one file from the project's GitHub releases page (the latest version number and its notes) to see whether a new version is out. The request carries no identifier, and nothing about you, your Mac or your apps is sent. Downloading and installing a new version always waits for your yes.\n\nYou can change this any time with Dürbün → Check for Updates Automatically.",
+  autoCheckYes: 'Check Automatically',
+  autoCheckNo: "Don't Check",
+  file: 'File',
+  openFile: 'Open…',
+  openFileMessage: 'Choose a Dürbün package, backup or session recording',
+  openFailedTitle: 'The file could not be opened',
+  openFailedMessage: (name, problem) =>
+    ({
+      tooLarge: `${name} is larger than 500 MB, the most Dürbün imports.`,
+      unreadable: `${name} could not be read. Check that the file is still there and that Dürbün may read it.`,
+      unsupported: `${name} is not a Dürbün file. Dürbün opens .durbun packages and backups and .durbun.json session recordings.`,
+    })[problem],
+  copyDiagnostics: 'Copy Diagnostic Info',
+  diagnosticsCopiedTitle: 'Diagnostic info copied',
+  diagnosticsCopiedMessage:
+    'Versions, macOS, ports, the tool check and the last 200 log lines are on the clipboard; tokens, cookies and URL query values are masked. Paste it into your report and look it over before you send it.',
+  reportIssueTitle: 'The bug report form opens in your browser',
+  reportIssueMessage:
+    'The version and environment are filled in. Diagnostic info (the tool check and the last 200 log lines, secrets masked) is on the clipboard: paste it into the Logs field and look it over before you submit.',
+  openForm: 'Open Form',
+  aboutCredits: (versions) => `Live logs, network and performance inspector for Android and iOS\n${versions}`,
+  closeNoteTitle: 'Dürbün keeps running in the menu bar',
+  closeNoteMessage: (lan) =>
+    `Closing the window does not stop capture: devices and apps stay connected.${lan ? ' LAN is on, so the SDK port stays reachable from your local network.' : ''} Open the window again from the binoculars icon in the menu bar or from the Dock. To stop Dürbün, choose Quit Dürbün (⌘Q).`,
+  openAtLogin: 'Open at Login',
+  loginApprovalTitle: 'Allow Dürbün to open at login',
+  loginApprovalMessage: 'macOS asks you to approve it in System Settings → General → Login Items.',
+  moveTitle: 'Move Dürbün to the Applications folder?',
+  moveMessage: (where) =>
+    `Dürbün is running ${where}. In Applications it keeps working after the disk image is ejected, can open at login and can update itself. Dürbün restarts after the move.`,
+  moveWhere: (kind, folder) =>
+    kind === 'diskImage' ? 'from the disk image' : kind === 'translocated' ? 'from a temporary copy macOS made (App Translocation)' : `from ${folder ?? 'another folder'}`,
+  moveNow: 'Move to Applications',
+  notNow: 'Not Now',
+  doNotAskAgain: "Don't ask again",
+  moveReplaceTitle: 'Another Dürbün is in Applications',
+  moveReplaceMessage: 'Replace it with this copy? The other copy goes to the Trash.',
+  replace: 'Replace',
+  moveFailedTitle: 'Dürbün could not be moved',
+  moveFailedMessage: (error) => `${error}\n\nYou can drag Dürbün to the Applications folder yourself.`,
   unresponsiveTitle: 'The Dürbün window is not responding',
   unresponsiveMessage: 'The server keeps running and capturing. You can wait or reload the window; a reload resets the saved search that may have caused the hang.',
   wait: 'Wait',

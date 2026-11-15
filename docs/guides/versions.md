@@ -46,9 +46,11 @@ breaking changes, so read [CHANGELOG.md](../../CHANGELOG.md) before upgrading.
 
 ### The Mac app
 
-1. **Dürbün → Check for Updates…** opens the download page when a newer release exists. Dürbün never checks
-   on its own.
-2. Quit Dürbün (⌘Q), download the DMG for your Mac and drag the new Dürbün over the old one in Applications.
+1. **Dürbün → Check for Updates…** looks for a new version. If one is out, Dürbün shows what is new, asks
+   before it downloads and asks again before it restarts into the new version. Dürbün checks by itself (once
+   a day) only if you allowed it; **Dürbün → Check for Updates Automatically** turns that on or off.
+2. A copy that cannot replace itself (a local build, or one opened from the disk image) is offered the DMG for
+   your Mac instead: quit Dürbün (⌘Q) and drag the new Dürbün over the old one in Applications.
 
 Settings, mock rules, flows, environments and run history stay in `~/.durbun` and carry over.
 

@@ -1,7 +1,7 @@
 import type { MenuItemConstructorOptions } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import { pickLanguage, STRINGS } from '../src/i18n';
-import { appMenuTemplate, serverLabel, trayMenuTemplate, type MenuHandlers } from '../src/menu';
+import { appMenuTemplate, serverLabel, trayMenuTemplate, trayNeedsAttention, updateMenuItem, type MenuHandlers } from '../src/menu';
 
 const handlers = (): MenuHandlers => ({
   showWindow: vi.fn(),
@@ -14,6 +14,11 @@ const handlers = (): MenuHandlers => ({
   reportIssue: vi.fn(),
   checkForUpdates: vi.fn(),
   openLicenses: vi.fn(),
+  restartToUpdate: vi.fn(),
+  setAutoUpdateCheck: vi.fn(),
+  setOpenAtLogin: vi.fn(),
+  openFile: vi.fn(),
+  copyDiagnostics: vi.fn(),
 });
 
 function flatten(items: MenuItemConstructorOptions[]): MenuItemConstructorOptions[] {
@@ -60,6 +65,8 @@ describe('app menu', () => {
       ['Dürbün Belgeleri', h.openDocs],
       ['Sorun Bildir…', h.reportIssue],
       ['Güncellemeleri Denetle…', h.checkForUpdates],
+      ['Tanılama Bilgisini Kopyala', h.copyDiagnostics],
+      ['Aç…', h.openFile],
       ['Lisanslar', h.openLicenses],
     ] as const) {
       (items.find((i) => i.label === label)!.click as () => void)();
@@ -79,7 +86,7 @@ describe('tray menu', () => {
   it('shows the server state (tr)', () => {
     const t = STRINGS.tr;
     const items = trayMenuTemplate(t, { kind: 'running', port: 9750, warnings: [] }, handlers());
-    expect(items.map((i) => i.label).filter(Boolean)).toEqual(["Dürbün'ü göster", 'Sunucu: çalışıyor · 9750', 'Tarayıcıda Aç', 'Çık']);
+    expect(items.map((i) => i.label).filter(Boolean)).toEqual(["Dürbün'ü göster", 'Sunucu: çalışıyor · 9750', 'Tarayıcıda Aç', 'Girişte Aç', 'Çık']);
     expect(items.find((i) => i.label === 'Sunucu: çalışıyor · 9750')?.enabled).toBe(false);
   });
   it('lists warnings and failure reasons', () => {
@@ -117,5 +124,48 @@ describe('tray menu', () => {
         expect(notice.length, notice).toBeLessThanOrEqual(120);
       }
     }
+  });
+});
+
+describe('updates, login item and files in the menus', () => {
+  const find = (items: MenuItemConstructorOptions[], label: string) => flatten(items).find((i) => i.label === label);
+  it('the update item follows the phase: check, checking, downloading, restart', () => {
+    const h = handlers();
+    const t = STRINGS.en;
+    const idle = updateMenuItem(t, h);
+    (idle.click as () => void)();
+    expect(h.checkForUpdates).toHaveBeenCalledOnce();
+    expect(updateMenuItem(t, h, { kind: 'checking' })).toMatchObject({ label: 'Checking for Updates…', enabled: false });
+    expect(updateMenuItem(t, h, { kind: 'downloading', version: '0.3.0' })).toMatchObject({ label: 'Downloading Dürbün 0.3.0…', enabled: false });
+    const ready = updateMenuItem(t, h, { kind: 'ready', version: '0.3.0' });
+    (ready.click as () => void)();
+    expect(h.restartToUpdate).toHaveBeenCalledOnce();
+    expect(h.checkForUpdates).toHaveBeenCalledOnce();
+  });
+  it('automatic checks and Open at Login are checkboxes that report the new state', () => {
+    const h = handlers();
+    const items = appMenuTemplate(STRINGS.tr, h, { canOpenInBrowser: true, autoUpdateCheck: true, openAtLogin: false });
+    const auto = find(items, 'Güncellemeleri Otomatik Denetle')!;
+    expect(auto).toMatchObject({ type: 'checkbox', checked: true });
+    (auto.click as (item: { checked: boolean }) => void)({ checked: false });
+    expect(h.setAutoUpdateCheck).toHaveBeenCalledWith(false);
+    const login = find(items, 'Girişte Aç')!;
+    expect(login).toMatchObject({ type: 'checkbox', checked: false });
+    (login.click as (item: { checked: boolean }) => void)({ checked: true });
+    expect(h.setOpenAtLogin).toHaveBeenCalledWith(true);
+    // Not answered yet: unticked.
+    expect(find(appMenuTemplate(STRINGS.en, h, { canOpenInBrowser: true }), 'Check for Updates Automatically')!.checked).toBe(false);
+  });
+  it('File → Open… takes ⌘O (the UI does not use it)', () => {
+    expect(find(appMenuTemplate(STRINGS.en, handlers(), { canOpenInBrowser: true }), 'Open…')!.accelerator).toBe('CmdOrCtrl+O');
+  });
+  it('the tray shows a running download and marks warnings and failures', () => {
+    const items = trayMenuTemplate(STRINGS.en, { kind: 'running', port: 9750, warnings: [] }, handlers(), { update: { kind: 'downloading', version: '0.3.0' }, openAtLogin: true });
+    expect(items.map((i) => i.label)).toContain('Downloading Dürbün 0.3.0…');
+    expect(items.find((i) => i.label === 'Open at Login')?.checked).toBe(true);
+    expect(trayNeedsAttention({ kind: 'running', port: 1, warnings: [] })).toBe(false);
+    expect(trayNeedsAttention({ kind: 'running', port: 1, warnings: ['x'] })).toBe(true);
+    expect(trayNeedsAttention({ kind: 'failed', error: 'x' })).toBe(true);
+    expect(trayNeedsAttention({ kind: 'starting' })).toBe(false);
   });
 });

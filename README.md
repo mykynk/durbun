@@ -63,8 +63,11 @@ Dürbün to Applications. Requires macOS 13 Ventura or later.
 
 Release builds are signed with a Developer ID and notarized by Apple, so they open like any other app.
 
-Dürbün never checks for updates on its own. **Dürbün → Check for Updates…** opens the download page when a
-newer release exists.
+**Dürbün → Check for Updates…** looks for a new version. If one is out, Dürbün shows what is new and asks
+before it downloads, then asks again before it restarts. A copy that cannot replace itself (a local build, or
+one opened from the disk image) gets the disk image for your Mac instead. From the second launch on, Dürbün
+asks once whether it may check by itself once a day; change it any time with
+**Dürbün → Check for Updates Automatically**.
 
 ### Requirements
 
@@ -195,9 +198,11 @@ Dürbün has no cloud, so your work lives in `~/.durbun` on this Mac. A `.durbun
 
 ## Privacy
 
-- Dürbün sends nothing off your Mac on its own: no analytics, no telemetry, no automatic update check.
+- Dürbün sends nothing off your Mac on its own: no analytics, no telemetry. If you allow automatic update
+  checks, Dürbün reads one static file from GitHub Releases once a day; the request carries no identifier.
   Crash dumps stay on the Mac.
-- Requests leave the Mac only when you ask: **Check for Updates** (one call to the GitHub API),
+- Requests leave the Mac only when you ask: **Check for Updates** (one static file from GitHub Releases; the
+  update downloads only after your yes),
   resending a captured request (to that request's own host), **Send to Slack** (to the webhook you set) and
   flows (their HTTP and Slack steps go where the flow says; a flow set to start on an event runs only while
   Dürbün is open). Backups are written to the folder you choose; syncing it is up to that folder's service.

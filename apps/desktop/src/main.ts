@@ -12,23 +12,29 @@
  *    moved over once
  *  - data dir ~/.durbun (shared with the CLI; DURBUN_DATA_DIR overrides; DURBUN_USER_DATA_DIR moves the
  *    Electron profile, DURBUN_DEMO=1 starts with demo data, DURBUN_DEBUG=1 logs verbosely)
- *  - menu-bar item, closing the window keeps capturing; Quit (⌘Q / menu bar) stops the server cleanly
+ *  - menu-bar item, closing the window keeps capturing (said once); Quit (⌘Q / menu bar) stops the server
+ *    cleanly; Open at Login starts it hidden in the menu bar
  *  - the window only ever loads the local server; links open in the default browser
+ *  - Dürbün files open from Finder and File → Open… (openFiles.ts); updates only after a yes (updateFlow.ts)
  */
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell, Tray, type WebContents } from 'electron';
-import { existsSync } from 'node:fs';
+import { app, autoUpdater, BrowserWindow, clipboard, crashReporter, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell, Tray, type WebContents } from 'electron';
+import { execFile } from 'node:child_process';
+import { accessSync, constants as fsConstants, existsSync, promises as fsp, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { splashUrl, statusPageUrl, syncFullScreen, TRAFFIC_LIGHTS } from './chrome';
 import { applyLoginShellEnv, SHELL_ENV_TIMEOUT_MS, type ShellEnvKey, type ShellEnvResult } from './env';
 import { pickLanguage, STRINGS, type Strings } from './i18n';
+import { createPrefsStore } from './desktopPrefs';
+import { diagnosticsText, issueUrl, lastLines, shortLocation } from './diagnostics';
 import { createQuitFlow } from './lifecycle';
-import { installFileLog, type FileLog, type ScopedLogger } from './log';
-import { appMenuTemplate, serverLabel, trayMenuTemplate, type MenuHandlers, type ServerState } from './menu';
+import { installFileLog, pruneCrashDumps, type FileLog, type ScopedLogger } from './log';
+import { appMenuTemplate, serverLabel, trayMenuTemplate, trayNeedsAttention, type MenuHandlers, type ServerState } from './menu';
 import { decideNavigation, isAllowedPermission, isAllowedRequest, isAppUrl, REQUEST_FILTER_URLS } from './navigation';
 import { attachNotices, bundledServerVersion, serverWarnings } from './notices';
 import { createNotifier, type Notifier, type NotifyRequest } from './notifier';
+import { createOpenQueue, readOpened } from './openFiles';
 import { devIconPath, serverPaths } from './paths';
 import { DEFAULT_HTTP_PORT, DEFAULT_SDK_PORT, isPortFree, parsePortEnv, probeDurbun, proveDurbun, watchAttached, type DurbunProbe } from './ports';
 import { createReloadGuard, resolveFailure, type FailureChoice } from './recovery';
@@ -36,7 +42,8 @@ import { runSelfTest, type ConsoleEntry } from './selftest';
 import { startedOrigin, startOrAttachServer } from './startup';
 import { applyZoomLevel, BLANK_PAGE, LEGACY_HOST, legacyOriginFor, migrateUiStorage, planZoomMove, recordZoomMoved } from './storageMigration';
 import { renderTrayBitmap } from './trayIcon';
-import { checkForUpdates, createRateLimiter, REPO_URL } from './updates';
+import { createUpdateFlow, type MessageBoxRequest, type UpdatePhase } from './updateFlow';
+import { autoCheckDue, bundlePath, createRateLimiter, parseCodesign, REPO_URL, selfUpdateSupport, shouldAskAutoCheck, shouldOfferMove, updateArch, type SignatureKind } from './updates';
 import { fitBounds, MIN_SIZE, readWindowState, THEME_BACKGROUND, writeWindowState, type Theme, type WindowState } from './windowState';
 
 /** The part of dist/server.mjs this app uses (packages/server/src/server.ts). */
@@ -120,6 +127,28 @@ function run(): void {
   let zoomChecked = false;
   let winState: WindowState = readWindowState(stateFile);
   const dataDir = process.env.DURBUN_DATA_DIR ? path.resolve(process.env.DURBUN_DATA_DIR) : path.join(os.homedir(), '.durbun');
+  const prefs = createPrefsStore(path.join(app.getPath('userData'), 'desktop.json'));
+  /** The server version the window shows (own bundle, or the attached Dürbün's). */
+  let serverVersion: string | undefined;
+  let openAtLogin = false;
+  /** Opened at login: the window stays hidden, Dürbün captures from the menu bar. */
+  let startHidden = false;
+  let openedAtLogin = false;
+  let trayImages: { plain: Electron.NativeImage; attention: Electron.NativeImage } | null = null;
+  const bundle = bundlePath(process.execPath);
+  let signature: SignatureKind = 'other';
+  let signatureRead: Promise<void> = Promise.resolve();
+  let updatePhase: UpdatePhase = { kind: 'idle' };
+  let installingUpdate = false;
+
+  // Files opened from Finder can arrive before 'ready' (the app was not running): they wait for the UI.
+  const openQueue = createOpenQueue();
+  app.on('open-file', (event, file) => {
+    event.preventDefault();
+    log.info(`open-file: ${path.basename(file)}`);
+    openQueue.add(file);
+    deliverOpenedFiles();
+  });
 
   const openExternal = (url: string) => {
     if (selfTestFile) {
@@ -154,8 +183,18 @@ function run(): void {
       if (win && !win.isDestroyed() && appOrigin) win.webContents.send('durbun:command', 'settings');
     },
     openDocs: () => openExternal(`${REPO_URL}#readme`),
-    reportIssue: () => openExternal(`${REPO_URL}/issues/new`),
-    checkForUpdates: () => void runUpdateCheck(),
+    reportIssue: () => void reportIssue(),
+    copyDiagnostics: () => void copyDiagnostics(),
+    checkForUpdates: () => void updates.check('manual'),
+    restartToUpdate: () => void updates.offerRestart(),
+    setAutoUpdateCheck: (on) => {
+      void updates.setAutoCheck(on).then(() => {
+        refreshMenus();
+        if (on) void autoUpdateTick();
+      });
+    },
+    setOpenAtLogin: (on) => void setOpenAtLogin(on),
+    openFile: () => void pickFiles(),
     openLicenses: () => {
       const dir = app.isPackaged ? path.join(process.resourcesPath, 'legal') : path.resolve(app.getAppPath(), '..', '..');
       shell.openPath(path.join(dir, 'LICENSE')).then((err) => err && log.warn(`open licenses: ${err}`));
@@ -163,49 +202,316 @@ function run(): void {
     },
   };
 
-  /** Help → Check for Updates…: one request to GitHub, only when the user asks (never in the background). */
-  let updateCheckRunning = false;
-  async function runUpdateCheck(): Promise<void> {
-    if (updateCheckRunning) return;
-    updateCheckRunning = true;
-    try {
-      // A session of its own: the default session lets the window reach only the local server.
-      const ses = session.fromPartition('durbun-update-check');
-      const result = await checkForUpdates(app.getVersion(), async (url) => {
-        const res = await ses.fetch(url, { headers: { accept: 'application/vnd.github+json', 'user-agent': `Durbun/${app.getVersion()}` }, signal: AbortSignal.timeout(10_000) });
-        return { status: res.status, body: res.ok ? await res.json() : null };
-      });
-      log.info(`update check: ${JSON.stringify(result)}`);
-      const parent = win && !win.isDestroyed() && win.isVisible() ? win : undefined;
-      const box = (opts: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts));
-      if (result.kind === 'newer') {
-        const { response } = await box({ type: 'info', message: t.updateAvailableTitle(result.version), detail: t.updateAvailableMessage(app.getVersion()), buttons: [t.download, t.later], defaultId: 0, cancelId: 1 });
-        if (response === 0) openExternal(result.url);
-      } else if (result.kind === 'failed') {
-        await box({ type: 'warning', message: t.updateCheckFailedTitle, detail: t.updateCheckFailedMessage(result.error) });
-      } else {
-        await box({ type: 'info', message: t.upToDateTitle, detail: result.kind === 'none' ? t.noReleaseMessage : t.upToDateMessage(result.version) });
+  const box = (opts: Electron.MessageBoxOptions) => {
+    const parent = win && !win.isDestroyed() && win.isVisible() ? win : undefined;
+    return parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts);
+  };
+
+  /* ───────────── updates (updateFlow.ts) ───────────── */
+
+  // A session of its own: no cookies, no cache, and the default session lets the window reach only the
+  // local server. The request names no user, machine or install.
+  const fetchFeed = async (url: string) => {
+    const ses = session.fromPartition('durbun-update-check');
+    const res = await ses.fetch(url, { headers: { accept: 'application/json', 'user-agent': 'Durbun' }, cache: 'no-store', credentials: 'omit', signal: AbortSignal.timeout(15_000) });
+    let body: unknown = null;
+    if (res.ok) {
+      try {
+        body = JSON.parse(await res.text());
+      } catch {
+        body = null;
       }
-    } catch (err) {
-      log.warn(`update check failed: ${(err as Error).message}`);
-    } finally {
-      updateCheckRunning = false;
+    }
+    return { status: res.status, body };
+  };
+
+  const updates = createUpdateFlow({
+    t: () => t,
+    currentVersion: app.getVersion(),
+    arch: updateArch(process.arch, app.runningUnderARM64Translation),
+    get: fetchFeed,
+    selfUpdate: () => selfUpdateSupport({ isPackaged: app.isPackaged, signature, bundle, parentWritable: bundle ? isWritable(path.dirname(bundle)) : false }),
+    box: (req: MessageBoxRequest) => box({ ...req, noLink: true }).then((r) => r.response),
+    openExternal,
+    startDownload: (url) => {
+      autoUpdater.setFeedURL({ url, serverType: 'json', headers: { 'user-agent': 'Durbun' } });
+      autoUpdater.checkForUpdates();
+    },
+    restart: async () => {
+      // quitAndInstall closes the windows first (the close handler lets them go), then the usual quit path
+      // stops the server and Squirrel.Mac swaps the app and starts the new version.
+      installingUpdate = true;
+      autoUpdater.quitAndInstall();
+      setTimeout(() => {
+        if (!installingUpdate || isQuitting()) return;
+        installingUpdate = false;
+        updates.failed('Dürbün did not quit to install the update');
+      }, 20_000);
+    },
+    prefs,
+    onPhase: (phase) => {
+      updatePhase = phase;
+      refreshMenus();
+      // The Dock icon shows activity while the update downloads (Squirrel.Mac reports no progress).
+      if (win && !win.isDestroyed()) win.setProgressBar(phase.kind === 'downloading' ? 2 : -1);
+    },
+    log,
+  });
+  autoUpdater.on('update-downloaded', () => updates.downloaded());
+  autoUpdater.on('update-not-available', () => updates.notAvailable());
+  autoUpdater.on('error', (err) => {
+    installingUpdate = false;
+    updates.failed(err?.message ?? String(err));
+  });
+
+  /** Automatic checks: only after the user's yes, at most once a day, never during the first minutes. */
+  let autoUpdateStarted = false;
+  async function autoUpdateTick(): Promise<void> {
+    if (!app.isPackaged || selfTestFile || isQuitting()) return;
+    if (shouldAskAutoCheck(prefs.get(), app.isPackaged) && win && !win.isDestroyed() && win.isVisible() && win.isFocused()) {
+      await updates.askAboutAutoCheck();
+      refreshMenus();
+    }
+    if (autoCheckDue(prefs.get(), Date.now())) await updates.check('auto');
+  }
+  function startAutoUpdates(): void {
+    if (autoUpdateStarted || !app.isPackaged || selfTestFile) return;
+    autoUpdateStarted = true;
+    setTimeout(() => void autoUpdateTick(), 2 * 60_000);
+    setInterval(() => void autoUpdateTick(), 60 * 60_000).unref();
+  }
+
+  function isWritable(dir: string): boolean {
+    try {
+      accessSync(dir, fsConstants.W_OK);
+      return true;
+    } catch {
+      return false;
     }
   }
 
+  /**
+   * Developer ID, ad-hoc or unsigned (codesign prints the signature details on stderr). Read once at start;
+   * the move-to-Applications question waits for it.
+   */
+  function readSignature(): Promise<void> {
+    if (!app.isPackaged || !bundle) return Promise.resolve();
+    return new Promise((resolve) => {
+      execFile('/usr/bin/codesign', ['-dv', '--verbose=2', bundle], { timeout: 10_000 }, (_err, _stdout, stderr) => {
+        signature = parseCodesign(String(stderr ?? ''));
+        log.info(`signature: ${signature}`);
+        resolve();
+      });
+    });
+  }
+
+  /* ───────────── files opened from Finder / File → Open… (openFiles.ts) ───────────── */
+
+  let uiLoaded = false;
+  function deliverOpenedFiles(): void {
+    if (openQueue.size === 0 || !app.isReady()) return;
+    showWindow();
+    // The UI asks for the files itself (it also does when it starts); this tells a loaded UI they are there.
+    if (win && !win.isDestroyed() && appOrigin && uiLoaded) win.webContents.send('durbun:command', 'open-file');
+  }
+
+  ipcMain.handle('durbun:take-opened-files', async (event) => {
+    if (!isTrustedSender(event.sender, event.senderFrame?.url)) return [];
+    const files = openQueue.take();
+    const results = await Promise.all(files.map((f) => readOpened(f, { size: async (p) => (await fsp.stat(p)).size, read: (p) => fsp.readFile(p, 'utf8') })));
+    const out: { name: string; text: string }[] = [];
+    for (const r of results) {
+      if ('text' in r) out.push(r);
+      else {
+        log.warn(`open-file ${r.name}: ${r.error}`);
+        void box({ type: 'warning', message: t.openFailedTitle, detail: t.openFailedMessage(r.name, r.error), buttons: [t.ok] });
+      }
+    }
+    return out;
+  });
+
+  async function pickFiles(): Promise<void> {
+    const parent = win && !win.isDestroyed() && win.isVisible() ? win : undefined;
+    const opts: Electron.OpenDialogOptions = {
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Dürbün', extensions: ['durbun', 'json'] }],
+      message: t.openFileMessage,
+    };
+    const { canceled, filePaths } = parent ? await dialog.showOpenDialog(parent, opts) : await dialog.showOpenDialog(opts);
+    if (canceled) return;
+    for (const f of filePaths) openQueue.add(f);
+    deliverOpenedFiles();
+  }
+
+  /* ───────────── diagnostics (diagnostics.ts) ───────────── */
+
+  async function collectDiagnostics(): Promise<string> {
+    const port = state.kind === 'running' || state.kind === 'attached' ? state.port : undefined;
+    let doctor: unknown;
+    if (port) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/doctor`, { signal: AbortSignal.timeout(8_000) });
+        if (res.ok) doctor = await res.json();
+      } catch (err) {
+        log.warn(`diagnostics: tool check unavailable (${(err as Error).message})`);
+      }
+    }
+    let logTail = '';
+    try {
+      const handle = await fsp.open(log.file, 'r');
+      try {
+        const { size } = await handle.stat();
+        const length = Math.min(size, 256 * 1024);
+        const buf = Buffer.alloc(length);
+        await handle.read(buf, 0, length, size - length);
+        logTail = lastLines(buf.toString('utf8'), 200, size > length);
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      /* no log */
+    }
+    return diagnosticsText({
+      app: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      server: serverVersion,
+      macos: process.getSystemVersion(),
+      arch: process.arch,
+      translated: app.runningUnderARM64Translation,
+      packaged: app.isPackaged,
+      mode: state.kind,
+      httpPort: port,
+      sdkPort: server?.info?.ports?.sdk,
+      lan: readLanSetting(),
+      signature: app.isPackaged ? signature : undefined,
+      location: shortLocation(bundle, os.homedir()),
+      warnings: state.kind === 'running' || state.kind === 'attached' ? state.warnings : state.kind === 'failed' ? [state.error] : [],
+      doctor,
+      logTail,
+    });
+  }
+
+  async function copyDiagnostics(): Promise<void> {
+    clipboard.writeText(await collectDiagnostics());
+    await box({ type: 'info', message: t.diagnosticsCopiedTitle, detail: t.diagnosticsCopiedMessage, buttons: [t.ok] });
+  }
+
+  /** The bug report form, prefilled with the version and environment; the long part goes through the clipboard. */
+  async function reportIssue(): Promise<void> {
+    clipboard.writeText(await collectDiagnostics());
+    const { response } = await box({ type: 'info', message: t.reportIssueTitle, detail: t.reportIssueMessage, buttons: [t.openForm, t.cancel], defaultId: 0, cancelId: 1 });
+    if (response === 0) openExternal(issueUrl({ app: app.getVersion(), macos: process.getSystemVersion(), arch: process.arch, translated: app.runningUnderARM64Translation }));
+  }
+
+  /** The server's LAN setting (settings.json in the data folder): the SDK port is then reachable from the network. */
+  function readLanSetting(): boolean | undefined {
+    try {
+      const raw = JSON.parse(readFileSync(path.join(dataDir, 'settings.json'), 'utf8')) as { allowLan?: unknown };
+      return raw.allowLan === true;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /* ───────────── login item, first close, Applications folder ───────────── */
+
+  async function setOpenAtLogin(on: boolean): Promise<void> {
+    if (!app.isPackaged) {
+      log.info('Open at Login works in the packaged app only');
+      refreshMenus();
+      return;
+    }
+    try {
+      app.setLoginItemSettings({ openAtLogin: on });
+      const settings = app.getLoginItemSettings();
+      openAtLogin = settings.openAtLogin;
+      log.info(`open at login: ${on ? 'on' : 'off'} (${settings.status ?? '?'})`);
+      if (on && settings.status === 'requires-approval') await box({ type: 'info', message: t.loginApprovalTitle, detail: t.loginApprovalMessage, buttons: [t.ok] });
+    } catch (err) {
+      log.warn(`open at login: ${(err as Error).message}`);
+    }
+    refreshMenus();
+  }
+
+  /** Once: closing the window does not stop Dürbün (users took it for a quit and left the SDK port open). */
+  function closeNoteOnce(): void {
+    if (prefs.get().closeNoteShown || selfTestFile) return;
+    void prefs.update({ closeNoteShown: true });
+    void dialog.showMessageBox({ type: 'info', message: t.closeNoteTitle, detail: t.closeNoteMessage(readLanSetting() === true), buttons: [t.ok] });
+  }
+
+  /**
+   * A copy running from the disk image or App Translocation is asked once per launch whether it should
+   * move to Applications, until it moved or the user ticked "Don't ask again"; a copy in another folder is
+   * asked only when it is a Developer ID signed release (a developer's own build is never asked). The
+   * rule is shouldOfferMove (updates.ts). A move relaunches the app.
+   */
+  async function offerMoveToApplications(): Promise<void> {
+    let inApplications = false;
+    try {
+      inApplications = !app.isPackaged || app.isInApplicationsFolder();
+    } catch {
+      return;
+    }
+    await signatureRead;
+    const decision = shouldOfferMove({
+      isPackaged: app.isPackaged,
+      inApplications,
+      declined: prefs.get().moveToApplicationsDeclined === true,
+      openedAtLogin,
+      selfTest: Boolean(selfTestFile),
+      bundle,
+      signature,
+    });
+    if (!decision.offer || !bundle) return;
+    const where = decision.location === 'folder' ? t.moveWhere('folder', shortLocation(path.dirname(bundle), os.homedir())) : t.moveWhere(decision.location);
+    const { response, checkboxChecked } = await dialog.showMessageBox({
+      type: 'question',
+      message: t.moveTitle,
+      detail: t.moveMessage(where),
+      buttons: [t.moveNow, t.notNow],
+      defaultId: 0,
+      cancelId: 1,
+      checkboxLabel: t.doNotAskAgain,
+    });
+    if (response !== 0) {
+      if (checkboxChecked) await prefs.update({ moveToApplicationsDeclined: true });
+      return;
+    }
+    try {
+      log.info('moving the app to the Applications folder');
+      app.moveToApplicationsFolder({
+        conflictHandler: (conflict) =>
+          conflict === 'existsAndRunning' ||
+          dialog.showMessageBoxSync({ type: 'question', message: t.moveReplaceTitle, detail: t.moveReplaceMessage, buttons: [t.replace, t.cancel], defaultId: 0, cancelId: 1 }) === 0,
+      });
+    } catch (err) {
+      log.warn(`move to Applications failed: ${(err as Error).message}`);
+      await dialog.showMessageBox({ type: 'warning', message: t.moveFailedTitle, detail: t.moveFailedMessage((err as Error).message), buttons: [t.ok] });
+    }
+  }
+
+  // The versions a bug report asks for, in About too (an attached Dürbün can run another server version).
   const applyAboutPanel = () =>
     app.setAboutPanelOptions({
       applicationName: 'Dürbün',
       applicationVersion: app.getVersion(),
       copyright: 'Copyright © 2026 Muhammed Yusuf Kaynak · MIT License',
-      credits: t === STRINGS.tr ? 'Android ve iOS için canlı log, ağ ve performans izleyici' : 'Live logs, network and performance inspector for Android and iOS',
+      credits: t.aboutCredits(
+        `Electron ${process.versions.electron} · Chromium ${process.versions.chrome} · Node ${process.versions.node}${serverVersion ? ` · Server ${serverVersion}` : ''}`,
+      ),
     });
 
   const refreshMenus = () => {
-    Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(t, handlers, { canOpenInBrowser: appOrigin !== null })));
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate(appMenuTemplate(t, handlers, { canOpenInBrowser: appOrigin !== null, autoUpdateCheck: prefs.get().autoUpdateCheck, update: updatePhase, openAtLogin })),
+    );
     if (tray && !tray.isDestroyed()) {
-      tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(t, state, handlers)));
+      tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(t, state, handlers, { update: updatePhase, openAtLogin })));
       tray.setToolTip(`Dürbün — ${serverLabel(t, state)}`);
+      if (trayImages) tray.setImage(trayNeedsAttention(state) ? trayImages.attention : trayImages.plain);
     }
   };
 
@@ -334,8 +640,14 @@ function run(): void {
     win = w;
     if (winState.maximized) w.maximize();
     w.once('ready-to-show', () => {
+      if (w.isDestroyed()) return;
+      // Opened at login: Dürbün captures from the menu bar until the user opens the window.
+      if (startHidden) {
+        startHidden = false;
+        return;
+      }
       // A self-test run shows the window without taking the focus from what the user is doing.
-      if (!w.isDestroyed()) selfTestFile ? w.showInactive() : w.show();
+      selfTestFile ? w.showInactive() : w.show();
     });
 
     let saveTimer: NodeJS.Timeout | undefined;
@@ -352,10 +664,12 @@ function run(): void {
     w.on('move', scheduleSave);
     w.on('close', (event) => {
       saveBounds();
-      // macOS: closing the window keeps Dürbün running in the menu bar (capture continues).
-      if (!isQuitting()) {
+      // macOS: closing the window keeps Dürbün running in the menu bar (capture continues), except while
+      // an update closes it to restart.
+      if (!isQuitting() && !installingUpdate) {
         event.preventDefault();
         w.hide();
+        closeNoteOnce();
       }
     });
     w.on('closed', () => {
@@ -397,8 +711,14 @@ function run(): void {
     // Quick retries first (the server is starting or restarting), then a slow retry behind a status page:
     // the window never stays blank. A successful load starts the count again.
     let retries = 0;
+    wc.on('did-start-loading', () => {
+      uiLoaded = false;
+    });
     wc.on('did-finish-load', () => {
-      if (appOrigin && isAppUrl(wc.getURL(), appOrigin)) retries = 0;
+      if (!appOrigin || !isAppUrl(wc.getURL(), appOrigin)) return;
+      retries = 0;
+      uiLoaded = true;
+      deliverOpenedFiles();
     });
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
       if (!isMainFrame || !appOrigin || !isAppUrl(url, appOrigin) || code === -3 /* aborted */) return;
@@ -578,9 +898,12 @@ function run(): void {
       const warnings = attachNotices(t, outcome, bundledServerVersion(mod, app.getVersion()));
       log.info(`a Dürbün ${outcome.version} already runs on port ${outcome.port} (${outcome.page ?? 'ui'}); opening ${outcome.origin}`);
       for (const w of warnings) log.warn(w);
+      serverVersion = outcome.version;
+      applyAboutPanel();
       setState({ kind: 'attached', port: outcome.port, warnings });
       await loadUi(outcome.port, outcome.origin);
       if (isQuitting()) return;
+      startAutoUpdates();
       // When that Dürbün stops (its terminal closed), this app starts its own server instead of
       // leaving the window on a dead page.
       stopWatch = watchAttached(outcome.port, {
@@ -603,8 +926,11 @@ function run(): void {
     for (const w of [...fallback, ...(started.warnings ?? []), ...shell]) log.warn(w);
     const warnings = [...fallback, ...serverWarnings(t, started), ...shell];
     log.info(`server running at ${origin}`);
+    serverVersion = bundledServerVersion(mod, app.getVersion());
+    applyAboutPanel();
     setState({ kind: 'running', port, warnings });
     await loadUi(port, origin);
+    startAutoUpdates();
   }
 
   /** The login shell could not be asked: say so, tools may then be missing (Finder's bare PATH). */
@@ -707,20 +1033,42 @@ function run(): void {
   app.whenReady().then(async () => {
     t = STRINGS[pickLanguage(app.getPreferredSystemLanguages())];
     applyAboutPanel();
+    void prefs.update({ launches: (prefs.get().launches ?? 0) + 1 });
+    if (app.isPackaged) {
+      try {
+        const login = app.getLoginItemSettings();
+        openAtLogin = login.openAtLogin;
+        openedAtLogin = login.wasOpenedAtLogin === true && !selfTestFile;
+        startHidden = openedAtLogin;
+        if (openedAtLogin) log.info('opened at login: the window stays hidden');
+      } catch (err) {
+        log.warn(`login item state unavailable: ${(err as Error).message}`);
+      }
+    }
+    signatureRead = readSignature();
+    // Crashpad keeps every minidump: the old ones go (30 days, newest 20 kept).
+    void pruneCrashDumps(app.getPath('crashDumps')).then((n) => n > 0 && log.info(`removed ${n} old crash dump(s)`));
     if (!app.isPackaged && process.platform === 'darwin') {
       const icon = devIconPath(app.getAppPath());
       if (existsSync(icon)) app.dock?.setIcon(icon);
     }
     setupSecurity();
     try {
-      const image = nativeImage.createFromBitmap(renderTrayBitmap(36, 3), { width: 36, height: 36, scaleFactor: 2 });
-      image.setTemplateImage(true);
-      tray = new Tray(image);
+      const image = (badge: boolean) => {
+        const img = nativeImage.createFromBitmap(renderTrayBitmap(36, 3, badge), { width: 36, height: 36, scaleFactor: 2 });
+        img.setTemplateImage(true);
+        return img;
+      };
+      trayImages = { plain: image(false), attention: image(true) };
+      tray = new Tray(trayImages.plain);
     } catch (err) {
       log.warn(`menu-bar icon unavailable: ${(err as Error).message}`);
     }
     refreshMenus();
     if (!win || win.isDestroyed()) createWindow();
+    // Before the server starts: a move relaunches the app.
+    await offerMoveToApplications();
+    if (isQuitting()) return;
 
     shellEnv = await envReady;
     const r = shellEnv.result;

@@ -59,6 +59,15 @@ const bridge = {
     clickHandlers.delete(String(id));
     ipcRenderer.send('durbun:notification-close', String(id));
   },
+  /**
+   * Files opened from Finder or File → Open… that wait for the UI ({ name, text } each). The main process
+   * sends the 'open-file' command when there are some; the UI also asks once when it starts.
+   */
+  takeOpenedFiles(): Promise<{ name: string; text: string }[]> {
+    return ipcRenderer.invoke('durbun:take-opened-files').then((files: unknown) =>
+      Array.isArray(files) ? files.filter((f): f is { name: string; text: string } => !!f && typeof f.name === 'string' && typeof f.text === 'string') : [],
+    );
+  },
 };
 
 contextBridge.exposeInMainWorld('durbunDesktop', bridge);

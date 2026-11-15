@@ -63,12 +63,28 @@ module.exports = {
     // pass Finder and then die in dyld. With 13 macOS itself says the app needs a newer system.
     minimumSystemVersion: '13.0',
     // Electron's own Info.plist asks for camera, microphone and Bluetooth; Dürbün uses none of them.
+    // Finder opens Dürbün files with the app (double click, Open With, a drop on the Dock icon; main.ts
+    // 'open-file'): .durbun packages and backups are Dürbün's own type, session recordings (.durbun.json)
+    // are JSON to macOS (it knows one extension per file), so Dürbün is offered for JSON in Open With
+    // without becoming the default JSON app.
     extendInfo: {
       NSCameraUsageDescription: null,
       NSMicrophoneUsageDescription: null,
       NSAudioCaptureUsageDescription: null,
       NSBluetoothAlwaysUsageDescription: null,
       NSBluetoothPeripheralUsageDescription: null,
+      UTExportedTypeDeclarations: [
+        {
+          UTTypeIdentifier: 'dev.durbun.package',
+          UTTypeDescription: 'Dürbün Package',
+          UTTypeConformsTo: ['public.json'],
+          UTTypeTagSpecification: { 'public.filename-extension': ['durbun'] },
+        },
+      ],
+      CFBundleDocumentTypes: [
+        { CFBundleTypeName: 'Dürbün Package', CFBundleTypeRole: 'Viewer', LSHandlerRank: 'Owner', LSItemContentTypes: ['dev.durbun.package'] },
+        { CFBundleTypeName: 'Dürbün Session Recording', CFBundleTypeRole: 'Viewer', LSHandlerRank: 'Alternate', LSItemContentTypes: ['public.json'] },
+      ],
     },
   },
   dmg: {

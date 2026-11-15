@@ -44,6 +44,11 @@ All notable changes to Dürbün are listed here. The format follows
 
 ### Changed
 
+- Mac app: **Check for Updates…** shows what is new, downloads only after you say yes and asks before it
+  restarts. A copy that cannot update itself (a local build, or one opened from the disk image) gets the disk
+  image for your Mac. Dürbün asks once whether it may check by itself once a day
+  (**Dürbün → Check for Updates Automatically**); that check reads one static file from GitHub Releases and
+  carries no identifier.
 - Export session and Export HAR open a dialog that shows the scope and the counts before saving.
 - Network "Clear" (and ⌘⌫) asks first, with the number of requests; Shift skips the question.
 - Crash records from the last 7 days (was 24 hours) are read when a phone connects.
@@ -54,12 +59,21 @@ All notable changes to Dürbün are listed here. The format follows
   (`DURBUN_ALLOW_UNSIGNED=1` for a deliberate ad-hoc build) and verifies the built apps.
   `scripts/check-versions.mjs` covers lockfiles, the no-op SDK and the install snippets in the docs, and can
   write a new version with `--write`.
+- `npm run release:check` runs every check a release needs and stops at the first problem; `app:release`
+  writes the update feed files and clears old build files.
+- Mac app: the diagnostic log is capped while Dürbün runs, and old crash dumps are removed at startup.
 
 ### Added
 
 - Logs and Network say when the memory limit has dropped the oldest lines or requests.
 - An iPhone with Developer Mode off says so, and actions that need it explain how to turn it on.
 - Importing a masked recording says that `••••` values are masks.
+- Mac app: `.durbun` packages and backups and `.durbun.json` recordings open from Finder (double click, Open
+  With, the Dock icon), also when Dürbün is not running; **File → Open…** (⌘O).
+- Mac app: **Help → Copy Diagnostic Info**; **Report an Issue…** fills in the version and environment and
+  copies the diagnostics with secrets masked. About lists the Electron, Chromium, Node and server versions.
+- Mac app: closing the window says once that capture continues in the menu bar; **Open at Login**; the
+  menu-bar icon shows a dot for warnings; a copy opened from the disk image offers to move to Applications.
 - Flutter in-app panel: **Tools → Mac connection** says why the app is not connected to the Mac and what to
   do next, with the addresses tried; debug builds print the same once in the console.
 - Flutter in-app panel: the Mac's Wi-Fi address can be typed in at run time. It is kept for later launches,

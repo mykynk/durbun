@@ -64,8 +64,12 @@ Uygulamalar klasörüne sürükleyin. macOS 13 Ventura veya üstü gerekir.
 
 Yayın paketleri Developer ID ile imzalı ve Apple onaylıdır (notarized); her uygulama gibi açılır.
 
-Dürbün kendiliğinden güncelleme aramaz. **Dürbün → Güncellemeleri Denetle…** yeni bir sürüm varsa indirme
-sayfasını açar.
+**Dürbün → Güncellemeleri Denetle…** yeni bir sürüm olup olmadığına bakar. Varsa Dürbün yenilikleri gösterir
+ve indirmeden önce sorar; indirme bitince yeniden başlamadan önce yine sorar. Kendi yerine yenisini kuramayan
+bir kopya (yerel bir derleme ya da disk görüntüsünden açılan kopya) bunun yerine Mac'inize uygun disk
+görüntüsünü alır. İkinci açılıştan itibaren Dürbün, günde bir kez kendiliğinden denetleyip denetlemeyeceğini
+bir kez sorar; bu seçimi istediğiniz zaman **Dürbün → Güncellemeleri Otomatik Denetle** ile
+değiştirebilirsiniz.
 
 ### Gereksinimler
 
@@ -201,10 +205,11 @@ yere taşır:
 
 ## Gizlilik
 
-- Dürbün kendiliğinden Mac'in dışına hiçbir şey göndermez: analitik, telemetri ya da otomatik güncelleme
-  denetimi yoktur. Çökme dökümleri Mac'te kalır.
-- Mac'ten dışarı istek yalnızca siz istediğinizde çıkar: **Güncellemeleri Denetle** (GitHub API'ye tek
-  istek), yakalanmış bir isteği yeniden göndermek (isteğin kendi adresine), **Slack'e gönder** (ayarladığınız
+- Dürbün kendiliğinden Mac'in dışına hiçbir şey göndermez: analitik ve telemetri yoktur. Otomatik güncelleme
+  denetimine izin verirseniz Dürbün günde bir kez GitHub Releases'ten tek bir sabit dosya okur; bu istek
+  hiçbir kimlik bilgisi taşımaz. Çökme dökümleri Mac'te kalır.
+- Mac'ten dışarı istek yalnızca siz istediğinizde çıkar: **Güncellemeleri Denetle** (GitHub Releases'ten tek
+  bir sabit dosya; güncelleme yalnızca onayınızdan sonra iner), yakalanmış bir isteği yeniden göndermek (isteğin kendi adresine), **Slack'e gönder** (ayarladığınız
   webhook'a) ve akışlar (HTTP ve Slack adımları akışta yazan yere gider; bir olayda kendiliğinden başlayan akış
   yalnızca Dürbün açıkken çalışır). Yedekler seçtiğiniz klasöre yazılır; o klasörü eşitlemek klasörün
   servisine kalmıştır.

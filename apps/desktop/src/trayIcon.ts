@@ -45,10 +45,25 @@ export function glyphDistance(x: number, y: number): number {
 }
 
 /**
- * Raw 8-bit BGRA (premultiplied; black, so only alpha matters) bitmap of `sizePx`², glyph fitted into
- * `sizePx - 2·paddingPx`.
+ * The attention dot (warnings, a failed start): a filled dot in the top-right corner with a clear ring
+ * around it, so it reads as a badge on the glyph in either menu-bar tint. In the 32×32 SVG space.
  */
-export function renderTrayBitmap(sizePx = 36, paddingPx = 3): Buffer {
+const BADGE = { cx: 23.8, cy: 8.4, r: 3.8, ring: 1.6 };
+
+/** Coverage test with the badge: inside the dot, or on the glyph outside the dot's ring. */
+export function badgedInside(x: number, y: number): boolean {
+  const d = Math.hypot(x - BADGE.cx, y - BADGE.cy);
+  if (d <= BADGE.r) return true;
+  if (d <= BADGE.r + BADGE.ring) return false;
+  return glyphDistance(x, y) <= 0;
+}
+
+/**
+ * Raw 8-bit BGRA (premultiplied; black, so only alpha matters) bitmap of `sizePx`², glyph fitted into
+ * `sizePx - 2·paddingPx`; `badge` adds the attention dot.
+ */
+export function renderTrayBitmap(sizePx = 36, paddingPx = 3, badge = false): Buffer {
+  const inside = badge ? badgedInside : (x: number, y: number) => glyphDistance(x, y) <= 0;
   const buf = Buffer.alloc(sizePx * sizePx * 4);
   const gw = GLYPH.x1 - GLYPH.x0;
   const gh = GLYPH.y1 - GLYPH.y0;
@@ -63,7 +78,7 @@ export function renderTrayBitmap(sizePx = 36, paddingPx = 3): Buffer {
         for (let sx = 0; sx < SS; sx++) {
           const ux = GLYPH.x0 + (px + (sx + 0.5) / SS - offX) / scale;
           const uy = GLYPH.y0 + (py + (sy + 0.5) / SS - offY) / scale;
-          if (glyphDistance(ux, uy) <= 0) cover++;
+          if (inside(ux, uy)) cover++;
         }
       }
       const a = Math.round((cover / (SS * SS)) * 255);
