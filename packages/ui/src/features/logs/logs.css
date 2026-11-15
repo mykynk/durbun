@@ -340,6 +340,23 @@
   margin-left: auto;
 }
 
+/* "Show in context" suspended some filters for this view: says which, with the way back. */
+.lg-context {
+  background: var(--accent-soft);
+}
+.lg-context > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.lg-context__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.4;
+}
+.lg-context .btn {
+  flex: 0 0 auto;
+}
+
 /* One calm note above the list (iPhone system lines left out by the server's log scope). */
 .lg-note {
   display: flex;

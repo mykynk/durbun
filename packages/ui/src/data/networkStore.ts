@@ -41,6 +41,8 @@ export class NetworkStore extends VersionedStore {
   order: string[] = [];
   maxEntries: number = DEFAULT_SETTINGS.maxNetworkEntries;
   generation = 0;
+  /** Requests the memory limit deleted (oldest first) since the last reset: the Network tab says so (UIF-08). */
+  dropped = 0;
   /** Distinct requests seen since page load (snapshot included). */
   totalReceived = 0;
   /** Distinct live requests seen since page load (snapshot excluded; used for rates). */
@@ -91,6 +93,7 @@ export class NetworkStore extends VersionedStore {
       if (e) {
         this.count(e, -1);
         this.byId.delete(id);
+        this.dropped++;
       }
     }
     this.generation++;
@@ -110,6 +113,7 @@ export class NetworkStore extends VersionedStore {
   reset(): void {
     this.byId = new Map();
     this.order = [];
+    this.dropped = 0;
     this.counts = emptyNetworkCounts();
     this.countsByDevice = new Map();
     this.countsByApp = new Map();

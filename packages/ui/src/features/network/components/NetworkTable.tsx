@@ -48,6 +48,8 @@ export interface NetworkTableProps {
   /** The tab is visible (timers stop while hidden). */
   active: boolean;
   empty?: ReactNode;
+  /** Whether the first / last rows are on screen (or within the overscan): where the oldest requests are. */
+  onEdgesChange?: (top: boolean, bottom: boolean) => void;
   'aria-label': string;
 }
 
@@ -172,6 +174,13 @@ export const NetworkTable = memo(function NetworkTable(props: NetworkTableProps)
   const anyPending = visible.some((e) => e?.state === 'pending');
   const now = useTicker(1000, props.active && anyPending);
   const range = useMemo(() => rangeOf(visible, now), [visible.map((e) => (e ? `${e.id}:${e.endTs ?? ''}` : '')).join('|'), now]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const atTopEdge = rowIds.length === 0 || (items.length > 0 && items[0]!.index === 0);
+  const atBottomEdge = rowIds.length === 0 || (items.length > 0 && items[items.length - 1]!.index === rowIds.length - 1);
+  const onEdgesChange = props.onEdgesChange;
+  useEffect(() => {
+    onEdgesChange?.(atTopEdge, atBottomEdge);
+  }, [atTopEdge, atBottomEdge, onEdgesChange]);
 
   const style = { '--net-cols': template, '--net-min-w': `${minWidth}px`, '--net-row-h': `${rowHeight}px` } as CSSProperties;
 

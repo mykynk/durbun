@@ -418,6 +418,14 @@ export function scopeLogCounts(compiled: CompiledScope, store: LogStore): LogCou
   return out;
 }
 
+/**
+ * Every line the scope shows, counted by scanning (an app scope also holds its device lines and the device's
+ * connect separators, which the per-app counters leave out). What an export or a clear of the scope covers.
+ */
+export function scopeLogTotal(compiled: CompiledScope, store: LogStore): number {
+  return compiled.scope.kind === 'app' ? scannedLogCounts(compiled, store).total : scopeLogCounts(compiled, store).total;
+}
+
 export function scopeNetworkCounts(compiled: CompiledScope, store: NetworkStore): NetworkCounts {
   const s = compiled.scope;
   const out = emptyNetworkCounts();

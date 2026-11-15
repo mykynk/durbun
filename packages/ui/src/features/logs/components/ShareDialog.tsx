@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
 import { Copy, FileDown, Share2 } from 'lucide-react';
 import type { LogEntry } from '@durbun/protocol';
-import { useApp, useDevice } from '../../../data';
+import { useDevice, useHub } from '../../../data';
 import { Button, CodeView, Dialog, SlackButton, copyText, downloadText, formatBytes, toast, useShortcut } from '../../../components';
 import { translate, useLanguage, useT, type Lang } from '../../../i18n';
-import { shareAppLabel, shareDeviceLabel } from '../../network/share';
+import { shareAppLabel, shareDeviceLabel, shareInstallLabel } from '../../network/share';
+import { deviceAppForEntry, sessionForEntry } from '../model/appOf';
 import { buildLogReport, type LogShareLabels } from '../model/shareReport';
 import { displayText } from './DetailPanel';
 
@@ -30,8 +31,12 @@ export function logShareLabels(lang: Lang): LogShareLabels {
 export function ShareDialog({ entry: e, onClose }: { entry: LogEntry; onClose: () => void }) {
   const t = useT();
   const lang = useLanguage();
-  const app = useApp(e.appId);
   const device = useDevice(e.deviceId);
+  // Device lines (crash records of an SDK-less build) have no session: the app the device reports names the build.
+  const apps = useHub((s) => s.apps);
+  const deviceApps = useHub((s) => s.deviceApps);
+  const app = useMemo(() => sessionForEntry(e, apps), [e, apps]);
+  const deviceApp = useMemo(() => deviceAppForEntry(e, deviceApps, app), [e, deviceApps, app]);
 
   const report = useMemo(() => {
     const kindKey = e.kind ? KIND_KEYS[e.kind] : undefined;
@@ -42,7 +47,7 @@ export function ShareDialog({ entry: e, onClose }: { entry: LogEntry; onClose: (
         tag: e.tag || undefined,
         kind: kindKey ? translate(lang, kindKey) : undefined,
         ts: e.ts,
-        app: shareAppLabel(app),
+        app: shareAppLabel(app, deviceApp, shareInstallLabel(deviceApp, app, device)),
         device: shareDeviceLabel(device),
         process: process || undefined,
         message: displayText(e),
@@ -52,7 +57,7 @@ export function ShareDialog({ entry: e, onClose }: { entry: LogEntry; onClose: (
       },
       logShareLabels(lang),
     );
-  }, [e, app, device, lang]);
+  }, [e, app, deviceApp, device, lang]);
   const size = useMemo(() => new TextEncoder().encode(report).length, [report]);
 
   const copy = async () => {

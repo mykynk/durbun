@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type LogEntry } from '@durbun/protocol';
+import { DEFAULT_SETTINGS, type LogEntry, type LogLevel } from '@durbun/protocol';
 import { VersionedStore } from './versioned';
 
 /** Incrementally maintained counters (cheap badges/status bar without scanning 200k entries). */
@@ -63,6 +63,8 @@ function lowerBoundIn(arr: readonly LogEntry[], id: number): number {
  *   ids < `entries[0].id`; `generation` does not change). The array is replaced, not mutated; `keptRevision`
  *   is bumped whenever it changes. `counts`, `size`, `getById` and `findLast` include it.
  * - `headDropped`: entries trimmed from the head of `entries` since the last reset (absolute index = headDropped + i).
+ * - `dropped`: entries the memory limit deleted since the last reset (head trims minus the crash records moved to
+ *   `kept`, plus kept records evicted). The views tell the user about it (UIF-08).
  * - `generation`: bumped on reset / removeWhere / out-of-order inserts (arbitrary changes) — drop derived
  *   caches when it changes.
  */
@@ -76,7 +78,15 @@ export class LogStore extends VersionedStore {
   /** Live entries accepted since page load (monotonic, history excluded; used for ingest rates). */
   liveReceived = 0;
   headDropped = 0;
+  dropped = 0;
   generation = 0;
+  /**
+   * Bumped when an entry's level changed in place (a network row took its request's outcome level, UXL-02). Row
+   * models re-run their filters on it; ids and order do not change, so it is not a `generation` change.
+   */
+  levelRevision = 0;
+  /** Network log rows by request id (`netId` → entry id), for that level update. Pruned with the ring. */
+  private netRows = new Map<string, number>();
   lastId = 0;
   counts: LogCounts = emptyLogCounts();
   countsByDevice = new Map<string, LogCounts>();
@@ -145,10 +155,39 @@ export class LogStore extends VersionedStore {
         accepted++;
       }
     }
+    for (let i = 0; i < batch.length; i++) {
+      const e = batch[i]!;
+      if (e.kind === 'network' && e.netId) this.netRows.set(e.netId, e.id);
+    }
     this.totalReceived += accepted;
     if (!opts.history) this.liveReceived += accepted;
     this.trim();
     this.changed();
+  }
+
+  /**
+   * A request's outcome arrived: its log row takes [level] (the hub's `networkLogLevel`), as the server already did
+   * for its own copy. A row that reached this client while the request was pending still says `info`; without this
+   * "errors only" would miss a failed request until the next resync. Counts follow; returns true when it changed.
+   */
+  setNetworkLevel(netId: string, level: LogLevel): boolean {
+    const id = this.netRows.get(netId);
+    if (id === undefined) return false;
+    const idx = this.indexOfId(id);
+    if (idx < 0) {
+      this.netRows.delete(netId);
+      return false;
+    }
+    const e = this.entries[idx]!;
+    if (e.level === level) return false;
+    // A new object: rows and views compare entries by reference.
+    const next: LogEntry = { ...e, level };
+    this.count(e, -1);
+    this.entries[idx] = next;
+    this.count(next, 1);
+    this.levelRevision++;
+    this.changed();
+    return true;
   }
 
   /** Out-of-order entry at or before the newest kept one. Returns true when it was added (not a duplicate). */
@@ -198,17 +237,25 @@ export class LogStore extends VersionedStore {
         }
       } else {
         this.count(e, -1);
+        this.dropped++;
         total--;
       }
     }
     if (n > 0) {
       arr.splice(0, n);
       this.headDropped += n;
+      if (this.netRows.size > this.maxEntries) {
+        const first = arr.length > 0 ? arr[0]!.id : Infinity;
+        for (const [netId, id] of this.netRows) if (id < first) this.netRows.delete(netId);
+      }
     }
     if (moved || evict > 0) {
       // Moved entries come from the head of `entries`, so they are newer than every kept one.
       const next = moved ? kept.concat(moved) : kept.slice();
-      for (const e of next.splice(0, evict)) this.count(e, -1);
+      for (const e of next.splice(0, evict)) {
+        this.count(e, -1);
+        this.dropped++;
+      }
       this.kept = next;
       this.keptRevision++;
     }
@@ -228,6 +275,8 @@ export class LogStore extends VersionedStore {
     this.kept = [];
     this.keptRevision++;
     this.headDropped = 0;
+    this.dropped = 0;
+    this.netRows = new Map();
     this.lastId = 0;
     this.counts = emptyLogCounts();
     this.countsByDevice = new Map();

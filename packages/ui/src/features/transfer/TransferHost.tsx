@@ -2,6 +2,7 @@ import './i18n';
 import './transfer.css';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { ExportDialog } from './ExportDialog';
+import { DataExportDialog } from './DataExportDialog';
 import { ImportDialog } from './ImportDialog';
 import { useUiPrefsSync } from './prefsSync';
 import { transfer, useTransfer } from './store';
@@ -16,6 +17,14 @@ export function TransferHost() {
   return (
     <ErrorBoundary name="packages" resetKey={dialog} fallback={() => null}>
       <ExportDialog open={dialog?.kind === 'export'} mode={dialog?.kind === 'export' ? dialog.mode : 'share'} flows={dialog?.kind === 'export' ? dialog.flows : undefined} onClose={transfer.close} />
+      <DataExportDialog
+        open={dialog?.kind === 'data'}
+        format={dialog?.kind === 'data' ? dialog.format : 'session'}
+        ids={dialog?.kind === 'data' ? dialog.ids : undefined}
+        label={dialog?.kind === 'data' ? dialog.label : undefined}
+        fileName={dialog?.kind === 'data' ? dialog.fileName : undefined}
+        onClose={transfer.close}
+      />
       <ImportDialog open={dialog?.kind === 'import'} text={dialog?.kind === 'import' ? dialog.text : null} fileName={dialog?.kind === 'import' ? dialog.fileName : undefined} onClose={transfer.close} />
     </ErrorBoundary>
   );

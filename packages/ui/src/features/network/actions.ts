@@ -6,6 +6,7 @@ import { copyAs, type CopyFormat, type CopyNote } from './model/copyAs';
 import { safeFileStem } from './model/http';
 import { cachedDetail, loadDetail } from './detailCache';
 import { draftFromRequest, type DraftNote } from '../mocks/model/draft';
+import { transfer } from '../transfer/store';
 import './i18n';
 
 /** Actions on a captured request, shared by the table's context menu, the detail panel and the palette. */
@@ -125,12 +126,17 @@ export async function createMockFrom(e: NetworkEntry): Promise<void> {
   if (texts.length > 0) toast.warn(t('network.mockNotes.title'), { description: texts.join(' '), duration: 9000 });
 }
 
-export async function downloadHarFor(ids: string[], filename: string): Promise<void> {
-  try {
-    await api.downloadHar(ids, filename);
-  } catch (err) {
-    toast.error(t('network.toast.harFailed'), { description: errorText(err) });
-  }
+/**
+ * HAR of exactly these requests, through the export dialog (secrets masked unless the user turns it off there).
+ * `label` names them in the dialog ("GET /api/cart", "The 23 requests visible in the Network tab").
+ */
+export function exportHarFor(ids: string[], label: string, fileName: string): void {
+  transfer.openDataExport('har', { ids, label, fileName });
+}
+
+/** "GET /api/cart" — one request as the export dialog names it. */
+export function harLabel(e: NetworkEntry): string {
+  return `${e.method} ${e.url}`;
 }
 
 export function harFileName(e: NetworkEntry): string {

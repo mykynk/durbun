@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { ArrowLeftRight, BookOpen, Columns3, Copy, Drama, Eraser, FileDown, FilterX, Link2, Pause, PencilLine, Play, Radio, RotateCw, ScrollText, Share2, Workflow, X } from 'lucide-react';
+import { Archive, ArrowLeftRight, BookOpen, Columns3, Copy, Drama, Eraser, FileDown, FilterX, Link2, Pause, PencilLine, Play, Radio, RotateCw, ScrollText, Settings2, Share2, Workflow, X } from 'lucide-react';
 import type { NetworkEntry, UiCommand } from '@durbun/protocol';
 import {
   ALL_SCOPE,
   networkStore,
   onResync,
   onServerMessage,
+  scopeDisplayName,
   scopeNetworkCounts,
   sendCommand,
   setScope,
@@ -19,7 +20,9 @@ import {
 import {
   Button,
   EmptyState,
+  confirm,
   SplitPane,
+  formatClock,
   formatDuration,
   formatNumber,
   isMac,
@@ -57,7 +60,8 @@ import { DetailPanel } from './components/DetailPanel';
 import { ReplayDialog } from './components/ReplayDialog';
 import { CompareDialog } from './components/CompareDialog';
 import { ShareDialog } from './components/ShareDialog';
-import { copyEntryAs, copyUrl, createMockFrom, downloadHarFor, harFileName, replayRequest, showInLogs } from './actions';
+import { copyEntryAs, copyUrl, createMockFrom, exportHarFor, harFileName, harLabel, replayRequest, showInLogs } from './actions';
+import { harFileStamp } from '../transfer/dataExport';
 import { useBodySearch } from './useBodySearch';
 import { ExplainEmpty } from '../../sources';
 import './i18n';
@@ -192,6 +196,13 @@ export default function NetworkView() {
   );
   const newCount = follow ? 0 : Math.max(0, index.appended - followMark.current);
 
+  /* ── memory limit: said where the oldest requests are (top when oldest-first, bottom when newest-first) ── */
+  const [edges, setEdges] = useState({ top: true, bottom: true });
+  const onEdgesChange = useCallback((top: boolean, bottom: boolean) => setEdges((e) => (e.top === top && e.bottom === bottom ? e : { top, bottom })), []);
+  const oldestInView = followEdge === 'bottom' ? edges.top : followEdge === 'top' ? edges.bottom : true;
+  const memoryFull = networkStore.dropped > 0 || networkStore.size >= networkStore.maxEntries;
+  const oldestTs = memoryFull ? networkStore.get(networkStore.order[0] ?? '')?.startTs : undefined;
+
   /* ── selected entry ── */
   const storeSelected = selectedId ? networkStore.get(selectedId) : undefined;
   const lastSelected = useRef<NetworkEntry | null>(null);
@@ -265,7 +276,7 @@ export default function NetworkView() {
       { label: t('network.menu.createFlow'), icon: Workflow, disabled: e.method === '?', onSelect: () => ui.newFlowFromRequests([e.id]) },
       { type: 'separator' },
       { label: t('network.menu.showInLogs'), icon: ScrollText, onSelect: () => showInLogs(e) },
-      { label: t('network.menu.har'), icon: FileDown, onSelect: () => void downloadHarFor([e.id], harFileName(e)) },
+      { label: t('network.menu.har'), icon: FileDown, onSelect: () => exportHarFor([e.id], harLabel(e), harFileName(e)) },
       base
         ? { label: t('network.menu.compareWith', { name: `${base.method} ${base.path}` }), icon: ArrowLeftRight, onSelect: () => openCompare(base.id, e.id) }
         : { label: t('network.menu.compareEllipsis'), icon: ArrowLeftRight, hint: t('network.menu.compareHint'), onSelect: () => setCompareBase(e.id) },
@@ -279,8 +290,16 @@ export default function NetworkView() {
   });
 
   /* ── toolbar actions ── */
-  const clear = async () => {
+  /** Same pattern as the Logs tab: asks first (Shift / Mod+Shift+Backspace skips it); the server's delete cannot be undone. */
+  const clear = async (skipConfirm = false) => {
     const s = compiled.scope;
+    if (!skipConfirm) {
+      const count = scopeTotal;
+      const name = scopeDisplayName(s, useHub.getState());
+      const message = s.kind === 'all' ? t('network.clear.all', { count }) : s.kind === 'device' ? t('network.clear.device', { count, name }) : t('network.clear.app', { count, name });
+      const ok = await confirm({ title: t('network.clear.title'), message, confirmLabel: t('network.clear.confirm'), danger: true, icon: Eraser });
+      if (!ok) return;
+    }
     const cmds: UiCommand[] = [];
     if (s.kind === 'all') cmds.push({ name: 'clear', target: 'network' });
     else {
@@ -301,9 +320,7 @@ export default function NetworkView() {
 
   const exportHar = () => {
     if (rowIds.length === 0) return;
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    void downloadHarFor([...rowIds], `durbun-${stamp}.har`);
-    toast.info(t('network.toast.harStarted', { count: rowIds.length }));
+    exportHarFor([...rowIds], t('transfer.data.visible', { count: rowIds.length }), harFileStamp());
   };
 
   const hostItems = (): MenuItem[] => {
@@ -398,7 +415,7 @@ export default function NetworkView() {
   );
   useShortcut('Space', togglePause, { enabled: kbEnabled });
   useShortcut('G', jumpToNewest, { enabled: kbEnabled });
-  useShortcut('Mod+Backspace', () => void clear(), { enabled: kbEnabled, allowInInputs: false });
+  useShortcut(['Mod+Backspace', 'Mod+Shift+Backspace'], (e) => void clear(e.shiftKey), { enabled: kbEnabled, allowInInputs: false });
 
   /* ── cross-feature focus ── */
   const focus = useUi((s) => s.focus);
@@ -414,9 +431,20 @@ export default function NetworkView() {
     if (!compiled.network(e)) {
       toast.info(t('network.toast.outOfScope'), { action: { label: t('network.toast.showAll'), onClick: () => setScope(ALL_SCOPE) } });
     } else if (!predicate(e)) {
+      // The filters go so the request shows, and one click brings them back (nothing else changes).
+      const before = { query, filters: rawFilters };
       setQuery('');
       resetFilters();
-      toast.info(t('network.toast.filtersCleared'));
+      toast.info(t('network.toast.filtersCleared'), {
+        duration: 10_000,
+        action: {
+          label: t('network.toast.restoreFilters'),
+          onClick: () => {
+            setQuery(before.query);
+            setRawFilters(before.filters);
+          },
+        },
+      });
     }
     select(e.id, { reveal: true, center: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -539,7 +567,7 @@ export default function NetworkView() {
         onFollow={() => (follow && followEdge && !paused ? setFollow(false) : jumpToNewest())}
         paused={paused}
         onPause={togglePause}
-        onClear={() => void clear()}
+        onClear={(skip) => void clear(skip)}
         clearDisabled={scopeTotal === 0}
         onExportHar={exportHar}
         harDisabled={rowIds.length === 0}
@@ -554,6 +582,18 @@ export default function NetworkView() {
           <span>{waiting > 0 ? t('network.banner.pausedWaiting', { count: waiting }) : t('network.banner.paused')}</span>
           <Button size="sm" variant="ghost" icon={Play} onClick={togglePause}>
             {t('network.toolbar.resume')}
+          </Button>
+        </div>
+      ) : null}
+      {memoryFull && oldestInView && rowIds.length > 0 ? (
+        <div className="net-banner net-banner--dropped" role="note">
+          <Archive size={13} aria-hidden />
+          <span>
+            <strong>{networkStore.dropped > 0 ? t('network.dropped.title', { count: networkStore.dropped }) : t('network.dropped.titleFull')}</strong> {t('network.dropped.body', { limit: networkStore.maxEntries })}
+            {oldestTs !== undefined ? ` ${t('network.dropped.since', { time: formatClock(oldestTs, { ms: false }) })}` : ''}
+          </span>
+          <Button size="sm" variant="ghost" icon={Settings2} onClick={() => ui.openSettings('network')}>
+            {t('network.dropped.settings')}
           </Button>
         </div>
       ) : null}
@@ -600,6 +640,7 @@ export default function NetworkView() {
           lang={lang}
           active={active}
           empty={empty}
+          onEdgesChange={onEdgesChange}
           aria-label={t('network.table.label')}
         />
         {selected ? (

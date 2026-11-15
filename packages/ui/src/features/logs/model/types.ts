@@ -58,6 +58,8 @@ export interface StoreView {
   readonly entries: readonly LogEntry[];
   readonly generation: number;
   readonly lastId: number;
+  /** Bumped when an entry's level changed in place (network rows); filters re-run. */
+  readonly levelRevision?: number;
   lowerBound(id: number): number;
 }
 

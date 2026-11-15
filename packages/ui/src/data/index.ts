@@ -75,6 +75,7 @@ export {
   networkInScope,
   useCompiledScope,
   scopeLogCounts,
+  scopeLogTotal,
   scopeNetworkCounts,
   scopeTarget,
   scopeSignature,
@@ -112,3 +113,4 @@ export type {
   ExplainBuild,
   BuildBadge,
 } from './explain';
+export { scopeDisplayName } from './scopeName';

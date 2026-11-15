@@ -475,3 +475,25 @@
   font-size: var(--fs-xs);
   overflow-wrap: anywhere;
 }
+
+/* Session / HAR export: what goes in, masked or not. */
+.tx-data__counts {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+.tx-data__fixed {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.tx-data__maskhint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding-left: 24px;
+}
+.tx-data__maskhint > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--success);
+}

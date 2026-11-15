@@ -1,5 +1,7 @@
-import type { AppSession, DeviceInfo, NetworkDetail, NetworkEntry } from '@durbun/protocol';
+import type { AppSession, DeviceApp, DeviceInfo, NetworkDetail, NetworkEntry } from '@durbun/protocol';
 import { translate, type Lang } from '../../i18n';
+import { buildBadgeOf } from '../../data/explain';
+import { buildBadgeLabel } from '../../sources/text';
 import { safeFileStem } from './model/http';
 import type { ShareInput, ShareLabels } from './model/shareReport';
 import './i18n';
@@ -68,9 +70,26 @@ function platformName(d: DeviceInfo): string {
   }
 }
 
-/** "Shop 2.4.1 (com.example.shop)" */
-export function shareAppLabel(app: AppSession | undefined): string | undefined {
-  return app ? `${app.app.name}${app.app.version ? ` ${app.app.version}` : ''} (${app.app.id})` : undefined;
+/**
+ * "Shop 2.4.1 (812) · com.example.shop · TestFlight": name, version (build), bundle id and where the build came
+ * from, so "which build?" is answered in the report. The SDK session says what the app reports about itself; the
+ * device's report (`DeviceApp`) fills the gaps and is the only source for SDK-less builds (store, Firebase, an APK).
+ * `install`: the localized build / install source label (`buildBadgeLabel`), when known.
+ */
+export function shareAppLabel(app: AppSession | undefined, deviceApp?: DeviceApp, install?: string): string | undefined {
+  const id = app?.app.id ?? deviceApp?.id;
+  if (!id) return undefined;
+  const name = app?.app.name || deviceApp?.name || id;
+  const version = app?.app.version || deviceApp?.version;
+  const build = app?.app.build || deviceApp?.build;
+  const head = `${name}${version ? ` ${version}` : ''}${build && build !== version ? ` (${build})` : ''}`;
+  return [head, name !== id ? id : undefined, install].filter(Boolean).join(' · ');
+}
+
+/** "Play", "TestFlight / ad-hoc", "Firebase", "APK", "Debug"…: where the build came from, in the UI language. */
+export function shareInstallLabel(deviceApp: DeviceApp | undefined, session: AppSession | undefined, device: DeviceInfo | undefined): string | undefined {
+  const badge = buildBadgeOf({ deviceApp, sessions: session ? [session] : [], device });
+  return badge ? buildBadgeLabel(badge, deviceApp?.install.installer) : undefined;
 }
 
 /** "iPhone 16 Pro (iPhone17,1) · iOS 18.2": the name reads better than a model identifier. None for the desktop. */
@@ -84,7 +103,7 @@ export function shareDeviceLabel(device: DeviceInfo | undefined): string | undef
 export function shareInputFor(
   entry: NetworkEntry,
   detail: NetworkDetail | null | undefined,
-  context: { app?: AppSession; device?: DeviceInfo; rule?: string } = {},
+  context: { app?: AppSession; device?: DeviceInfo; rule?: string; deviceApp?: DeviceApp; install?: string } = {},
 ): ShareInput {
   const { app, device } = context;
   return {
@@ -98,7 +117,7 @@ export function shareInputFor(
     duration: entry.duration,
     source: entry.source,
     graphql: entry.graphql ? [entry.graphql.operationType ?? 'query', entry.graphql.operationName].filter(Boolean).join(' ') : undefined,
-    app: shareAppLabel(app),
+    app: shareAppLabel(app, context.deviceApp, context.install),
     device: entry.deviceId !== 'desktop' ? shareDeviceLabel(device) : undefined,
     mocked: entry.mocked,
     mockRule: context.rule ?? entry.mockRuleId,

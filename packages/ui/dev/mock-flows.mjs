@@ -163,6 +163,11 @@ function packageOf(req) {
   const contents = { flows: picked };
   if (kind === 'backup' || inc.environments) contents.environments = { ...environments, environments: environments.environments.map((e) => ({ ...e, vars: e.vars.map((v) => (v.secret ? { ...v, value: '' } : v)) })) };
   if ((kind === 'backup' || inc.uiPrefs) && uiPrefs) contents.uiPrefs = uiPrefs;
+  // As the server: `runs: true` packs every finished run, a list packs those ids only.
+  if (inc.runs) {
+    const done = runs.filter((r) => r.status !== 'running' && (inc.runs === true || (Array.isArray(inc.runs) && inc.runs.includes(r.id))));
+    if (done.length) contents.runs = done.map((run) => ({ run }));
+  }
   return {
     format: 'durbun-package',
     version: 1,

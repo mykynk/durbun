@@ -1,7 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { MockRule, NetworkEntry } from '@durbun/protocol';
-import { networkStore, useMocks } from '../../data';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { MockRule, NetworkEntry, UiCommand } from '@durbun/protocol';
+import { networkStore, ui, useMocks } from '../../data';
+import { __resetCommandsForTests, setCommandTransport } from '../../data/commands';
+import { ConfirmHost, toast } from '../../components';
+import { isMac } from '../../lib/platform';
 import NetworkView from './index';
 import MocksView from '../mocks/index';
 
@@ -96,5 +99,67 @@ describe('MocksView', () => {
     // openNew awaits the unsaved-changes guard, so the editor appears a tick later.
     fireEvent.click(await screen.findByRole('button', { name: /Create rule/ }));
     expect(await screen.findByText('A URL pattern is required')).toBeTruthy();
+  });
+});
+
+describe('NetworkView clear and cross-tab jumps', () => {
+  afterEach(() => {
+    __resetCommandsForTests();
+    vi.restoreAllMocks();
+  });
+
+  function setup() {
+    const sent: UiCommand[] = [];
+    setCommandTransport({ isOpen: () => true, send: (m) => (m.type === 'command' && sent.push(m.command), true) });
+    render(
+      <>
+        <NetworkView />
+        <ConfirmHost />
+      </>,
+    );
+    act(() => {
+      networkStore.upsert([entry('a'), entry('b', { status: 404 })]);
+      networkStore.flush();
+    });
+    return sent;
+  }
+
+  it('Clear asks first, like Logs, and says how many requests go', async () => {
+    const sent = setup();
+    fireEvent.click(screen.getByRole('button', { name: /Clear the requests in this scope/ }));
+    expect(await screen.findByText(/Requests of every device and app \(2 requests\) will be deleted\. This cannot be undone\./)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByText(/will be deleted/)).toBeNull());
+    expect(sent).toEqual([]);
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear the requests in this scope/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear' }));
+    await waitFor(() => expect(sent).toEqual([{ name: 'clear', target: 'network' }]));
+  });
+
+  it('Shift+click clears without asking; the keyboard shortcut asks too', async () => {
+    const sent = setup();
+    fireEvent.click(screen.getByRole('button', { name: /Clear the requests in this scope/ }), { shiftKey: true });
+    expect(screen.queryByText(/will be deleted/)).toBeNull();
+    await waitFor(() => expect(sent).toEqual([{ name: 'clear', target: 'network' }]));
+    sent.length = 0;
+    fireEvent.keyDown(window, { key: 'Backspace', code: 'Backspace', metaKey: isMac, ctrlKey: !isMac });
+    expect(await screen.findByText(/will be deleted/)).toBeTruthy();
+    expect(sent).toEqual([]);
+  });
+
+  it('a jump from another tab clears the filters hiding the request, and one click brings them back', async () => {
+    setup();
+    const input = screen.getByPlaceholderText(/Filter requests/) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'status:404' } });
+    fireEvent.click(screen.getByRole('button', { name: '5xx' }));
+    const info = vi.spyOn(toast, 'info');
+    act(() => ui.focusNetwork('a'));
+    expect(input.value).toBe('');
+    const opts = info.mock.calls.at(-1)![1] as { action: { label: string; onClick(): void } };
+    expect(opts.action.label).toBe('Back to my filters');
+    act(() => opts.action.onClick());
+    expect(input.value).toBe('status:404');
+    expect(screen.getByRole('button', { name: '5xx' }).getAttribute('aria-pressed')).toBe('true');
   });
 });

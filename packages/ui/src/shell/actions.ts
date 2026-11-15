@@ -1,11 +1,12 @@
-import { exportUrl, importSession, downloadHar } from '../data/api';
+import { importSession } from '../data/api';
 import { sendCommand } from '../data/commands';
 import { useHub } from '../data/stores/hub';
-import { getScope, setScope, type Scope } from '../data/stores/scope';
+import { getScope, setScope } from '../data/stores/scope';
 import { usePrefs, type ThemePref } from '../data/stores/prefs';
 import { ui, useUi } from '../data/stores/ui';
 import { sniffFormat, transfer, type DurbunFileKind } from '../features/transfer/store';
-import { downloadUrl, pickFiles } from '../lib/download';
+import { isMaskedSessionFile } from '../features/transfer/dataExport';
+import { pickFiles } from '../lib/download';
 import { t } from '../i18n/core';
 import { errorText } from '../i18n/codes';
 import { toast } from '../components/Toast';
@@ -16,30 +17,16 @@ export function errorMessage(err: unknown): string {
   return errorText(err);
 }
 
-export function scopeExportParams(scope: Scope): { deviceId?: string; appId?: string; bundleId?: string } {
-  if (scope.kind === 'device') return { deviceId: scope.deviceId };
-  if (scope.kind === 'app') {
-    const app = useHub.getState().apps[scope.appId];
-    return { deviceId: app?.deviceId, appId: scope.appId };
-  }
-  // An SDK-less app has no session id on the server: the device + bundle id name it ("Export “Kumbara”" holds
-  // Kumbara only, never the other apps' lines of that phone).
-  if (scope.kind === 'deviceApp') return { deviceId: scope.deviceId, bundleId: scope.bundleId };
-  return {};
+export { scopeExportParams } from '../features/transfer/dataExport';
+
+/** "Export session…": the dialog says what goes in (scope, counts) and masks secrets unless told otherwise. */
+export function exportSession(): void {
+  transfer.openDataExport('session');
 }
 
-export function exportSession(scope: Scope | 'all' = 'all'): void {
-  const params = scope === 'all' ? {} : scopeExportParams(scope);
-  downloadUrl(exportUrl(params));
-  toast.info(t('shell.io.exportStarted'));
-}
-
-export async function exportHar(): Promise<void> {
-  try {
-    await downloadHar();
-  } catch (err) {
-    toast.error(t('shell.io.harFailed'), { description: errorMessage(err) });
-  }
+/** "Export network traffic as HAR…": the same dialog; the current scope's requests by default. */
+export function exportHar(): void {
+  transfer.openDataExport('har');
 }
 
 const SESSION_EXT = /\.(json|durbun)$/i;
@@ -82,11 +69,14 @@ export async function importFile(file: File): Promise<void> {
   }
   const id = toast({ kind: 'info', title: t('shell.io.importing', { name: file.name }), duration: 0 });
   try {
+    const masked = await isMaskedSessionFile(file);
     const { deviceIds } = await importSession(file);
     toast.dismiss(id);
     const first = deviceIds[0];
     toast.success(t('code.import.done', { count: deviceIds.length }), {
-      description: file.name,
+      // A masked recording shows •••• where tokens were: said here so nobody hunts for a missing value.
+      description: masked ? `${file.name} · ${t('transfer.data.importedMasked')}` : file.name,
+      ...(masked ? { duration: 9000 } : {}),
       action: first ? { label: t('shell.io.show'), onClick: () => setScope({ kind: 'device', deviceId: first }) } : undefined,
     });
     if (first) setScope({ kind: 'device', deviceId: first });

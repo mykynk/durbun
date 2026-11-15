@@ -92,6 +92,7 @@ export class RowModel {
   private readonly twinRows = new Map<number, number>();
   private filter: RowFilter | null = null;
   private gen = -1;
+  private levelRev = 0;
   private lastId = 0;
   private pause: { cursor: number; count: number; gen: number } | null = null;
 
@@ -142,6 +143,17 @@ export class RowModel {
     if (!this.filter) return false;
     this.pause = null;
     let changed = false;
+    const levelRev = store.levelRevision ?? 0;
+    let keep: { build: number; appended: number } | null = null;
+    if (levelRev !== this.levelRev) {
+      this.levelRev = levelRev;
+      // A row's level changed (a request failed after its row arrived): the filters run again over the same
+      // entries. Not a new build: the view keeps its scroll position, selection and "N new" count.
+      if (this.gen !== -1 && this.gen === store.generation) {
+        keep = { build: this.build, appended: this.appended };
+        this.reset();
+      }
+    }
     if (store.generation !== this.gen) {
       if (this.gen !== -1) this.reset();
       this.gen = store.generation;
@@ -154,6 +166,11 @@ export class RowModel {
     for (let i = from; i < entries.length; i++) this.process(entries[i]!);
     if (from < entries.length) {
       this.lastId = entries[entries.length - 1]!.id;
+      changed = true;
+    }
+    if (keep) {
+      this.build = keep.build;
+      this.appended = keep.appended;
       changed = true;
     }
     if (changed) this.version++;

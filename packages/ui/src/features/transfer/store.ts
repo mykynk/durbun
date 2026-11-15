@@ -6,7 +6,11 @@ export type TransferDialog =
   | { kind: 'export'; mode: PackageKind; flows?: string[] }
   /** `text`: a package already read (a dropped file, a backup from the folder); null lets the user pick one. */
   | { kind: 'import'; text: string | null; fileName?: string }
+  /** Session recording / HAR export: what goes in, masked or not. `ids`: fixed requests (the Network tab's HAR). */
+  | { kind: 'data'; format: DataExportFormat; ids?: string[]; label?: string; fileName?: string }
   | null;
+
+export type DataExportFormat = 'session' | 'har';
 
 export const useTransfer = create<{ dialog: TransferDialog }>()(() => ({ dialog: null }));
 
@@ -16,6 +20,13 @@ export const transfer = {
   },
   openImport(text: string | null = null, fileName?: string): void {
     useTransfer.setState({ dialog: { kind: 'import', text, ...(fileName ? { fileName } : {}) } });
+  },
+  /**
+   * The export dialog for a session recording or a HAR (masked by default). Without `ids` the user picks the scope;
+   * with `ids` (visible rows, one request) the HAR holds exactly those, named by `label`.
+   */
+  openDataExport(format: DataExportFormat, fixed?: { ids: string[]; label: string; fileName?: string }): void {
+    useTransfer.setState({ dialog: { kind: 'data', format, ...(fixed ? { ids: fixed.ids, label: fixed.label, ...(fixed.fileName ? { fileName: fixed.fileName } : {}) } : {}) } });
   },
   close(): void {
     useTransfer.setState({ dialog: null });

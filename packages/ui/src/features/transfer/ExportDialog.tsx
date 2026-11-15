@@ -2,12 +2,13 @@ import './i18n';
 import { useEffect, useMemo, useState } from 'react';
 import { clsx } from 'clsx';
 import { Archive, Check, KeyRound, Share2 } from 'lucide-react';
-import type { PackageExportRequest, PackageKind } from '@durbun/protocol';
+import type { FlowRunHeader, PackageExportRequest, PackageKind } from '@durbun/protocol';
 import { Button, Callout, Checkbox, Dialog, Input, SegmentedControl, downloadBlob, toast } from '../../components';
 import { api, ui, useFlows, useMocks } from '../../data';
 import { errorText, useT } from '../../i18n';
 import { useEnvironments } from '../flows/model/envStore';
 import { uiPrefsSnapshot } from './prefsSync';
+import { flowCountOf, flowsWithCalls, runsOfFlows } from './runs';
 
 /** Same minimum the server asks for the stored backup passphrase. */
 export const MIN_PASSPHRASE = 8;
@@ -38,6 +39,8 @@ export function ExportDialog({ open, mode: initialMode, flows: initialFlows, onC
   const [pass, setPass] = useState('');
   const [pass2, setPass2] = useState('');
   const [busy, setBusy] = useState(false);
+  /** Finished runs on the server (null while loading, 'error' when the list could not be read). */
+  const [runHeaders, setRunHeaders] = useState<FlowRunHeader[] | null | 'error'>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -48,13 +51,26 @@ export function ExportDialog({ open, mode: initialMode, flows: initialFlows, onC
     setInc(initialFlows ? { ...SHARE_DEFAULTS, mocks: false } : SHARE_DEFAULTS);
     setPass('');
     setPass2('');
+    // A share carries only the runs of the flows that go in: the dialog needs their ids (the server keeps ≤ 200).
+    setRunHeaders(null);
+    const ac = new AbortController();
+    api.listFlowRuns({ limit: 500, signal: ac.signal }).then(
+      (r) => setRunHeaders(r.runs),
+      () => {
+        if (!ac.signal.aborted) setRunHeaders('error');
+      },
+    );
+    return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const sorted = useMemo(() => [...summaries].sort((a, b) => a.name.localeCompare(b.name)), [summaries]);
   const share = mode === 'share';
+  // Runs of the picked flows and of the sub-flows that travel with them: never another flow's runs.
+  const shareRuns = useMemo(() => (Array.isArray(runHeaders) ? runsOfFlows(runHeaders, flowsWithCalls(summaries, flows)) : []), [runHeaders, summaries, flows]);
+  const shareRunsOn = inc.runs && shareRuns.length > 0;
   const passProblem = !share && pass ? (pass.length < MIN_PASSPHRASE ? t('transfer.export.passphraseShort', { min: MIN_PASSPHRASE }) : pass !== pass2 ? t('transfer.export.passphraseMismatch') : null) : null;
-  const nothing = share && flows.size === 0 && !(inc.mocks && mockCount) && !(inc.environments && envCount !== 0) && !inc.settings && !inc.uiPrefs && !inc.runs;
+  const nothing = share && flows.size === 0 && !(inc.mocks && mockCount) && !(inc.environments && envCount !== 0) && !inc.settings && !inc.uiPrefs && !shareRunsOn;
 
   const request = (): PackageExportRequest => {
     const base = { name: name.trim() || undefined, note: note.trim() || undefined };
@@ -63,7 +79,15 @@ export function ExportDialog({ open, mode: initialMode, flows: initialFlows, onC
       return {
         ...base,
         kind: 'share',
-        include: { flows: all ? 'all' : [...flows], mocks: inc.mocks, environments: inc.environments && envCount !== 0, settings: inc.settings, uiPrefs: inc.uiPrefs, runs: inc.runs },
+        include: {
+          flows: all ? 'all' : [...flows],
+          mocks: inc.mocks,
+          environments: inc.environments && envCount !== 0,
+          settings: inc.settings,
+          uiPrefs: inc.uiPrefs,
+          // Run ids, never `true` (which means every flow's runs).
+          runs: shareRunsOn ? shareRuns.map((r) => r.id) : false,
+        },
         ...(inc.uiPrefs ? { uiPrefs: uiPrefsSnapshot() } : {}),
       };
     }
@@ -187,7 +211,24 @@ export function ExportDialog({ open, mode: initialMode, flows: initialFlows, onC
               />
               <ItemRow checked={inc.settings} onChange={(v) => set('settings', v)} label={t('transfer.export.settings')} hint={t('transfer.export.settingsHint')} />
               <ItemRow checked={inc.uiPrefs} onChange={(v) => set('uiPrefs', v)} label={t('transfer.export.uiPrefs')} hint={t('transfer.export.uiPrefsHint')} />
-              <ItemRow checked={inc.runs} onChange={(v) => set('runs', v)} label={t('transfer.export.runs')} hint={t('transfer.export.runsHint')} />
+              <ItemRow
+                checked={shareRunsOn}
+                disabled={shareRuns.length === 0}
+                onChange={(v) => set('runs', v)}
+                label={t('transfer.export.runs')}
+                meta={
+                  runHeaders === null
+                    ? t('transfer.export.runsLoading')
+                    : runHeaders === 'error'
+                      ? t('transfer.export.runsFailed')
+                      : flows.size === 0
+                        ? t('transfer.export.runsPickFlows')
+                        : shareRuns.length === 0
+                          ? t('transfer.export.runsNone')
+                          : `${t('transfer.export.runsCount', { count: shareRuns.length })} · ${t('transfer.export.runsFlows', { count: flowCountOf(shareRuns) })}`
+                }
+                hint={t('transfer.export.runsShareHint')}
+              />
             </>
           ) : (
             <>

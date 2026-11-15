@@ -126,6 +126,8 @@ useStoreVersion(store, opts?)                 // generic
 | `version` | frame-coalesced change counter |
 | `generation` | bumped on reset / arbitrary removal (`cleared`) — drop index-based caches when it changes |
 | `headDropped` | entries trimmed from the head since the last reset (absolute index = `headDropped + i`) |
+| `dropped` | entries the memory limit deleted since the last reset (head trims minus crash records moved to `kept`). Logs and Network show it at the oldest edge ("the oldest N lines were dropped") |
+| `levelRevision` / `setNetworkLevel(netId, level)` | a network log row takes its request's outcome level when the outcome arrives (`networkLogLevel` from `@durbun/protocol`, applied in `data/dispatch.ts` after `networkStore.upsert`; the hub does the same for its copy). The entry object is replaced and counts follow; `RowModel` re-runs its filters on a `levelRevision` change without a new `build` (scroll and selection stay) |
 | `lastId`, `size` | newest id, `entries.length` |
 | `totalReceived` / `liveReceived` | accepted since page load (with / without history) |
 | `counts`, `countsByDevice`, `countsByApp` | incremental `{ total, warn, error (error+fatal), crash (crash/anr/flutter-error) }` |
@@ -156,7 +158,7 @@ const rows = useMemo(() => {
 **`networkStore`** (`NetworkStore`): `byId: Map<string, NetworkEntry>` (latest state; updates replace the
 object), `order: string[]` (first seen), `list()` (cached array in order), `get(id)`, `size`,
 `counts`/`countsByDevice`/`countsByApp` (`{ total, pending, failed, clientError, serverError, mocked }`),
-`generation`, `isNetworkError(e)`. Log rows with `kind: 'network'` carry `netId` — render them from
+`generation`, `dropped` (requests the memory limit deleted since the last reset), `isNetworkError(e)`. Log rows with `kind: 'network'` carry `netId` — render them from
 `networkStore.get(netId)` so status/duration update live.
 
 **`metricsStore`** (`MetricsStore`): `series: Map<key, MetricSeries>` where
@@ -182,10 +184,10 @@ Counters & rates (throttled hooks): `useScopedLogCounts(throttleMs = 250)`,
 | `useScope()` / `setScope(scope, hint?)` / `getScope()` | current scope (see 4.4); persisted; validated after every resync |
 | `useMocks(s => s.rules)` / `saveMocks(rules): Promise<MockRule[]>` | mock rules; `saveMocks` = `mocks.set` (optimistic, reverts on error) |
 | `useFlows(s => s.summaries \| s.runs)` | flow list (WS `flows`) and live runs by id (WS `flowRun` deltas merged by step id, `applyFlowRunDelta`); `rememberFlowRun(run)` stores a REST copy unless a newer live copy exists; `latestRunOf(runs, flowId)` |
-| `useTransfer` / `transfer` (`features/transfer/store.ts`) | package dialogs: `transfer.openExport('share' \| 'backup', flowIds?)`, `transfer.openImport(text?, fileName?)`, `transfer.close()` |
+| `useTransfer` / `transfer` (`features/transfer/store.ts`) | package dialogs: `transfer.openExport('share' \| 'backup', flowIds?)`, `transfer.openImport(text?, fileName?)`, `transfer.close()`; session / HAR export dialog: `transfer.openDataExport('session' \| 'har', { ids?, label?, fileName? }?)` (scope + counts, "mask secret values" on by default; `ids` fixes the requests, e.g. the Network tab's visible rows). Never start an export download without it |
 | `useServerSettings(s => s.settings)` / `updateServerSettings(patch)` | `ServerSettings`; update = `settings.update` (optimistic) |
 | `usePrefs` | UI prefs, persisted to localStorage (`durbun.prefs.v1`) |
-| `useUi` / `ui` | active tab + global screens: `ui.setTab(id)`, `ui.openPalette()`, `ui.openSettings(section?)`, `ui.openDoctor()`, `ui.openSdkGuide(tab?)`, `ui.openShortcuts()`; cross-feature navigation: `ui.focusLog(logId)`, `ui.focusNetwork(netId)`, `ui.focusMock(ruleId)`, `ui.newMockFromDraft(draft)`, `ui.newFlowFromRequests(ids)`, `ui.importFlows(text)` set `useUi(s => s.focus)` (`UiFocus` with a `seq`) and switch tabs — the target view handles it in an effect keyed on `focus?.seq`, then calls `ui.consumeFocus(seq)` |
+| `useUi` / `ui` | active tab + global screens: `ui.setTab(id)`, `ui.openPalette()`, `ui.openSettings(section?)`, `ui.openDoctor()`, `ui.openSdkGuide(tab?)`, `ui.openShortcuts()`; cross-feature navigation: `ui.focusLog(logId)`, `ui.focusNetwork(netId)`, `ui.focusMock(ruleId)`, `ui.newMockFromDraft(draft)`, `ui.newFlowFromRequests(ids)`, `ui.importFlows(text)` set `useUi(s => s.focus)` (`UiFocus` with a `seq`) and switch tabs — the target view handles it in an effect keyed on `focus?.seq`, then calls `ui.consumeFocus(seq)`. A jump must never overwrite the user's filters or prefs: Logs suspends only the filters that hide the line ("Show in context" also those hiding its neighbours) behind a "Back to my filters" bar (`features/logs/model/reveal.ts`); Network clears them with a 10 s "Back to my filters" toast action |
 
 `UiPrefs` fields: `theme ('system'|'dark'|'light')`, `language ('tr'|'en')`, `logFontSize (11–16)`,
 `density ('compact'|'comfortable')`, `timeFormat ('absolute'|'relative'|'delta')`, `wrapLines`,
@@ -212,6 +214,8 @@ compiled.logs(entry); compiled.network(entry); compiled.metrics(series);
 compiled.key; compiled.deviceId; compiled.bundleId; compiled.appIds; compiled.app; compiled.deviceApp
 compileScope(scope, { apps, deviceApps?, processes? }) / entryInScope(entry, scope) / networkInScope(entry, scope)
 scopeLogCounts(compiled, logStore) / scopeNetworkCounts(compiled, networkStore)
+scopeLogTotal(compiled, logStore)        // every line the scope shows (an app scope's device lines too): exports, clear
+scopeDisplayName(scope, hub)             // "All devices" / device name / "App · Device"
 scopeSignature(scope, hub) / scopeAppRef(scope, hub) / scopeDeviceId(scope, hub) / scopeTarget(scope, hub) → { device, app, deviceApp, bundleId }
 ```
 Use `compiled.key` as the memo key for scans (it changes when the app's sessions, pids or process names change).
@@ -281,9 +285,9 @@ with `tCode(code, data, fallback)`. Default timeouts: 15 s; `device.action` 30 s
 | `api.getNetworkDetail(id, signal?)` | `GET /api/network/:id` → `NetworkDetail` (bodies) |
 | `api.bodyUrl(id, 'request'|'response', { download? })` | raw body URL (for `<img src>`, download links) |
 | `api.searchNetwork(text, { ids?, caseSensitive?, signal? })` | `POST /api/network/search` → `string[]` |
-| `api.exportUrl({ deviceId?, appId? })` | `GET /api/export` URL |
+| `api.exportUrl({ deviceId?, appId?, bundleId?, mask? })` | `GET /api/export` URL. Masked unless `mask: false` (adds `mask=0`); a masked file ends with `"masked": true`. An app scope exports by `deviceId` + `bundleId` (every session plus its device lines), an exact one by `appId` (`scopeExportParams` in `features/transfer/dataExport.ts`) |
 | `api.importSession(input, signal | { name?, signal? })` | `POST /api/import?name=<file name>` → `{ deviceIds }` (a `File` sends its own name; the server labels the imported devices with it) |
-| `api.harExport(ids?)` / `api.downloadHar(ids?, filename?)` | `POST /api/har` |
+| `api.harExport(ids?, { mask?, signal? })` / `api.downloadHar(ids?, filename?, { mask? })` | `POST /api/har` `{ ids?, mask? }`: no `ids` = every request; masked unless `mask: false` (`log._durbun.masked`) |
 | `api.doctor()` | `GET /api/doctor` → `ToolCheck[]` |
 | `api.upload(file, { name?, onProgress?, signal? })` | `POST /api/upload` → `{ file }` (pass to `app-install`); errors keep the server `code` (`upload.tooLarge`…) |
 | `api.fileUrl(name)`, `api.health()` | `/api/files/:name`, `/api/health` |
@@ -399,7 +403,8 @@ Helpers: `formatBytes`, `formatDuration`, `formatTime(ts, { format, base, prev }
 `{ lang }`); `jsonPath`, `tryParseJson`, `prettyJson`, `looksLikeJson`, `previewValue`, `valueToText`,
 `detectCodeLanguage(contentType?, text?)`; `fuzzyMatch`, `fuzzyFilter`, `fold`; `hashHue`, `fnv1a`;
 `notifyDesktop(title, { body, tag, onClick })` (respects `notifyOnCrash` + permission; only when the window is
-not focused); `isMac`.
+not focused); `isMac`. Crash notifications are the shell's (`shell/crashNotify.ts`, mounted in `App`): every
+connected device, any tab; features do not notify for crashes themselves.
 
 ### Hooks
 

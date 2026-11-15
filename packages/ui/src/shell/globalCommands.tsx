@@ -154,8 +154,8 @@ export function useGlobalCommands(): void {
     ...(tab === 'logs'
       ? []
       : [{ id: 'marker', title: t('shell.marker.add'), group: data, icon: Bookmark, shortcut: 'M', keywords: both('shell.marker.add'), run: () => void addMarker() } satisfies PaletteCommand]),
-    { id: 'export.all', title: t('shell.io.exportAll'), group: data, icon: FileDown, keywords: ['save', ...both('shell.io.exportAll')], run: () => exportSession('all') },
-    { id: 'export.har', title: t('shell.io.exportHar'), group: data, icon: FileDown, keywords: ['har', ...both('shell.io.exportHar')], run: () => void exportHar() },
+    { id: 'export.all', title: t('shell.io.exportAll'), group: data, icon: FileDown, keywords: ['save', ...both('shell.io.exportAll')], run: exportSession },
+    { id: 'export.har', title: t('shell.io.exportHar'), group: data, icon: FileDown, keywords: ['har', ...both('shell.io.exportHar')], run: exportHar },
     { id: 'import', title: t('shell.io.import'), group: data, icon: FileUp, keywords: ['open', ...both('shell.io.import')], run: () => void pickAndImport() },
     { id: 'package.share', title: t('transfer.menu.share'), group: data, icon: Share2, keywords: ['package', 'paket', 'export', 'team', 'takım', ...both('transfer.menu.share')], run: () => transfer.openExport('share') },
     { id: 'package.backup', title: t('transfer.menu.backup'), group: data, icon: Archive, keywords: ['package', 'paket', 'backup', 'yedek', 'mac', ...both('transfer.menu.backup')], run: () => transfer.openExport('backup') },

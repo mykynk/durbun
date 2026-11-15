@@ -39,7 +39,7 @@ import { queryParams, reasonPhrase, requestCookies, responseCookies, type SetCoo
 import { COPY_FORMATS, type CopyFormat } from '../model/copyAs';
 import { shortErrorKey, splitError } from '../model/errors';
 import { timingBreakdown, type Phase } from '../model/waterfall';
-import { FORMAT_LABEL, copyEntryAs, copyUrl, createMockFrom, downloadBody, downloadHarFor, harFileName, showInLogs } from '../actions';
+import { FORMAT_LABEL, copyEntryAs, copyUrl, createMockFrom, downloadBody, exportHarFor, harFileName, harLabel, showInLogs } from '../actions';
 import { useNetworkDetail } from '../detailCache';
 import { BodyViewer } from './BodyViewer';
 import { ruleLabel } from '../../mocks/model/rules';
@@ -74,7 +74,7 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
     { label: t('network.menu.compare'), icon: ArrowLeftRight, onSelect: onCompare },
     { label: t('network.menu.createFlow'), icon: Workflow, disabled: gone || entry.method === '?', onSelect: () => ui.newFlowFromRequests([entry.id]) },
     { type: 'separator' },
-    { label: t('network.menu.har'), icon: FileDown, disabled: gone, onSelect: () => void downloadHarFor([entry.id], harFileName(entry)) },
+    { label: t('network.menu.har'), icon: FileDown, disabled: gone, onSelect: () => exportHarFor([entry.id], harLabel(entry), harFileName(entry)) },
     { label: t('network.menu.downloadResponse'), icon: FileDown, disabled: gone || !entry.hasResponseBody, onSelect: () => downloadBody(entry, 'response') },
     { label: t('network.menu.downloadRequest'), icon: FileDown, disabled: gone || !entry.hasRequestBody, onSelect: () => downloadBody(entry, 'request') },
   ];

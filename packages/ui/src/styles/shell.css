@@ -298,6 +298,10 @@
   font-size: var(--fs-xs);
   line-height: 1.4;
 }
+.sb-hint--info {
+  background: var(--info-soft);
+  color: var(--info);
+}
 .sb-hint svg {
   flex-shrink: 0;
   margin-top: 1px;

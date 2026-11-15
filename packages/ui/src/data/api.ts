@@ -111,13 +111,15 @@ export async function searchNetwork(
 /**
  * Session export download URL (`durbun-<date>.durbun.json`), optionally limited to a device, an app session
  * (`appId`) or one app the device reports (`deviceId` + `bundleId`: that app's lines, sessions, requests and
- * DeviceApp only — an SDK-less app has no session id).
+ * DeviceApp only — an SDK-less app has no session id). Secret values are masked (`masked: true` in the file)
+ * unless `mask: false` asks for the raw file (`mask=0`).
  */
-export function exportUrl(scope: { deviceId?: string; appId?: string; bundleId?: string } = {}): string {
+export function exportUrl(scope: { deviceId?: string; appId?: string; bundleId?: string; mask?: boolean } = {}): string {
   const q = new URLSearchParams();
   if (scope.deviceId) q.set('deviceId', scope.deviceId);
   if (scope.appId) q.set('appId', scope.appId);
   if (scope.bundleId && scope.deviceId) q.set('bundleId', scope.bundleId);
+  if (scope.mask === false) q.set('mask', '0');
   const qs = q.toString();
   return `/api/export${qs ? `?${qs}` : ''}`;
 }
@@ -158,15 +160,19 @@ function isAbortSignal(v: unknown): v is AbortSignal {
   return typeof AbortSignal !== 'undefined' && v instanceof AbortSignal;
 }
 
-/** HAR 1.2 for the given network ids (all when omitted). */
-export async function harExport(ids?: string[], signal?: AbortSignal): Promise<Blob> {
-  const res = await fetchOk('/api/har', postJson({ ids }, signal));
+/**
+ * HAR 1.2 for the given network ids (all when omitted). Secret values are masked (`log._durbun.masked`) unless
+ * `mask: false` asks for the raw requests.
+ */
+export async function harExport(ids?: string[], opts: { mask?: boolean; signal?: AbortSignal } | AbortSignal = {}): Promise<Blob> {
+  const o = isAbortSignal(opts) ? { signal: opts } : opts;
+  const res = await fetchOk('/api/har', postJson({ ids, ...(o.mask === false ? { mask: false } : {}) }, o.signal));
   return res.blob();
 }
 
-/** Fetch a HAR and save it as a file. */
-export async function downloadHar(ids?: string[], filename?: string): Promise<void> {
-  const blob = await harExport(ids);
+/** Fetch a HAR and save it as a file (masked unless `mask: false`). */
+export async function downloadHar(ids?: string[], filename?: string, opts: { mask?: boolean } = {}): Promise<void> {
+  const blob = await harExport(ids, opts);
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   downloadBlob(blob, filename ?? `durbun-${stamp}.har`);
 }

@@ -3,11 +3,12 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { DEFAULT_SETTINGS, type AppSession, type DeviceApp, type DeviceInfo, type LogEntry, type UiCommand } from '@durbun/protocol';
 import '../../i18n';
 import { setLanguage } from '../../i18n/core';
-import { hubActions, logStore, setScope, usePrefs, useServerSettings } from '../../data';
+import { getScope, hubActions, logStore, setScope, ui, usePrefs, useServerSettings } from '../../data';
 import { __resetCommandsForTests, setCommandTransport } from '../../data/commands';
-import { toast } from '../../components';
+import { ConfirmHost, ContextMenuHost, toast } from '../../components';
 import { getAllCommands } from '../../lib/commands';
 import LogsView from './index';
+import { DroppedNote } from './components/Banners';
 
 const PIXEL = 'android:R5CT20XK9QM';
 /** The server sent the setting itself (an older server streams every iPhone line). */
@@ -261,5 +262,132 @@ describe('clear', () => {
     act(() => hubActions.replaceAll({ devices: [device(PIXEL)], apps: [session('app:1'), session('app:2')], drivers: [], processes: [], deviceApps: [] }));
     act(() => setScope({ kind: 'app', appId: 'app:1', exact: true }));
     expect(clearWithShift()).toEqual([{ name: 'clear', target: 'logs', deviceId: PIXEL, appId: 'app:1' }]);
+  });
+});
+
+describe('show in context keeps the user’s filters', () => {
+  /** In the list (the detail panel keeps showing the selected line). */
+  const visible = (text: string) => (document.querySelector('.lg-scroll')?.textContent ?? '').includes(text);
+
+  it('suspends only what hides the line, writes nothing, and “Back to my filters” brings them back', () => {
+    setLanguage('en');
+    localStorage.setItem('durbun.state.logs.query', JSON.stringify('payment'));
+    localStorage.setItem('durbun.state.logs.minLevel', JSON.stringify('error'));
+    act(() => usePrefs.setState({ hideNoise: true }));
+    load([device(PIXEL)]);
+    const target = entry({ source: 'app', message: 'cart loaded' });
+    feed([entry({ source: 'app', level: 'error', message: 'payment failed' }), target]);
+    render(<LogsView />);
+    expect(visible('cart loaded')).toBe(false);
+
+    act(() => ui.focusLog(target.id));
+    expect(visible('cart loaded')).toBe(true);
+    expect(screen.getByText(/these are off for now: your query, the level filter\. Your saved filters did not change/)).toBeTruthy();
+    // Nothing persisted changed: the query, the level and the noise pref are the user's.
+    expect(localStorage.getItem('durbun.state.logs.query')).toBe(JSON.stringify('payment'));
+    expect(localStorage.getItem('durbun.state.logs.minLevel')).toBe(JSON.stringify('error'));
+    expect(usePrefs.getState().hideNoise).toBe(true);
+    // The box shows what applies now (the suspended query is not); "Back" puts it back.
+    const box = () => screen.getAllByRole('combobox').find((el) => el.classList.contains('lq__input')) as HTMLInputElement;
+    expect(box().value).toBe('');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to my filters' }));
+    expect(screen.queryByRole('button', { name: 'Back to my filters' })).toBeNull();
+    expect(visible('cart loaded')).toBe(false);
+    expect(visible('payment failed')).toBe(true);
+    expect(box().value).toBe('payment');
+  });
+
+  it('“Show in context” on a visible line shows its neighbours the filters hide, still without writing anything', () => {
+    setLanguage('en');
+    localStorage.setItem('durbun.state.logs.minLevel', JSON.stringify('error'));
+    load([device(PIXEL)]);
+    feed([entry({ source: 'app', message: 'before the failure' }), entry({ source: 'app', level: 'error', message: 'payment failed' })]);
+    render(
+      <>
+        <LogsView />
+        <ContextMenuHost />
+      </>,
+    );
+    expect(visible('before the failure')).toBe(false);
+    const row = Array.from(document.querySelectorAll('.lg-scroll [role="option"]')).find((el) => el.textContent?.includes('payment failed'))!;
+    Element.prototype.scrollIntoView ??= () => {};
+    fireEvent.contextMenu(row.querySelector('[data-row]')!);
+    fireEvent.click(screen.getByRole('menuitem', { name: /Show in context/ }));
+    expect(visible('before the failure')).toBe(true);
+    expect(screen.getByText(/these are off for now: the level filter/)).toBeTruthy();
+    expect(localStorage.getItem('durbun.state.logs.minLevel')).toBe(JSON.stringify('error'));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to my filters' }));
+    expect(visible('before the failure')).toBe(false);
+  });
+
+  it('a line outside the scope switches to all devices for now; going back restores the scope', () => {
+    setLanguage('en');
+    load([device(PIXEL), device(IPHONE)]);
+    const target = entry({ deviceId: IPHONE, source: 'app', message: 'on the iPhone' });
+    feed([entry({ source: 'app', message: 'on the Pixel' }), target]);
+    act(() => setScope({ kind: 'device', deviceId: PIXEL }));
+    render(<LogsView />);
+    act(() => ui.focusLog(target.id));
+    expect(getScope()).toEqual({ kind: 'all' });
+    expect(screen.getByText(/the scope went from “Pixel 8” to “All devices”/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to my filters' }));
+    expect(getScope()).toEqual({ kind: 'device', deviceId: PIXEL });
+  });
+});
+
+describe('memory limit note', () => {
+  // Where it shows (the oldest edge of the list) needs real layout; the text and the way to the setting are here.
+  it('says how many of the oldest lines went, since when, and where the limit is set', () => {
+    setLanguage('en');
+    const open = vi.fn();
+    render(<DroppedNote dropped={5} limit={10_000} since={T0} onOpenSettings={open} />);
+    expect(screen.getByText('The oldest 5 lines were dropped.')).toBeTruthy();
+    expect(screen.getByText(/keeps at most 10,000 log lines in memory/)).toBeTruthy();
+    expect(screen.getByText(/22:20:02/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button'));
+    expect(open).toHaveBeenCalled();
+    cleanup();
+    setLanguage('tr');
+    render(<DroppedNote dropped={0} limit={10_000} onOpenSettings={open} />);
+    expect(screen.getByRole('note').textContent).toMatch(/bellekte en fazla 10\.000 log satırı/);
+  });
+});
+
+describe('clear asks first and says how much goes', () => {
+  it('names the number of lines', async () => {
+    setLanguage('en');
+    load([device(PIXEL)]);
+    feed([entry({ message: 'a' }), entry({ message: 'b' })]);
+    render(
+      <>
+        <LogsView />
+        <ConfirmHost />
+      </>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Clear the logs in this scope/ }));
+    expect(await screen.findByText(/Logs of every device and app \(2 lines\) will be deleted/)).toBeTruthy();
+  });
+});
+
+describe('network rows follow the request’s outcome (UXL-02)', () => {
+  it('`level:error` shows a request that failed after its row arrived, live', () => {
+    setLanguage('en');
+    localStorage.setItem('durbun.state.logs.query', JSON.stringify('level:error'));
+    load([device(PIXEL)]);
+    feed([entry({ source: 'app', kind: 'network', netId: 'n1', level: 'info', message: 'GET https://api.pati.app/v1/pets' })]);
+    render(<LogsView />);
+    const inList = () => (document.querySelector('.lg-scroll')?.textContent ?? '').includes('/v1/pets');
+    expect(inList()).toBe(false);
+    act(() => {
+      logStore.setNetworkLevel('n1', 'error');
+      logStore.flush();
+    });
+    expect(inList()).toBe(true);
+    act(() => {
+      logStore.setNetworkLevel('n1', 'info');
+      logStore.flush();
+    });
+    expect(inList()).toBe(false);
   });
 });

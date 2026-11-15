@@ -23,6 +23,7 @@ import { DataSourcesDialog } from './sources';
 import { DropImport } from './shell/DropImport';
 import { TransferHost } from './features/transfer/TransferHost';
 import { useGlobalCommands } from './shell/globalCommands';
+import { useCrashNotifications } from './shell/crashNotify';
 
 const NOTICE_KIND: Record<'info' | 'success' | 'warn' | 'error', ToastKind> = { info: 'info', success: 'success', warn: 'warn', error: 'error' };
 
@@ -41,6 +42,7 @@ export function App() {
   useLanguage(); // re-render everything when the language changes
   useNoticeToasts();
   useGlobalCommands();
+  useCrashNotifications();
   useEffect(() => initHashSync(), []);
   const collapsed = usePrefs((s) => s.sidebarCollapsed);
   const { narrow, overlay } = useUi(useShallow((s) => ({ narrow: s.narrow, overlay: s.sidebarOverlay })));

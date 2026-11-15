@@ -362,17 +362,6 @@ function ScopeBreadcrumb() {
   );
 }
 
-/** Display name of the scope (export menu labels). */
-function useScopeName(): string | undefined {
-  const scope = useScope();
-  const { devices, apps, deviceApps } = useHub(useShallow((s) => ({ devices: s.devices, apps: s.apps, deviceApps: s.deviceApps })));
-  const target = scopeTarget(scope, { devices, apps, deviceApps });
-  if (target.app) return appTitle(target.app);
-  // An SDK-less app: the export holds that app only, so the menu names the app.
-  if (scope.kind === 'deviceApp') return target.deviceApp?.name || target.bundleId;
-  return target.device ? deviceDisplayName(target.device) : undefined;
-}
-
 /** Packages: share a setup with the team, back everything up for a new Mac. */
 function packageItems(t: ReturnType<typeof useT>): MenuItem[] {
   return [
@@ -384,15 +373,12 @@ function packageItems(t: ReturnType<typeof useT>): MenuItem[] {
 
 function ImportExportMenu() {
   const t = useT();
-  const scope = useScope();
-  const scopeName = useScopeName();
   return (
     <DropdownMenu
       minWidth={280}
       items={() => [
-        { label: t('shell.io.exportAll'), icon: FileDown, onSelect: () => exportSession('all') },
-        ...(scope.kind !== 'all' && scopeName ? [{ label: t('shell.io.exportScope', { name: scopeName }), icon: FileDown, onSelect: () => exportSession(scope) }] : []),
-        { label: t('shell.io.exportHar'), icon: FileDown, onSelect: () => void exportHar() },
+        { label: t('shell.io.exportAll'), icon: FileDown, hint: t('shell.io.exportHint'), onSelect: exportSession },
+        { label: t('shell.io.exportHar'), icon: FileDown, onSelect: exportHar },
         { type: 'separator' },
         ...packageItems(t),
         { type: 'separator' },
@@ -408,15 +394,12 @@ function ImportExportMenu() {
 function MoreMenu() {
   const t = useT();
   const theme = usePrefs((s) => s.theme);
-  const scope = useScope();
-  const scopeName = useScopeName();
   return (
     <DropdownMenu
       minWidth={260}
       items={() => [
-        { label: t('shell.io.exportAll'), icon: FileDown, onSelect: () => exportSession('all') },
-        ...(scope.kind !== 'all' && scopeName ? [{ label: t('shell.io.exportScope', { name: scopeName }), icon: FileDown, onSelect: () => exportSession(scope) }] : []),
-        { label: t('shell.io.exportHar'), icon: FileDown, onSelect: () => void exportHar() },
+        { label: t('shell.io.exportAll'), icon: FileDown, hint: t('shell.io.exportHint'), onSelect: exportSession },
+        { label: t('shell.io.exportHar'), icon: FileDown, onSelect: exportHar },
         { label: t('shell.io.import'), icon: FileUp, onSelect: () => void pickAndImport() },
         { type: 'separator' },
         ...packageItems(t),

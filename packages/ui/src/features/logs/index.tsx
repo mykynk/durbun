@@ -22,10 +22,13 @@ import {
   ScrollText,
 } from 'lucide-react';
 import { LOG_LEVELS, type AppSession, type LogEntry, type LogLevel, type LogSource } from '@durbun/protocol';
+import type { Scope } from '../../data';
 import {
   ALL_SCOPE,
   DESKTOP_DEVICE_ID,
+  scopeDisplayName,
   compileNoiseRules,
+  getScope,
   isCrashEntry,
   logStore,
   networkStore,
@@ -38,6 +41,7 @@ import {
   useLogVersion,
   usePrefs,
   scopeLogCounts,
+  scopeLogTotal,
   useServerSettings,
   useUi,
 } from '../../data';
@@ -48,7 +52,6 @@ import {
   downloadText,
   formatCompact,
   notificationPermission,
-  notifyDesktop,
   openContextMenu,
   requestNotificationPermission,
   toast,
@@ -66,10 +69,11 @@ import { RowModel } from './model/rowModel';
 import { rankOf, type LogRow, type RowFilter, type SourceToggles } from './model/types';
 import { buildHighlighter } from './model/highlight';
 import { appIdentity, type AppIdentity } from './model/frames';
-import { analyzeEntry } from './model/analyze';
 import { exportCount, exportFileName, exportJson, exportTxt } from './model/export';
 import { makeTerm, pushHistory, sanitizeSavedFilters, toggleTerm, type QueryField, type SavedFilter } from './model/queryEdit';
 import { useLiveCrashes } from './live';
+import { deviceAppForEntry, sessionForEntry } from './model/appOf';
+import { contextPartKeys, mergeContext, revealNeeds, type RevealContext } from './model/reveal';
 import { LogList, type LogListHandle } from './components/LogList';
 import { EXPAND_JSON, EXPAND_LINES, EXPAND_STACK, type DeviceMark, type RowDisplay } from './components/LogRow';
 import { deviceMarks, keepCrashRelevant } from './model/devices';
@@ -77,7 +81,7 @@ import { FilterChips, LogsToolbar, SourceFilters } from './components/Toolbar';
 import { DetailPanel, displayText, rowAsLines } from './components/DetailPanel';
 import { ShareDialog } from './components/ShareDialog';
 import { Histogram } from './components/Histogram';
-import { CrashBanner, IosScopeNote, NewLinesPill, PausedBar, crashTitle } from './components/Banners';
+import { ContextBar, CrashBanner, DroppedNote, IosScopeNote, NewLinesPill, PausedBar } from './components/Banners';
 import { NoLogsState, NoMatchState, type ActiveFilter } from './components/EmptyStates';
 import { CrashRecordsNote, ExplainEmpty, NotRunningNote, crashReaderText, crashRecordsState, useIosSystemLinesHidden } from '../../sources';
 import { markApplying } from './hangGuard';
@@ -165,15 +169,15 @@ export default function LogsView() {
 
   /* ───── persisted view state ───── */
   const [queryRaw, setQueryState] = usePersistentState<string>('logs.query', '');
-  const query = typeof queryRaw === 'string' ? queryRaw : '';
-  const [appliedQuery, setAppliedQuery] = useState(() => {
-    if (query.trim()) markApplying('query');
-    return query;
+  const userQuery = typeof queryRaw === 'string' ? queryRaw : '';
+  const [userApplied, setAppliedQuery] = useState(() => {
+    if (userQuery.trim()) markApplying('query');
+    return userQuery;
   });
-  const [minLevelRaw, setMinLevel] = usePersistentState<LogLevel>('logs.minLevel', 'verbose');
-  const minLevel: LogLevel = LOG_LEVELS.includes(minLevelRaw) ? minLevelRaw : 'verbose';
-  const [sourcesRaw, setSources] = usePersistentState<SourceToggles>('logs.sources', ALL_SOURCES);
-  const sources = useMemo(() => sanitizeSources(sourcesRaw), [sourcesRaw]);
+  const [minLevelRaw, setMinLevelState] = usePersistentState<LogLevel>('logs.minLevel', 'verbose');
+  const userMinLevel: LogLevel = LOG_LEVELS.includes(minLevelRaw) ? minLevelRaw : 'verbose';
+  const [sourcesRaw, setSourcesState] = usePersistentState<SourceToggles>('logs.sources', ALL_SOURCES);
+  const userSources = useMemo(() => sanitizeSources(sourcesRaw), [sourcesRaw]);
   const [dedupe, setDedupe] = usePersistentState<boolean>('logs.dedupe', true);
   const [fold, setFold] = usePersistentState<boolean>('logs.fold', true);
   const [historyRaw, setHistory] = usePersistentState<string[]>('logs.queryHistory', []);
@@ -198,13 +202,13 @@ export default function LogsView() {
 
   // Debounce typing: parse on every keystroke (highlighting), filter 150 ms after the last one.
   useEffect(() => {
-    if (query === appliedQuery) return;
+    if (userQuery === userApplied) return;
     const id = setTimeout(() => {
-      if (query.trim()) markApplying('query');
-      setAppliedQuery(query);
+      if (userQuery.trim()) markApplying('query');
+      setAppliedQuery(userQuery);
     }, 150);
     return () => clearTimeout(id);
-  }, [query, appliedQuery]);
+  }, [userQuery, userApplied]);
   const setQueryNow = useCallback(
     (q: string) => {
       if (q.trim()) markApplying('query');
@@ -212,6 +216,59 @@ export default function LogsView() {
       setAppliedQuery(q);
     },
     [setQueryState],
+  );
+
+  const userAppliedRef = useRef(userApplied);
+  userAppliedRef.current = userApplied;
+
+  /* ───── reveal context: filters suspended to show one line (never saved) ───── */
+  const [ctx, setCtxState] = useState<RevealContext | null>(null);
+  const ctxRef = useRef(ctx);
+  const setCtx = useCallback((c: RevealContext | null) => {
+    ctxRef.current = c;
+    setCtxState(c);
+  }, []);
+  // What the view filters by: the user's own filters, minus the parts the context suspends.
+  const query = ctx?.query ? '' : userQuery;
+  const appliedQuery = ctx?.query ? '' : userApplied;
+  const minLevel: LogLevel = ctx?.level ? 'verbose' : userMinLevel;
+  const sources = ctx?.sources ? ALL_SOURCES : userSources;
+  /** Editing a filter while in context keeps what is on screen and builds on it: the suspended parts become the filter. */
+  const commitCtx = useCallback(() => {
+    const c = ctxRef.current;
+    if (!c) return;
+    setCtx(null);
+    if (c.query) setQueryNow('');
+    if (c.level) setMinLevelState('verbose');
+    if (c.sources) setSourcesState(ALL_SOURCES);
+  }, [setCtx, setQueryNow, setMinLevelState, setSourcesState]);
+  const setMinLevel = useCallback(
+    (l: LogLevel) => {
+      commitCtx();
+      setMinLevelState(l);
+    },
+    [commitCtx, setMinLevelState],
+  );
+  const setSources = useCallback(
+    (next: SourceToggles | ((cur: SourceToggles) => SourceToggles)) => {
+      commitCtx();
+      setSourcesState(next);
+    },
+    [commitCtx, setSourcesState],
+  );
+  const setQueryUser = useCallback(
+    (q: string) => {
+      commitCtx();
+      setQueryNow(q);
+    },
+    [commitCtx, setQueryNow],
+  );
+  const onQueryChange = useCallback(
+    (q: string) => {
+      commitCtx();
+      setQueryState(q);
+    },
+    [commitCtx, setQueryState],
   );
 
   /* ───── scope & apps (stats churn ignored via signatures) ───── */
@@ -247,6 +304,9 @@ export default function LogsView() {
   // (a server that does not report the setting streams everything).
   const iosAppsScope = useServerSettings((s) => !!s.reported?.has('iosDeviceLogScope') && (s.settings.iosDeviceLogScope ?? 'apps') === 'apps');
   const noiseFn = useMemo(() => cachedNoise(keepCrashRelevant(compileNoiseRules(noiseRules), iosAppsScope)), [noiseRules, iosAppsScope]);
+  // The prefs stay as the user set them; a reveal context only lifts them for this view.
+  const effHideNoise = hideNoise && !ctx?.noise;
+  const effShowNetwork = showNetwork || !!ctx?.network;
 
   const filter = useMemo<RowFilter>(
     () => ({
@@ -254,14 +314,14 @@ export default function LogsView() {
       minRank: rankOf(minLevel),
       queryMinRank: queryMin ? rankOf(queryMin) : 0,
       sources,
-      hideNoise,
+      hideNoise: effHideNoise,
       noise: noiseFn,
-      showNetwork,
+      showNetwork: effShowNetwork,
       query: compiledQuery,
       dedupe,
       fold,
     }),
-    [scopeFn, minLevel, queryMin, sources, hideNoise, noiseFn, showNetwork, compiledQuery, dedupe, fold],
+    [scopeFn, minLevel, queryMin, sources, effHideNoise, noiseFn, effShowNetwork, compiledQuery, dedupe, fold],
   );
 
   /* ───── rows (incremental; frozen while paused) ───── */
@@ -331,27 +391,8 @@ export default function LogsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeKey]);
 
-  const appForEntry = useCallback((e: LogEntry): AppSession | undefined => {
-    const all = appsRef.current;
-    if (e.appId && all[e.appId]) return all[e.appId];
-    // Device lines: the process is the app; ANRs / tombstones name the package in the message or data.
-    const data = e.data as { package?: unknown } | undefined;
-    const proc =
-      (e.kind === 'anr' ? /ANR in (\S+)/.exec(e.message)?.[1] : undefined) ??
-      (typeof data?.package === 'string' ? data.package : undefined) ??
-      e.process;
-    if (proc) {
-      let best: AppSession | undefined;
-      for (const a of Object.values(all)) {
-        if (a.deviceId !== e.deviceId) continue;
-        if (a.app.id === proc || a.app.processName === proc || proc.startsWith(`${a.app.id}:`)) {
-          if (!best || a.connectedAt > best.connectedAt) best = a;
-        }
-      }
-      if (best) return best;
-    }
-    return undefined;
-  }, []);
+  // Device lines: the process is the app; ANRs / tombstones name the package in the message or data.
+  const appForEntry = useCallback((e: LogEntry): AppSession | undefined => sessionForEntry(e, appsRef.current), []);
 
   const identity = useMemo(() => {
     const cache = new Map<string, AppIdentity>();
@@ -373,18 +414,8 @@ export default function LogsView() {
       const sdkName = appForEntry(e)?.app.name;
       if (sdkName) return sdkName;
       // SDK-less apps: the name the device reports (iOS display name, Android label when known).
-      const data = e.data as { package?: unknown; bundleId?: unknown; bundleID?: unknown } | undefined;
-      const named = [data?.package, data?.bundleId, data?.bundleID].find((v): v is string => typeof v === 'string' && v.length > 0);
-      const deviceApps = useHub.getState().deviceApps;
-      const pkg = named ?? e.process;
-      if (!pkg) return undefined;
-      const base = pkg.includes(':') ? pkg.slice(0, pkg.indexOf(':')) : pkg;
-      const direct = deviceApps[`${e.deviceId}|${base}`];
-      if (direct) return direct.name || direct.id;
-      // iOS lines name the executable ("Runner"): the app whose live pid it is.
-      if (e.pid !== undefined)
-        for (const d of Object.values(deviceApps)) if (d.deviceId === e.deviceId && d.processName === e.process && d.pids.includes(e.pid)) return d.name || d.id;
-      return undefined;
+      const da = deviceAppForEntry(e, useHub.getState().deviceApps);
+      return da ? da.name || da.id : undefined;
     },
     [appForEntry],
   );
@@ -481,21 +512,37 @@ export default function LogsView() {
   /* ───── filters ───── */
   const toggleSource = useCallback((s: LogSource) => setSources((cur) => ({ ...sanitizeSources(cur), [s]: !sanitizeSources(cur)[s] })), [setSources]);
   const clearFilters = useCallback(() => {
-    setQueryNow('');
+    setQueryUser('');
     setMinLevel('verbose');
     setSources(ALL_SOURCES);
-  }, [setQueryNow, setMinLevel, setSources]);
+  }, [setQueryUser, setMinLevel, setSources]);
+  // Explicit choices about noise / network lines (they write the prefs, as the toolbar and Settings do).
+  const setNoiseHidden = useCallback(
+    (hidden: boolean) => {
+      commitCtx();
+      usePrefs.getState().setPref('hideNoise', hidden);
+    },
+    [commitCtx],
+  );
+  const setNetworkShown = useCallback(
+    (shown: boolean) => {
+      commitCtx();
+      usePrefs.getState().setPref('showNetworkInLogs', shown);
+    },
+    [commitCtx],
+  );
 
-  const applyTerm = useCallback((term: string) => setQueryNow(toggleTerm(query, term)), [query, setQueryNow]);
+  const applyTerm = useCallback((term: string) => setQueryUser(toggleTerm(query, term)), [query, setQueryUser]);
   const filterBy = useCallback((field: QueryField, value: string | number, exclude: boolean) => applyTerm(makeTerm(field, value, { exclude })), [applyTerm]);
 
   const submitQuery = useCallback(
     (q: string) => {
+      commitCtx();
       if (q.trim()) markApplying('query');
       setAppliedQuery(q);
       if (q.trim()) setHistory((h) => pushHistory(Array.isArray(h) ? h : [], q));
     },
-    [setHistory],
+    [setHistory, commitCtx],
   );
 
   const getSuggestData = useCallback((): QuerySuggestData => {
@@ -522,19 +569,41 @@ export default function LogsView() {
   const pendingReveal = useRef<{ id: number; build: number; tries: number; open: boolean } | null>(null);
   const [revealTick, setRevealTick] = useState(0);
   const revealEntry = useCallback(
-    (entryId: number, opts: { open?: boolean; anyScope?: boolean } = {}) => {
+    (entryId: number, opts: { open?: boolean; anyScope?: boolean; context?: boolean } = {}) => {
       const e = logStore.getById(entryId) ?? (sel?.entry.id === entryId ? sel.entry : undefined);
       if (!e) {
         toast.info(t('logs.reveal.gone'));
         return;
       }
-      if (opts.anyScope && !scopeRef.current.logs(e)) setScope(ALL_SCOPE);
-      setQueryNow('');
-      setMinLevel('verbose');
-      setSources(ALL_SOURCES);
-      const prefs = usePrefs.getState();
-      if (prefs.hideNoise && noiseFn(e)) prefs.setPref('hideNoise', false);
-      if (e.kind === 'network' && !prefs.showNetworkInLogs) prefs.setPref('showNetworkInLogs', true);
+      // Outside the scope (a jump from another tab, a notification): all devices, and "Back" returns to the scope.
+      let leftScope: Scope | undefined;
+      if (opts.anyScope && !scopeRef.current.logs(e)) {
+        leftScope = getScope();
+        setScope(ALL_SCOPE);
+      }
+      // Only the filters that hide this line are suspended, for this view only: the saved query, level, sources
+      // and the noise / network prefs stay as the user set them (the context bar offers the way back). "Show in
+      // context" (`context`) also suspends the query, level and sources filters that hide the lines around it.
+      if (leftScope || opts.context || model.indexOfEntry(entryId) < 0) {
+        const own = parseLogQuery(userAppliedRef.current);
+        const ownMin = queryMinLevel(own);
+        const needs = revealNeeds(e, {
+          minRank: rankOf(userMinLevel),
+          queryMinRank: ownMin ? rankOf(ownMin) : 0,
+          sources: userSources,
+          hideNoise,
+          noise: noiseFn,
+          showNetwork,
+          query: compileLogQuery(own, { now: Date.now(), apps: appsRef.current }),
+        });
+        if (opts.context) {
+          needs.query ||= userAppliedRef.current.trim() !== '';
+          needs.level ||= userMinLevel !== 'verbose';
+          needs.sources ||= Object.values(userSources).some((on) => on === false);
+        }
+        const next = mergeContext(ctxRef.current, needs, leftScope);
+        if (next !== ctxRef.current) setCtx(next);
+      }
       setPaused(false);
       setFollowing(false);
       setSel({ id: entryId, entry: e });
@@ -542,8 +611,16 @@ export default function LogsView() {
       pendingReveal.current = { id: entryId, build: model.build, tries: 0, open: !!opts.open };
       setRevealTick((x) => x + 1);
     },
-    [model, sel, noiseFn, setQueryNow, setMinLevel, setSources, setFollowing],
+    [model, sel, noiseFn, userMinLevel, userSources, hideNoise, showNetwork, setCtx, setFollowing],
   );
+
+  /** "Back to my filters": the suspended filters apply again, and a scope the jump left comes back. */
+  const leaveContext = useCallback(() => {
+    const c = ctxRef.current;
+    if (!c) return;
+    setCtx(null);
+    if (c.scope && getScope().kind === 'all') setScope(c.scope);
+  }, [setCtx]);
 
   useEffect(() => {
     const p = pendingReveal.current;
@@ -671,15 +748,18 @@ export default function LogsView() {
       }
       items.push({ type: 'separator' });
       items.push({ label: t('logs.ctx.openDetail'), shortcut: 'Enter', onSelect: () => selectRow(row, true) });
-      items.push({ label: t('logs.ctx.showInContext'), icon: LocateFixed, onSelect: () => revealEntry(e.id, { open: true }) });
+      items.push({ label: t('logs.ctx.showInContext'), icon: LocateFixed, onSelect: () => revealEntry(e.id, { open: true, context: true }) });
       if (e.kind === 'network' && e.netId && networkStore.get(e.netId)) items.push({ label: t('logs.ctx.openNetwork'), icon: ExternalLink, onSelect: () => ui.focusNetwork(e.netId!) });
       openContextMenu(ev, items);
     },
     [copy, filterBy, revealEntry, selectRow],
   );
 
+  // The top of the list is on screen: where the user looks for older lines (the memory-limit note shows there).
+  const [atTop, setAtTop] = useState(true);
   const onRangeChange = useCallback(
     (first: number, last: number) => {
+      setAtTop(first === 0);
       const a = model.row(first);
       const b = model.row(Math.min(last, model.count - 1));
       if (!a || !b) {
@@ -715,12 +795,15 @@ export default function LogsView() {
       const cs = scopeRef.current;
       const scope = cs.scope;
       if (!skipConfirm) {
+        // Same wording as the Network tab's clear: what goes, how much, and that it cannot be undone.
+        // An app scope's clear removes its device lines too: count them as the list shows them.
+        const count = scopeLogTotal(cs, logStore);
         const message =
           scope.kind === 'all'
-            ? t('logs.clear.all')
+            ? t('logs.clear.all', { count })
             : scope.kind === 'device'
-              ? t('logs.clear.device', { name: deviceDisplayName(useHub.getState().devices[scope.deviceId], scope.deviceId) })
-              : t('logs.clear.app', { name: cs.app?.app.name || cs.deviceApp?.name || (scope.kind === 'app' ? scope.appId : scope.bundleId) });
+              ? t('logs.clear.device', { count, name: deviceDisplayName(useHub.getState().devices[scope.deviceId], scope.deviceId) })
+              : t('logs.clear.app', { count, name: cs.app?.app.name || cs.deviceApp?.name || (scope.kind === 'app' ? scope.appId : scope.bundleId) });
         const ok = await confirm({ title: t('logs.clear.title'), message, confirmLabel: t('logs.clear.confirm'), danger: true, icon: Trash2 });
         if (!ok) return;
       }
@@ -781,22 +864,9 @@ export default function LogsView() {
   );
 
   /* ───── crashes ───── */
-  const lastNotify = useRef(0);
-  const onLiveCrash = useCallback(
-    (e: LogEntry) => {
-      if (!usePrefs.getState().notifyOnCrash) return;
-      const now = Date.now();
-      if (now - lastNotify.current < 5000) return;
-      lastNotify.current = now;
-      notifyDesktop(crashTitle(e, appName(e)), {
-        body: analyzeEntry(e).crash?.title ?? e.message.slice(0, 200),
-        tag: 'durbun-crash',
-        onClick: () => ui.focusLog(e.id),
-      });
-    },
-    [appName],
-  );
-  const [crashState, dismissCrash] = useLiveCrashes(scopeFn, scopeKey, onLiveCrash);
+  // The banner shows the scope's live crashes; desktop notifications cover every device from the shell
+  // (shell/crashNotify.ts), whichever tab is open.
+  const [crashState, dismissCrash] = useLiveCrashes(scopeFn, scopeKey);
   const bannerCrashes = useMemo(() => crashState.list.filter((e) => e.id > crashState.dismissedId), [crashState]);
   const gotoCrash = useCallback(
     (e: LogEntry) => {
@@ -892,7 +962,7 @@ export default function LogsView() {
       ? { id: 'logs.follow', title: t('logs.cmd.unfollow'), group, icon: ArrowDownToLine, keywords: ['follow', 'takip', 'canlı', 'live'], run: () => setFollowing(false) }
       : { id: 'logs.follow', title: t('logs.cmd.follow'), group, icon: ArrowDownToLine, shortcut: 'G', keywords: ['follow', 'takip', 'canlı', 'live', 'bottom'], run: () => { ui.setTab('logs'); jumpToEnd(); } },
     { id: 'logs.pause', title: paused ? t('logs.cmd.resume') : t('logs.cmd.pause'), group, icon: Pause, shortcut: 'Space', keywords: ['pause', 'resume', 'duraklat', 'devam'], run: togglePause },
-    { id: 'logs.noise', title: hideNoise ? t('logs.cmd.showNoise') : t('logs.cmd.hideNoise'), group, icon: VolumeX, keywords: ['noise', 'gürültü', 'gurultu'], run: () => setPref('hideNoise', !hideNoise) },
+    { id: 'logs.noise', title: effHideNoise ? t('logs.cmd.showNoise') : t('logs.cmd.hideNoise'), group, icon: VolumeX, keywords: ['noise', 'gürültü', 'gurultu'], run: () => setNoiseHidden(!effHideNoise) },
     ...MENU_LEVELS.map((l) => ({
       id: `logs.level.${l}`,
       title: t('logs.level.set', { level: LEVEL_NAME[l] }),
@@ -915,9 +985,9 @@ export default function LogsView() {
   ]);
 
   /* ───── stable callbacks for the memoized toolbar / chips ───── */
-  const hideNoiseRef = useRef(hideNoise);
-  hideNoiseRef.current = hideNoise;
-  const onToggleNoise = useCallback(() => usePrefs.getState().setPref('hideNoise', !hideNoiseRef.current), []);
+  const hideNoiseRef = useRef(effHideNoise);
+  hideNoiseRef.current = effHideNoise;
+  const onToggleNoise = useCallback(() => setNoiseHidden(!hideNoiseRef.current), [setNoiseHidden]);
   const liveRef = useRef(false);
   liveRef.current = following && !paused;
   const onFollowButton = useCallback(() => {
@@ -930,10 +1000,10 @@ export default function LogsView() {
   queryRef.current = query;
   const onApplyChip = useCallback(
     (q: string) => {
-      setQueryNow(q);
+      setQueryUser(q);
       if (q) setHistory((h) => pushHistory(Array.isArray(h) ? h : [], q));
     },
-    [setQueryNow, setHistory],
+    [setQueryUser, setHistory],
   );
   const onSaveChip = useCallback(
     (name: string) => {
@@ -965,12 +1035,12 @@ export default function LogsView() {
   const noiseCountText = formatCompact(snap.counts.noise);
 
   const activeFilters: ActiveFilter[] = [];
-  if (appliedQuery.trim()) activeFilters.push({ id: 'q', label: t('logs.empty.filterQuery', { query: appliedQuery.trim() }), mono: true, clear: () => setQueryNow('') });
+  if (appliedQuery.trim()) activeFilters.push({ id: 'q', label: t('logs.empty.filterQuery', { query: appliedQuery.trim() }), mono: true, clear: () => setQueryUser('') });
   if (minLevel !== 'verbose') activeFilters.push({ id: 'lvl', label: t('logs.empty.filterLevel', { level: LEVEL_NAME[minLevel] }), clear: () => setMinLevel('verbose') });
   for (const s of SOURCES) if (!sources[s]) activeFilters.push({ id: `src-${s}`, label: t('logs.empty.filterSourceOff', { source: t(`logs.source.${s}`) }), clear: () => toggleSource(s) });
-  if (hideNoise && snap.counts.noise > 0) activeFilters.push({ id: 'noise', label: t('logs.empty.filterNoise'), clear: () => setPref('hideNoise', false) });
-  if (!showNetwork) activeFilters.push({ id: 'net', label: t('logs.empty.filterNetwork'), clear: () => setPref('showNetworkInLogs', true) });
-  const filtersActive = activeFilters.some((f) => f.id !== 'net' && f.id !== 'noise') || (hideNoise && snap.counts.noise > 0);
+  if (effHideNoise && snap.counts.noise > 0) activeFilters.push({ id: 'noise', label: t('logs.empty.filterNoise'), clear: () => setNoiseHidden(false) });
+  if (!effShowNetwork) activeFilters.push({ id: 'net', label: t('logs.empty.filterNetwork'), clear: () => setNetworkShown(true) });
+  const filtersActive = activeFilters.some((f) => f.id !== 'net' && f.id !== 'noise') || (effHideNoise && snap.counts.noise > 0);
 
   // Markers are global: a scope whose only rows are markers has no logs of its own yet.
   const empty = snap.count === 0 || (snap.count === snap.counts.markers && !filtersActive && scopedTotal === 0);
@@ -988,7 +1058,7 @@ export default function LogsView() {
         onPrev={() => move(-1)}
         onNext={() => move(1)}
         onFilter={filterBy}
-        onShowInContext={(id) => revealEntry(id, { open: true })}
+        onShowInContext={(id) => revealEntry(id, { open: true, context: true })}
         onOpenNetwork={(id) => ui.focusNetwork(id)}
         onShare={() => setShareEntry(sel.entry)}
       />
@@ -1001,7 +1071,7 @@ export default function LogsView() {
         inputRef={inputRef}
         query={query}
         parsed={parsed}
-        onQueryChange={setQueryState}
+        onQueryChange={onQueryChange}
         onQuerySubmit={submitQuery}
         getSuggestData={getSuggestData}
         minLevel={minLevel}
@@ -1024,7 +1094,7 @@ export default function LogsView() {
           sources={sources}
           onToggleSource={toggleSource}
           sourceCounts={sourceCounts}
-          hideNoise={hideNoise}
+          hideNoise={effHideNoise}
           noiseCount={snap.counts.noise}
           noiseCountText={noiseCountText}
           onToggleNoise={onToggleNoise}
@@ -1032,6 +1102,10 @@ export default function LogsView() {
       </div>
       {bannerCrashes.length ? <CrashBanner crashes={bannerCrashes} appName={appName} device={deviceMark} onGoto={gotoCrash} onDismiss={dismissCrash} /> : null}
       {paused ? <PausedBar pending={snap.pending} onResume={togglePause} /> : null}
+      {ctx ? <ContextBar parts={contextPartKeys(ctx)} scopeName={ctx.scope ? scopeDisplayName(ctx.scope, useHub.getState()) : undefined} onBack={leaveContext} /> : null}
+      {!empty && atTop && (logStore.dropped > 0 || logStore.size >= logStore.maxEntries) ? (
+        <DroppedNote dropped={logStore.dropped} limit={logStore.maxEntries} since={model.row(0)?.e.ts} onOpenSettings={() => ui.openSettings('logs')} />
+      ) : null}
       {iosPhones.length > 0 ? (
         <IosScopeNote device={iosPhones.length === 1 ? deviceDisplayName(iosPhones[0]) : undefined} onOpenSettings={() => ui.openSettings('logs')} onDismiss={() => setIosNoteSeen(true)} />
       ) : null}
@@ -1045,7 +1119,7 @@ export default function LogsView() {
             {empty ? (
               <div className="lg-empty">
                 {filtersActive ? (
-                  <NoMatchState inScope={inScope} filters={activeFilters} onClearAll={clearFilters} noiseHidden={hideNoise && snap.counts.noise > 0} onShowNoise={() => setPref('hideNoise', false)}>
+                  <NoMatchState inScope={inScope} filters={activeFilters} onClearAll={clearFilters} noiseHidden={effHideNoise && snap.counts.noise > 0} onShowNoise={() => setNoiseHidden(false)}>
                     {CRASH_QUERY.test(appliedQuery) ? <CrashRecordsNote className="lg-empty__crash" /> : null}
                   </NoMatchState>
                 ) : (
@@ -1077,7 +1151,7 @@ export default function LogsView() {
                 rowHeight={rowHeight}
                 measureKey={measureKey}
                 active={active}
-                showNetwork={showNetwork}
+                showNetwork={effShowNetwork}
                 onFollowChange={setFollowing}
                 onRowClick={onRowClick}
                 onRowAction={onRowAction}
@@ -1093,7 +1167,7 @@ export default function LogsView() {
       {shareEntry ? <ShareDialog entry={shareEntry} onClose={() => setShareEntry(null)} /> : null}
       <NoiseRulesDialog open={dialog === 'noise'} onClose={() => setDialog(null)} keepsCrashLines={iosAppsScope && hiddenIphones.length > 0} />
       <HighlightRulesDialog open={dialog === 'highlight'} onClose={() => setDialog(null)} />
-      <SavedFiltersDialog open={dialog === 'saved'} onClose={() => setDialog(null)} saved={saved} onChange={(next) => setSaved(next)} onApply={setQueryNow} />
+      <SavedFiltersDialog open={dialog === 'saved'} onClose={() => setDialog(null)} saved={saved} onChange={(next) => setSaved(next)} onApply={setQueryUser} />
     </div>
   );
 }

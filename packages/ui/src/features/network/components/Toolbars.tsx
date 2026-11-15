@@ -21,7 +21,8 @@ export interface MainToolbarProps {
   onFollow: () => void;
   paused: boolean;
   onPause: () => void;
-  onClear: () => void;
+  /** `skipConfirm`: Shift was held. */
+  onClear: (skipConfirm: boolean) => void;
   clearDisabled: boolean;
   onExportHar: () => void;
   harDisabled: boolean;
@@ -73,7 +74,7 @@ export function MainToolbar(p: MainToolbarProps) {
       <ToolbarSeparator />
       <IconButton icon={Radio} label={p.followSorted ? t('network.toolbar.followSorted') : t('network.toolbar.follow')} shortcut="G" active={p.follow} onClick={p.onFollow} />
       <IconButton icon={p.paused ? Play : Pause} label={p.paused ? t('network.toolbar.resume') : t('network.toolbar.pause')} shortcut="Space" active={p.paused} onClick={p.onPause} />
-      <IconButton icon={Eraser} label={t('network.toolbar.clear')} shortcut="Mod+Backspace" onClick={p.onClear} disabled={p.clearDisabled} />
+      <IconButton icon={Eraser} label={t('network.toolbar.clear')} shortcut="Mod+Backspace" onClick={(e) => p.onClear(e.shiftKey)} disabled={p.clearDisabled} />
       <IconButton icon={FileDown} label={t('network.toolbar.exportHar', { count: p.shown })} onClick={p.onExportHar} disabled={p.harDisabled} />
       <DropdownMenu items={p.columnItems} aria-label={t('network.toolbar.columns')}>
         {(tp) => <IconButton icon={Columns3} label={t('network.toolbar.columns')} {...tp} />}

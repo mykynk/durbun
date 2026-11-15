@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, type ServerSettings, type ServerToUi } from '@durbun/protocol';
+import { PROTOCOL_VERSION, networkLogLevel, type ServerSettings, type ServerToUi } from '@durbun/protocol';
 import { logStore } from './logStore';
 import { compileScope } from './scope';
 import { networkStore } from './networkStore';
@@ -160,7 +160,11 @@ export function handleServerMessage(msg: ServerToUi): void {
       // A removed device app stays in scope until the next resync (its rows are still on screen).
       if (msg.removedDeviceApps?.length) hubActions.removeDeviceApps(msg.removedDeviceApps);
       if (msg.logs?.length) logStore.append(msg.logs);
-      if (msg.network?.length) networkStore.upsert(msg.network);
+      if (msg.network?.length) {
+        networkStore.upsert(msg.network);
+        // The outcome arrived: the request's log row (sent while pending, as `info`) takes the hub's level.
+        for (const n of msg.network) if (n.state !== 'pending') logStore.setNetworkLevel(n.id, networkLogLevel(n));
+      }
       if (msg.metrics?.length) metricsStore.push(msg.metrics);
       if (msg.removedDevices?.length) removeDevices(msg.removedDevices);
       break;

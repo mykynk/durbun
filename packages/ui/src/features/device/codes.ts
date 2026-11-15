@@ -105,6 +105,8 @@ registerMessages('device', {
         driverStopped: 'Sürücü durdu. Sistem kontrolünden araçların durumuna bakın.',
         networkIdle: 'Uygulama yeniden bağlandığında bu cihaz tekrar canlanır.',
         imported: 'Bu bir kayıt; yalnızca bilgiler ve geçmiş veriler gösterilir.',
+        developerModeOff:
+          'iPhone’da Ayarlar → Gizlilik ve Güvenlik → Geliştirici Modu’nu açın ve telefonu yeniden başlatın. Seçenek görünmüyorsa iPhone’u bir kez Xcode’a bağlayın. Loglar bu arada okunmaya devam eder.',
       },
       demo: { stopped: 'Demo verisini kenar çubuğundan yeniden açabilirsiniz.' },
       logs: {
@@ -215,6 +217,8 @@ registerMessages('device', {
         driverStopped: 'The driver stopped. Check the tools in System check.',
         networkIdle: 'This device comes back to life when the app reconnects.',
         imported: 'This is a recording; only details and past data are shown.',
+        developerModeOff:
+          'On the iPhone, turn on Settings → Privacy & Security → Developer Mode and restart the phone. If the switch is not there, connect the iPhone to Xcode once. Logs keep coming in meanwhile.',
       },
       demo: { stopped: 'You can turn the demo data back on from the sidebar.' },
       logs: {

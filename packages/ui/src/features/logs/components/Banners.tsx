@@ -1,5 +1,5 @@
 import { memo, type CSSProperties } from 'react';
-import { ArrowDown, Hourglass, Info, OctagonX, Pause, Play, Settings2, TriangleAlert, X } from 'lucide-react';
+import { ArrowDown, Archive, Hourglass, Info, LocateFixed, OctagonX, Pause, Play, Settings2, TriangleAlert, Undo2, X } from 'lucide-react';
 import type { LogEntry } from '@durbun/protocol';
 import { Button, IconButton, formatClock } from '../../../components';
 import { t, useT } from '../../../i18n';
@@ -111,6 +111,53 @@ export const IosScopeNote = memo(function IosScopeNote({ device, onOpenSettings,
       </Button>
       <Button size="sm" variant="ghost" onClick={onDismiss}>
         {t('logs.iosScope.dismiss')}
+      </Button>
+    </div>
+  );
+});
+
+/**
+ * A line was shown that the user's filters hide ("Show in context", a jump from another tab, a notification): the
+ * filters that hid it are suspended for this view only. Says which, and offers the way back. Editing a filter
+ * keeps the view (the bar goes away).
+ */
+export const ContextBar = memo(function ContextBar({ parts, scopeName, onBack }: { parts: readonly string[]; scopeName?: string; onBack(): void }) {
+  useT(); // re-render on language change (memoized)
+  const names = parts.filter((p) => p !== 'scope').map((p) => t(`logs.context.part.${p}`));
+  const list = names.join(', ');
+  const text =
+    names.length && scopeName
+      ? t('logs.context.textScope', { parts: list, scope: scopeName })
+      : names.length
+        ? t('logs.context.text', { parts: list })
+        : t('logs.context.scopeOnly', { scope: scopeName ?? '' });
+  return (
+    <div className="lg-paused lg-context" role="status">
+      <LocateFixed size={13} aria-hidden />
+      <span className="lg-context__text">{text}</span>
+      <Button size="sm" variant="primary" icon={Undo2} onClick={onBack}>
+        {t('logs.context.back')}
+      </Button>
+    </div>
+  );
+});
+
+/**
+ * The oldest lines were dropped by the memory limit (or are about to be): said where the user looks for them, at
+ * the top of the list, with how many, since when the list starts, and the setting that moves the limit.
+ */
+export const DroppedNote = memo(function DroppedNote({ dropped, limit, since, onOpenSettings }: { dropped: number; limit: number; since?: number; onOpenSettings(): void }) {
+  useT(); // re-render on language change (memoized)
+  return (
+    <div className="lg-note lg-dropped" role="note">
+      <Archive size={13} aria-hidden />
+      <p className="lg-note__text">
+        <strong>{dropped > 0 ? t('logs.dropped.title', { count: dropped }) : t('logs.dropped.titleFull')}</strong>{' '}
+        {t('logs.dropped.body', { limit })}
+        {since !== undefined ? ` ${t('logs.dropped.since', { time: formatClock(since, { ms: false }) })}` : ''}
+      </p>
+      <Button size="sm" variant="ghost" icon={Settings2} onClick={onOpenSettings}>
+        {t('logs.dropped.settings')}
       </Button>
     </div>
   );

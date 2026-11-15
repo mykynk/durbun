@@ -2,7 +2,7 @@ import { useEffect, useReducer, useRef, useState, type KeyboardEvent, type React
 import { Package } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
-import { Activity, BookOpen, ChevronRight, CirclePause, CloudOff, FlaskConical, LayoutGrid, PanelLeftClose, PanelLeftOpen, Stethoscope, TriangleAlert } from 'lucide-react';
+import { Activity, BookOpen, ChevronRight, CirclePause, CloudOff, FlaskConical, Info, LayoutGrid, PanelLeftClose, PanelLeftOpen, Stethoscope, TriangleAlert } from 'lucide-react';
 import type { AppSession, DeviceApp, DeviceInfo } from '@durbun/protocol';
 import { useT } from '../i18n';
 import { deviceDisplayName, deviceStateText, logStatusText } from '../i18n/codes';
@@ -306,6 +306,8 @@ function DeviceNode({
   const requests = desktop ? (networkStore.countsByDevice.get(device.id)?.total ?? 0) : 0;
   const count = logStore.countsByDevice.get(device.id)?.total ?? 0;
   const attention = device.state === 'unauthorized' || device.state === 'offline';
+  // Connected and streaming, but device actions need Developer Mode (iOS 16+): a note, not a warning state.
+  const devModeOff = device.state === 'online' && device.stateCode === 'device.developerModeOff';
   // Imported sessions are recordings, not unplugged devices: keep them readable.
   const disconnected = device.state === 'disconnected' && !imported;
   const name = deviceDisplayName(device);
@@ -363,6 +365,12 @@ function DeviceNode({
         <div className="sb-hint" role="note">
           <TriangleAlert size={12} aria-hidden />
           <span>{deviceStateText(device)}</span>
+        </div>
+      ) : null}
+      {devModeOff && !compact ? (
+        <div className="sb-hint sb-hint--info" role="note">
+          <Info size={12} aria-hidden />
+          <span>{t('shell.device.developerModeOff')}</span>
         </div>
       ) : null}
       {expanded && groups.length > 0 && !compact ? <DeviceApps device={device} groups={groups} scope={scope} hold={hold} /> : null}

@@ -13,6 +13,8 @@ import * as S from './sdkSnippets';
 import { sdkHostLines } from './sdkHosts';
 import { noticeToastParts } from './notices';
 import { Sidebar } from './Sidebar';
+import { InfoCard } from '../features/device/InfoCard';
+import '../features/device/i18n';
 import { scopeExportParams } from './actions';
 import { exportUrl } from '../data/api';
 import { SettingsDialog } from './SettingsDialog';
@@ -362,6 +364,58 @@ describe('Sidebar', () => {
     expect(text).toContain('SDK data only');
     expect(text).toContain('Imported');
     expect(text).toContain('Unlock the device and tap Trust on “Trust This Computer?”');
+  });
+});
+
+describe('React Native over Wi-Fi note', () => {
+  it('points to the app’s own switch, not a CLI flag the Mac app user does not have', () => {
+    for (const lang of ['tr', 'en'] as const) {
+      const note = translate(lang, 'shell.settings.lanRnNote', { port: 9750 });
+      expect(note).not.toContain('--lan');
+      expect(note).toContain('9750');
+      expect(note).toContain(translate(lang, 'shell.settings.allowLan'));
+      expect(note).toContain(translate(lang, 'shell.settings.sections.connection'));
+    }
+  });
+});
+
+describe('iPhone with Developer Mode off (PLT-05)', () => {
+  const iphone = () =>
+    device('ios:00008130-0001A2B3C4D5E6F7', {
+      platform: 'ios',
+      name: 'Yusuf’un iPhone’u',
+      osVersion: '18.2',
+      state: 'online',
+      stateCode: 'device.developerModeOff',
+      stateDetail: 'Developer Mode is off on this iPhone, so apps cannot be started …',
+      logs: { status: 'streaming', via: 'idevicesyslog' },
+    });
+
+  beforeEach(() => hubActions.replaceAll({ devices: [iphone()], apps: [], drivers: [], processes: [] }));
+
+  it('the sidebar still shows it connected, with a Developer Mode note (TR + EN)', () => {
+    setLanguage('tr');
+    const { container } = render(<Sidebar />);
+    const node = container.querySelector('.sb-node')!;
+    expect(node.textContent).toContain('Geliştirici Modu kapalı: loglar geliyor');
+    expect(node.textContent).not.toContain('Bağlantı kesildi');
+    expect(node.querySelector('.sb-row.is-dim')).toBeNull();
+    expect(node.querySelector('.sb-hint--info')).toBeTruthy();
+    cleanup();
+    setLanguage('en');
+    expect(render(<Sidebar />).container.textContent).toContain('Developer Mode is off: logs come in');
+  });
+
+  it('the device card says how to turn it on, in the UI language (not the server’s English)', () => {
+    setLanguage('tr');
+    const { container } = render(<InfoCard device={iphone()} />);
+    const text = container.textContent ?? '';
+    expect(text).toContain('Geliştirici Modu kapalı');
+    expect(text).toContain('Ayarlar → Gizlilik ve Güvenlik → Geliştirici Modu’nu açın');
+    expect(text).not.toContain('Developer Mode is off on this iPhone');
+    cleanup();
+    setLanguage('en');
+    expect(render(<InfoCard device={iphone()} />).container.textContent).toContain('turn on Settings → Privacy & Security → Developer Mode');
   });
 });
 

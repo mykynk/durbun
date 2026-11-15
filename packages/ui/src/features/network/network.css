@@ -211,6 +211,22 @@
 .net-banner > span {
   flex: 1 1 auto;
 }
+/* The memory limit dropped the oldest requests (calm: a note, not a warning). */
+.net-banner--dropped {
+  background: color-mix(in srgb, var(--info-soft) 70%, transparent);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.net-banner--dropped > svg {
+  flex: 0 0 auto;
+  color: var(--info);
+}
+.net-banner--dropped strong {
+  color: var(--text);
+  font-weight: 600;
+}
 
 .net-split {
   flex: 1 1 auto;

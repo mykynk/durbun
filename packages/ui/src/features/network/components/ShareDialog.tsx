@@ -1,13 +1,13 @@
 import { useMemo } from 'react';
 import { Copy, FileDown, Share2 } from 'lucide-react';
 import type { NetworkEntry } from '@durbun/protocol';
-import { useApp, useDevice, useMocks } from '../../../data';
+import { useApp, useDevice, useDeviceApp, useMocks } from '../../../data';
 import { Button, Callout, CodeView, Dialog, SlackButton, Spinner, Toggle, copyText, downloadText, formatBytes, toast, usePersistentState, useShortcut } from '../../../components';
 import { useLanguage, useT } from '../../../i18n';
 import { ruleLabel } from '../../mocks/model/rules';
 import { useNetworkDetail } from '../detailCache';
 import { DEFAULT_SHARE_OPTIONS, buildShareReport, type ShareOptions } from '../model/shareReport';
-import { shareFileName, shareInputFor, shareLabels } from '../share';
+import { shareFileName, shareInputFor, shareInstallLabel, shareLabels } from '../share';
 
 /** "Share request": the share report (same text as the in-app Flutter panel) with its options, a preview, Copy and Send to Slack. */
 export function ShareDialog({ entry, gone, onClose }: { entry: NetworkEntry; gone?: boolean; onClose: () => void }) {
@@ -15,6 +15,9 @@ export function ShareDialog({ entry, gone, onClose }: { entry: NetworkEntry; gon
   const lang = useLanguage();
   const app = useApp(entry.appId);
   const device = useDevice(entry.deviceId);
+  // The device's report of the app adds the build number and where the build came from (Play, TestFlight…).
+  const deviceApp = useDeviceApp(app ? `${app.deviceId}|${app.app.id}` : undefined);
+  const install = shareInstallLabel(deviceApp, app, device);
   const rule = useMocks((s) => (entry.mockRuleId ? s.rules.find((r) => r.id === entry.mockRuleId) : undefined));
   const hasBodies = entry.hasRequestBody || entry.hasResponseBody;
   const { detail, loading, error } = useNetworkDetail(gone || !hasBodies ? null : entry);
@@ -24,8 +27,8 @@ export function ShareDialog({ entry, gone, onClose }: { entry: NetworkEntry; gon
 
   const ruleName = rule ? ruleLabel(rule) : undefined;
   const report = useMemo(
-    () => buildShareReport(shareInputFor(entry, detail, { app, device, rule: ruleName }), { mask: options.mask, bodies: options.bodies, curl: options.curl }, shareLabels(lang)),
-    [entry, detail, app, device, ruleName, options.mask, options.bodies, options.curl, lang],
+    () => buildShareReport(shareInputFor(entry, detail, { app, device, rule: ruleName, deviceApp, install }), { mask: options.mask, bodies: options.bodies, curl: options.curl }, shareLabels(lang)),
+    [entry, detail, app, device, deviceApp, install, ruleName, options.mask, options.bodies, options.curl, lang],
   );
   const size = useMemo(() => new TextEncoder().encode(report).length, [report]);
   // The bodies are on their way: copying now would say "not captured".

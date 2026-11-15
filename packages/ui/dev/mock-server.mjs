@@ -921,6 +921,48 @@ function doctorChecks() {
 }
 
 /* ───────────── HTTP ───────────── */
+/* ── export masking: same contract as the server (packages/protocol/src/secrets.ts, a shorter copy) ── */
+const MASK = '••••';
+const SECRET_HEADERS = new Set(['authorization', 'proxy-authorization', 'cookie', 'set-cookie', 'x-api-key', 'api-key', 'apikey', 'x-auth-token', 'x-access-token', 'x-session-token', 'x-csrf-token', 'x-xsrf-token']);
+const SECRET_WORDS = new Set(['password', 'passwd', 'pass', 'pwd', 'passcode', 'passphrase', 'secret', 'token', 'otp', 'pin', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'cookie', 'signature', 'sig', 'credential', 'credentials', 'jwt', 'apikey', 'appcheck']);
+const KEY_PREFIXES = new Set(['api', 'access', 'private', 'secret', 'subscription', 'client', 'app', 'master']);
+function isSecretName(name) {
+  if (SECRET_HEADERS.has(name.toLowerCase())) return true;
+  const words = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (words.length === 1 && words[0] === 'key') return true;
+  return words.some((w, i) => SECRET_WORDS.has(w) || (w === 'key' && i > 0 && KEY_PREFIXES.has(words[i - 1])));
+}
+function maskHeader([n, v]) {
+  const l = n.toLowerCase();
+  if (l.startsWith('access-control-') || !isSecretName(l)) return [n, v];
+  if (l === 'cookie') return [n, v.split(';').map((p) => p.trim()).filter(Boolean).map((p) => (p.indexOf('=') > 0 ? `${p.slice(0, p.indexOf('='))}=${MASK}` : MASK)).join('; ')];
+  if (l === 'authorization' || l === 'proxy-authorization') {
+    const m = /^(\S+)\s+\S/.exec(v);
+    return [n, m ? `${m[1]} ${MASK}` : MASK];
+  }
+  return [n, MASK];
+}
+const maskQuery = (qs) => qs.split('&').map((p) => { const eq = p.indexOf('='); return eq > 0 && eq < p.length - 1 && isSecretName(p.slice(0, eq)) ? `${p.slice(0, eq)}=${MASK}` : p; }).join('&');
+const maskUrl = (u) => { const q = u.indexOf('?'); return q < 0 ? u : u.slice(0, q + 1) + maskQuery(u.slice(q + 1)); };
+const maskText = (text) => text.replace(/"((?:[^"\\]|\\.)*)"(\s*:\s*)("(?:[^"\\]|\\.)*"|-?\d[\d.eE+-]*)/g, (m, k, sep) => (isSecretName(k) ? `"${k}"${sep}"${MASK}"` : m));
+const maskBody = (b) => (b && b.encoding === 'utf8' ? { ...b, data: maskText(b.data) } : b);
+function maskDetail(d) {
+  return { ...d, url: maskUrl(d.url), path: maskUrl(d.path ?? ''), requestHeaders: (d.requestHeaders ?? []).map(maskHeader), responseHeaders: d.responseHeaders?.map(maskHeader), requestBody: maskBody(d.requestBody), responseBody: maskBody(d.responseBody) };
+}
+/** `mask` of GET /api/export: only "0" / "false" / "no" / "off" export raw. */
+const maskParam = (v) => !['0', 'false', 'no', 'off'].includes(String(v ?? '').toLowerCase());
+function harOf(details) {
+  const pairs = (list) => (list ?? []).map(([name, value]) => ({ name, value }));
+  return details.map((d) => ({
+    startedDateTime: new Date(d.startTs).toISOString(),
+    time: d.duration ?? 0,
+    request: { method: d.method, url: d.url, httpVersion: 'HTTP/1.1', headers: pairs(d.requestHeaders), queryString: [], cookies: [], headersSize: -1, bodySize: -1, ...(d.requestBody?.encoding === 'utf8' ? { postData: { mimeType: d.requestContentType ?? '', text: d.requestBody.data } } : {}) },
+    response: { status: d.status ?? 0, statusText: d.statusText ?? '', httpVersion: 'HTTP/1.1', headers: pairs(d.responseHeaders), cookies: [], content: { size: -1, mimeType: d.responseContentType ?? '', ...(d.responseBody?.encoding === 'utf8' ? { text: d.responseBody.data } : {}) }, redirectURL: '', headersSize: -1, bodySize: -1 },
+    cache: {},
+    timings: { send: 0, wait: d.duration ?? 0, receive: 0 },
+  }));
+}
+
 function json(res, status, body, headers = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
   res.end(JSON.stringify(body));
@@ -985,6 +1027,12 @@ const httpServer = http.createServer(async (req, res) => {
         network: [...network.values()].filter((n) => (!deviceId || n.deviceId === deviceId) && (!appId && !bundleId ? true : appIds.has(n.appId))),
         deviceApps: deviceApps.filter((d) => (!deviceId || d.deviceId === deviceId) && (!bundleId || d.id === bundleId)),
       };
+      // Masked by default (the last member of the file says so); `mask=0` exports the raw values.
+      if (maskParam(url.searchParams.get('mask'))) {
+        exp.network = exp.network.map(maskDetail);
+        exp.logs = exp.logs.map((e) => (e.kind === 'network' ? { ...e, message: e.message.replace(/\S+:\/\/\S+/g, maskUrl) } : e));
+        exp.masked = true;
+      }
       const date = new Date().toISOString().slice(0, 10);
       return json(res, 200, exp, { 'Content-Disposition': `attachment; filename="durbun-${date}.durbun.json"` });
     }
@@ -1010,7 +1058,14 @@ const httpServer = http.createServer(async (req, res) => {
       return res.end(ipsFile());
     }
     if (p === '/api/har' && req.method === 'POST') {
-      return json(res, 200, { log: { version: '1.2', creator: { name: 'Dürbün', version: '0.2.0' }, entries: [] } }, { 'Content-Disposition': 'attachment; filename="durbun.har"' });
+      // { ids?, mask? }: masked unless mask is false; a masked HAR says so in log._durbun.masked.
+      const { ids, mask } = JSON.parse((await readBody(req)).toString() || '{}');
+      if (mask !== undefined && mask !== null && typeof mask !== 'boolean') return json(res, 400, { error: 'mask must be true or false', code: 'har.invalid' });
+      const masked = mask !== false;
+      const picked = [...network.values()].filter((d) => !Array.isArray(ids) || ids.includes(d.id));
+      const log = { version: '1.2', creator: { name: 'Dürbün', version: '0.2.0' }, entries: harOf(masked ? picked.map(maskDetail) : picked) };
+      if (masked) log._durbun = { masked: true };
+      return json(res, 200, { log }, { 'Content-Disposition': 'attachment; filename="durbun.har"' });
     }
     if (p === '/api/slack') {
       if (req.method === 'PUT') {
