@@ -60,6 +60,8 @@ All notable changes to Dürbün are listed here. The format follows
 - Logs and Network say when the memory limit has dropped the oldest lines or requests.
 - An iPhone with Developer Mode off says so, and actions that need it explain how to turn it on.
 - Importing a masked recording says that `••••` values are masks.
+- Guides in `docs/guides`: Dürbün for testers, troubleshooting by symptom, mock rules, versions and
+  upgrading, and Dürbün in test builds. The Android and iOS SDK guides gain a "Test builds" section.
 - React Native / JS SDK: when no connection is made within 10 seconds, one console note lists the addresses
   tried and the fix for the device, and a line confirms when it connects.
 

@@ -28,7 +28,7 @@ does in one readable, live window. *Dürbün* is Turkish for binoculars.
   [What gets captured](#what-gets-captured)). Copy as cURL, fetch, Dio, Swift or OkHttp, resend or edit and
   send, compare two requests, export HAR.
 - **Mocks.** Answer matching requests with a canned response, add latency or simulate a failure. The SDK
-  applies the rules inside the app, so no proxy or certificate is involved.
+  applies the rules inside the app, so no proxy or certificate is involved (see [Mock rules](docs/guides/mocks.md)).
 - **Performance.** CPU, memory, heap, FPS and jank, requests per second and logs per second.
 - **Flows.** Tests you draw as a graph: requests sent from the Mac, checks, waits on what the app does, mock
   scenarios and device actions, chained and calling each other as sub-flows (see [Flows](#flows)). Write them
@@ -76,7 +76,8 @@ newer release exists.
 | iOS simulators | Xcode (`xcrun simctl`) |
 | Physical iOS devices | Xcode and `idevicesyslog` (`brew install libimobiledevice`; the copy in Flutter's cache also works) |
 
-The **System check** screen in the app tells you what is missing and how to fix it.
+The **System check** screen in the app tells you what is missing and how to fix it. For everything else, see
+[Troubleshooting](docs/guides/troubleshooting.md).
 
 ### Try it without a device
 
@@ -99,9 +100,24 @@ The **SDK setup** screen in the app shows the same steps with copyable snippets.
 | Android (Kotlin, OkHttp) | [`io.github.mykynk:durbun`](https://central.sonatype.com/artifact/io.github.mykynk/durbun) on Maven Central, plus `durbun-noop` for release builds | [sdks/android](sdks/android/README.md) |
 | React Native / JavaScript | [`@durbun/react-native`](https://www.npmjs.com/package/@durbun/react-native) on npm | [sdks/js](sdks/js/README.md) |
 
-The SDKs are off in release builds unless you turn them on; each guide shows how. They connect on their
-own: `adb reverse` on Android, usbmux on iOS devices, `127.0.0.1:9751` on simulators. Wi-Fi works too when
-you allow LAN connections.
+The SDKs are off in release builds unless you turn them on; each guide shows how, and
+[Dürbün in test builds](docs/guides/qa-builds.md) covers Firebase App Distribution, TestFlight and ad hoc
+builds. They connect on their own: `adb reverse` on Android, `127.0.0.1:9751` on simulators, and usbmux on
+iPhones for the Flutter and iOS SDKs. A React Native app on an iPhone connects over Wi-Fi only: turn on
+**Settings → Connection → Allow local network (Wi-Fi) connections** and pass the Mac's IP address
+(`Durbun.start({ host: '192.168.1.20' })`). Wi-Fi works for every SDK once local network connections are
+allowed.
+
+## Guides
+
+| Guide | For |
+|---|---|
+| [Dürbün for testers](docs/guides/testers.md) | Testers: install, USB debugging on Android, "Trust This Computer" on iPhone, finding your app, reporting what you found |
+| [Troubleshooting](docs/guides/troubleshooting.md) | By symptom: the phone does not appear, no iPhone logs, requests missing, the app does not connect, ports |
+| [Mock rules](docs/guides/mocks.md) | Writing rules, matching and order, what happens inside the app, recipes, limits |
+| [Dürbün in test builds](docs/guides/qa-builds.md) | Turning the SDK on in staging, Firebase, TestFlight and ad hoc builds |
+| [Versions and upgrades](docs/guides/versions.md) | Which SDK works with which Mac app, and how to upgrade |
+| [Flow files](docs/flows/README.md) | The flow file format |
 
 ## What gets captured
 
@@ -323,6 +339,10 @@ report a vulnerability.
 Dürbün follows [Semantic Versioning](https://semver.org). The Mac app, the server and every SDK share one
 version and are released together from a `vX.Y.Z` tag on `main`; changes are listed in
 [CHANGELOG.md](CHANGELOG.md). While the version is `0.x`, minor releases may include breaking changes.
+
+The parts do not have to be upgraded together: from 0.1.0 on, the Mac app accepts apps built with any SDK
+version and the SDKs accept any Mac app, since both sides ignore what they do not know. A new feature works once both sides
+have it. See [Versions and upgrades](docs/guides/versions.md).
 
 ## License
 

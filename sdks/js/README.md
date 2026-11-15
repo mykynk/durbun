@@ -150,8 +150,14 @@ device logs without any SDK.
 When `__DEV__` is `false`, `Durbun.start()` installs no patches and opens no connection; every other call is a
 no-op. If you deliberately enable it in release builds (`enabled: true`), Android needs cleartext permission for
 `ws://` and iOS needs the ATS `NSAllowsLocalNetworking` exception (already enabled in the RN debug templates).
+[Dürbün in test builds](https://github.com/mykynk/durbun/blob/main/docs/guides/qa-builds.md) has the steps for
+builds you hand to testers.
 
 ## Troubleshooting
+
+More symptoms and fixes, for every platform:
+[Troubleshooting](https://github.com/mykynk/durbun/blob/main/docs/guides/troubleshooting.md). Writing mock
+rules: [Mock rules](https://github.com/mykynk/durbun/blob/main/docs/guides/mocks.md).
 
 - **No connection**: read the note the SDK prints 10 seconds after start. Is Dürbün running (`http://localhost:9750`)? On Android, does `adb reverse --list` show
   `tcp:9750`? If not, check that Dürbün lists the phone (System check shows a missing `adb`); Dürbün adds the

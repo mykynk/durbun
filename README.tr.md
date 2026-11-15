@@ -29,7 +29,7 @@ ve canlı bir pencerede gösterir.
   zamanlamalarıyla (bkz. [Ne yakalanır](#ne-yakalanır)). cURL, fetch, Dio, Swift veya OkHttp olarak kopyalama,
   yeniden ya da düzenleyip gönderme, iki isteği karşılaştırma, HAR olarak dışa aktarma.
 - **Mock'lar.** Eşleşen isteklere hazır yanıt verme, gecikme ekleme veya hata simüle etme. Kuralları SDK
-  uygulamanın içinde uygular; proxy ya da sertifika gerekmez.
+  uygulamanın içinde uygular; proxy ya da sertifika gerekmez (bkz. [Mock kuralları](docs/guides/mocks.md)).
 - **Performans.** CPU, bellek, heap, FPS ve takılmalar, saniyede istek ve saniyede log.
 - **Akışlar.** Graf olarak çizdiğiniz testler: Mac'ten gönderilen istekler, kontroller, uygulamanın
   yaptıklarını bekleme, mock senaryoları ve cihaz işlemleri; birbirine zincirlenir, birbirini alt akış olarak
@@ -77,7 +77,8 @@ sayfasını açar.
 | iOS simülatör | Xcode (`xcrun simctl`) |
 | iOS fiziksel cihaz | Xcode ve `idevicesyslog` (`brew install libimobiledevice`; Flutter önbelleğindeki kopya da olur) |
 
-Uygulamadaki **Sistem kontrolü** ekranı eksik olanı ve nasıl tamamlanacağını söyler.
+Uygulamadaki **Sistem kontrolü** ekranı eksik olanı ve nasıl tamamlanacağını söyler. Diğer sorunlar için
+[Sorun giderme](docs/guides/troubleshooting.md) kılavuzuna bakın.
 
 ### Cihazsız denemek
 
@@ -100,9 +101,26 @@ Uygulamadaki **SDK kurulumu** ekranı aynı adımları kopyalanabilir haliyle g�
 | Android (Kotlin, OkHttp) | Maven Central'da [`io.github.mykynk:durbun`](https://central.sonatype.com/artifact/io.github.mykynk/durbun); release derlemeleri için `durbun-noop` | [sdks/android](sdks/android/README.md) |
 | React Native / JavaScript | npm'de [`@durbun/react-native`](https://www.npmjs.com/package/@durbun/react-native) | [sdks/js](sdks/js/README.md) |
 
-SDK'lar release derlemelerinde siz açmadıkça kapalıdır; nasıl açılacağı her kılavuzda yazar. Bağlantıyı
-kendileri kurar: Android'de `adb reverse`, iOS cihazda usbmux, simülatörde `127.0.0.1:9751`. LAN
-bağlantılarına izin verirseniz Wi-Fi üzerinden de çalışır.
+SDK'lar release derlemelerinde siz açmadıkça kapalıdır; nasıl açılacağı her kılavuzda yazar.
+[Test derlemelerinde Dürbün](docs/guides/qa-builds.md) Firebase App Distribution, TestFlight ve ad hoc
+derlemeleri anlatır. Bağlantıyı kendileri kurar: Android'de `adb reverse`, simülatörde `127.0.0.1:9751`,
+iPhone'da Flutter ve iOS SDK'ları için usbmux. iPhone'daki bir React Native uygulaması yalnızca Wi-Fi
+üzerinden bağlanır: **Ayarlar → Bağlantı → Yerel ağ (Wi-Fi) bağlantılarına izin ver** seçeneğini açın ve
+Mac'in IP adresini verin (`Durbun.start({ host: '192.168.1.20' })`). Yerel ağ bağlantılarına izin
+verdiğinizde Wi-Fi her SDK ile çalışır.
+
+## Kılavuzlar
+
+Kılavuzlar şimdilik yalnızca İngilizce.
+
+| Kılavuz | Kimin için, ne anlatır |
+|---|---|
+| [Test uzmanları için Dürbün](docs/guides/testers.md) | Test uzmanları: kurulum, Android'de USB hata ayıklama, iPhone'da "Bu bilgisayara güvenilsin mi?", uygulamanızı bulma, bulduğunuzu paylaşma |
+| [Sorun giderme](docs/guides/troubleshooting.md) | Belirtiye göre: telefon görünmüyor, iPhone logu yok, istekler eksik, uygulama bağlanmıyor, portlar |
+| [Mock kuralları](docs/guides/mocks.md) | Kural yazma, eşleşme ve sıra, uygulamanın içinde ne olduğu, hazır tarifler, sınırlar |
+| [Test derlemelerinde Dürbün](docs/guides/qa-builds.md) | SDK'yı staging, Firebase, TestFlight ve ad hoc derlemelerde açma |
+| [Sürümler ve yükseltme](docs/guides/versions.md) | Hangi SDK hangi Mac uygulamasıyla çalışır, nasıl yükseltilir |
+| [Akış dosyaları](docs/flows/README.md) | Akış dosyası biçimi |
 
 ## Ne yakalanır
 
@@ -328,6 +346,10 @@ Pull request açmadan önce [CONTRIBUTING.md](CONTRIBUTING.md)'yi, güvenlik aç
 Dürbün [Semantic Versioning](https://semver.org) kullanır. Mac uygulaması, sunucu ve tüm SDK'lar aynı
 sürümü taşır ve `main` üzerindeki bir `vX.Y.Z` etiketinden birlikte yayımlanır; değişiklikler
 [CHANGELOG.md](CHANGELOG.md)'de. Sürüm `0.x` iken ara sürümler uyumsuz değişiklik içerebilir.
+
+Parçaları birlikte yükseltmeniz gerekmez: 0.1.0'dan bu yana Mac uygulaması her SDK sürümüyle derlenmiş
+uygulamaları kabul eder, SDK'lar da her Mac uygulamasını; iki taraf da bilmediğini yok sayar. Yeni bir özellik,
+iki tarafta da olduğunda çalışır. Bkz. [Sürümler ve yükseltme](docs/guides/versions.md).
 
 ## Lisans
 

@@ -111,6 +111,7 @@ basis).
 If the connection drops, the SDK retries forever with a 0.5 s to 3 s backoff. Meanwhile it keeps the last
 5,000 messages in memory and sends them in order once connected (a single warning line is added if some had to
 be dropped). Whichever path completes the `hello` → `welcome` handshake first is used; the others are closed.
+If the app does not show up, see [Troubleshooting](../../docs/guides/troubleshooting.md).
 
 ## Options (`DurbunOptions`)
 
@@ -132,7 +133,8 @@ be dropped). Whichever path completes the `hello` → `welcome` handshake first 
 
 ## Mocks
 
-Rules are defined on the desktop (the Mocks tab) and pushed to the SDK live. Matching is identical to
+Rules are defined on the desktop (the Mocks tab; see the [mock rules guide](../../docs/guides/mocks.md)) and
+pushed to the SDK live. Matching is identical to
 `mockRuleMatches` in the protocol package; the tests verify it with more than 2,700 cases generated from the
 TypeScript reference. Mocked requests are marked `mocked` on the desktop.
 
@@ -159,6 +161,45 @@ TypeScript reference. Mocked requests are marked `mocked` on the desktop.
 - All I/O runs on background queues with bounded buffers, and the SDK swallows its own errors and never
   crashes the app. Network requests are forwarded untouched (tee); timeouts and certificate validation
   (pinning) are still enforced by your own session.
+
+## Test builds (TestFlight, ad hoc, Firebase App Distribution)
+
+Builds for testers are usually archived with a Release-based configuration, where `DEBUG` is not set, so the
+SDK stays off. To run Dürbün in such builds only:
+
+1. In the project's **Info → Configurations**, duplicate Release as, for example, **Staging**.
+2. In the app target's Build Settings, add `DURBUN` to **Active Compilation Conditions**
+   (`SWIFT_ACTIVE_COMPILATION_CONDITIONS`) for Staging only.
+3. Start the SDK under that condition and allow it outside `DEBUG`:
+
+   ```swift
+   #if DEBUG || DURBUN
+   import Durbun
+   #endif
+
+   // at launch:
+   #if DEBUG || DURBUN
+   Durbun.start(options: DurbunOptions(allowInReleaseBuilds: true))
+   #endif
+   ```
+
+4. Archive with a scheme whose **Archive** action uses Staging (Edit Scheme → Archive → Build Configuration),
+   then distribute it through TestFlight, ad hoc or Firebase App Distribution as usual.
+
+- `allowInReleaseBuilds` is needed because the package checks `DEBUG` itself; the app target's own
+  compilation conditions do not reach the package.
+- With CocoaPods, link the pod only where it runs:
+  `pod 'Durbun', :configurations => ['Debug', 'Staging']` (with a version requirement as in
+  [Installation](#installation)). A custom configuration also needs a mapping at the top of the Podfile, for
+  example `project 'MyApp', 'Staging' => :release`.
+- Over USB nothing else is needed: the SDK listens on the device's loopback and the Mac connects through
+  usbmux, whatever the app was installed from. Wi-Fi needs `host` and `NSLocalNetworkUsageDescription`, as in
+  [Connecting](#connecting).
+- Without `allowInReleaseBuilds`, the SDK writes `Dürbün is disabled in non-DEBUG builds (set
+  allowInReleaseBuilds to force it).` to the unified log (subsystem `dev.durbun.sdk`, visible in Console.app
+  with Info messages shown).
+
+The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, Android and React Native as well.
 
 ## Known limitations
 

@@ -140,10 +140,10 @@ val client = OkHttpClient.Builder()
   them.
 - Mask secrets with `DurbunInterceptor(redactHeaders = setOf("Authorization", "Cookie"))`; values show as
   `••••`.
-- Desktop mock rules apply here. `respond` synthesizes the response without touching the network (the request
-  body is then written once, to a side buffer), `delay` waits and then performs the real call, and `fail`
-  throws the platform's real exception (`SocketTimeoutException`, `UnknownHostException`, `ConnectException`,
-  `SSLHandshakeException`).
+- Desktop mock rules apply here ([how to write them](../../docs/guides/mocks.md)). `respond` synthesizes the
+  response without touching the network (the request body is then written once, to a side buffer), `delay`
+  waits and then performs the real call, and `fail` throws the platform's real exception
+  (`SocketTimeoutException`, `UnknownHostException`, `ConnectException`, `SSLHandshakeException`).
 
 **Not captured:** only `OkHttpClient`s that have `DurbunInterceptor` are seen, and every client needs it.
 Add it to the clients that Retrofit, Coil, Glide's OkHttp integration (`okhttp3-integration`) and Ktor's
@@ -217,7 +217,8 @@ a log entry) and **Run garbage collection**.
 - If the connection drops, the SDK reconnects indefinitely with a 0.5 s → 3 s backoff. Meanwhile the last 5 000
   messages are kept in memory and sent on reconnect (a warning line reports how many were dropped, if any).
 - Troubleshooting: filter logcat by the `Durbun` tag
-  (`Waiting for the Dürbün desktop on 127.0.0.1:9751 …`, `Connected to the Dürbün desktop via …`).
+  (`Waiting for the Dürbün desktop on 127.0.0.1:9751 …`, `Connected to the Dürbün desktop via …`). More
+  symptoms and fixes: [Troubleshooting](../../docs/guides/troubleshooting.md).
 
 ## Permissions, cleartext and release safety
 
@@ -236,6 +237,54 @@ a log entry) and **Run garbage collection**.
 - No R8/ProGuard rules are needed. For apps without OkHttp, the modules ship `-dontwarn` lines for exactly the
   OkHttp and Okio classes the SDK references (missing OkHttp classes that your own code needs are still
   reported by R8).
+
+## Test builds (staging, QA, Firebase App Distribution)
+
+Testers often install a non-debuggable build, for example a `staging` build type shared through Firebase App
+Distribution. To run Dürbün in such a build, give it the real SDK and turn `forceInRelease` on for it:
+
+`app/build.gradle.kts`:
+
+```kotlin
+android {
+    buildFeatures { buildConfig = true }
+    defaultConfig { buildConfigField("boolean", "DURBUN", "false") }
+    buildTypes {
+        getByName("debug") { buildConfigField("boolean", "DURBUN", "true") }
+        create("staging") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            buildConfigField("boolean", "DURBUN", "true")
+        }
+    }
+}
+
+dependencies {
+    // debugImplementation and releaseImplementation as in "1. Add the dependency", plus the real SDK for
+    // staging, with the same version:
+    "stagingImplementation"("io.github.mykynk:durbun:<version>")
+}
+```
+
+`Application.onCreate`:
+
+```kotlin
+Durbun.start(this, DurbunOptions(forceInRelease = BuildConfig.DURBUN))
+```
+
+- `durbun-noop` has the same API, so this line compiles in every build type; in `release` it does nothing.
+- With product flavors instead of a build type, use variant configurations so that each variant gets exactly
+  one of the two artifacts, for example `"qaReleaseImplementation"` for `durbun` and
+  `"prodReleaseImplementation"` for `durbun-noop`, and set `DURBUN` per flavor.
+- The `durbun` module adds the `INTERNET` permission to the builds it is part of. No R8 rules and no cleartext
+  settings are needed.
+- Without `forceInRelease`, a non-debuggable build with `durbun` stays off and logs
+  `Dürbün is off: this build is not debuggable (set forceInRelease = true to override).` under the `Durbun`
+  tag.
+- A build with Dürbün on behaves as described in [How the connection works](#how-the-connection-works),
+  wherever it is installed from: over USB the phone needs USB debugging, over Wi-Fi the build needs `host`.
+
+The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, iOS and React Native as well.
 
 ## Options (`DurbunOptions`)
 
