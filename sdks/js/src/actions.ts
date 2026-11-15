@@ -126,6 +126,38 @@ export function builtInActions(runtime: Runtime): Array<{ descriptor: AppActionD
         },
       });
     }
+    const appearance = rn && (rn.Appearance as AnyRecord | undefined);
+    if (appearance && typeof appearance.setColorScheme === 'function') {
+      const descriptor: AppActionDescriptor = {
+        id: 'rn.appearance',
+        kind: 'select',
+        label: 'Appearance',
+        group: 'react-native',
+        options: [
+          { value: 'system', label: 'System' },
+          { value: 'light', label: 'Light' },
+          { value: 'dark', label: 'Dark' },
+        ],
+        value: 'system',
+      };
+      out.push({
+        descriptor,
+        handler: (params) => {
+          const mode = params.value;
+          if (mode !== 'system' && mode !== 'light' && mode !== 'dark') throw new Error(`Unknown appearance '${String(mode)}' (use system, light or dark)`);
+          if (mode !== 'system') appearance.setColorScheme(mode);
+          else {
+            // Recent React Native versions take 'unspecified'; older ones reject it and take null.
+            try {
+              appearance.setColorScheme('unspecified');
+            } catch {
+              appearance.setColorScheme(null);
+            }
+          }
+          return null;
+        },
+      });
+    }
     const devMenu = rn && rn.NativeModules && (rn.NativeModules.DevMenu as AnyRecord | undefined);
     if (devMenu && typeof devMenu.show === 'function') {
       out.push({

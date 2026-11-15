@@ -30,13 +30,24 @@
       },
       "default": "./dist/index.js"
     },
+    "./noop": {
+      "import": {
+        "types": "./dist/noop.d.ts",
+        "default": "./dist/noop.js"
+      },
+      "require": {
+        "types": "./dist/cjs/noop.d.ts",
+        "default": "./dist/cjs/noop.js"
+      },
+      "default": "./dist/noop.js"
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,
   "publishConfig": {
     "access": "public"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": ["dist", "noop.js", "noop.d.ts", "README.md", "LICENSE"],
   "keywords": ["react-native", "logging", "network", "debugger", "inspector", "durbun"],
   "engines": {
     "node": ">=18"

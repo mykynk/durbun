@@ -26,6 +26,13 @@ export interface DurbunOptions {
   /** Capture XMLHttpRequest / fetch traffic and apply mock rules (default true). */
   captureNetwork?: boolean;
   /**
+   * Milliseconds (default 0, at most 10 000). Requests made this soon after `start()` wait for the desktop's
+   * mock rules, so mocks apply to launch requests (remote config, login). They stop waiting as soon as the
+   * rules arrive or no desktop answers. Even at 0, a request made while the desktop is answering waits for it
+   * (up to 0.8 s).
+   */
+  waitForDesktop?: number;
+  /**
    * Report uncaught errors and unhandled promise rejections (default true). In React Native, rejections are
    * picked up from React Native's own rejection tracker, which only runs in dev builds (LogBox in 0.71–0.81,
    * the "Uncaught (in promise)" error in 0.82+, the console warning before 0.71); browsers use
@@ -62,6 +69,8 @@ export interface ResolvedOptions {
   explicitHost: boolean;
   captureConsole: boolean | 'auto';
   captureNetwork: boolean;
+  /** Milliseconds, 0–10 000. */
+  waitForDesktop: number;
   captureErrors: boolean;
   captureMetrics: boolean;
   maxBufferedMessages: number;
@@ -75,6 +84,8 @@ export interface ResolvedOptions {
   WebSocket?: WebSocketConstructor;
   debug: boolean;
 }
+
+export const MAX_WAIT_FOR_DESKTOP_MS = 10_000;
 
 function formatHost(host: string): string {
   return host.indexOf(':') >= 0 && !host.startsWith('[') ? `[${host}]` : host;
@@ -123,6 +134,8 @@ export function resolveOptions(options: DurbunOptions, runtime: Runtime): Resolv
     explicitHost: (typeof options.url === 'string' && options.url.trim() !== '') || (typeof options.host === 'string' && options.host.trim() !== ''),
     captureConsole: options.captureConsole === undefined ? 'auto' : options.captureConsole === 'auto' ? 'auto' : !!options.captureConsole,
     captureNetwork: options.captureNetwork !== false,
+    waitForDesktop:
+      typeof options.waitForDesktop === 'number' && isFinite(options.waitForDesktop) ? Math.min(MAX_WAIT_FOR_DESKTOP_MS, Math.max(0, Math.floor(options.waitForDesktop))) : 0,
     captureErrors: options.captureErrors !== false,
     captureMetrics: options.captureMetrics !== false,
     maxBufferedMessages: max,

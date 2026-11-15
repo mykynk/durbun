@@ -8,6 +8,11 @@ export interface NetworkHost {
   emit(message: SdkNetRequest | SdkNetResponse | SdkNetError): void;
   /** A warning row on the desktop (tag "durbun"), e.g. a mock rule that could not be applied. */
   notice(message: string): void;
+  /**
+   * Before the first mock rules arrived: resolves once they did (or waiting no longer makes sense), so a
+   * launch request can still be mocked. Undefined when the request should go right away.
+   */
+  mocksPending(): Promise<void> | undefined;
   /** First enabled matching mock rule for this request, if any. */
   findMock(method: string, url: string): MockRule | undefined;
   /** Requests that must never be captured or mocked (the desktop itself, the Metro dev server, user list). */

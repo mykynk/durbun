@@ -53,6 +53,8 @@ export interface ConnectionHandlers {
   message(message: ServerToSdk): void;
   /** An active connection was lost (not called for failed attempts). */
   disconnected(): void;
+  /** An attempt or handshake ended without a welcome; the next attempt is scheduled. */
+  retrying?(): void;
   debug(message: string): void;
 }
 
@@ -113,6 +115,11 @@ export class Connection {
 
   get url(): string {
     return this.currentUrl;
+  }
+
+  /** A socket is open and the hello is out: the desktop's welcome (with its mock rules) is on its way. */
+  get isHandshaking(): boolean {
+    return this.state === 'handshaking';
   }
 
   /** The last candidate whose WebSocket opened (whether or not the desktop then welcomed us). */
@@ -335,6 +342,11 @@ export class Connection {
   private scheduleReconnect(): void {
     if (this.state === 'stopped' || this.reconnectTimer !== undefined) return;
     this.state = 'idle';
+    try {
+      this.handlers.retrying?.();
+    } catch {
+      // ignore
+    }
     const delay = this.backoff;
     this.backoff = Math.min(this.backoff * 2, this.timing.backoffMaxMs);
     this.reconnectTimer = setTimer(() => {

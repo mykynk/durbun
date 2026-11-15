@@ -65,6 +65,8 @@ interface XhrRecord {
   mockTimer?: TimerHandle;
   /** The real (network) send() was called. */
   sentToNetwork?: boolean;
+  /** send() was called and waits for the desktop's mock rules (see `NetworkHost.mocksPending`). */
+  waiting?: boolean;
   overrides?: Override[];
   listeners?: Array<[string, (ev: unknown) => void]>;
 }
@@ -781,65 +783,93 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
         if (!rec || rec.passthrough || !isActive()) return original.apply(this, args);
         if (rec.id !== undefined) {
           // Second send() on the same request: a mocked one never reached the network, mirror the platform error.
-          if (rec.rule && !rec.sentToNetwork) {
+          if (rec.waiting || (rec.rule && !rec.sentToNetwork)) {
             throw invalidStateError("Failed to execute 'send' on 'XMLHttpRequest': The object's state must be OPENED.");
           }
           return original.apply(this, args);
         }
-        let rule: MockRule | undefined;
+        let pending: Promise<void> | undefined;
         try {
           rec.id = host.nextRequestId();
           rec.startTs = Date.now();
           rec.requestEmitted = emitRequest(rec, args[0]);
-          rule = host.findMock(rec.method, rec.url);
+          // Launch requests wait for the desktop's mock rules (async requests only: send() returns at once anyway).
+          if (rec.async) pending = host.mocksPending();
         } catch (e) {
           host.debug('xhr send', e);
           if (rec.id === undefined) return original.apply(this, args);
         }
-        if (rule && rule.action.type === 'respond' && !mockBodyDeliverable(attempt(() => String(this.responseType || ''), ''), rule.action)) {
-          // Better the real response than corrupted bytes: say why once, and let the request through.
-          if (!notedRules.has(rule.id)) {
-            notedRules.add(rule.id);
-            host.notice(
-              `Mock rule "${rule.name || rule.url}" was not applied to ${rec.method} ${rec.url}: React Native cannot hold this binary (base64) body in a Blob response without corrupting it, so the request went to the network. Text, JSON and arraybuffer responses are mocked as usual.`,
-            );
-          }
-          rule = undefined;
+        if (pending) {
+          rec.waiting = true;
+          const xhr = this;
+          const go = () => {
+            rec.waiting = false;
+            // Aborted or re-opened meanwhile: nothing to send.
+            if (rec.done || records.get(xhr) !== rec) return;
+            try {
+              sendNow(xhr, rec, original, args);
+            } catch (e) {
+              host.debug('xhr send after wait', e);
+            }
+          };
+          pending.then(go, go);
+          return undefined;
         }
-        if (rule) {
-          rec.rule = rule;
-          try {
-            startMock(this, rec, rule, () => original.apply(this, args));
-            return undefined;
-          } catch (e) {
-            host.debug('xhr mock start', e);
-            if (rec.done || rec.sentToNetwork) return undefined;
-            rec.rule = undefined;
-          }
-        }
-        rec.sentToNetwork = true;
-        watch(this, rec);
-        try {
-          return original.apply(this, args);
-        } catch (e) {
-          if (!rec.done) {
-            rec.done = true;
-            unwatch(this, rec);
-            const id = rec.id as string;
-            after(rec, undefined, () => host.emit({ type: 'net.error', id, ts: Date.now(), error: errorMessage(e) }));
-          }
-          throw e;
-        }
+        return sendNow(this, rec, original, args);
       },
     ),
   );
+
+  /** The rest of send(): mock rule lookup, then the mock or the real request. */
+  function sendNow(xhr: AnyRecord, rec: XhrRecord, original: (...args: unknown[]) => unknown, args: unknown[]): unknown {
+    let rule: MockRule | undefined;
+    try {
+      rule = host.findMock(rec.method, rec.url);
+    } catch (e) {
+      host.debug('xhr send', e);
+    }
+    if (rule && rule.action.type === 'respond' && !mockBodyDeliverable(attempt(() => String(xhr.responseType || ''), ''), rule.action)) {
+      // Better the real response than corrupted bytes: say why once, and let the request through.
+      if (!notedRules.has(rule.id)) {
+        notedRules.add(rule.id);
+        host.notice(
+          `Mock rule "${rule.name || rule.url}" was not applied to ${rec.method} ${rec.url}: React Native cannot hold this binary (base64) body in a Blob response without corrupting it, so the request went to the network. Text, JSON and arraybuffer responses are mocked as usual.`,
+        );
+      }
+      rule = undefined;
+    }
+    if (rule) {
+      rec.rule = rule;
+      try {
+        startMock(xhr, rec, rule, () => original.apply(xhr, args));
+        return undefined;
+      } catch (e) {
+        host.debug('xhr mock start', e);
+        if (rec.done || rec.sentToNetwork) return undefined;
+        rec.rule = undefined;
+      }
+    }
+    rec.sentToNetwork = true;
+    watch(xhr, rec);
+    try {
+      return original.apply(xhr, args);
+    } catch (e) {
+      if (!rec.done) {
+        rec.done = true;
+        unwatch(xhr, rec);
+        const id = rec.id as string;
+        after(rec, undefined, () => host.emit({ type: 'net.error', id, ts: Date.now(), error: errorMessage(e) }));
+      }
+      throw e;
+    }
+  }
 
   patches.push(
     patchMethod<(...args: unknown[]) => unknown>(proto, 'abort', (original) =>
       function durbunAbort(this: AnyRecord, ...args: unknown[]) {
         const rec = records.get(this);
-        if (rec && rec.mockTimer !== undefined && !rec.done) {
-          // A mocked (or delayed) request still waiting: cancel it like the platform would.
+        if (rec && (rec.mockTimer !== undefined || rec.waiting) && !rec.done) {
+          // A mocked (or delayed) request, or one waiting for mock rules: cancel it like the platform would.
           clearTimer(rec.mockTimer);
           rec.mockTimer = undefined;
           try {

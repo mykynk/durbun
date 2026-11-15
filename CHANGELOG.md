@@ -48,6 +48,9 @@ All notable changes to Dürbün are listed here. The format follows
 - React Native: binary mock bodies arrive intact when they are valid UTF-8; other binary bodies on `blob`
   responses go to the network with a warning instead of arriving corrupted.
 - React Native: watching a request no longer switches React Native to chunk-by-chunk response delivery.
+- React Native: Expo Go apps show under their own bundle id, name and version instead of "main" or "Expo Go".
+- A React Native app connected over Wi-Fi attaches to the plugged-in phone that runs it, and several iPhones
+  no longer collapse into one row.
 
 ### Changed
 
@@ -100,6 +103,10 @@ All notable changes to Dürbün are listed here. The format follows
   the phone, without the Mac.
 - Flutter: `Durbun.showInspector()` without a running SDK opens a page that says why and what to do, and the
   first launch shows a one-time "shake to open" hint (`DurbunInspector(showHint: false)` turns it off).
+- React Native: `waitForDesktop` lets mock rules apply to requests made at launch;
+  `Durbun.network.begin` reports requests from clients the SDK cannot see (file downloads, gRPC-web);
+  `Durbun.trackNavigation(ref)` sends screen changes as events; an Appearance action (system, light, dark);
+  the `@durbun/react-native/noop` entry keeps the SDK out of release bundles.
 - Guides in `docs/guides`: Dürbün for testers, troubleshooting by symptom, mock rules, versions and
   upgrading, and Dürbün in test builds. The Android and iOS SDK guides gain a "Test builds" section.
 - React Native / JS SDK: when no connection is made within 10 seconds, one console note lists the addresses

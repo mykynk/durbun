@@ -344,6 +344,12 @@ export function installFetchPatch(host: NetworkHost, runtime: Runtime): Patch[] 
 
       let rule: MockRule | undefined;
       try {
+        const pending = host.mocksPending();
+        if (pending) await pending;
+      } catch {
+        // go ahead without waiting
+      }
+      try {
         rule = host.findMock(info.method, info.url);
       } catch {
         rule = undefined;

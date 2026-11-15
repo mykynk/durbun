@@ -92,10 +92,85 @@ export function rnScriptUrl(rn: AnyRecord | undefined = loadReactNative()): stri
   }, undefined);
 }
 
-function expoApplication(): AnyRecord | undefined {
+/** An Expo native module's constants (`globalThis.expo.modules.<name>`), when that module is installed. */
+function expoModule(name: string): AnyRecord | undefined {
   return attempt(() => {
-    const mod = g.expo && g.expo.modules && g.expo.modules.ExpoApplication;
+    const mod = g.expo && g.expo.modules && g.expo.modules[name];
     return mod && typeof mod === 'object' ? (mod as AnyRecord) : undefined;
+  }, undefined);
+}
+
+function expoApplication(): AnyRecord | undefined {
+  return expoModule('ExpoApplication');
+}
+
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+
+function parseJson(v: unknown): AnyRecord | undefined {
+  if (v && typeof v === 'object') return v as AnyRecord;
+  if (typeof v !== 'string' || !v) return undefined;
+  try {
+    const parsed = JSON.parse(v);
+    return parsed && typeof parsed === 'object' ? (parsed as AnyRecord) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Expo Go (the store client) runs every project inside its own app id. */
+const EXPO_GO_IDS = ['host.exp.exponent', 'host.exp.exponent.dev'];
+
+export interface ExpoProject {
+  /** Running inside Expo Go: the native app id is Expo Go's, not the project's. */
+  expoGo: boolean;
+  name?: string;
+  slug?: string;
+  version?: string;
+  iosBundleId?: string;
+  androidPackage?: string;
+}
+
+/**
+ * The project's app config (app.json / app.config) the way expo-constants finds it: the expo-updates
+ * manifest, the dev client's manifest, then the embedded config. Undefined outside Expo.
+ */
+export function expoProject(rn: AnyRecord | undefined): ExpoProject | undefined {
+  return attempt(() => {
+    const constants = expoModule('ExponentConstants');
+    const updates = expoModule('ExpoUpdates');
+    const devLauncher = attempt(() => (rn && rn.NativeModules ? (rn.NativeModules.EXDevLauncher as AnyRecord | undefined) : undefined), undefined);
+    if (!constants && !updates && !devLauncher) return undefined;
+    const manifests = [
+      updates ? parseJson(updates.manifest) || parseJson(updates.manifestString) : undefined,
+      devLauncher ? parseJson(devLauncher.manifestString) : undefined,
+      constants ? parseJson(constants.manifest) : undefined,
+    ];
+    let config: AnyRecord | undefined;
+    for (const m of manifests) {
+      if (!m || Object.keys(m).length === 0) continue;
+      // An expo-updates style manifest carries the app config in extra.expoClient; an embedded one is the config.
+      const extra = m.extra && typeof m.extra === 'object' ? (m.extra as AnyRecord) : undefined;
+      const candidate = extra && extra.expoClient && typeof extra.expoClient === 'object' ? (extra.expoClient as AnyRecord) : m;
+      if (str(candidate.slug) || str(candidate.name)) {
+        config = candidate;
+        break;
+      }
+    }
+    const app = expoApplication();
+    const nativeId = app ? str(app.applicationId) : undefined;
+    const expoGo =
+      (constants ? constants.executionEnvironment === 'storeClient' || constants.appOwnership === 'expo' : false) ||
+      (nativeId !== undefined && EXPO_GO_IDS.indexOf(nativeId.toLowerCase()) >= 0);
+    const ios = config && config.ios && typeof config.ios === 'object' ? (config.ios as AnyRecord) : {};
+    const android = config && config.android && typeof config.android === 'object' ? (config.android as AnyRecord) : {};
+    return {
+      expoGo,
+      name: config ? str(config.name) : undefined,
+      slug: config ? str(config.slug) : undefined,
+      version: config ? str(config.version) : undefined,
+      iosBundleId: str(ios.bundleIdentifier),
+      androidPackage: str(android.package),
+    };
   }, undefined);
 }
 
@@ -169,6 +244,11 @@ export interface EnvironmentInfo {
   sdkPlatform: SdkPlatform;
   app: AppInfo;
   device: DeviceHints;
+  /**
+   * The app id is a guess that will not tell projects apart: `'app-key'` (only the AppRegistry key, e.g.
+   * Expo's "main"), `'expo-go'` (inside Expo Go without the project's config). Undefined when it is real.
+   */
+  weakIdentity?: 'app-key' | 'expo-go';
 }
 
 function lastSegment(id: string): string {
@@ -217,6 +297,7 @@ export function describeEnvironment(overrides: EnvironmentOverrides = {}, runtim
   let device: DeviceHints = { platform: 'other' };
   let sdkPlatform: SdkPlatform = 'js';
   let nameFromId = false;
+  let weakIdentity: EnvironmentInfo['weakIdentity'];
 
   if (runtime === 'react-native') {
     sdkPlatform = 'react-native';
@@ -226,21 +307,44 @@ export function describeEnvironment(overrides: EnvironmentOverrides = {}, runtim
     const os = attempt(() => (platform ? String(platform.OS) : ''), '');
     const script = rnScriptUrl(rn);
     const expo = expoApplication();
+    const project = expoProject(rn);
     const bundleApp = script ? queryParam(script, 'app') : undefined;
     const appKey = rnAppKey(rn);
-    const nativeId = (expo && typeof expo.applicationId === 'string' && expo.applicationId) || bundleApp || undefined;
+    const expoNativeId = expo ? str(expo.applicationId) : undefined;
+    // The process that runs the JS: Expo Go's own package inside Expo Go (logcat lines carry it).
+    let processId = expoNativeId || bundleApp || undefined;
+    if (!processId && project && !project.expoGo) {
+      // A dev-client build without expo-application: its id is the one the app config declares.
+      processId = (os === 'ios' ? project.iosBundleId : os === 'android' ? project.androidPackage : undefined) || undefined;
+    }
+    let nativeId: string | undefined = processId;
+    let nativeName = (expo ? str(expo.applicationName) : undefined) || undefined;
+    let version = expo ? str(expo.nativeApplicationVersion) : undefined;
+    let build = expo ? str(expo.nativeBuildVersion) : undefined;
+    if (project && project.expoGo) {
+      // Inside Expo Go: the project's own ids and name, never "Expo Go" (every project would share one row).
+      nativeId = (os === 'ios' ? project.iosBundleId : os === 'android' ? project.androidPackage : undefined) || project.slug;
+      nativeName = project.name;
+      version = project.version;
+      build = undefined;
+    }
     const id = nativeId || appKey || 'react-native-app';
-    const nativeName = (expo && typeof expo.applicationName === 'string' && expo.applicationName) || appKey;
-    nameFromId = !nativeName;
+    const name = nativeName || (appKey && appKey !== 'main' ? appKey : undefined) || (project && project.name);
+    nameFromId = !name;
+    if (!nativeId) weakIdentity = project && project.expoGo ? 'expo-go' : 'app-key';
     app = {
       id,
-      name: nativeName || lastSegment(id),
-      version: expo && typeof expo.nativeApplicationVersion === 'string' ? expo.nativeApplicationVersion : undefined,
-      build: expo && typeof expo.nativeBuildVersion === 'string' ? expo.nativeBuildVersion : undefined,
+      name: name || lastSegment(id),
+      version,
+      build,
       // Android process name == package name (lets the desktop link logcat lines to this app).
-      processName: os === 'android' && nativeId ? nativeId : undefined,
+      processName: os === 'android' && processId ? processId : undefined,
       debug,
     };
+    // expo-device, when installed, knows the device's name and model identifier.
+    const expoDevice = expoModule('ExpoDevice');
+    const deviceName = expoDevice ? str(expoDevice.deviceName) : undefined;
+    const isDevice = expoDevice && typeof expoDevice.isDevice === 'boolean' ? (expoDevice.isDevice as boolean) : undefined;
     if (os === 'android') {
       const fingerprint = String(consts.Fingerprint || '');
       const model = typeof consts.Model === 'string' ? consts.Model : undefined;
@@ -248,19 +352,24 @@ export function describeEnvironment(overrides: EnvironmentOverrides = {}, runtim
       device = {
         platform: 'android',
         model,
+        name: deviceName,
         manufacturer: typeof consts.Manufacturer === 'string' ? consts.Manufacturer : undefined,
         osVersion: typeof consts.Release === 'string' ? consts.Release : undefined,
         apiLevel: typeof version === 'number' ? version : undefined,
-        isPhysical: !(ANDROID_EMULATOR_RE.test(fingerprint) || ANDROID_EMULATOR_RE.test(model || '')),
+        isPhysical: isDevice ?? !(ANDROID_EMULATOR_RE.test(fingerprint) || ANDROID_EMULATOR_RE.test(model || '')),
       };
     } else if (os === 'ios') {
       const version = attempt(() => platform!.Version, undefined);
       const scriptHost = script && /^https?:/i.test(script) ? hostOfUrl(script) : '';
+      const idiom = str(consts.interfaceIdiom);
       device = {
         platform: 'ios',
+        // React Native knows no device name; "iPhone" / "iPad" (what iOS reports to apps anyway) unless expo-device says more.
+        name: deviceName || (idiom === 'phone' ? 'iPhone' : idiom === 'pad' ? 'iPad' : undefined),
+        model: expoDevice ? str(expoDevice.modelId) : undefined,
         osVersion: typeof consts.osVersion === 'string' ? consts.osVersion : version !== undefined ? String(version) : undefined,
         // Dev builds load the bundle from localhost on a simulator and from the Mac's LAN address on a device.
-        isPhysical: scriptHost ? !isLoopbackHost(scriptHost) : undefined,
+        isPhysical: isDevice ?? (scriptHost ? !isLoopbackHost(scriptHost) : undefined),
       };
     } else {
       device = { platform: 'other', name: os || undefined };
@@ -297,10 +406,13 @@ export function describeEnvironment(overrides: EnvironmentOverrides = {}, runtim
   if (overrides.appId) {
     app.id = overrides.appId;
     if (nameFromId) app.name = lastSegment(overrides.appId);
+    weakIdentity = undefined;
   }
   if (overrides.appName) app.name = overrides.appName;
   if (overrides.appVersion) app.version = overrides.appVersion;
   if (runtime === 'react-native' && overrides.appId && device.platform === 'android') app.processName = overrides.appId;
   if (overrides.device) device = { ...device, ...compact({ ...overrides.device }) };
-  return { runtime, sdkPlatform, app: compact(app), device: compact(device) };
+  const info: EnvironmentInfo = { runtime, sdkPlatform, app: compact(app), device: compact(device) };
+  if (weakIdentity) info.weakIdentity = weakIdentity;
+  return info;
 }

@@ -66,6 +66,8 @@ const REDACTED = '••••';
  * first (the request row stays, its body shows as truncated), then the oldest messages.
  */
 export const MAX_BUFFERED_CHARS = 8 * 1024 * 1024;
+/** Before the first welcome, a request made while the desktop is answering waits this long for its mock rules. */
+const HANDSHAKE_WAIT_MS = 800;
 
 function sanitizeConfig(input: unknown, previous: SdkConfig): SdkConfig {
   const next = { ...previous };
@@ -111,6 +113,10 @@ export class DurbunClient implements NetworkHost {
   private everWelcomed = false;
   private hintTimer: TimerHandle | undefined;
   private hintShown = false;
+  private startedAt = 0;
+  /** No desktop answered the first attempt: launch requests stop waiting for mock rules. */
+  private firstAttemptFailed = false;
+  private mockGate: { promise: Promise<void>; release: () => void } | undefined;
 
   constructor(
     options: DurbunOptions = {},
@@ -150,7 +156,7 @@ export class DurbunClient implements NetworkHost {
       return false;
     }
     this.started = true;
-    this.desktopSeenAt = Date.now();
+    this.desktopSeenAt = this.startedAt = Date.now();
     for (const url of this.opts.urls) {
       const origin = originOfUrl(url.replace(/^ws/i, 'http'));
       if (origin) this.ignoreOrigins.push(origin);
@@ -188,12 +194,17 @@ export class DurbunClient implements NetworkHost {
         welcome: (msg) => this.onWelcome(msg),
         message: (msg) => this.onServerMessage(msg),
         disconnected: () => this.onDisconnected(),
+        retrying: () => {
+          this.firstAttemptFailed = true;
+          this.releaseMockGate();
+        },
         debug: (m) => this.debug(m),
       },
       this.timing,
     );
     this.conn.start();
     this.debug(`started; desktop candidates: ${this.opts.urls.join(', ')}`);
+    this.noteWeakIdentity();
     this.hintTimer = setTimer(() => {
       this.hintTimer = undefined;
       this.showConnectionHint();
@@ -204,6 +215,7 @@ export class DurbunClient implements NetworkHost {
   stop(): void {
     if (!this.started) return;
     this.started = false;
+    this.releaseMockGate();
     clearTimer(this.hintTimer);
     this.hintTimer = undefined;
     try {
@@ -346,6 +358,36 @@ export class DurbunClient implements NetworkHost {
 
   nextRequestId(): string {
     return String(++this.requestSeq);
+  }
+
+  mocksPending(): Promise<void> | undefined {
+    const conn = this.conn;
+    if (!this.started || this.everWelcomed || !conn) return undefined;
+    // `waitForDesktop`: the first moments after start, while a desktop may still be reached.
+    const until = this.startedAt + this.opts.waitForDesktop;
+    let limit = this.firstAttemptFailed ? 0 : until - Date.now();
+    // A desktop accepted the socket and its welcome is on its way: worth a short wait in any case.
+    if (conn.isHandshaking) limit = Math.max(limit, HANDSHAKE_WAIT_MS);
+    if (limit <= 0) return undefined;
+    if (!this.mockGate) {
+      let release: () => void = () => undefined;
+      const promise = new Promise<void>((resolve) => (release = resolve));
+      this.mockGate = { promise, release };
+    }
+    const gate = this.mockGate.promise;
+    return new Promise<void>((resolve) => {
+      const timer = setTimer(resolve, limit);
+      gate.then(() => {
+        clearTimer(timer);
+        resolve();
+      });
+    });
+  }
+
+  private releaseMockGate(): void {
+    const gate = this.mockGate;
+    this.mockGate = undefined;
+    if (gate) gate.release();
   }
 
   findMock(method: string, url: string): MockRule | undefined {
@@ -535,6 +577,7 @@ export class DurbunClient implements NetworkHost {
     this.mocks = normalizeRules(msg.mocks);
     this.desktopSeenAt = Date.now();
     this.everWelcomed = true;
+    this.releaseMockGate();
     clearTimer(this.hintTimer);
     this.hintTimer = undefined;
     // After the "not connected" note, say that it worked.
@@ -619,6 +662,20 @@ export class DurbunClient implements NetworkHost {
     } catch (e) {
       reply({ ok: false, error: errorMessage(e) });
     }
+  }
+
+  /** The app id is only a guess (Expo's "main", Expo Go): say how to give the real one, once per start. */
+  private noteWeakIdentity(): void {
+    const weak = this.env.weakIdentity;
+    if (!weak) return;
+    const why =
+      weak === 'expo-go'
+        ? 'it runs in Expo Go and its app config was not found'
+        : 'React Native reported no bundle id (Expo apps: install expo-application)';
+    this.consoleOut(
+      'info',
+      `[Dürbün] This app shows in Dürbün as "${this.env.app.id}" because ${why}. Pass Durbun.start({ appId: 'com.example.app' }) so mock rules and device logs match this app.`,
+    );
   }
 
   /** Once per start: no desktop has accepted the app yet — say which addresses were tried and what to do. */

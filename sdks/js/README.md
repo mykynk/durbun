@@ -51,6 +51,19 @@ AppRegistry.registerComponent(appName, () => App);
 > its own file and import it first: `durbun.js` contains `Durbun.start();` and `index.js` starts with
 > `import './durbun';`.
 
+### Expo
+
+With Expo Router, create `durbun.js` as above and import it on the first line of `app/_layout.tsx`
+(`import '../durbun';`). Without Expo Router, import it at the top of the file your `main` entry points to.
+
+- **Expo Go**: the app shows in Dürbün under your project's own bundle id (`ios.bundleIdentifier` /
+  `android.package` from the app config), name and version, not as "Expo Go". If the app config cannot be read,
+  the SDK prints one note in the Metro terminal; pass `Durbun.start({ appId: 'com.example.app' })` then, so mock
+  rules scoped to your app match.
+- **Dev client and bare Expo**: install `expo-application` (`npx expo install expo-application`) and the real
+  native id is used; without it the id comes from the app config.
+- `expo-device`, when installed, gives the device's name, which keeps several phones on Wi-Fi apart in Dürbün.
+
 ## Connecting a device
 
 | Target | What to do |
@@ -102,6 +115,10 @@ Durbun.addAction({ id: 'app.clearCache', label: 'Clear cache' }, async () => {
 });
 Durbun.addAction({ id: 'app.mockLocation', label: 'Mock location', kind: 'toggle', value: false }, ({ value }) => setMockLocation(!!value));
 
+// Screen changes as "navigation" events, so rows show which screen they came from (route params are not sent).
+// React Navigation: the ref passed to <NavigationContainer ref={…}>; Expo Router: useNavigationContainerRef().
+Durbun.trackNavigation(navigationRef);
+
 Durbun.stop();             // restores every patched API
 Durbun.isStarted; Durbun.isConnected;
 ```
@@ -110,6 +127,26 @@ Durbun.isStarted; Durbun.isConnected;
   as a collapsible JSON tree.
 - A leading `[Tag]` in a console message, as in `console.log('[Auth] token refreshed')`, becomes the row's tag
   chip (`Auth`). Objects appear as single-line JSON in the message and as a tree in the details.
+
+### Requests the SDK cannot see
+
+`react-native-blob-util`, Expo FileSystem downloads, gRPC-web and native modules do not go through `fetch` or
+`XMLHttpRequest`. Report them yourself; while the SDK is off these calls do nothing:
+
+```js
+const call = Durbun.network.begin({ method: 'GET', url, headers, source: 'blob-util' });
+try {
+  const res = await ReactNativeBlobUtil.config({ fileCache: true }).fetch('GET', url, headers);
+  const info = res.info();
+  call.response({ status: info.status, headers: info.headers, bodySize: Number(info.headers['Content-Length']) || undefined });
+} catch (e) {
+  call.error(e);
+}
+```
+
+`body` may be a string, bytes, a Blob or a plain object (shown as JSON); for a download written to a file,
+pass `bodySize` instead. To apply Dürbün's mock rules in your own client, `Durbun.network.findMock(method, url)`
+returns the matching rule; answer with `rule.action` and report it with `call.response({ …, mockRuleId: rule.id })`.
 
 ## What is captured
 
@@ -121,12 +158,24 @@ Durbun.isStarted; Durbun.isConnected;
 | **Mocks** | Rules from Dürbün's Mocks tab: *respond* (a fake response, the network is never hit), *delay* (then the real request; the app's own timeout still applies), *fail* (the platform's natural error, `Network request failed` in React Native). In React Native, a binary (base64) mock body cannot be delivered intact to a `blob` response (what `fetch` uses) unless it is valid UTF-8, because React Native's `Blob` only holds text: such a request goes to the network instead and Dürbün shows a warning line saying why. Text, JSON and `arraybuffer` responses are mocked as usual. |
 | **Errors** | Uncaught errors via `ErrorUtils` (the previous handler chain is kept): fatal ones appear as **crash** rows. In React Native, unhandled promise rejections in dev builds, read from React Native's own rejection tracker (LogBox in 0.71–0.81, the "Uncaught (in promise)" error in 0.82 and later, the console warning before 0.71); LogBox still shows them. React Native does not track rejections in release builds, so none are reported there. On the web, `error` and `unhandledrejection`; in Node, `uncaughtExceptionMonitor`. |
 | **Performance** | JS heap (Hermes), JS-thread FPS and janky frame count (the "JS FPS" of the RN perf monitor). |
-| **Actions** | "Reload JS" and "Open dev menu" buttons in development mode, plus your own via `Durbun.addAction`. |
+| **Actions** | "Reload JS", "Open dev menu" and Appearance (system / light / dark) in development mode, plus your own via `Durbun.addAction`, for example a dump of AsyncStorage (below). |
 
 **What a JS SDK cannot see:** React Native `<Image>` downloads and requests made by native modules (Firebase and
-similar) never pass through the JS layer, so they are not captured. Requests that were opened (`open()` called)
+similar) never pass through the JS layer, so they are not captured (report your own clients with
+`Durbun.network.begin`, see above). Requests that were opened (`open()` called)
 before `Durbun.start()` are not captured either. The app's stdout and system logs still show up in Dürbün's
 device logs without any SDK.
+
+An AsyncStorage (or MMKV) dump as an action; the returned value shows as JSON on the desktop:
+
+```js
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+Durbun.addAction({ id: 'app.dumpStorage', label: 'Dump AsyncStorage', group: 'storage' }, async () => {
+  const keys = await AsyncStorage.getAllKeys();
+  return Object.fromEntries(await AsyncStorage.multiGet(keys));
+});
+```
 
 ## Options
 
@@ -137,8 +186,9 @@ device logs without any SDK.
 | `enabled` | `__DEV__` (RN), otherwise `NODE_ENV !== 'production'` | Set `true` to force it on in release builds. |
 | `captureConsole` | `'auto'` | `true` always, `false` never. |
 | `captureNetwork` / `captureErrors` / `captureMetrics` | `true` | |
+| `waitForDesktop` | `0` | Milliseconds (at most 10 000). Requests made this soon after `start()` wait for Dürbün's mock rules, so mocks apply to launch requests (remote config, login). They stop waiting as soon as the rules arrive or no Dürbün answers. Even at `0`, a request made while Dürbün is answering waits for it (up to 0.8 s). |
 | `maxBufferedMessages` | `5000` | Number of messages kept while disconnected. |
-| `appId` / `appName` / `appVersion` | auto | Package id / display name. In React Native they are read from Metro's bundle URL and `AppRegistry`; in Expo, from `expo-application`. Mock rules are scoped by app id. |
+| `appId` / `appName` / `appVersion` | auto | Package id / display name. In React Native they are read from Metro's bundle URL and `AppRegistry`; in Expo, from `expo-application` or the app config (see Expo above). Mock rules are scoped by app id. |
 | `device` | auto | For example `{ name: "Jane's iPhone" }`. |
 | `ignoreUrls` | `[]` | URLs that are never captured or mocked (substring or RegExp). |
 | `redactHeaders` | `[]` | Header names (case-insensitive) whose values show as `••••` in Dürbün, for example `['Authorization', 'Cookie']`. The request sent to the server is unchanged. |
@@ -152,6 +202,19 @@ no-op. If you deliberately enable it in release builds (`enabled: true`), Androi
 `ws://` and iOS needs the ATS `NSAllowsLocalNetworking` exception (already enabled in the RN debug templates).
 [Dürbün in test builds](https://github.com/mykynk/durbun/blob/main/docs/guides/qa-builds.md) has the steps for
 builds you hand to testers.
+
+The SDK's code is still in the release bundle (about 180 KB before minification) when it is imported
+statically. To leave it out, import it through one file and pick the no-op entry when `__DEV__` is false;
+Metro folds the condition in release builds, so only the branch that is used ends up in the bundle:
+
+```js
+// durbun.js: import { Durbun } from './durbun' everywhere else
+export const Durbun = __DEV__ ? require('@durbun/react-native').Durbun : require('@durbun/react-native/noop').Durbun;
+Durbun.start();
+```
+
+`@durbun/react-native/noop` has the same API with empty bodies (`Durbun.network.begin` returns a call that does
+nothing). Builds you hand to testers with `enabled: true` need the first branch instead.
 
 ## Troubleshooting
 
