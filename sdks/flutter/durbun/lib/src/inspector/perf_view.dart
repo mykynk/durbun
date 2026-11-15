@@ -53,10 +53,7 @@ class PerformanceView extends StatelessWidget {
             LayoutBuilder(
               builder: (context, box) {
                 final w = (box.maxWidth - 8) / 2;
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
+                final tiles = <StatTile>[
                     StatTile(
                         width: w,
                         label: 'FPS',
@@ -91,11 +88,6 @@ class PerformanceView extends StatelessWidget {
                             .whereType<double>()
                             .fold<double?>(null,
                                 (a, b) => a == null ? b : math.max(a, b))))),
-                    StatTile(
-                        width: w,
-                        label: t.heap,
-                        value: mb(m.heapMB),
-                        unit: 'MB'),
                     if (m.cpu != null)
                       StatTile(
                           width: w,
@@ -105,8 +97,19 @@ class PerformanceView extends StatelessWidget {
                     if (m.threads != null)
                       StatTile(
                           width: w, label: t.threads, value: '${m.threads}'),
-                  ],
-                );
+                ];
+                // Two tiles per row; an odd last tile takes the whole row instead of leaving a hole.
+                if (tiles.length.isOdd) {
+                  final last = tiles.removeLast();
+                  tiles.add(StatTile(
+                      width: box.maxWidth,
+                      label: last.label,
+                      value: last.value,
+                      unit: last.unit,
+                      sub: last.sub,
+                      color: last.color));
+                }
+                return Wrap(spacing: 8, runSpacing: 8, children: tiles);
               },
             ),
             const SizedBox(height: 16),
@@ -142,8 +145,6 @@ class PerformanceView extends StatelessWidget {
               series: <ChartSeries>[
                 ChartSeries(t.memory, c.pickOrange,
                     <double?>[for (final s in samples) s.memoryMB]),
-                ChartSeries(t.heap, c.textSubtle,
-                    <double?>[for (final s in samples) s.heapMB]),
               ],
             ),
             const SizedBox(height: 12),

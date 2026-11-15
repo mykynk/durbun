@@ -537,7 +537,6 @@ class InspectorStrings {
   String get buildTime => 'Build';
   String get rasterTime => 'Raster';
   String get memory => _('Bellek', 'Memory');
-  String get heap => _('Dart heap', 'Dart heap');
   String get threads => _('İş parçacığı', 'Threads');
   String get frameTimes => _('Kare süreleri', 'Frame times');
   String avg(String? v) => _('ort. ${v ?? '—'}', 'avg ${v ?? '—'}');

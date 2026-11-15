@@ -175,8 +175,11 @@ and status colors, tag colors, light and dark theme) and its tabs:
 - **Mocks:** the rules that come from the desktop and how many times each was
   applied. Rules last only as long as the connection, so on the phone the tab
   has content only while the desktop is connected.
-- **Performance:** tiles for FPS, janky frames, build/raster time, memory, heap
-  and CPU, plus charts for FPS, frame time and memory.
+- **Performance:** tiles for FPS, janky frames, build/raster time, memory
+  (resident memory of the app process, with its peak), and CPU and threads
+  where the platform reports them, plus charts for FPS, frame time and memory.
+  The Dart heap is not shown on the phone: reading it needs the Dart VM
+  Service, which release builds do not have.
 - **Device:** the app, the device, the captured layers (Dart / Kotlin / Swift),
   the desktop connection, and "What is captured?": whether each data source is
   on and, if not, why.
@@ -439,7 +442,9 @@ lookup", `HandshakeException`, "timed out"; Dio recognizes the latter as
 - **Wi-Fi:** provide the Mac's IP address with
   `DurbunOptions(host: '192.168.1.20')` or
   `flutter run --dart-define=DURBUN_HOST=192.168.1.20`.
-  Turn on LAN access on the desktop (`durbun --lan`). On iOS 14+, add a local
+  In the Dürbün Mac app, turn on Settings → "Allow local network (Wi-Fi)
+  connections" (when you run the server from the repository instead, start it
+  with `node dist/durbun.mjs --lan`). On iOS 14+, add a local
   network usage description to `ios/Runner/Info.plist`:
 
   ```xml

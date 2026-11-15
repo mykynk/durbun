@@ -434,7 +434,6 @@ class InspectorMetric {
     this.frameBuildMs,
     this.frameRasterMs,
     this.memoryMB,
-    this.heapMB,
     this.cpu,
     this.threads,
   });
@@ -445,7 +444,6 @@ class InspectorMetric {
   final double? frameBuildMs;
   final double? frameRasterMs;
   final double? memoryMB;
-  final double? heapMB;
   final double? cpu;
   final int? threads;
 }
@@ -782,7 +780,6 @@ class DurbunInspectorStore extends ChangeNotifier {
             frameBuildMs: _num(m['frameBuildMs']),
             frameRasterMs: _num(m['frameRasterMs']),
             memoryMB: _num(m['memoryMB']),
-            heapMB: _num(m['heapMB']),
             cpu: _num(m['cpu']),
             threads: _num(m['threads'])?.toInt(),
           ),

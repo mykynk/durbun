@@ -28,7 +28,34 @@ allprojects {
 }
 
 apply plugin: "com.android.library"
-apply plugin: "kotlin-android"
+
+// Kotlin works with both Android Gradle Plugin generations:
+// - AGP 9+ compiles Kotlin itself ("built-in Kotlin", on unless the app sets android.builtInKotlin=false).
+//   The Kotlin Gradle Plugin must not be applied then.
+// - Older AGP, or AGP 9 with android.builtInKotlin=false, needs the Kotlin Gradle Plugin. Flutter 3.44+ applies it
+//   to plugins on its own; older Flutter versions do not, so it is applied here when it is missing (applying an
+//   applied plugin again does nothing). This mirrors Flutter's own check (FlutterPluginUtils.isBuiltInKotlinEnabled).
+def agpMajor = project.extensions.getByName("androidComponents").pluginVersion.major
+def builtInKotlin = agpMajor >= 9 &&
+    providers.gradleProperty("android.builtInKotlin").getOrElse("true").toBoolean()
+
+if (builtInKotlin) {
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
+} else {
+    pluginManager.apply("org.jetbrains.kotlin.android")
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
+        if (task.hasProperty("compilerOptions")) {
+            // Kotlin Gradle Plugin 1.8+.
+            task.compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        } else {
+            task.kotlinOptions.jvmTarget = "17"
+        }
+    }
+}
 
 android {
     namespace = "dev.durbun.flutter"
@@ -40,16 +67,13 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17
-    }
-
     sourceSets {
-        main.java.srcDirs += [
-            "src/main/kotlin",
-            "src/core/kotlin",
-            "src/core/java",
-        ]
+        // The Kotlin Gradle Plugin compiles Kotlin found in the Java source folders; built-in Kotlin reads only the
+        // Kotlin source folders (src/main/kotlin is one by default), so the copied core is listed in both.
+        main.java.srcDirs("src/main/kotlin", "src/core/kotlin", "src/core/java")
+        if (main.hasProperty("kotlin")) {
+            main.kotlin.srcDirs("src/core/kotlin")
+        }
     }
 
     defaultConfig {
