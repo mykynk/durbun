@@ -135,7 +135,7 @@ export function dmgFollowUp(state, dmgs, env = {}) {
       `xcrun stapler validate ${f}`,
     );
   }
-  lines.push('shasum -a 256 *.dmg *.zip > SHA256SUMS.txt');
+  lines.push('shasum -a 256 *.dmg *.zip durbun-update-mac-*.json > SHA256SUMS.txt');
   return lines;
 }
 

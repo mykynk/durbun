@@ -80,20 +80,36 @@ Run the checks for every part you changed before you open a pull request, and sa
 
 All parts share one version and are released together, by hand from a maintainer's Mac.
 
-1. Update the version everywhere `node scripts/check-versions.mjs` lists, and move the changelog entries
-   under a new `## [X.Y.Z] - YYYY-MM-DD` heading (and `## X.Y.Z` in the Flutter changelogs). Run the checks
-   above.
-2. Merge to `main`, then tag and push: `git tag -a vX.Y.Z -m "Dürbün X.Y.Z"` and `git push origin vX.Y.Z`.
+1. Write the new version everywhere with `node scripts/check-versions.mjs --write X.Y.Z`, and move the
+   changelog entries under a new `## [X.Y.Z] - YYYY-MM-DD` heading (and `## X.Y.Z` in the Flutter
+   changelogs). Merge to `main`.
+2. Run `npm run release:check` on `main`. It runs every check a release needs, one after the other: a clean
+   tree on `main`, a tag that does not exist yet, the versions, the changelog section dated today, type
+   checks, tests and builds of every part, the Flutter, Android and iOS SDKs, `pub publish --dry-run`,
+   `npm pack --dry-run` and `pod lib lint`. It changes nothing and stops at the first problem with what to
+   do; `npm run release:check -- --from <step>` continues from there (`--list` shows the steps,
+   `--rehearse` tries it on another branch without the git and date checks).
 3. Build the Mac app for Apple silicon and Intel with `npm run app:release`. Set the Developer ID and
    notarization variables first (see `apps/desktop/electron-builder.config.cjs`): without them the command
    stops and lists what is missing (`DURBUN_ALLOW_UNSIGNED=1` makes an ad-hoc build that must not be
-   published). It verifies the signature, Gatekeeper and the stapled ticket of both apps, then prints the
-   commands that sign, notarize and staple each DMG. Run those, and write the checksums last:
-   `shasum -a 256 *.dmg *.zip > SHA256SUMS.txt` in `apps/desktop/release`.
-4. Draft the GitHub release with the version's `CHANGELOG.md` section as notes, attach the DMG, ZIP and
-   `SHA256SUMS.txt` files, review it and publish it:
+   published). It clears the files of earlier builds from `apps/desktop/release`, verifies the signature,
+   Gatekeeper and the stapled ticket of both apps, and writes the in-app update feeds
+   `durbun-update-mac-arm64.json` and `durbun-update-mac-x64.json` (each names its ZIP with the ZIP's
+   SHA-256 and size, and carries the version's changelog section as release notes). Then it prints the
+   commands that sign, notarize and staple each DMG. Run those, and write the checksums last, in
+   `apps/desktop/release`: `shasum -a 256 *.dmg *.zip durbun-update-mac-*.json > SHA256SUMS.txt`.
+4. Only now tag and push: `git tag -a vX.Y.Z -m "Dürbün X.Y.Z"` and `git push origin vX.Y.Z`. A pushed tag
+   never moves: Swift Package Manager caches it.
+5. Draft the GitHub release with the version's changelog section as notes
+   (`node scripts/release-notes.mjs X.Y.Z > notes.md`) and attach the DMG and ZIP files, both
+   `durbun-update-mac-*.json` feeds and `SHA256SUMS.txt`:
    `gh release create vX.Y.Z --draft --verify-tag --title "Dürbün X.Y.Z" --notes-file notes.md …`.
-5. Publish the packages:
+   The Mac app looks for updates at `releases/latest/download/durbun-update-mac-<arch>.json`, so a draft or
+   a pre-release is never offered; publishing the release is what offers it. A release without the feed
+   files makes **Check for Updates…** answer that there is no update information for that Mac. Before
+   publishing, update an installed earlier version once with **Check for Updates…** (it must be a
+   Developer ID signed copy in Applications; other copies are offered the DMG).
+6. Publish the packages:
    - pub.dev: `dart pub publish` in `sdks/flutter/durbun`, then in `sdks/flutter/durbun_dio`.
    - npm: `npm publish` in `sdks/js`.
    - Maven Central: in `sdks/android`, `./gradlew publishReleasePublicationToStagingRepository` with the

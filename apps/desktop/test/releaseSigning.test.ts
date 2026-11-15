@@ -99,7 +99,7 @@ describe('verification after the build', () => {
       'xcrun stapler staple Durbun-1.0.0-arm64.dmg',
       'spctl --assess --type open --context context:primary-signature -v Durbun-1.0.0-arm64.dmg',
       'xcrun stapler validate Durbun-1.0.0-arm64.dmg',
-      'shasum -a 256 *.dmg *.zip > SHA256SUMS.txt',
+      'shasum -a 256 *.dmg *.zip durbun-update-mac-*.json > SHA256SUMS.txt',
     ]);
     expect(lines.join('\n')).not.toContain('/keys/AuthKey.p8');
     const appleId = { CSC_LINK: '/certs/id.p12', ...APPLE_ID };

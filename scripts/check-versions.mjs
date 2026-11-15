@@ -76,8 +76,9 @@ export const SOURCES = [
   // The newest released changelog entry must be the current version (written by hand, never by --write).
   // A `## [Unreleased]` section above it collects the next version's entries and is skipped.
   { file: 'CHANGELOG.md', what: 'newest entry', pattern: re(String.raw`^## \[(?!Unreleased\])([^\]]+)\]`, 'm'), write: false },
-  { file: 'sdks/flutter/durbun/CHANGELOG.md', what: 'newest entry', pattern: re(String.raw`^## (\S+)`, 'm'), write: false },
-  { file: 'sdks/flutter/durbun_dio/CHANGELOG.md', what: 'newest entry', pattern: re(String.raw`^## (\S+)`, 'm'), write: false },
+  // The Flutter changelogs (pub.dev format, `## X.Y.Z`) may also start with an `## Unreleased` section.
+  { file: 'sdks/flutter/durbun/CHANGELOG.md', what: 'newest entry', pattern: re(String.raw`^## (?!Unreleased\s*$)(\S+)`, 'm'), write: false },
+  { file: 'sdks/flutter/durbun_dio/CHANGELOG.md', what: 'newest entry', pattern: re(String.raw`^## (?!Unreleased\s*$)(\S+)`, 'm'), write: false },
 ];
 
 const lineOf = (text, index) => text.slice(0, index).split('\n').length;

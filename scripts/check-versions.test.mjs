@@ -40,6 +40,28 @@ test('a stale place is reported under its file with line, value and what it is',
   }
 });
 
+test('an Unreleased section on top of a changelog is skipped, the released entry below it is checked', () => {
+  const dir = copyOfSources();
+  try {
+    for (const [file, heading] of [
+      ['CHANGELOG.md', '## [Unreleased]'],
+      ['sdks/flutter/durbun/CHANGELOG.md', '## Unreleased'],
+      ['sdks/flutter/durbun_dio/CHANGELOG.md', '## Unreleased'],
+    ]) {
+      const full = path.join(dir, file);
+      const text = readFileSync(full, 'utf8').replace(/^## (?:\[Unreleased\]|Unreleased)\s*\n(?:(?!## )[^\n]*\n)*/m, '');
+      writeFileSync(full, `${heading}\n\n- next\n\n${text}`);
+    }
+    assert.equal(formatReport(checkVersions(dir)).ok, true);
+    // A stale released entry under the Unreleased section is still found.
+    const dio = path.join(dir, 'sdks/flutter/durbun_dio/CHANGELOG.md');
+    writeFileSync(dio, readFileSync(dio, 'utf8').replace(/^## (?!Unreleased)\S+/m, '## 0.0.1'));
+    assert.match(formatReport(checkVersions(dir)).text, /✖ sdks\/flutter\/durbun_dio\/CHANGELOG\.md\n      line \d+: 0\.0\.1 \(newest entry\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a missing or reshaped place is reported, not skipped', () => {
   const dir = copyOfSources();
   try {
