@@ -552,6 +552,57 @@ export function parseLowMemoryKill(tag: string, message: string): LowMemoryKill 
   };
 }
 
+/* ───────────────────────────── app start time ───────────────────────────── */
+
+/** How long an activity took to show (system_server's "Displayed" / "Fully drawn" lines). */
+export interface AppStartup {
+  /** Package of the activity ("com.mykynk.pati"). */
+  app: string;
+  /** Activity as logged (".MainActivity" or a full class name). */
+  activity: string;
+  /** 'displayed': first frame drawn; 'fully-drawn': the app called reportFullyDrawn(). */
+  kind: 'displayed' | 'fully-drawn';
+  ms: number;
+  /** Launch of several activities (a trampoline, a splash screen): the whole time. */
+  totalMs?: number;
+}
+
+/** TimeUtils.formatDuration: "+612ms", "+1s34ms", "+1m2s3ms" (no padding) → ms. */
+export function parseDuration(text: string): number | undefined {
+  const m = /^\+?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m(?!s))?(?:(\d+)s)?(?:(\d+)ms)?$/.exec(text.trim());
+  if (!m || !m.slice(1).some((x) => x !== undefined)) return undefined;
+  const [d, h, min, sec, ms] = m.slice(1).map((x) => Number(x ?? 0));
+  return (((d! * 24 + h!) * 60 + min!) * 60 + sec!) * 1000 + ms!;
+}
+
+const DURATION = '\\+(?:\\d+d)?(?:\\d+h)?(?:\\d+m(?!s))?(?:\\d+s)?(?:\\d+ms)?';
+/**
+ * ActivityTaskManager (Android 10+) / ActivityManager (older), as ActivityMetricsLogger writes them:
+ *   Displayed com.example/.MainActivity: +612ms
+ *   Displayed com.example/.MainActivity: +1s34ms (total +1s502ms)
+ *   Displayed com.example/.MainActivity for user 0: +612ms               (Android 14+)
+ *   Fully drawn com.example/.MainActivity: +2s110ms
+ */
+const DISPLAYED_RE = new RegExp(
+  `^(Displayed|Fully drawn) ([A-Za-z][\\w.]*)/([\\w.$]+)(?: for user \\d+)?: (${DURATION})(?: \\(total (${DURATION})\\))?`,
+);
+
+export function parseAppStartup(tag: string, message: string): AppStartup | null {
+  if (tag !== 'ActivityTaskManager' && tag !== 'ActivityManager') return null;
+  const m = DISPLAYED_RE.exec(message);
+  if (!m) return null;
+  const ms = parseDuration(m[4]!);
+  if (ms === undefined) return null;
+  const total = m[5] ? parseDuration(m[5]) : undefined;
+  return {
+    app: m[2]!,
+    activity: m[3]!,
+    kind: m[1] === 'Displayed' ? 'displayed' : 'fully-drawn',
+    ms,
+    ...(total !== undefined && total !== ms ? { totalMs: total } : {}),
+  };
+}
+
 /* ───────────────────────────── history at connect ───────────────────────────── */
 
 /** Tags kept from the older part of the buffer whatever process wrote them (crashes, Flutter, lmkd). */
@@ -619,7 +670,8 @@ export function selectBackfill(raw: readonly string[], opts: BackfillOptions): B
       else if (HISTORY_TAGS.has(rec.tag)) keep = true;
       else if (AM_TAGS.has(rec.tag)) {
         const m = AM_APP_RE.exec(rec.message);
-        keep = !!m && opts.isAppProcess(m[1]!);
+        const app = m?.[1] ?? parseAppStartup(rec.tag, rec.message)?.app;
+        keep = !!app && opts.isAppProcess(app);
       }
       if (keep) history += 1;
     }
@@ -644,6 +696,8 @@ export interface AndroidPipelineHooks {
   onProcessEvent?(ev: ProcessEvent): void;
   /** pid → process name (for filling `process`). */
   processName?(pid: number): string | undefined;
+  /** Process name → its live pid (start-time lines are attributed to the app's process). */
+  pidOf?(name: string): number | undefined;
 }
 
 /**
@@ -750,6 +804,17 @@ export class AndroidLogPipeline {
       };
       // A kill in the background (cached app) is routine; one of the app on screen is what testers report.
       if (lmk.adj <= LMK_VISIBLE_ADJ && entry.level !== 'fatal') entry.level = 'error';
+      this.crashes.push(entry);
+      return;
+    }
+    const startup = parseAppStartup(rec.tag, rec.message);
+    if (startup) {
+      // system_server writes it about the app: show it with the app's lines.
+      const pid = this.hooks.pidOf?.(startup.app);
+      entry.process = startup.app;
+      entry.pid = pid;
+      entry.tid = undefined;
+      entry.data = { startup, reporterPid: rec.pid };
       this.crashes.push(entry);
       return;
     }

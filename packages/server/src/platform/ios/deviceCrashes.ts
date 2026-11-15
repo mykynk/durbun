@@ -15,6 +15,10 @@
  * ("Retired/Runner-2026-11-02-095019.ips"); nearly every report sits in Retired/. `--destination` is the
  * file to write (an existing folder there makes the copy fail). ProxiedDevice-<id>/ holds a paired Apple
  * Watch's reports: not this device's crashes.
+ *
+ * Where devicectl cannot read the folder (no Xcode 15+, an iPhone before iOS 17, Developer Mode off), a
+ * `CrashSource` built on libimobiledevice's idevicecrashreport serves the same listing from a local mirror
+ * (ideviceFallback.ts); `fallbackCrashSource` switches between the two.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,9 +45,76 @@ import { parseDevicectlFiles, type DevicectlFile, type DevicectlRunner } from '.
 export const CRASH_LOOKBACK_MS = CRASH_HISTORY_MS;
 const MAX_REPORT_BYTES = 8 * 1024 * 1024;
 
+/** Outcome of one listing; `via` names a fallback source (absent: devicectl). */
+export type CrashScanStatus = { ok: true; via?: string } | { ok: false; error: string; via?: string };
+
+/** Lists the device's crash folder and copies one file of the last listing to a local path. */
+export interface CrashSource {
+  /** Set for a fallback source ('idevicecrashreport'); devicectl leaves it out. */
+  readonly via?: string;
+  list(): Promise<{ ok: true; files: DevicectlFile[] } | { ok: false; error: string }>;
+  copy(file: DevicectlFile, dest: string): Promise<{ ok: boolean; error?: string }>;
+}
+
+export function devicectlCrashSource(udid: string, devicectl: DevicectlRunner): CrashSource {
+  return {
+    async list() {
+      const r = await devicectl(['device', 'info', 'files', '--device', udid, '--domain-type', 'systemCrashLogs'], 60_000);
+      return r.ok ? { ok: true, files: parseDevicectlFiles(r.json) } : { ok: false, error: r.error ?? 'devicectl failed' };
+    },
+    async copy(file, dest) {
+      const r = await devicectl(
+        ['device', 'copy', 'from', '--device', udid, '--domain-type', 'systemCrashLogs', '--source', file.relativePath, '--destination', dest],
+        60_000,
+      );
+      return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'devicectl failed' };
+    },
+  };
+}
+
+/** After this many listings on the fallback, the primary source is tried again (Developer Mode turned on…). */
+export const RETRY_PRIMARY_EVERY = 10;
+
+/**
+ * devicectl first; when its listing fails and a fallback exists, the fallback's listing is used (and its copies,
+ * until a later listing switches back). While on the fallback the primary is retried every RETRY_PRIMARY_EVERY
+ * listings. Without a primary (devicectl missing) the fallback alone.
+ */
+export function fallbackCrashSource(primary: CrashSource | undefined, fallback: CrashSource | undefined): CrashSource | undefined {
+  if (!primary || !fallback) return primary ?? fallback;
+  let active: CrashSource = primary;
+  let sinceSwitch = 0;
+  const source: CrashSource = {
+    get via() {
+      return active.via;
+    },
+    async list() {
+      if (active === fallback && ++sinceSwitch < RETRY_PRIMARY_EVERY) return fallback.list();
+      const r = await primary.list();
+      if (r.ok) {
+        active = primary;
+        return r;
+      }
+      const f = await fallback.list();
+      if (!f.ok) {
+        active = primary;
+        return { ok: false, error: `${r.error} · ${fallback.via ?? 'fallback'}: ${f.error}` };
+      }
+      active = fallback;
+      sinceSwitch = 0;
+      return f;
+    },
+    copy: (file, dest) => active.copy(file, dest),
+  };
+  return source;
+}
+
 export interface DeviceCrashWatcherOptions {
   udid: string;
-  devicectl: DevicectlRunner;
+  /** The device's crash folder through devicectl (used when `source` is absent). */
+  devicectl?: DevicectlRunner;
+  /** Where listings and copies come from (default: devicectl). */
+  source?: CrashSource;
   /** Where copies go: `<tempDir>/crash/<udid>`. */
   destDir: string;
   logger: Logger;
@@ -59,7 +130,7 @@ export interface DeviceCrashWatcherOptions {
    */
   onJetsam?(report: JetsamReport, file: string): boolean;
   /** Outcome of every listing (the device's crash-report reader state). */
-  onStatus?(status: { ok: true } | { ok: false; error: string }): void;
+  onStatus?(status: CrashScanStatus): void;
   intervalMs?: number;
   lookbackMs?: number;
   maxCopiesPerScan?: number;
@@ -105,10 +176,14 @@ export class DeviceCrashWatcher {
   private rescan?: Promise<void>;
   private stopped = false;
   private readonly now: () => number;
+  private readonly source: CrashSource;
 
   constructor(private readonly opts: DeviceCrashWatcherOptions) {
     this.now = opts.now ?? Date.now;
     this.seen = opts.seen ?? new Set();
+    const source = opts.source ?? (opts.devicectl ? devicectlCrashSource(opts.udid, opts.devicectl) : undefined);
+    if (!source) throw new Error('DeviceCrashWatcher needs a crash source');
+    this.source = source;
   }
 
   start(): void {
@@ -123,7 +198,7 @@ export class DeviceCrashWatcher {
     this.poller = undefined;
   }
 
-  private status(s: { ok: true } | { ok: false; error: string }): void {
+  private status(s: CrashScanStatus): void {
     try {
       this.opts.onStatus?.(s);
     } catch (e) {
@@ -149,18 +224,19 @@ export class DeviceCrashWatcher {
 
   private async scanOnce(): Promise<void> {
     if (this.stopped) return;
-    const { udid, devicectl, logger } = this.opts;
-    const r = await devicectl(['device', 'info', 'files', '--device', udid, '--domain-type', 'systemCrashLogs'], 60_000);
+    const { udid, logger } = this.opts;
+    const r = await this.source.list();
     if (this.stopped) return;
+    const via = this.source.via;
     if (!r.ok) {
-      logger.debug(`crash report listing for ${udid} failed: ${r.error ?? 'unknown error'}`);
-      this.status({ ok: false, error: r.error ?? 'devicectl failed' });
+      logger.debug(`crash report listing for ${udid} failed: ${r.error}`);
+      this.status({ ok: false, error: r.error, ...(via ? { via } : {}) });
       return;
     }
-    this.status({ ok: true });
+    this.status({ ok: true, ...(via ? { via } : {}) });
     const cutoff = this.now() - (this.opts.lookbackMs ?? CRASH_LOOKBACK_MS);
     const candidates: Array<{ file: DevicectlFile; when: number; named: boolean; jetsam: boolean }> = [];
-    for (const file of parseDevicectlFiles(r.json)) {
+    for (const file of r.files) {
       // iOS moves reports into Retired/ under the same name: one key per report, not per path.
       if (file.isDirectory || PROXIED_DEVICE.test(file.relativePath) || this.seen.has(reportKey(file))) continue;
       // Memory kills (Jetsam) name the killed processes inside: copied when the session reads them.
@@ -181,7 +257,6 @@ export class DeviceCrashWatcher {
       candidates.push({ file, when, named, jetsam });
     }
     // Reports named after a third-party executable first: other crashes (system daemons, extensions not seen
-    // running) must not delay them when a scan has more than it copies.
     // running) must not delay them when a scan has more than it copies. Memory kills come last.
     candidates.sort((a, b) => Number(b.named) - Number(a.named) || Number(a.jetsam) - Number(b.jetsam) || a.when - b.when);
     const max = this.opts.maxCopiesPerScan ?? 20;
@@ -192,7 +267,7 @@ export class DeviceCrashWatcher {
   }
 
   private async fetch(file: DevicectlFile, jetsam = false): Promise<void> {
-    const { udid, devicectl, logger, destDir } = this.opts;
+    const { udid, logger, destDir } = this.opts;
     const key = reportKey(file);
     this.seen.add(key);
     const dest = path.join(destDir, localCrashName(file.name));
@@ -204,10 +279,7 @@ export class DeviceCrashWatcher {
       logger.debug(`cannot create ${destDir}: ${(e as Error).message}`);
       return;
     }
-    const r = await devicectl(
-      ['device', 'copy', 'from', '--device', udid, '--domain-type', 'systemCrashLogs', '--source', file.relativePath, '--destination', dest],
-      60_000,
-    );
+    const r = await this.source.copy(file, dest);
     if (this.stopped) {
       // The device session ended meanwhile: leave the file to the next session of this device.
       this.seen.delete(key);

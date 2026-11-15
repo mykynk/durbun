@@ -175,7 +175,7 @@ describe('runAndroidAction', () => {
       run: () => bad('adb: failed to install app-debug.apk: Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]'),
     });
     const r = await runAndroidAction(target(adb), 'app-install', { file: apk });
-    expect(r).toMatchObject({ ok: false, code: 'action.installFailed' });
+    expect(r).toMatchObject({ ok: false, code: 'action.install.noSpace' });
     expect(r.message).toBe('Install failed: INSTALL_FAILED_INSUFFICIENT_STORAGE');
     const missing = await runAndroidAction(target(adb), 'app-install', { file: path.join(dir, 'nope.apk') });
     expect(missing.code).toBe('action.fileNotFound');

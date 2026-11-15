@@ -122,9 +122,12 @@ export const SERVER_CODES = {
     'sdk.portBusy',
     'sdk.listenFailed',
     'demo.startFailed',
+    'server.dataDirInUse',
     'replay.bodyTruncated',
     'replay.bodyMissing',
     'replay.bodyDropped',
+    'replay.tlsUnverified',
+    'replay.tlsRejected',
     'vm.attached',
     'vm.detached',
     'vm.attachFailed',
@@ -172,7 +175,15 @@ export const SERVER_CODES = {
     'logs.idevicesyslogMissing',
   ],
   /** `reply.code` of successful `device.action` replies (`DeviceActionResult.code`). */
-  actionResults: ['action.done', 'action.listApps', 'action.screenshot.saved', 'action.recording.saved'],
+  actionResults: [
+    'action.done',
+    'action.listApps',
+    'action.screenshot.saved',
+    'action.recording.saved',
+    'action.settingRestored',
+    'action.nothingToRestore',
+    'action.backgroundKilled',
+  ],
   /** `DeviceActionResult.code` of failed device actions. */
   actionErrors: [
     'action.failed',
@@ -195,6 +206,18 @@ export const SERVER_CODES = {
     'action.developerModeOff',
     'action.stopNotAllowed',
     'action.osTooOld',
+    'action.install.signatureMismatch',
+    'action.install.downgrade',
+    'action.install.userRestricted',
+    'action.install.noSpace',
+    'action.install.noMatchingAbis',
+    'action.install.olderSdk',
+    'action.install.missingSplit',
+    'action.install.notSigned',
+    'action.install.verificationFailed',
+    'action.install.obbFailed',
+    'action.appNotRunning',
+    'action.backgroundKillRefused',
   ],
   /** `DeviceInfo.readers.<id>.code`: why an SDK-less reader (crash records, frame stats) does not work. */
   readers: [
@@ -203,6 +226,7 @@ export const SERVER_CODES = {
     'reader.crashReports.developerModeOff',
     'reader.crashReports.failed',
     'reader.crashReports.osTooOld',
+    'reader.crashReports.viaLibimobiledevice',
     'reader.frameStats.noData',
     'reader.frameStats.unsupported',
   ],
@@ -232,6 +256,7 @@ export const SERVER_CODES = {
     'slack.invalid',
     'slack.invalidUrl',
     'slack.notConfigured',
+    'slack.rateLimited',
     'slack.rejected',
     'slack.saveFailed',
     'slack.unreachable',
@@ -242,6 +267,10 @@ export const SERVER_CODES = {
   ],
   /** Flow preflight issues about requests to this Mac (`FlowPreflightIssue.code`, params { host }). */
   flowTargets: ['preflight.http.ownServer', 'preflight.http.thisMac'],
+  /** Certificates of HTTPS test servers: a step error, the environment's preflight notes, a refused save. */
+  flowTls: ['flow.http.tls', 'preflight.env.insecureTls', 'preflight.env.customCa', 'env.tls.invalidCa'],
+  /** Flow validation warning for a regular expression that can backtrack exponentially (params { pattern, param }). */
+  flowRegex: ['flow.regex.unsafe'],
   /** Flows, packages and backups (flowCodes.ts). */
   ...FLOW_CODES,
 } as const satisfies Record<string, readonly string[]>;
@@ -380,9 +409,12 @@ registerMessages('code', {
       'SDK portu açılamadı. Simülatördeki ve Wi-Fi üzerinden bağlanan uygulamalar Dürbün’e ulaşamaz (Android’de USB bağlantısı yine çalışır).',
     ],
     'demo.startFailed': ['Demo modu başlatılamadı: {reason}', 'Demo modu başlatılamadı'],
+    'server.dataDirInUse': ['Bu veri klasörünü {port} portundaki Dürbün kullanıyor', 'Bu veri klasörünü başka bir Dürbün kullanıyor'],
     'replay.bodyTruncated': 'Yakalanan istek gövdesi kırpılmıştı; istek kırpılmış gövdeyle gönderildi',
     'replay.bodyMissing': 'İstek gövdesi yakalanmamış ya da bellekten atılmış; istek gövdesiz gönderildi',
     'replay.bodyDropped': 'GET ve HEAD istekleri gövde taşıyamaz; gövde çıkarıldı',
+    'replay.tlsUnverified': 'İstek, sunucu sertifikası doğrulanmadan gönderildi',
+    'replay.tlsRejected': 'Sunucunun sertifikası kabul edilmedi. Doğrulamadan yeniden göndermeyi yalnızca güvendiğiniz bir test sunucusu için kullanın',
 
     /* ── command errors ── */
     'command.invalid': ['Geçersiz komut: {detail}', 'Geçersiz komut'],
@@ -420,6 +452,20 @@ registerMessages('code', {
       'Bir adım Dürbün’ün kendi sunucusuna istek gönderiyor; Dürbün kendisine istek göndermez',
     ],
     'preflight.http.thisMac': ['Bir adım bu Mac’teki bir servise ({host}) istek gönderiyor', 'Bir adım bu Mac’teki bir servise istek gönderiyor'],
+    'flow.http.tls': [
+      '{host} sunucusunun sertifikası kabul edilmedi ({reason}). Bu bir test sunucusuysa ortamın sertifika ayarını değiştirin',
+      'Sunucunun sertifikası kabul edilmedi. Bu bir test sunucusuysa ortamın sertifika ayarını değiştirin',
+    ],
+    'preflight.env.insecureTls': [
+      '{env} ortamı sunucu sertifikalarını doğrulamıyor: HTTP adımları kendini sizin sunucunuz gibi gösteren bir sunucuyu da kabul eder',
+      'Seçilen ortam sunucu sertifikalarını doğrulamıyor: HTTP adımları kendini sizin sunucunuz gibi gösteren bir sunucuyu da kabul eder',
+    ],
+    'preflight.env.customCa': ['{env} ortamı HTTPS adımlarında kendi sertifikalarına da güveniyor', 'Seçilen ortam HTTPS adımlarında kendi sertifikalarına da güveniyor'],
+    'env.tls.invalidCa': 'Güvenilen sertifika metninde PEM sertifikası yok (-----BEGIN CERTIFICATE----- ile başlamalı)',
+    'flow.regex.unsafe': [
+      '"{pattern}" düzenli ifadesi bazı metinlerde çok uzun sürebilir; tekrar içinde tekrar kullanmadan yazın',
+      'Bu düzenli ifade bazı metinlerde çok uzun sürebilir; tekrar içinde tekrar kullanmadan yazın',
+    ],
     'demo.unavailable': 'Bu sürümde demo modu yok',
     'demo.timeout': 'Demo modu zamanında açılıp kapanmadı',
     'demo.unsupportedAction': 'Demo cihazları bu işlemi desteklemiyor',
@@ -434,6 +480,9 @@ registerMessages('code', {
     'action.listApps': 'Uygulama listesi alındı',
     'action.screenshot.saved': ['Ekran görüntüsü kaydedildi ({size})', 'Ekran görüntüsü kaydedildi'],
     'action.recording.saved': 'Ekran kaydı kaydedildi',
+    'action.settingRestored': 'Ayar, Dürbün değiştirmeden önceki değerine döndü',
+    'action.nothingToRestore': 'Dürbün bu ayarı değiştirmedi; geri alınacak bir şey yok',
+    'action.backgroundKilled': 'Uygulama arka planda sonlandırıldı. Son uygulamalardan açıp durumunu geri getirip getirmediğine bakın.',
     'action.invalidParams': ['Geçersiz parametre: {detail}', 'Geçersiz parametre'],
     'action.recording.busy': 'Bu cihazda zaten bir ekran kaydı sürüyor',
     'action.recording.notRunning': 'Bu cihazda süren bir ekran kaydı yok',
@@ -445,6 +494,24 @@ registerMessages('code', {
       'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor ({detail})',
       'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor.',
     ],
+    'action.install.signatureMismatch':
+      'Telefonda bu uygulamanın başka bir imzayla kurulmuş bir sürümü var (örneğin mağaza sürümü). Önce onu kaldırın, sonra tekrar kurun; kaldırınca uygulamanın verileri silinir.',
+    'action.install.downgrade': 'Telefondaki sürüm bundan daha yeni. Eski sürümü kurmak için önce uygulamayı kaldırın; kaldırınca verileri silinir.',
+    'action.install.userRestricted':
+      'Telefon USB üzerinden kurulumu reddetti. Telefondaki onay penceresini kabul edin; Xiaomi’de Geliştirici seçenekleri → “USB üzerinden yükle”yi açın.',
+    'action.install.noSpace': 'Telefonda yeterli boş alan yok. Yer açıp tekrar deneyin.',
+    'action.install.noMatchingAbis': [
+      'Bu paket telefonun işlemcisine uygun yerel kod içermiyor ({detail})',
+      'Bu paket telefonun işlemcisine uygun yerel kod içermiyor (örneğin yalnızca x86 emülatör için derlenmiş).',
+    ],
+    'action.install.olderSdk': 'Bu uygulama telefondakinden daha yeni bir Android sürümü istiyor.',
+    'action.install.missingSplit': 'Uygulamanın parçalı APK’larından biri eksik. Tek .apk yerine .apks dosyasını (bundletool) kurun.',
+    'action.install.notSigned': 'APK imzalı değil ya da imzası bozuk. İmzalı bir build kurun.',
+    'action.install.verificationFailed': 'Telefondaki uygulama doğrulaması (örneğin Play Protect) kurulumu engelledi.',
+    'action.install.obbFailed': ['Uygulama kuruldu ama veri dosyası (OBB) kopyalanamadı: {detail}', 'Uygulama kuruldu ama veri dosyası (OBB) kopyalanamadı.'],
+    'action.appNotRunning': 'Uygulama şu an çalışmıyor; önce açın.',
+    'action.backgroundKillRefused':
+      'Sistem uygulamayı arka planda sonlandırmadı; bir ön plan hizmeti ya da açık bir pencere onu canlı tutuyor.',
     'action.unsupported': 'Bu cihaz bu işlemi desteklemiyor',
     'action.deviceOffline': 'Cihaz çevrimdışı ya da kapalı',
     'action.deviceNotFound': 'Cihaz bulunamadı',
@@ -452,8 +519,11 @@ registerMessages('code', {
     'action.screenshotRefused': 'Cihaz ekran görüntüsünü reddetti; Geliştirici Modu ya da geliştirici disk görüntüsü gerekebilir',
     'action.appNotFound': 'Uygulama bu cihazda yüklü değil',
     'action.fileNotFound': 'Dosya bulunamadı',
-    'action.unsupportedFile': 'Bu dosya kurulamaz: Android’de .apk, iOS’ta .app ya da .ipa gerekir (simülatörde .zip de olur)',
-    'action.inputTextAscii': 'Android “input text” yalnızca ASCII karakterleri yazabilir (ç, ğ, ı, ö, ş, ü desteklenmez)',
+    'action.unsupportedFile': 'Bu dosya kurulamaz: Android’de .apk, .apks ya da .xapk, iOS’ta .app ya da .ipa gerekir (simülatörde .zip de olur)',
+    'action.inputTextAscii': [
+      'Android “input text” yalnızca ASCII karakterleri yazabilir; şunlar yazılamaz: {detail}',
+      'Android “input text” yalnızca ASCII karakterleri yazabilir (ç, ğ, ı, ö, ş, ü desteklenmez)',
+    ],
     'action.installFailed': ['Kurulum başarısız oldu: {detail}', 'Kurulum başarısız oldu'],
     'action.launchFailed': ['Uygulama başlatılamadı: {detail}', 'Uygulama başlatılamadı'],
     'action.uninstallFailed': ['Uygulama kaldırılamadı: {detail}', 'Uygulama kaldırılamadı'],
@@ -482,6 +552,7 @@ registerMessages('code', {
     'slack.invalid': 'Gönderilecek mesaj boş ya da çok uzun',
     'slack.invalidUrl': 'Webhook adresi https:// ile başlamalı',
     'slack.notConfigured': 'Slack bağlı değil. Ayarlar’dan bir webhook adresi ekleyin',
+    'slack.rateLimited': ['Slack şu an mesajları sınırlıyor. {detail} sonra yeniden gönderin', 'Slack şu an mesajları sınırlıyor. Biraz sonra yeniden gönderin'],
     'slack.rejected': ['Slack mesajı kabul etmedi: {detail}', 'Slack mesajı kabul etmedi'],
     'slack.saveFailed': ['Slack ayarları kaydedilemedi: {detail}', 'Slack ayarları kaydedilemedi'],
     'slack.unreachable': ['Slack’e ulaşılamadı: {detail}', 'Slack’e ulaşılamadı'],
@@ -495,12 +566,14 @@ registerMessages('code', {
     'reader.crashReports.dropboxRefused':
       'Bu cihaz Android’in çökme kayıtlarının (dumpsys dropbox) okunmasına izin vermiyor; bazı üreticiler bunu kapatır. Canlı çökmeler cihaz logunda yine görünür, önceki açılışların kayıtları görünmez.',
     'reader.crashReports.devicectlMissing':
-      'iPhone’un çökme raporlarını (.ips) okumak için Xcode’un devicectl aracı gerekir; bu Mac’te bulunamadı. Xcode 15 ya da daha yenisi kurulunca raporlar kendiliğinden gelir.',
+      'iPhone’un çökme raporlarını (.ips) okumak için Xcode 15 ya da daha yenisi (devicectl) veya libimobiledevice’in idevicecrashreport aracı gerekir; ikisi de bu Mac’te bulunamadı. Birini kurun (brew install libimobiledevice); raporlar kendiliğinden gelir.',
     'reader.crashReports.developerModeOff':
       'iPhone’da Geliştirici Modu kapalı olduğu için çökme raporları (.ips) okunamıyor. Ayarlar → Gizlilik ve Güvenlik → Geliştirici Modu açılıp telefon yeniden başlatılınca raporlar gelir.',
     'reader.crashReports.failed': ['Cihazın çökme kayıtları okunamadı: {detail}', 'Cihazın çökme kayıtları şu an okunamıyor.'],
     'reader.crashReports.osTooOld':
       'Çökme raporları ve kurulu uygulamalar Xcode’un devicectl aracıyla okunur; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor. Canlı loglar idevicesyslog ile yine gelir.',
+    'reader.crashReports.viaLibimobiledevice':
+      'devicectl bu iPhone’un çökme raporlarını okuyamadığı için raporlar idevicecrashreport (libimobiledevice) ile okunuyor; yeni bir rapor 5 dakika içinde görünür.',
     'reader.frameStats.noData':
       'CPU ve bellek cihazın süreç listesinden okunur. FPS ise bu cihazda dışarıdan ölçülemiyor: ne gfxinfo ne SurfaceFlinger bu uygulama için kare verdi; FPS için SDK ya da Flutter debug oturumu gerekir.',
     'reader.frameStats.unsupported': 'Bu cihaz kare istatistiklerini dışarıya vermiyor; FPS ve takılan kareler yalnızca uygulamanın içinden (SDK ya da Flutter debug) ölçülür.',
@@ -541,7 +614,7 @@ registerMessages('code', {
       deviceState: { offline: 'çevrimdışı', unauthorized: 'izin bekleniyor' },
       /** logs.scopeNotApplied `reason`: why app lines cannot be told from system lines. */
       scopeWhy: {
-        devicectlMissing: 'uygulama satırlarını ayırmak için Xcode 15 ya da daha yenisi (devicectl) gerekir',
+        devicectlMissing: 'uygulama satırlarını ayırmak için Xcode 15 ya da daha yenisi (devicectl) ya da ideviceinstaller (libimobiledevice) gerekir',
         appListFailed: 'kurulu uygulamalar devicectl ile okunamadığı için uygulama satırları ayrılamıyor',
         osTooOld: 'devicectl kurulu uygulamaları iOS 17’den itibaren okur; bu cihaz daha eski bir iOS kullandığı için uygulama satırları ayrılamıyor',
       },
@@ -717,9 +790,12 @@ registerMessages('code', {
       'The SDK port could not be opened. Apps on simulators or Wi-Fi cannot connect (Android over USB still works).',
     ],
     'demo.startFailed': ['Demo mode could not start: {reason}', 'Demo mode could not start'],
+    'server.dataDirInUse': ['This data folder is in use by the Dürbün on port {port}', 'This data folder is in use by another Dürbün'],
     'replay.bodyTruncated': 'The captured request body was truncated; the request was sent with the truncated body',
     'replay.bodyMissing': 'The request body was not captured or was evicted; the request was sent without a body',
     'replay.bodyDropped': 'GET and HEAD requests cannot carry a body; it was dropped',
+    'replay.tlsUnverified': 'Sent without verifying the server certificate',
+    'replay.tlsRejected': 'The server certificate was not accepted. Resend without verifying only to a test server you trust',
 
     /* ── command errors ── */
     'command.invalid': ['Invalid command: {detail}', 'Invalid command'],
@@ -757,6 +833,20 @@ registerMessages('code', {
       'A step sends a request to Dürbün’s own server; Dürbün does not send requests to itself',
     ],
     'preflight.http.thisMac': ['A step sends a request to a service on this Mac ({host})', 'A step sends a request to a service on this Mac'],
+    'flow.http.tls': [
+      'The certificate of {host} was not accepted ({reason}). If this is a test server, change the environment’s certificate setting',
+      'The server certificate was not accepted. If this is a test server, change the environment’s certificate setting',
+    ],
+    'preflight.env.insecureTls': [
+      '{env} does not verify server certificates: HTTP steps also accept a server pretending to be yours',
+      'The chosen environment does not verify server certificates: HTTP steps also accept a server pretending to be yours',
+    ],
+    'preflight.env.customCa': ['{env} also trusts its own certificates for HTTPS steps', 'The chosen environment also trusts its own certificates for HTTPS steps'],
+    'env.tls.invalidCa': 'The trusted certificate text holds no PEM certificate (it starts with -----BEGIN CERTIFICATE-----)',
+    'flow.regex.unsafe': [
+      'The regular expression "{pattern}" can take very long on some texts; write it without a repeat inside a repeat',
+      'This regular expression can take very long on some texts; write it without a repeat inside a repeat',
+    ],
     'demo.unavailable': 'Demo mode is not available in this build',
     'demo.timeout': 'Demo mode did not start or stop in time',
     'demo.unsupportedAction': 'Demo devices do not support this action',
@@ -771,6 +861,9 @@ registerMessages('code', {
     'action.listApps': 'App list loaded',
     'action.screenshot.saved': ['Screenshot saved ({size})', 'Screenshot saved'],
     'action.recording.saved': 'Screen recording saved',
+    'action.settingRestored': 'The setting is back to its value from before Dürbün changed it',
+    'action.nothingToRestore': 'Dürbün has not changed this setting; there is nothing to restore',
+    'action.backgroundKilled': 'The app was ended in the background. Open it from Recents and check that it restores its state.',
     'action.invalidParams': ['Invalid parameter: {detail}', 'Invalid parameter'],
     'action.recording.busy': 'A screen recording is already running on this device',
     'action.recording.notRunning': 'No screen recording is running on this device',
@@ -782,6 +875,23 @@ registerMessages('code', {
       'This action uses Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS ({detail})',
       'This action uses Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS.',
     ],
+    'action.install.signatureMismatch':
+      'The phone has this app installed with another signature (a store build, for example). Uninstall it first, then install again; uninstalling deletes the app’s data.',
+    'action.install.downgrade': 'The phone has a newer version. To install the older one, uninstall the app first; that deletes its data.',
+    'action.install.userRestricted':
+      'The phone refused the install over USB. Accept the prompt on the phone; on Xiaomi phones turn on Developer options → “Install via USB”.',
+    'action.install.noSpace': 'There is not enough free space on the phone. Free some space and try again.',
+    'action.install.noMatchingAbis': [
+      'This package has no native code for the phone’s processor ({detail})',
+      'This package has no native code for the phone’s processor (built for an x86 emulator only, for example).',
+    ],
+    'action.install.olderSdk': 'This app needs a newer Android version than the phone runs.',
+    'action.install.missingSplit': 'One of the app’s split APKs is missing. Install the .apks file (bundletool) instead of a single .apk.',
+    'action.install.notSigned': 'The APK is not signed or its signature is broken. Install a signed build.',
+    'action.install.verificationFailed': 'App verification on the phone (Play Protect, for example) blocked the install.',
+    'action.install.obbFailed': ['The app was installed, but its data file (OBB) could not be copied: {detail}', 'The app was installed, but its data file (OBB) could not be copied.'],
+    'action.appNotRunning': 'The app is not running; open it first.',
+    'action.backgroundKillRefused': 'The system did not end the app in the background; a foreground service or an open window keeps it alive.',
     'action.unsupported': 'This device does not support this action',
     'action.deviceOffline': 'The device is offline or not booted',
     'action.deviceNotFound': 'Device not found',
@@ -789,8 +899,11 @@ registerMessages('code', {
     'action.screenshotRefused': 'The device refused the screenshot; Developer Mode or the developer disk image may be required',
     'action.appNotFound': 'The app is not installed on this device',
     'action.fileNotFound': 'File not found',
-    'action.unsupportedFile': 'This file cannot be installed: Android needs an .apk, iOS an .app or .ipa (a .zip also works on simulators)',
-    'action.inputTextAscii': 'Android “input text” only supports printable ASCII characters',
+    'action.unsupportedFile': 'This file cannot be installed: Android needs an .apk, .apks or .xapk, iOS an .app or .ipa (a .zip also works on simulators)',
+    'action.inputTextAscii': [
+      'Android “input text” only types ASCII characters; these cannot be typed: {detail}',
+      'Android “input text” only types ASCII characters (ç, ğ, ı, ö, ş, ü cannot be typed)',
+    ],
     'action.installFailed': ['Install failed: {detail}', 'Install failed'],
     'action.launchFailed': ['Could not launch the app: {detail}', 'Could not launch the app'],
     'action.uninstallFailed': ['Could not uninstall the app: {detail}', 'Could not uninstall the app'],
@@ -819,6 +932,7 @@ registerMessages('code', {
     'slack.invalid': 'The message to send is empty or too long',
     'slack.invalidUrl': 'The webhook URL must start with https://',
     'slack.notConfigured': 'Slack is not connected. Add a webhook URL in Settings',
+    'slack.rateLimited': ['Slack is limiting messages for now. Send again in {detail}', 'Slack is limiting messages for now. Send again in a moment'],
     'slack.rejected': ['Slack refused the message: {detail}', 'Slack refused the message'],
     'slack.saveFailed': ['Could not save the Slack settings: {detail}', 'Could not save the Slack settings'],
     'slack.unreachable': ['Could not reach Slack: {detail}', 'Could not reach Slack'],
@@ -831,12 +945,14 @@ registerMessages('code', {
     'reader.crashReports.dropboxRefused':
       'This device does not allow reading Android’s crash records (dumpsys dropbox); some manufacturers block it. Live crashes still show up in the device log; records of earlier launches do not.',
     'reader.crashReports.devicectlMissing':
-      'Reading the iPhone’s crash reports (.ips) takes Xcode’s devicectl tool, which was not found on this Mac. Once Xcode 15 or newer is installed, the reports come in by themselves.',
+      'Reading the iPhone’s crash reports (.ips) takes Xcode 15 or newer (devicectl) or libimobiledevice’s idevicecrashreport; neither was found on this Mac. Install one (brew install libimobiledevice) and the reports come in by themselves.',
     'reader.crashReports.developerModeOff':
       'Crash reports (.ips) cannot be read while Developer Mode is off on the iPhone. Once it is turned on in Settings → Privacy & Security → Developer Mode and the phone has restarted, the reports come in.',
     'reader.crashReports.failed': ['The device’s crash records could not be read: {detail}', 'The device’s crash records cannot be read right now.'],
     'reader.crashReports.osTooOld':
       'Crash reports and installed apps are read with Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS. Live logs still come through idevicesyslog.',
+    'reader.crashReports.viaLibimobiledevice':
+      'devicectl cannot read this iPhone’s crash reports, so they are read with idevicecrashreport (libimobiledevice); a new report shows up within 5 minutes.',
     'reader.frameStats.noData':
       'CPU and memory are read from the device’s process list. FPS cannot be measured from outside on this device: neither gfxinfo nor SurfaceFlinger gave frames for this app; FPS needs the SDK or a Flutter debug session.',
     'reader.frameStats.unsupported': 'This device does not expose frame stats; FPS and janky frames can only be measured inside the app (SDK or Flutter debug).',
@@ -873,7 +989,7 @@ registerMessages('code', {
       connection: { usb: 'USB', wifi: 'Wi-Fi' },
       deviceState: { offline: 'offline', unauthorized: 'waiting for permission' },
       scopeWhy: {
-        devicectlMissing: 'telling app lines apart needs Xcode 15 or newer (devicectl)',
+        devicectlMissing: 'telling app lines apart needs Xcode 15 or newer (devicectl) or ideviceinstaller (libimobiledevice)',
         appListFailed: 'the installed apps could not be read with devicectl, so app lines cannot be told apart',
         osTooOld: 'devicectl reads installed apps from iOS 17 on; this device runs an older iOS, so app lines cannot be told apart',
       },
@@ -1065,7 +1181,7 @@ const PREPARE: Record<string, Preparer> = {
   'logs.connectionRestored': (p, lang) => connectionGap(p, lang, 'restored', /log lines from that moment are missing/),
   'logs.scopeNotApplied': (p, lang) => {
     const reason = str(p.reason);
-    return { params: { ...p, why: reason === 'devicectlMissing' || reason === 'appListFailed' ? part(lang, `scopeWhy.${reason}`) : '' } };
+    return { params: { ...p, why: reason === 'devicectlMissing' || reason === 'appListFailed' || reason === 'osTooOld' ? part(lang, `scopeWhy.${reason}`) : '' } };
   },
   'vm.detached': (p, lang) => {
     const reason = str(p.reason);

@@ -13,7 +13,7 @@
  * the program that started it, which then kills ours back). On a mismatch the driver uses an adb of the
  * server's version found on this Mac (unless settings.adbPath names one), else it waits and says why.
  */
-import type { ConnectionType, DeviceActionId, DeviceActionResult, DriverStatus, ServerSettings, ToolCheck } from '@durbun/protocol';
+import type { ConnectionType, DeviceActionId, DeviceActionResult, DeviceSettingOverride, DriverStatus, ServerSettings, ToolCheck } from '@durbun/protocol';
 import type { DeviceDriver, DriverContext, Logger, PortForward } from '../../types';
 import { silentLogger } from '../../util/logger';
 import { failureText } from '../exec';
@@ -87,6 +87,8 @@ export class AndroidDriver implements DeviceDriver {
   private readonly dropboxCursors = new Map<string, DropboxCursor>();
   /** DeviceApp ids published, per device key — apps uninstalled while the phone was unplugged go at the replug. */
   private readonly publishedApps = new Map<string, Set<string>>();
+  /** Settings Dürbün changed, per device key — the old values can be put back after a replug too. */
+  private readonly settingOverrides = new Map<string, Map<DeviceActionId, DeviceSettingOverride>>();
   /** adb serial → device key, for serials whose phone had to be asked (Wi-Fi). */
   private readonly keyOfSerial = new Map<string, string>();
   private readonly resolving = new Set<string>();
@@ -173,7 +175,8 @@ export class AndroidDriver implements DeviceDriver {
       {
         id: 'adb',
         label,
-        status: version ? (tool.detail ? 'warn' : 'ok') : 'error',
+        // A warning only when settings.adbPath names something unusable (another adb was taken instead).
+        status: version ? (settings.adbPath?.trim() && tool.source !== 'settings' ? 'warn' : 'ok') : 'error',
         ...(version ? { version } : {}),
         path: tool.path,
         detail: version ? (tool.detail ?? sourceText(tool)) : `${tool.path} exists but "adb version" failed`,
@@ -481,6 +484,8 @@ export class AndroidDriver implements DeviceDriver {
     if (!cursor) this.dropboxCursors.set(key, (cursor = createDropboxCursor()));
     let published = this.publishedApps.get(key);
     if (!published) this.publishedApps.set(key, (published = new Set()));
+    let overrides = this.settingOverrides.get(key);
+    if (!overrides) this.settingOverrides.set(key, (overrides = new Map()));
     const session = new AndroidDeviceSession(
       {
         ctx,
@@ -488,6 +493,7 @@ export class AndroidDriver implements DeviceDriver {
         logger: this.logger,
         dropboxCursor: cursor,
         publishedApps: published,
+        settingOverrides: overrides,
         onHardwareSerial: (hw) => this.noteHardwareSerial(key, hw),
       },
       row,

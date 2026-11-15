@@ -89,6 +89,21 @@ All notable changes to Dürbün are listed here. The format follows
 - Apps closed by the system for memory are shown: iOS Jetsam reports and Android low-memory kills.
 - iPhones on iOS 16 and older say which actions need a newer iOS instead of failing without a reason.
 - Importing a masked recording says that `••••` values are masks.
+- iPhones that cannot use Xcode's device tools (iOS 16 and older, Developer Mode off, a Mac without Xcode 15)
+  get their app list and crash reports through `ideviceinstaller` and `idevicecrashreport` when these are
+  installed; System check lists both.
+- Android: `.apks` (bundletool) and `.xapk` files install like an `.apk`; Dürbün picks the parts that fit the
+  phone. A refused install says why: another signature, an older version, no space, blocked by a phone
+  setting.
+- Android: dark mode, font scale and animation changes remember the value from before. The device card
+  lists what Dürbün changed, and **Undo** puts it back.
+- Android: **End in background** ends an app the way the system does under memory pressure, to check that
+  it restores its state.
+- Android: the device card can enlarge the phone's log buffer to 16 MB, shows both connections of a phone
+  that is plugged in and on Wi-Fi, and names two phones of the same model apart.
+- Android: how long a screen took to open (`Displayed … +350ms`) is shown on its log line.
+- Apps the system closed for memory have their own badge and crash banner, and `is:oom` finds them.
+- System check gives the command that fixes a simulator problem.
 - Mac app: `.durbun` packages and backups and `.durbun.json` recordings open from Finder (double click, Open
   With, the Dock icon), also when Dürbün is not running; **File → Open…** (⌘O).
 - Mac app: **Help → Copy Diagnostic Info**; **Report an Issue…** fills in the version and environment and

@@ -10,7 +10,15 @@ export const IOS_FRAME_STATS_UNSUPPORTED: DeviceReaderState = {
 
 export const DEVICECTL_MISSING = {
   code: 'reader.crashReports.devicectlMissing',
-  detail: 'Xcode 15 or newer (xcrun devicectl) is needed to read crash reports from iOS devices.',
+  detail:
+    'Xcode 15 or newer (xcrun devicectl) or idevicecrashreport (brew install libimobiledevice) is needed to read crash reports from iOS devices.',
+} as const;
+
+/** Crash reports are read with libimobiledevice's idevicecrashreport because devicectl cannot (status 'ok'). */
+export const VIA_LIBIMOBILEDEVICE = {
+  code: 'reader.crashReports.viaLibimobiledevice',
+  detail:
+    'Read with idevicecrashreport (libimobiledevice) because devicectl cannot read them on this iPhone; new reports show up within about 5 minutes.',
 } as const;
 
 /** A devicectl listing failed while the device reports Developer Mode off (the likely cause). */

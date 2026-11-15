@@ -237,7 +237,7 @@ describe('IosDeviceDriver · round-2 verification', () => {
     await start({ devicectl: run, timing: { crashStartDelayMs: 60_000 } });
     await waitFor(() => system('logs.scopeNotApplied').length === 1);
     expect(system('logs.scopeNotApplied')[0]!.input.params).toMatchObject({ reason: 'appListFailed' });
-    expect(system('logs.scopeNotApplied')[0]!.input.message).toContain('could not be read with devicectl');
+    expect(system('logs.scopeNotApplied')[0]!.input.message).toContain('installed apps could not be read');
   });
 
   it('scope applied (apps listed): nothing is said', async () => {

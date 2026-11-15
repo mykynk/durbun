@@ -20,6 +20,7 @@ import {
 import { sigintRecording, type RecordingProcess, type ScreenRecorder } from '../shared/screenRecord';
 import { tailLines } from '../shared/text';
 import { contentSizeForScale, CONTENT_SIZES, parseListApps, simctl, XCRUN } from './simctl';
+import type { RunOptions, RunResult } from '../exec';
 
 export const SIM_ACTIONS: DeviceActionId[] = [
   'screenshot',
@@ -48,7 +49,11 @@ export interface SimActionTarget {
   ctx: DriverContext;
   restartLogs(): Promise<void>;
   recorder: ScreenRecorder;
+  /** Tests: a fake `xcrun simctl` (default the real one). */
+  simctl?: (args: string[], opts?: RunOptions) => Promise<RunResult<string>>;
 }
+
+const simOf = (t: Pick<SimActionTarget, 'simctl'>) => t.simctl ?? simctl;
 
 function simError(r: { stdout: string; stderr: string; error?: string; code: number | null }): string {
   // simctl prints "An error was encountered processing the command (domain=…, code=…):\n<reason>"
@@ -77,7 +82,7 @@ export async function runSimAction(
       await ensureDir(t.ctx.tempDir);
       const name = tempFileName('screenshot', t.label, 'png');
       const file = path.join(t.ctx.tempDir, name);
-      const r = await simctl(['io', udid, 'screenshot', '--type=png', file], { timeoutMs: 30_000 });
+      const r = await simOf(t)(['io', udid, 'screenshot', '--type=png', file], { timeoutMs: 30_000 });
       const png = await fs.promises.readFile(file).catch(() => undefined);
       if (!r.ok || !png || !isPng(png)) {
         await fs.promises.rm(file, { force: true });
@@ -89,13 +94,13 @@ export async function runSimAction(
     case 'open-url': {
       const url = str(params, 'url');
       if (!url || url.length > 4096) return fail('A URL is required', 'action.invalidParams');
-      const r = await simctl(['openurl', udid, url]);
+      const r = await simOf(t)(['openurl', udid, url]);
       if (!r.ok) return fail(`Could not open the URL: ${simError(r)}`, 'action.openUrlFailed');
       return done(`Opened ${url}`);
     }
 
     case 'list-apps': {
-      const r = await simctl(['listapps', udid]);
+      const r = await simOf(t)(['listapps', udid]);
       if (!r.ok) return fail(`Could not list apps: ${simError(r)}`);
       const apps = parseListApps(r.stdout, bool(params, 'includeSystem') === true);
       return done(`${apps.length} apps`, 'action.listApps', apps);
@@ -104,7 +109,7 @@ export async function runSimAction(
     case 'app-launch': {
       const appId = needApp();
       if (typeof appId !== 'string') return appId;
-      const r = await simctl(['launch', udid, appId]);
+      const r = await simOf(t)(['launch', udid, appId]);
       if (!r.ok) return fail(`Could not launch ${appId}: ${simError(r)}`, 'action.launchFailed');
       return done(`Launched ${appId}`);
     }
@@ -112,7 +117,7 @@ export async function runSimAction(
     case 'app-stop': {
       const appId = needApp();
       if (typeof appId !== 'string') return appId;
-      const r = await simctl(['terminate', udid, appId]);
+      const r = await simOf(t)(['terminate', udid, appId]);
       if (!r.ok && !/found nothing to terminate|not running/i.test(`${r.stderr}${r.stdout}`)) {
         return fail(`Could not stop ${appId}: ${simError(r)}`);
       }
@@ -122,8 +127,8 @@ export async function runSimAction(
     case 'app-restart': {
       const appId = needApp();
       if (typeof appId !== 'string') return appId;
-      await simctl(['terminate', udid, appId]);
-      const r = await simctl(['launch', udid, appId]);
+      await simOf(t)(['terminate', udid, appId]);
+      const r = await simOf(t)(['launch', udid, appId]);
       if (!r.ok) return fail(`Could not launch ${appId}: ${simError(r)}`, 'action.launchFailed');
       return done(`Restarted ${appId}`);
     }
@@ -138,9 +143,9 @@ export async function runSimAction(
       const appId = needApp();
       if (typeof appId !== 'string') return appId;
       // simctl reports success for bundle ids that are not installed; check first.
-      const c = await simctl(['get_app_container', udid, appId]);
+      const c = await simOf(t)(['get_app_container', udid, appId]);
       if (!c.ok) return fail(`${appId} is not installed on this simulator`, 'action.appNotFound');
-      const r = await simctl(['uninstall', udid, appId], { timeoutMs: 60_000 });
+      const r = await simOf(t)(['uninstall', udid, appId], { timeoutMs: 60_000 });
       if (!r.ok) return fail(`Could not uninstall ${appId}: ${simError(r)}`, 'action.uninstallFailed');
       return done(`Uninstalled ${appId}`);
     }
@@ -151,7 +156,7 @@ export async function runSimAction(
     case 'appearance': {
       const mode = str(params, 'mode');
       if (mode !== 'dark' && mode !== 'light') return fail('mode must be "dark" or "light"', 'action.invalidParams');
-      const r = await simctl(['ui', udid, 'appearance', mode]);
+      const r = await simOf(t)(['ui', udid, 'appearance', mode]);
       if (!r.ok) return fail(`Could not switch appearance: ${simError(r)}`);
       return done(mode === 'dark' ? 'Dark mode on' : 'Light mode on');
     }
@@ -163,7 +168,7 @@ export async function runSimAction(
       if (explicit && CONTENT_SIZES.some(([n]) => n === explicit)) size = explicit;
       else if (scale !== undefined && scale > 0 && scale <= 4) size = contentSizeForScale(scale);
       else return fail('scale must be a positive number (1 = default size)', 'action.invalidParams');
-      const r = await simctl(['ui', udid, 'content_size', size]);
+      const r = await simOf(t)(['ui', udid, 'content_size', size]);
       if (!r.ok) return fail(`Could not set the content size: ${simError(r)}`);
       return done(`Text size set to ${size}`, 'action.done', { contentSize: size });
     }
@@ -182,7 +187,7 @@ export async function runSimAction(
       const file = path.join(t.ctx.tempDir, tempFileName('push', t.label, 'json'));
       await fs.promises.writeFile(file, json);
       try {
-        const r = await simctl(['push', udid, appId, file]);
+        const r = await simOf(t)(['push', udid, appId, file]);
         if (!r.ok) return fail(`Could not send the notification: ${simError(r)}`);
         return done(`Notification sent to ${appId}`);
       } finally {
@@ -196,7 +201,7 @@ export async function runSimAction(
       if (lat === undefined || lon === undefined || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
         return fail('lat (−90…90) and lon (−180…180) are required', 'action.invalidParams');
       }
-      const r = await simctl(['location', udid, 'set', `${lat},${lon}`]);
+      const r = await simOf(t)(['location', udid, 'set', `${lat},${lon}`]);
       if (!r.ok) return fail(`Could not set the location: ${simError(r)}`);
       return done(`Location set to ${lat}, ${lon}`);
     }
@@ -222,7 +227,7 @@ export async function runSimAction(
               '3',
             ]
           : ['status_bar', udid, 'clear'];
-      const r = await simctl(args);
+      const r = await simOf(t)(args);
       if (!r.ok) return fail(`Could not change the status bar: ${simError(r)}`);
       return done(mode === 'clean' ? 'Status bar set to 9:41, full battery' : 'Status bar restored');
     }
@@ -244,7 +249,7 @@ export async function runSimAction(
 
 /** Terminate, then wipe the app's data container (top-level folders are kept and recreated). */
 async function clearAppData(t: SimActionTarget, appId: string): Promise<DeviceActionResult> {
-  const c = await simctl(['get_app_container', t.udid, appId, 'data']);
+  const c = await simOf(t)(['get_app_container', t.udid, appId, 'data']);
   const dir = c.stdout.trim();
   if (!c.ok || !dir || !path.isAbsolute(dir)) {
     return fail(`Could not find the data container of ${appId}: ${simError(c)}`, 'action.appNotFound');
@@ -253,7 +258,7 @@ async function clearAppData(t: SimActionTarget, appId: string): Promise<DeviceAc
   if (!dir.includes(`/Devices/${t.udid}/data/Containers/Data/`)) {
     return fail(`Refusing to clear an unexpected container path: ${dir}`);
   }
-  await simctl(['terminate', t.udid, appId]);
+  await simOf(t)(['terminate', t.udid, appId]);
   const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
   for (const e of entries) {
     const p = path.join(dir, e.name);
@@ -268,7 +273,7 @@ async function clearAppData(t: SimActionTarget, appId: string): Promise<DeviceAc
     await fs.promises.mkdir(path.join(dir, sub), { recursive: true }).catch(() => undefined);
   }
   // cfprefsd caches NSUserDefaults; kill it so the wiped preferences are not written back.
-  await simctl(['spawn', t.udid, 'launchctl', 'kill', 'SIGKILL', 'system/com.apple.cfprefsd.xpc.daemon'], {
+  await simOf(t)(['spawn', t.udid, 'launchctl', 'kill', 'SIGKILL', 'system/com.apple.cfprefsd.xpc.daemon'], {
     timeoutMs: 10_000,
   }).catch(() => undefined);
   return done(`Cleared data of ${appId}`);
@@ -307,7 +312,7 @@ async function installApp(t: SimActionTarget, file: string | undefined): Promise
     } else if (!st.isDirectory() || !file.endsWith('.app')) {
       return fail('Install a .app folder or a .zip/.ipa containing one', 'action.unsupportedFile');
     }
-    const r = await simctl(['install', t.udid, appPath], { timeoutMs: 5 * 60_000 });
+    const r = await simOf(t)(['install', t.udid, appPath], { timeoutMs: 5 * 60_000 });
     if (!r.ok) return fail(`Install failed: ${simError(r)}`, 'action.installFailed');
     return done(`Installed ${path.basename(appPath)}`);
   } finally {

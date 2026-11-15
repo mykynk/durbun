@@ -405,14 +405,17 @@ describe('server codes → i18n', () => {
     expect(tr('logs.streamError', { via: 'logcat', detail: 'x' })).toBe('Cihaz log akışı kesildi (logcat); yeniden başlatılıyor');
     expect(tr('logs.streamStalled', { via: 'idevicesyslog', seconds: 30 })).toBe('iPhone bağlı ama log akışı 30 sn’dir sessiz; yeniden başlatılıyor');
     expect(tr('logs.scopeNotApplied', { via: 'idevicesyslog', reason: 'devicectlMissing', device: 'Yusuf’un iPhone’u' })).toBe(
-      'Yusuf’un iPhone’u: sistem süreçlerinin satırları da gösteriliyor; uygulama satırlarını ayırmak için Xcode 15 ya da daha yenisi (devicectl) gerekir',
+      'Yusuf’un iPhone’u: sistem süreçlerinin satırları da gösteriliyor; uygulama satırlarını ayırmak için Xcode 15 ya da daha yenisi (devicectl) ya da ideviceinstaller (libimobiledevice) gerekir',
     );
     expect(tr('logs.scopeNotApplied', { via: 'idevicesyslog', reason: 'appListFailed', device: 'Yusuf’un iPhone’u' })).toBe(
       'Yusuf’un iPhone’u: sistem süreçlerinin satırları da gösteriliyor; kurulu uygulamalar devicectl ile okunamadığı için uygulama satırları ayrılamıyor',
     );
+    expect(tr('logs.scopeNotApplied', { via: 'idevicesyslog', reason: 'osTooOld', device: 'Yusuf’un iPhone’u' })).toBe(
+      'Yusuf’un iPhone’u: sistem süreçlerinin satırları da gösteriliyor; devicectl kurulu uygulamaları iOS 17’den itibaren okur; bu cihaz daha eski bir iOS kullandığı için uygulama satırları ayrılamıyor',
+    );
     // A reason this UI does not know yet: the sentence without the why.
     expect(tr('logs.scopeNotApplied', { via: 'idevicesyslog', reason: 'somethingNew', device: 'Yusuf’un iPhone’u' })).toBe('Yusuf’un iPhone’u: sistem süreçlerinin satırları da gösteriliyor');
-    expect(tcodeEn('logs.scopeNotApplied', { reason: 'devicectlMissing', device: 'Pixel' })).toBe('Pixel: system process lines are shown too; telling app lines apart needs Xcode 15 or newer (devicectl)');
+    expect(tcodeEn('logs.scopeNotApplied', { reason: 'devicectlMissing', device: 'Pixel' })).toBe('Pixel: system process lines are shown too; telling app lines apart needs Xcode 15 or newer (devicectl) or ideviceinstaller (libimobiledevice)');
     expect(tr('logs.scopeApplied', { via: 'idevicesyslog', device: 'Yusuf’un iPhone’u' })).toBe('Yusuf’un iPhone’u: kurulu uygulamalar okundu; sistem süreçlerinin satırları artık gizleniyor');
     const lost = SYSTEM_SAMPLES.filter(([c]) => c === 'logs.connectionLost').map(([, p]) => p);
     expect(tr('logs.connectionLost', lost[0]!)).toBe('Cihazın USB bağlantısı koptu; dönene kadar log satırı gelmez. 3 sn içinde dönmezse cihaz bağlı değil olarak görünür');
@@ -447,6 +450,7 @@ describe('server codes → i18n', () => {
     expect(errorText({ code: 'replay.invalidMethod', message: 'Invalid HTTP method "G E T"' })).toBe('Geçersiz HTTP metodu: G E T');
     expect(errorText({ code: 'upload.tooLarge', message: 'File is too large (limit 2 GB)' })).toBe('Dosya çok büyük (en fazla 2 GB)');
     expect(errorText({ code: 'action.failed', message: 'The action failed' })).toBe('İşlem başarısız oldu');
+    expect(errorText({ code: 'slack.rateLimited', message: 'Slack is limiting messages: 30 s' })).toBe('Slack şu an mesajları sınırlıyor. 30 s sonra yeniden gönderin');
     expect(errorText({ code: 'device.readOnly', message: 'Imported sessions are read-only recordings' })).toBe(
       'İçe aktarılan kayıtlar salt okunurdur; cihaz işlemleri kullanılamaz',
     );

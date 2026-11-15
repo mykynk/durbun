@@ -51,8 +51,16 @@ import { crashReportEntry, jetsamEntries, type IpsReport, type JetsamReport } fr
 import { devicectl, parseDevicectlDevices, probeDevicectlCaps, type DevicectlCaps, type DevicectlRunner } from './devicectl';
 import { iosDeviceActions, runIosDeviceAction } from './deviceActions';
 import { devicectlAppSource } from './deviceApps';
-import { crashCopyDir, crashReportUrl, DeviceCrashWatcher } from './deviceCrashes';
+import { crashCopyDir, crashReportUrl, DeviceCrashWatcher, devicectlCrashSource, fallbackCrashSource } from './deviceCrashes';
 import { IosDeviceLogFilter, iosDeviceLogScope, type IosDeviceLogScope } from './deviceLogScope';
+import {
+  crashMirrorDir,
+  fallbackAppSource,
+  ideviceCrashSource,
+  ideviceinstallerAppSource,
+  type IdeviceFallbackTool,
+  type IdeviceRunner,
+} from './ideviceFallback';
 import { lockdownGetValues, type LockdownValues } from './lockdown';
 import {
   beforeDevicectl,
@@ -62,6 +70,7 @@ import {
   IOS_FRAME_STATS_UNSUPPORTED,
   OS_TOO_OLD_CODE,
   READ_FAILED_CODE,
+  VIA_LIBIMOBILEDEVICE,
 } from './readerStates';
 import { SyslogLineParser } from './syslog';
 import {
@@ -136,6 +145,9 @@ interface DriverShared {
   devicectl: DevicectlRunner;
   /** Tests: the fake devicectl for device actions too (default: `xcrun devicectl`, not queued). */
   actionDevicectl?: DevicectlRunner;
+  /** libimobiledevice fallbacks for apps and crash reports where devicectl cannot read them (found or not). */
+  ideviceTool: (name: IdeviceFallbackTool) => boolean;
+  idevice: IdeviceRunner;
   timing: IosDeviceTiming;
   /** Crash files already handled per device udid (kept across re-plugs so crashes are reported once). */
   crashSeen: (udid: string) => Set<string>;
@@ -179,8 +191,8 @@ const UNSTABLE_WINDOW_MS = 2 * 60_000;
 type ScopeNotAppliedReason = 'devicectlMissing' | 'appListFailed' | 'osTooOld';
 const SCOPE_NOT_APPLIED = 'logs.scopeNotApplied';
 const SCOPE_WHY: Record<ScopeNotAppliedReason, string> = {
-  devicectlMissing: 'telling app lines from system lines needs Xcode 15 or newer (devicectl)',
-  appListFailed: 'the installed apps could not be read with devicectl, so app lines cannot be told from system lines',
+  devicectlMissing: 'telling app lines from system lines needs Xcode 15 or newer (devicectl) or ideviceinstaller',
+  appListFailed: 'the installed apps could not be read, so app lines cannot be told from system lines',
   osTooOld: `devicectl reads installed apps from iOS ${DEVICECTL_MIN_IOS} on; this device runs an older iOS, so app lines cannot be told from system lines`,
 };
 
@@ -389,7 +401,7 @@ class IosDeviceSession {
    */
   private scopeProblem(): ScopeNotAppliedReason | undefined {
     if (this.shared.logScope() !== 'apps') return undefined;
-    if (!this.shared.caps().available) return 'devicectlMissing';
+    if (!this.shared.caps().available && !this.shared.ideviceTool('ideviceinstaller')) return 'devicectlMissing';
     if (this.apps?.listingFinished && !this.apps.knowsApps) return this.osTooOld() ? 'osTooOld' : 'appListFailed';
     return undefined;
   }
@@ -477,7 +489,9 @@ class IosDeviceSession {
     this.trusted = !!(await client.readPairRecord(this.udid).catch(() => null));
     if (this.disposed) return;
     if (values) this.applyLockdown(values);
-    if (!this.shared.caps().available) this.crashReader.unavailable(DEVICECTL_MISSING.code, DEVICECTL_MISSING.detail);
+    if (!this.shared.caps().available && !this.shared.ideviceTool('idevicecrashreport')) {
+      this.crashReader.unavailable(DEVICECTL_MISSING.code, DEVICECTL_MISSING.detail);
+    }
     const syslogTool = this.shared.syslogTool();
     this.info = {
       ...this.info,
@@ -503,15 +517,31 @@ class IosDeviceSession {
     void this.enrichFromDevicectl();
   }
 
-  /** DeviceApps + crash reports through devicectl (needs Xcode 15+ and a trusted device). */
+  /**
+   * DeviceApps + crash reports of a trusted device, in steps: devicectl (Xcode 15+, iOS 17+); where it is
+   * missing or its listings fail (older iOS, Developer Mode off), libimobiledevice's ideviceinstaller and
+   * idevicecrashreport when installed; otherwise the reader says what is missing.
+   */
   private startAppWatch(): void {
-    if (this.disposed || this.apps || !this.shared.caps().available) return;
-    const { ctx, logger, timing } = this.shared;
+    if (this.disposed || this.apps) return;
+    const { ctx, logger, timing, ideviceTool } = this.shared;
+    const devicectlOk = this.shared.caps().available;
+    const target = { udid: this.udid, run: this.shared.idevice, networkOnly: () => this.networkOnly, logger };
+    const appSource = fallbackAppSource(
+      devicectlOk ? devicectlAppSource(this.udid, this.shared.devicectl) : undefined,
+      ideviceTool('ideviceinstaller') ? ideviceinstallerAppSource(target) : undefined,
+    );
+    const crashSource = fallbackCrashSource(
+      devicectlOk ? devicectlCrashSource(this.udid, this.shared.devicectl) : undefined,
+      ideviceTool('idevicecrashreport') ? ideviceCrashSource({ ...target, mirrorDir: crashMirrorDir(ctx.tempDir, this.udid) }) : undefined,
+    );
+    if (!appSource && !crashSource) return;
     const apps = new IosAppTracker({
       deviceId: this.id,
       hub: ctx.hub,
       getDeviceApps: () => ctx.getDeviceApps(),
-      source: devicectlAppSource(this.udid, this.shared.devicectl),
+      // Crash reports alone: no app list (crash files are then picked by their report type).
+      source: appSource ?? { listInstalled: async () => null, listRunning: async () => null },
       logger,
       installedEveryMs: timing.appsEveryMs,
       runningEveryMs: timing.processesEveryMs,
@@ -521,16 +551,19 @@ class IosDeviceSession {
       onListed: () => this.noteScope(),
     });
     this.apps = apps;
+    apps.start();
+    if (!crashSource) return;
     this.crashes = new DeviceCrashWatcher({
       udid: this.udid,
-      devicectl: this.shared.devicectl,
+      source: crashSource,
       destDir: crashCopyDir(ctx.tempDir, this.udid),
       logger,
       isInteresting: (name) => apps.isInteresting(name),
       onReport: (report, file) => this.onCrashReport(report, file),
       onJetsam: (report, file) => this.onJetsam(report, file),
       onStatus: (s) => {
-        if (s.ok) this.crashReader.ok();
+        if (s.ok && s.via) this.crashReader.ok(VIA_LIBIMOBILEDEVICE.code, VIA_LIBIMOBILEDEVICE.detail);
+        else if (s.ok) this.crashReader.ok();
         else if (this.developerMode === 'disabled') this.crashReader.unavailable(DEVELOPER_MODE_OFF_CODE, readerDetail(s.error));
         else if (this.osTooOld()) this.crashReader.unavailable(OS_TOO_OLD_CODE, osTooOldDetail(this.info.osVersion, s.error));
         else this.crashReader.unavailable(READ_FAILED_CODE, readerDetail(s.error));
@@ -538,7 +571,6 @@ class IosDeviceSession {
       intervalMs: timing.crashesEveryMs,
       seen: this.shared.crashSeen(this.udid),
     });
-    apps.start();
     // Let the first app listing finish so crash files can be filtered by app name.
     const t = setTimeout(() => this.crashes?.start(), timing.crashStartDelayMs);
     t.unref?.();
@@ -966,6 +998,12 @@ export interface IosDeviceDriverOptions {
   useDevicectl?: boolean;
   /** Tests: a fake devicectl for the background watchers and device actions (implies devicectl is available). */
   devicectl?: DevicectlRunner;
+  /**
+   * Tests: a fake runner for the libimobiledevice fallbacks, and which of them count as installed (default: both).
+   * Without it, a driver with devicectl turned off or faked uses no fallback.
+   */
+  idevice?: IdeviceRunner;
+  ideviceTools?: IdeviceFallbackTool[];
   /** Tests: shorter polling intervals. */
   timing?: Partial<IosDeviceTiming>;
 }
@@ -985,6 +1023,9 @@ export class IosDeviceDriver implements DeviceDriver {
   private readonly muxToUdid = new Map<number, string>();
   private syslogTool: ResolvedTool | null = null;
   private screenshotTool: ResolvedTool | null = null;
+  private fallbackTools: Partial<Record<IdeviceFallbackTool, ResolvedTool | null>> = {};
+  private readonly fakeIdevice?: IdeviceRunner;
+  private readonly fakeIdeviceTools?: ReadonlySet<IdeviceFallbackTool>;
   private caps: DevicectlCaps = NO_CAPS;
   private unsubSettings?: () => void;
   private syslogSetting?: string;
@@ -1010,6 +1051,11 @@ export class IosDeviceDriver implements DeviceDriver {
     this.client = new UsbmuxClient({ socketPath: opts.socketPath ?? USBMUXD_SOCKET });
     this.useDevicectl = opts.useDevicectl ?? true;
     this.fakeDevicectl = opts.devicectl;
+    this.fakeIdevice = opts.idevice;
+    // Tests without a fake runner (devicectl off or faked) never reach the real libimobiledevice tools.
+    if (opts.idevice || !this.useDevicectl || opts.devicectl) {
+      this.fakeIdeviceTools = new Set(opts.idevice ? (opts.ideviceTools ?? ['idevicecrashreport', 'ideviceinstaller']) : []);
+    }
     this.timing = { ...DEFAULT_IOS_DEVICE_TIMING, ...opts.timing };
   }
 
@@ -1035,6 +1081,14 @@ export class IosDeviceDriver implements DeviceDriver {
       caps: () => this.caps,
       devicectl: serialize(this.fakeDevicectl ?? ((args: string[], timeoutMs?: number) => devicectl(args, timeoutMs))),
       ...(this.fakeDevicectl ? { actionDevicectl: this.fakeDevicectl } : {}),
+      ideviceTool: (name) => (this.fakeIdeviceTools ? this.fakeIdeviceTools.has(name) : !!this.fallbackTools[name]),
+      idevice:
+        this.fakeIdevice ??
+        (async (name, args, timeoutMs) => {
+          const tool = this.fallbackTools[name];
+          if (!tool) return { ok: false, code: null, signal: null, stdout: '', stderr: '', timedOut: false, error: `${name} was not found`, errorCode: 'ENOENT' };
+          return run(tool.path, args, { timeoutMs, env: tool.env });
+        }),
       timing: this.timing,
       crashSeen: (udid) => {
         let set = this.crashSeen.get(udid);
@@ -1160,6 +1214,27 @@ export class IosDeviceDriver implements DeviceDriver {
       detail: shot ? (shot.detail ?? `from ${shot.source}`) : caps.screenshot ? 'not needed (devicectl captures screenshots)' : 'not found',
       ...(shot || caps.screenshot ? {} : { fix: 'brew install libimobiledevice' }),
     });
+    // Fallbacks for iPhones devicectl cannot read (no Xcode 15+, iOS before 17, Developer Mode off).
+    const fallbacks: Array<[IdeviceFallbackTool, string, string]> = [
+      ['idevicecrashreport', 'idevicecrashreport (iOS crash reports, fallback)', 'brew install libimobiledevice'],
+      ['ideviceinstaller', 'ideviceinstaller (installed iOS apps, fallback)', 'brew install ideviceinstaller'],
+    ];
+    for (const [name, label, fix] of fallbacks) {
+      const tool = resolveIdeviceTool(name, settings);
+      checks.push({
+        id: name,
+        label,
+        // Optional while devicectl works; the only way without it.
+        status: tool || caps.available ? 'ok' : 'warn',
+        ...(tool ? { path: tool.path } : {}),
+        detail: tool
+          ? (tool.detail ?? `from ${tool.source}`)
+          : caps.available
+            ? 'not found (optional: used for iPhones devicectl cannot read, such as iOS 16 or Developer Mode off)'
+            : 'not found',
+        ...(tool ? {} : { fix }),
+      });
+    }
     return checks;
   }
 
@@ -1239,6 +1314,10 @@ export class IosDeviceDriver implements DeviceDriver {
     this.syslogSetting = settings.idevicesyslogPath;
     this.syslogTool = resolveIdeviceTool('idevicesyslog', settings);
     this.screenshotTool = resolveIdeviceTool('idevicescreenshot', settings);
+    this.fallbackTools = {
+      idevicecrashreport: resolveIdeviceTool('idevicecrashreport', settings),
+      ideviceinstaller: resolveIdeviceTool('ideviceinstaller', settings),
+    };
     if (!this.syslogTool) this.logger.info('idevicesyslog not found; iOS device logs are unavailable');
     else this.logger.debug(`using idevicesyslog at ${this.syslogTool.path} (${this.syslogTool.source})`);
   }

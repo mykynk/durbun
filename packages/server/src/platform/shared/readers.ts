@@ -51,12 +51,14 @@ export class ReaderReporter {
     return this.state;
   }
 
-  ok(): void {
+  /** Reading works; `code` + `detail` say how when it is not the usual way (a fallback tool). */
+  ok(code?: string, detail?: string): void {
     const now = (this.opts.now ?? Date.now)();
     this.lastOkAt = now;
     const s = this.state;
-    if (s?.status === 'ok' && s.lastOk !== undefined && now - s.lastOk < (this.opts.refreshOkMs ?? 10 * 60_000)) return;
-    this.set({ status: 'ok', lastOk: now });
+    const same = s?.status === 'ok' && s.code === code && s.detail === detail;
+    if (same && s.lastOk !== undefined && now - s.lastOk < (this.opts.refreshOkMs ?? 10 * 60_000)) return;
+    this.set({ status: 'ok', ...(code ? { code } : {}), ...(detail ? { detail } : {}), lastOk: now });
   }
 
   unavailable(code: string, detail: string): void {

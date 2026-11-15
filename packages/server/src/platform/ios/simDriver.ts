@@ -74,6 +74,13 @@ export interface IosSimDriverOptions {
 }
 
 /** One booted simulator (exported for tests). */
+/** The command that fixes a known Xcode set-up problem from its error text (license, first-launch components). */
+export function xcodeFix(problem: string): string | undefined {
+  if (/license/i.test(problem)) return 'sudo xcodebuild -license accept';
+  if (/runFirstLaunch|out of date|additional (required )?components/i.test(problem)) return 'xcodebuild -runFirstLaunch';
+  return undefined;
+}
+
 export class SimulatorSession {
   readonly id: string;
   private info: DeviceInfo;
@@ -476,14 +483,18 @@ export class IosSimDriver implements DeviceDriver {
     }
     const v = await run('/usr/bin/xcodebuild', ['-version'], { timeoutMs: 15_000 });
     const version = v.ok ? v.stdout.split('\n')[0]?.trim() : undefined;
+    // `simctl list` failing (Xcode license not accepted, first-launch components missing…) is the real problem.
+    const problem = this.pollProblem ?? (v.ok ? undefined : `xcodebuild -version failed: ${(v.stderr || v.stdout).trim().split('\n')[0] ?? ''}`);
+    const fix = problem ? xcodeFix(problem) : undefined;
     return [
       {
         id: 'simctl',
         label: 'Xcode simctl (iOS simulators)',
-        status: 'ok',
+        status: problem ? 'error' : 'ok',
         ...(version ? { version } : {}),
         ...(x.developerDir ? { path: x.developerDir } : {}),
-        detail: `${this.sessions.size} booted simulator(s)`,
+        detail: problem ?? `${this.sessions.size} booted simulator(s)`,
+        ...(fix ? { fix } : {}),
       },
     ];
   }

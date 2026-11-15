@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>ApplicationType</key>
+		<string>User</string>
+		<key>CFBundleDisplayName</key>
+		<string>Pati</string>
+		<key>CFBundleExecutable</key>
+		<string>Runner</string>
+		<key>CFBundleIdentifier</key>
+		<string>com.mykynk.pati</string>
+		<key>CFBundleName</key>
+		<string>Runner</string>
+		<key>CFBundleShortVersionString</key>
+		<string>2.3.0</string>
+		<key>CFBundleVersion</key>
+		<string>57</string>
+		<key>Container</key>
+		<string>/private/var/mobile/Containers/Data/Application/4C2E8A1F-7B3D-4F90-A5E6-1D8C0B2F7A34</string>
+		<key>Entitlements</key>
+		<dict>
+			<key>application-identifier</key>
+			<string>ABCDE12345.com.mykynk.pati</string>
+			<key>com.apple.developer.team-identifier</key>
+			<string>ABCDE12345</string>
+			<key>get-task-allow</key>
+			<true/>
+			<key>keychain-access-groups</key>
+			<array>
+				<string>ABCDE12345.com.mykynk.pati</string>
+			</array>
+		</dict>
+		<key>IsAppClip</key>
+		<false/>
+		<key>MinimumOSVersion</key>
+		<string>13.0</string>
+		<key>Path</key>
+		<string>/private/var/containers/Bundle/Application/9F1C2B7A-58D3-4E0B-A6C1-3D27E8F0B941/Runner.app</string>
+		<key>SignerIdentity</key>
+		<string>Apple Development: Test Developer (QWERTY1234)</string>
+	</dict>
+	<dict>
+		<key>ApplicationType</key>
+		<string>User</string>
+		<key>CFBundleDisplayName</key>
+		<string>Mahalle</string>
+		<key>CFBundleExecutable</key>
+		<string>Mahalle</string>
+		<key>CFBundleIdentifier</key>
+		<string>com.mykynk.mahalle</string>
+		<key>CFBundleShortVersionString</key>
+		<string>1.8.2</string>
+		<key>CFBundleVersion</key>
+		<string>412</string>
+		<key>Entitlements</key>
+		<dict>
+			<key>application-identifier</key>
+			<string>ABCDE12345.com.mykynk.mahalle</string>
+			<key>beta-reports-active</key>
+			<true/>
+			<key>get-task-allow</key>
+			<false/>
+		</dict>
+		<key>Path</key>
+		<string>/private/var/containers/Bundle/Application/2B7E4D90-1C3A-4F58-8E62-A0D9B5C7F311/Mahalle.app</string>
+		<key>SignerIdentity</key>
+		<string>Apple iPhone OS Application Signing</string>
+	</dict>
+	<dict>
+		<key>ApplicationType</key>
+		<string>User</string>
+		<key>CFBundleDisplayName</key>
+		<string>Sayfalar</string>
+		<key>CFBundleExecutable</key>
+		<string>Pages</string>
+		<key>CFBundleIdentifier</key>
+		<string>com.apple.Pages</string>
+		<key>CFBundleShortVersionString</key>
+		<string>14.4</string>
+		<key>CFBundleVersion</key>
+		<string>7032.0.97</string>
+		<key>Path</key>
+		<string>/private/var/containers/Bundle/Application/7A0F3C12-9E4B-4D86-B1A5-C6E8D2F40B97/Pages.app</string>
+		<key>SignerIdentity</key>
+		<string>Apple iPhone OS Application Signing</string>
+	</dict>
+</array>
+</plist>

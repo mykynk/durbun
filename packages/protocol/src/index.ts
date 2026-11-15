@@ -141,8 +141,26 @@ export interface DeviceInfo {
    * this per reader id on `upsertDevice` / `patchDevice`.
    */
   readers?: Partial<Record<DeviceReaderId, DeviceReaderState>>;
+  /**
+   * Device settings Dürbün changed through device actions, with the value from before (Android: animations,
+   * font scale, dark mode). The same action with `{ restore: true }` puts the old value back. Absent: nothing
+   * changed (or an older server).
+   */
+  settingOverrides?: DeviceSettingOverride[];
   firstSeen: number;
   lastSeen: number;
+}
+
+/** One device setting Dürbün changed, as `DeviceInfo.settingOverrides` lists it. */
+export interface DeviceSettingOverride {
+  /** The action that changed it ('animations', 'font-scale', 'appearance'). */
+  action: DeviceActionId;
+  /** The value before Dürbün's first change, as the device reported it ("1", "1.15", "no"…; "default" when unset). */
+  previous: string;
+  /** The value Dürbün set last. */
+  current: string;
+  /** When Dürbün first changed it (epoch ms). */
+  since: number;
 }
 
 /** A running `screen-record`: it lasts until `screen-record-stop` or `limitSec`, whichever comes first. */
@@ -515,7 +533,10 @@ export function findMockRule(rules: MockRule[], method: string, url: string, app
  *  open-url { url* }
  *  list-apps { includeSystem?: boolean }  → data: InstalledApp[]
  *  app-launch | app-stop | app-restart | app-clear-data | app-uninstall { appId* }  (bundle id / package)
- *  app-install { file* }                  (server path returned by POST /api/upload)
+ *      Android app-stop also takes `background: true`: Home, then the system's background kill (`am kill`) as
+ *      under memory pressure (`action.backgroundKilled`; `action.backgroundKillRefused` when a foreground
+ *      service keeps it alive, `action.appNotRunning` when it does not run).
+ *  app-install { file* }                  (server path returned by POST /api/upload; Android: .apk, .apks, .xapk)
  *  logs-clear-buffer {} · logs-restart {}
  *  appearance { mode*: 'dark' | 'light' }
  *  font-scale { scale*: number }          (Android 0.85–2.0; iOS simulator maps to content size)
@@ -548,6 +569,11 @@ export type DeviceActionId =
    * size (`logcat -G`, until the phone restarts) before the stream restarts; reply data LogBufferSizeData.
    */
   | 'logs-restart'
+  /**
+   * 'appearance', 'font-scale', 'animations': on Android the value from before Dürbün's first change is kept
+   * (`DeviceInfo.settingOverrides`); `{ restore: true }` instead of the usual params puts it back
+   * (`action.settingRestored`, or `action.nothingToRestore` when Dürbün changed nothing).
+   */
   | 'appearance'
   | 'font-scale'
   | 'animations'
@@ -750,6 +776,8 @@ export interface ReplayOverrides {
   headers?: Header[];
   body?: string;
   bodyEncoding?: 'utf8' | 'base64';
+  /** Send without verifying the server certificate (a self-signed test server); the reply warns `replay.tlsUnverified`. */
+  skipTlsVerify?: boolean;
 }
 
 /**

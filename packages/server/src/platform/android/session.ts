@@ -10,6 +10,7 @@ import type {
   DeviceInfo,
   DeviceReaderId,
   DeviceReaderState,
+  DeviceSettingOverride,
   DeviceState,
   LogStreamStatus,
 } from '@durbun/protocol';
@@ -20,7 +21,7 @@ import { fail } from '../shared/files';
 import { ScreenRecorder } from '../shared/screenRecord';
 import { humanizeModel } from '../shared/text';
 import { every, sleep } from '../shared/timing';
-import { androidActionsFor, runAndroidAction } from './actions';
+import { androidActionsFor, runAndroidAction, type SettingOverrides } from './actions';
 import type { Adb } from './adb';
 import type { DeviceClock } from './deviceClock';
 import { basePackage, DeviceAppTracker } from './deviceApps';
@@ -77,6 +78,8 @@ export interface AndroidSessionDeps {
   publishedApps?: Set<string>;
   /** The phone's `ro.serialno` once read (the driver merges its Wi-Fi transports by it). */
   onHardwareSerial?(serial: string): void;
+  /** Settings Dürbün changed on this phone, by action (kept by the driver across replugs and transports). */
+  settingOverrides?: Map<DeviceActionId, DeviceSettingOverride>;
 }
 
 export interface AndroidSessionOptions {
@@ -205,6 +208,7 @@ export class AndroidDeviceSession {
           ? { status: 'starting', via: VIA }
           : { status: 'unavailable', via: VIA, code: st!.code, detail: st!.detail },
       actions: [],
+      ...(deps.settingOverrides?.size ? { settingOverrides: [...deps.settingOverrides.values()] } : {}),
       firstSeen: old?.firstSeen ?? now,
       lastSeen: now,
     };
@@ -217,6 +221,11 @@ export class AndroidDeviceSession {
       },
       onProcessEvent: (ev) => this.onProcessEvent(ev),
       processName: (pid) => this.processName(pid),
+      pidOf: (name) => {
+        let found: number | undefined;
+        for (const [pid, n] of this.processes) if (n === name) found = pid;
+        return found;
+      },
     });
     this.apps = new DeviceAppTracker({
       adb: deps.adb,
@@ -823,10 +832,26 @@ export class AndroidDeviceSession {
         ctx: this.deps.ctx,
         restartLogs: () => this.restartLogs(),
         recorder: this.recorder,
+        ...(this.deps.settingOverrides ? { overrides: this.overridesStore(this.deps.settingOverrides) } : {}),
       },
       action,
       params,
     );
+  }
+
+  /** The driver's override map for this phone, mirrored into `DeviceInfo.settingOverrides`. */
+  private overridesStore(map: Map<DeviceActionId, DeviceSettingOverride>): SettingOverrides {
+    const publish = () => this.patch({ settingOverrides: map.size ? [...map.values()] : undefined });
+    return {
+      get: (action) => map.get(action),
+      set: (o) => {
+        map.set(o.action, o);
+        publish();
+      },
+      delete: (action) => {
+        if (map.delete(action)) publish();
+      },
+    };
   }
 
   watchMetrics(target: MetricsTarget, enabled: boolean): void {

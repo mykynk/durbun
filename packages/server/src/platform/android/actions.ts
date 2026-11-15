@@ -1,14 +1,15 @@
 /** Device actions for Android devices/emulators (SPEC §5.5 "Actions"). */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { DeviceActionId, DeviceActionResult, InstalledApp, LogBufferSizeData } from '@durbun/protocol';
+import type { DeviceActionId, DeviceActionResult, DeviceSettingOverride, InstalledApp, LogBufferSizeData } from '@durbun/protocol';
 import type { DriverContext } from '../../types';
-import { failureText, killProcess } from '../exec';
+import { failureText, killProcess, run } from '../exec';
 import { bool, done, ensureDir, fail, isPng, num, saveScreenshot, str, tempFileName, validAppId } from '../shared/files';
 import type { RecordingProcess, ScreenRecorder } from '../shared/screenRecord';
 import { shellQuote } from '../shared/text';
 import { sleep } from '../shared/timing';
 import type { Adb } from './adb';
+import { androidPackageKind, chooseSplits, installFailure, listFiles, parseDeviceSpec } from './install';
 import { parseCurrentScreenSize, parsePackageDump, parsePackageList } from './parsers';
 
 export interface AndroidActionTarget {
@@ -22,6 +23,45 @@ export interface AndroidActionTarget {
   ctx: DriverContext;
   restartLogs(): Promise<void>;
   recorder: ScreenRecorder;
+  /**
+   * Settings Dürbün changed on this phone (kept by the driver across replugs). Present: the value before the
+   * first change is read and kept, and `{ restore: true }` puts it back.
+   */
+  overrides?: SettingOverrides;
+}
+
+export interface SettingOverrides {
+  get(action: DeviceActionId): DeviceSettingOverride | undefined;
+  set(override: DeviceSettingOverride): void;
+  delete(action: DeviceActionId): void;
+}
+
+const ANIMATION_KEYS = ['window_animation_scale', 'transition_animation_scale', 'animator_duration_scale'] as const;
+/** `settings get` of a key nobody set prints "null": the platform default applies. */
+const DEFAULT_VALUE = 'default';
+
+/** One `settings get` line → value ("default" for an unset key), undefined when unreadable. */
+function settingValue(line: string | undefined): string | undefined {
+  const v = line?.trim();
+  if (!v) return undefined;
+  if (v === 'null') return DEFAULT_VALUE;
+  return /^-?\d+(\.\d+)?$/.test(v) ? String(Number(v)) : undefined;
+}
+
+/** "1,1,1" → "1"; differing scales stay a list (window,transition,animator). */
+function joinScales(values: string[]): string {
+  return values.every((v) => v === values[0]) ? values[0]! : values.join(',');
+}
+
+/** `cmd uimode night` → "yes" | "no" | "auto" (other modes, such as a custom schedule, cannot be set back). */
+export function parseNightMode(text: string): string | undefined {
+  const v = /Night mode:\s*(\w+)/i.exec(text)?.[1]?.toLowerCase();
+  return v === 'yes' || v === 'no' || v === 'auto' ? v : undefined;
+}
+
+/** Shell command that sets a setting to `value` (unset keys are deleted, so the platform default applies again). */
+function putSetting(namespace: 'global' | 'system', key: string, value: string): string {
+  return value === DEFAULT_VALUE ? `settings delete ${namespace} ${key}` : `settings put ${namespace} ${key} ${value}`;
 }
 
 export const ANDROID_KEY_CODES: Record<string, number> = {
@@ -141,6 +181,7 @@ export async function runAndroidAction(
     case 'app-stop': {
       const appId = needApp();
       if (typeof appId !== 'string') return appId;
+      if (params.background === true) return backgroundKill(t, appId);
       const r = await shell(`am force-stop ${shellQuote(appId)}`);
       if (!r.ok) return fail(`Could not stop ${appId}: ${failureText(r)}`);
       return done(`Stopped ${appId}`);
@@ -181,14 +222,10 @@ export async function runAndroidAction(
       if (!file || !path.isAbsolute(file)) return fail('An absolute APK file path is required', 'action.invalidParams');
       const st = await fs.promises.stat(file).catch(() => undefined);
       if (!st?.isFile()) return fail(`File not found: ${file}`, 'action.fileNotFound');
-      if (!/\.apk$/i.test(file)) return fail('Only .apk files can be installed on Android', 'action.unsupportedFile');
-      const r = await adb.run(['-s', serial, 'install', '-r', '-t', '-d', file], { timeoutMs: 10 * 60_000 });
-      const out = textOf(r);
-      if (!/^Success/m.test(out)) {
-        const reason = /Failure \[([^\]]+)\]/.exec(out)?.[1] ?? failureText(r);
-        return fail(`Install failed: ${reason}`, 'action.installFailed');
-      }
-      return done(`Installed ${path.basename(file)}`);
+      const kind = androidPackageKind(file);
+      if (!kind) return fail('Only .apk, .apks and .xapk files can be installed on Android', 'action.unsupportedFile');
+      if (kind !== 'apk') return installArchive(t, file, kind);
+      return installApks(t, [file], path.basename(file));
     }
 
     case 'logs-clear-buffer': {
@@ -223,45 +260,18 @@ export async function runAndroidAction(
       );
     }
 
-    case 'appearance': {
-      const mode = str(params, 'mode');
-      if (mode !== 'dark' && mode !== 'light') return fail('mode must be "dark" or "light"', 'action.invalidParams');
-      const r = await shell(`cmd uimode night ${mode === 'dark' ? 'yes' : 'no'}`);
-      if (!r.ok || /Error|Unknown command/i.test(r.stderr)) {
-        return fail(`Could not switch appearance: ${failureText(r)}`);
-      }
-      return done(mode === 'dark' ? 'Dark mode on' : 'Light mode on');
-    }
-
-    case 'font-scale': {
-      const scale = num(params, 'scale');
-      if (scale === undefined || scale < 0.5 || scale > 2.0) {
-        return fail('scale must be a number between 0.5 and 2.0', 'action.invalidParams');
-      }
-      const value = String(Math.round(scale * 100) / 100);
-      const r = await shell(`settings put system font_scale ${value}`);
-      if (!r.ok) return fail(`Could not set the font scale: ${failureText(r)}`);
-      return done(`Font scale set to ${value}`);
-    }
-
-    case 'animations': {
-      const enabled = bool(params, 'enabled');
-      if (enabled === undefined) return fail('enabled (boolean) is required', 'action.invalidParams');
-      const v = enabled ? '1' : '0';
-      const r = await shell(
-        ['window_animation_scale', 'transition_animation_scale', 'animator_duration_scale']
-          .map((k) => `settings put global ${k} ${v}`)
-          .join('; '),
-      );
-      if (!r.ok) return fail(`Could not change animation scales: ${failureText(r)}`);
-      return done(enabled ? 'Animations enabled' : 'Animations disabled');
-    }
+    case 'appearance':
+    case 'font-scale':
+    case 'animations':
+      return changeSetting(t, action, params);
 
     case 'input-text': {
       const text = typeof params.text === 'string' ? params.text : '';
       if (!text) return fail('text is required', 'action.invalidParams');
       if (!/^[\x20-\x7E\n]*$/.test(text)) {
-        return fail('Android "input text" only supports printable ASCII characters', 'action.inputTextAscii');
+        // adb's `input text` types through the ASCII key map only; no shell command types other characters.
+        const others = [...new Set([...text].filter((c) => !/[\x20-\x7E\n]/.test(c)))].slice(0, 8).join(' ');
+        return fail(`Android "input text" only supports printable ASCII characters: ${others}`, 'action.inputTextAscii');
       }
       const parts = text.split('\n');
       const cmds: string[] = [];
@@ -304,6 +314,182 @@ export async function runAndroidAction(
 
     default:
       return fail(`"${action}" is not supported on Android devices`, 'action.unsupported');
+  }
+}
+
+interface SettingIo {
+  read(): Promise<string | undefined>;
+  write(value: string): Promise<DeviceActionResult | undefined>;
+  label: string;
+}
+
+function settingIo(t: AndroidActionTarget, action: 'appearance' | 'font-scale' | 'animations'): SettingIo {
+  const shell = (cmd: string) => t.adb.shell(t.serial, cmd);
+  switch (action) {
+    case 'appearance':
+      return {
+        label: 'Dark mode',
+        read: async () => {
+          const r = await shell('cmd uimode night');
+          return r.ok ? parseNightMode(textOf(r)) : undefined;
+        },
+        write: async (value) => {
+          const r = await shell(`cmd uimode night ${value}`);
+          return !r.ok || /Error|Unknown command/i.test(r.stderr) ? fail(`Could not switch appearance: ${failureText(r)}`) : undefined;
+        },
+      };
+    case 'font-scale':
+      return {
+        label: 'Font scale',
+        read: async () => {
+          const r = await shell('settings get system font_scale');
+          return r.ok ? settingValue(r.stdout.split('\n')[0]) : undefined;
+        },
+        write: async (value) => {
+          const r = await shell(putSetting('system', 'font_scale', value));
+          return r.ok ? undefined : fail(`Could not set the font scale: ${failureText(r)}`);
+        },
+      };
+    case 'animations':
+      return {
+        label: 'Animation scales',
+        read: async () => {
+          const r = await shell(ANIMATION_KEYS.map((k) => `settings get global ${k}`).join('; '));
+          if (!r.ok) return undefined;
+          const values = r.stdout.split('\n').filter((l) => l.trim()).map(settingValue);
+          return values.length === 3 && values.every((v): v is string => v !== undefined) ? joinScales(values) : undefined;
+        },
+        write: async (value) => {
+          const parts = value.split(',');
+          const r = await shell(ANIMATION_KEYS.map((k, i) => putSetting('global', k, parts[parts.length === 3 ? i : 0]!)).join('; '));
+          return r.ok ? undefined : fail(`Could not change animation scales: ${failureText(r)}`);
+        },
+      };
+  }
+}
+
+/** Two setting values mean the same ("1.0" and "1"). */
+const sameValue = (a: string, b: string) => a === b || (Number.isFinite(Number(a)) && Number(a) === Number(b) && a !== DEFAULT_VALUE && b !== DEFAULT_VALUE);
+
+/**
+ * Dark mode, font scale and animation scales: before Dürbün's first change the current value is read and kept
+ * (`target.overrides`), so `{ restore: true }` can put it back later; a change back to that value forgets it.
+ */
+async function changeSetting(
+  t: AndroidActionTarget,
+  action: 'appearance' | 'font-scale' | 'animations',
+  params: Record<string, unknown>,
+): Promise<DeviceActionResult> {
+  const io = settingIo(t, action);
+  const overrides = t.overrides;
+  if (params.restore === true) {
+    const o = overrides?.get(action);
+    if (!o) return done(`${io.label}: Dürbün has not changed it, nothing to restore`, 'action.nothingToRestore');
+    const failed = await io.write(o.previous);
+    if (failed) return failed;
+    overrides!.delete(action);
+    return done(`${io.label} restored to ${o.previous}`, 'action.settingRestored', { previous: o.current, current: o.previous });
+  }
+  let value: string;
+  let message: string;
+  if (action === 'appearance') {
+    const mode = str(params, 'mode');
+    if (mode !== 'dark' && mode !== 'light') return fail('mode must be "dark" or "light"', 'action.invalidParams');
+    value = mode === 'dark' ? 'yes' : 'no';
+    message = mode === 'dark' ? 'Dark mode on' : 'Light mode on';
+  } else if (action === 'font-scale') {
+    const scale = num(params, 'scale');
+    if (scale === undefined || scale < 0.5 || scale > 2.0) return fail('scale must be a number between 0.5 and 2.0', 'action.invalidParams');
+    value = String(Math.round(scale * 100) / 100);
+    message = `Font scale set to ${value}`;
+  } else {
+    const enabled = bool(params, 'enabled');
+    if (enabled === undefined) return fail('enabled (boolean) is required', 'action.invalidParams');
+    value = enabled ? '1' : '0';
+    message = enabled ? 'Animations enabled' : 'Animations disabled';
+  }
+  const kept = overrides?.get(action);
+  const previous = overrides && !kept ? await io.read() : undefined;
+  const failed = await io.write(value);
+  if (failed) return failed;
+  if (overrides) {
+    const before = kept?.previous ?? previous;
+    if (before !== undefined && sameValue(before, value)) overrides.delete(action);
+    else if (before !== undefined) overrides.set({ action, previous: before, current: value, since: kept?.since ?? Date.now() });
+  }
+  return done(message);
+}
+
+/**
+ * The system ending an app in the background (what happens under memory pressure), unlike a force stop: Home,
+ * then `am kill`, which only ends processes the system may kill (background ones). Reopened from Recents, the
+ * app has to restore its saved state. A foreground service keeps the process alive: then it says so.
+ */
+async function backgroundKill(t: AndroidActionTarget, appId: string): Promise<DeviceActionResult> {
+  const shell = (cmd: string) => t.adb.shell(t.serial, cmd, { timeoutMs: 15_000 });
+  const pids = async () => (await shell(`pidof ${shellQuote(appId)}`)).stdout.trim();
+  if (!(await pids())) return fail(`${appId} is not running`, 'action.appNotRunning');
+  await shell('input keyevent 3');
+  await sleep(BACKGROUND_SETTLE_MS);
+  const r = await shell(`am kill ${shellQuote(appId)}`);
+  if (!r.ok) return fail(`Could not end ${appId} in the background: ${failureText(r)}`);
+  await sleep(300);
+  if (await pids()) {
+    return fail(`${appId} keeps running in the background (a foreground service or a visible window keeps it alive)`, 'action.backgroundKillRefused');
+  }
+  return done(`${appId} was ended in the background; open it from Recents to check that it restores its state`, 'action.backgroundKilled');
+}
+
+/** Time for the app to move to the background after Home (its activity stops). */
+export const BACKGROUND_SETTLE_MS = 1000;
+
+/** `adb install` (one APK) or `adb install-multiple` (split APKs of one app); refusals get their own code. */
+async function installApks(t: AndroidActionTarget, files: string[], label: string): Promise<DeviceActionResult> {
+  const args = files.length === 1 ? ['install', '-r', '-t', '-d', files[0]!] : ['install-multiple', '-r', '-t', '-d', ...files];
+  const r = await t.adb.run(['-s', t.serial, ...args], { timeoutMs: 10 * 60_000 });
+  const out = textOf(r);
+  if (/^Success/m.test(out)) return done(`Installed ${label}`);
+  const { reason, code } = installFailure(out);
+  return fail(`Install failed: ${reason ?? failureText(r)}`, code);
+}
+
+/** .apks / .xapk: unpack, pick the splits that fit the phone, install them together (OBB data of an .xapk after). */
+async function installArchive(t: AndroidActionTarget, file: string, kind: 'apks' | 'xapk'): Promise<DeviceActionResult> {
+  const { adb, serial } = t;
+  await ensureDir(t.ctx.tempDir);
+  const dir = await fs.promises.mkdtemp(path.join(t.ctx.tempDir, 'install-'));
+  try {
+    const unpack =
+      process.platform === 'darwin'
+        ? await run('/usr/bin/ditto', ['-x', '-k', file, dir], { timeoutMs: 5 * 60_000 })
+        : await run('unzip', ['-q', '-o', file, '-d', dir], { timeoutMs: 5 * 60_000 });
+    if (!unpack.ok) return fail(`Could not unpack ${path.basename(file)}: ${failureText(unpack)}`, 'action.unsupportedFile');
+    const spec = parseDeviceSpec((await adb.shell(serial, 'getprop ro.product.cpu.abilist; wm density', { timeoutMs: 10_000 })).stdout);
+    const choice = chooseSplits(await listFiles(dir), kind, spec, t.apiLevel);
+    if ('error' in choice) {
+      if (choice.error === 'noMatchingAbis') {
+        return fail(
+          `Install failed: INSTALL_FAILED_NO_MATCHING_ABIS: the package has native code for ${choice.available.join(', ')} only; this phone runs ${spec.abis.join(', ')}`,
+          'action.install.noMatchingAbis',
+        );
+      }
+      return fail(`${path.basename(file)} has no APK to install`, 'action.unsupportedFile');
+    }
+    const installed = await installApks(
+      t,
+      choice.apks.map((a) => path.join(dir, ...a.split('/'))),
+      `${path.basename(file)} (${choice.apks.length} APK${choice.apks.length === 1 ? '' : 's'})`,
+    );
+    if (!installed.ok || !choice.obb.length) return installed;
+    for (const obb of choice.obb) {
+      const remote = `/sdcard/${obb}`;
+      await adb.shell(serial, `mkdir -p ${shellQuote(path.posix.dirname(remote))}`, { timeoutMs: 15_000 });
+      const push = await adb.run(['-s', serial, 'push', path.join(dir, ...obb.split('/')), remote], { timeoutMs: 15 * 60_000 });
+      if (!push.ok) return fail(`The app was installed, but its data file ${path.posix.basename(obb)} could not be copied: ${failureText(push)}`, 'action.install.obbFailed');
+    }
+    return done(`${installed.message ?? 'Installed'} with ${choice.obb.length} OBB data file${choice.obb.length === 1 ? '' : 's'}`);
+  } finally {
+    await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 

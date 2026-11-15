@@ -437,7 +437,7 @@ describe('IosDeviceDriver · round-3 verification', () => {
       status: 'streaming',
       via: 'idevicesyslog',
       code: 'logs.scopeNotApplied',
-      detail: 'All log lines are shown: telling app lines from system lines needs Xcode 15 or newer (devicectl)',
+      detail: 'All log lines are shown: telling app lines from system lines needs Xcode 15 or newer (devicectl) or ideviceinstaller',
     });
     expect(system('logs.scopeNotApplied')).toHaveLength(1);
     ctx.setSettings({ iosDeviceLogScope: 'all' });

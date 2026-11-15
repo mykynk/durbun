@@ -279,10 +279,18 @@ export function envForArtifactsBinary(toolPath: string): Record<string, string> 
   return flutterArtifactsEnv(toolPath.slice(0, idx + marker.length - 1));
 }
 
-export type IdeviceToolName = 'idevicesyslog' | 'idevicescreenshot' | 'iproxy';
+/**
+ * libimobiledevice tools. Flutter's cache ships idevicesyslog and idevicescreenshot (and iproxy); the
+ * fallbacks for iPhones without devicectl — idevicecrashreport (in the libimobiledevice package) and
+ * ideviceinstaller (its own package) — are usually found on PATH or next to a configured idevicesyslog.
+ */
+export type IdeviceToolName = 'idevicesyslog' | 'idevicescreenshot' | 'iproxy' | 'idevicecrashreport' | 'ideviceinstaller';
 
 function artifactSubdir(name: IdeviceToolName): string {
-  return name === 'iproxy' ? 'libusbmuxd' : 'libimobiledevice';
+  if (name === 'iproxy') return 'libusbmuxd';
+  // Older Flutter releases downloaded ideviceinstaller into its own artifacts folder.
+  if (name === 'ideviceinstaller') return 'ideviceinstaller';
+  return 'libimobiledevice';
 }
 
 export function resolveIdeviceTool(
