@@ -231,7 +231,7 @@ export class SdkConnection {
 
   private handleHello(hello: SdkHello): void {
     const { hub, logger } = this.host;
-    const resolved = resolveDevice(hub, hello.device, this.meta);
+    const resolved = resolveDevice(hub, hello.device, this.meta, hello.app.id);
     const app = hub.registerApp({
       sessionKey: hello.session,
       deviceId: resolved.deviceId,

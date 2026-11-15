@@ -3,10 +3,13 @@
  *   1. the transport knows (adb reverse per-device port, usbmux): meta.deviceId
  *   2. iOS simulator: hello.device.simulatorUdid → ios-sim:<udid>
  *   3. an online device the hints identify without ambiguity (see `findUniqueDevice`)
- *   4. otherwise a `net:<platform>-<model>-<name>` device (LAN SDK without a known device)
+ *   4. the one online device of that platform running this app right now (see `findDeviceRunningApp`):
+ *      a React Native app on an iPhone connects over Wi-Fi, but the iPhone may be plugged in and known
+ *   5. otherwise a `net:<platform>-<model>-<name>` device (LAN SDK without a known device); when the name does
+ *      not tell devices apart ("iPhone"), the LAN address is part of the key so two phones stay two rows
  * A wrong attachment is worse than none: when in doubt the session gets its own `net:` device.
  */
-import type { DeviceHints, DeviceInfo, Transport } from '@durbun/protocol';
+import type { DeviceApp, DeviceHints, DeviceInfo, Transport } from '@durbun/protocol';
 import type { HubSink, SdkAttachMeta } from '../types';
 
 export const NET_DEVICE_PREFIX = 'net:';
@@ -14,7 +17,12 @@ export const NET_DEVICE_PREFIX = 'net:';
 export interface DeviceLookup {
   getDevice(id: string): DeviceInfo | undefined;
   getDevices(): DeviceInfo[];
+  /** Apps the platform drivers see on each device (running state, last activity). */
+  getDeviceApps?(): DeviceApp[];
 }
+
+/** How recent an app's last log line / process event must be to count as "just launched". */
+export const RECENT_APP_ACTIVITY_MS = 2 * 60_000;
 
 export interface ResolvedDevice {
   deviceId: string;
@@ -155,12 +163,50 @@ export function findUniqueDevice(
   return undefined;
 }
 
+/**
+ * The online device that is running the app `bundleId` (or showed activity from it in the last two minutes),
+ * when exactly one device of the hinted platform and kind does. Only drivers report device apps, so `net:`,
+ * imported and virtual devices never match.
+ */
+export function findDeviceRunningApp(
+  devices: DeviceInfo[],
+  apps: DeviceApp[],
+  hints: DeviceHints,
+  bundleId: string | undefined,
+  transport: Transport,
+  now = Date.now(),
+): DeviceInfo | undefined {
+  if (!bundleId || (hints.platform !== 'ios' && hints.platform !== 'android')) return undefined;
+  let pool = devices.filter((d) => d.state === 'online' && d.platform === hints.platform && !excludedFromMatching(d, transport));
+  if (hints.isPhysical !== undefined) pool = pool.filter((d) => (d.kind === 'physical') === hints.isPhysical);
+  if (pool.length === 0) return undefined;
+  const ids = new Set(pool.map((d) => d.id));
+  const live = (a: DeviceApp) => a.running || a.lastActivity >= now - RECENT_APP_ACTIVITY_MS;
+  const hosts = new Set(apps.filter((a) => a.id === bundleId && ids.has(a.deviceId) && live(a)).map((a) => a.deviceId));
+  if (hosts.size !== 1) return undefined;
+  const [deviceId] = hosts;
+  return pool.find((d) => d.id === deviceId);
+}
+
+/** "192.168.1.20" from "::ffff:192.168.1.20:50123" / "[fe80::1]:50123"; undefined for loopback or unknown. */
+export function lanAddress(remote: string | undefined): string | undefined {
+  if (!remote || isLoopback(remote)) return undefined;
+  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(remote);
+  let host = bracketed ? bracketed[1] : remote;
+  if (!bracketed) {
+    const v4 = /^(?:::ffff:)?(\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?$/i.exec(remote);
+    if (v4) host = v4[1];
+    else if ((remote.match(/:/g) || []).length === 1) host = remote.replace(/:\d+$/, '');
+  }
+  return host || undefined;
+}
+
 function netDeviceKind(hints: DeviceHints): DeviceInfo['kind'] {
   if (hints.isPhysical !== false) return 'physical';
   return hints.platform === 'ios' ? 'simulator' : hints.platform === 'android' ? 'emulator' : 'physical';
 }
 
-export function resolveDevice(hub: HubSink & DeviceLookup, hints: DeviceHints, meta: SdkAttachMeta): ResolvedDevice {
+export function resolveDevice(hub: HubSink & DeviceLookup, hints: DeviceHints, meta: SdkAttachMeta, bundleId?: string): ResolvedDevice {
   const now = Date.now();
   if (meta.deviceId) {
     if (!hub.getDevice(meta.deviceId)) hub.upsertDevice(placeholderDevice(meta.deviceId, hints, meta, now));
@@ -175,16 +221,31 @@ export function resolveDevice(hub: HubSink & DeviceLookup, hints: DeviceHints, m
     hub.upsertDevice(placeholderDevice(id, { ...hints, platform: 'ios', isPhysical: false }, meta, now));
     return { deviceId: id, network: false, placeholder: true };
   }
-  const match = findUniqueDevice(hub.getDevices(), hints, meta.transport, meta.remote);
+  const devices = hub.getDevices();
+  const match = findUniqueDevice(devices, hints, meta.transport, meta.remote);
   if (match) return { deviceId: match.id, network: false };
+  if (typeof hub.getDeviceApps === 'function') {
+    let apps: DeviceApp[] = [];
+    try {
+      apps = hub.getDeviceApps();
+    } catch {
+      apps = [];
+    }
+    const host = findDeviceRunningApp(devices, apps, hints, bundleId, meta.transport);
+    if (host) return { deviceId: host.id, network: false };
+  }
 
-  const id = `${NET_DEVICE_PREFIX}${slug(hints.platform)}-${slug(hints.model)}-${slug(hints.name)}`;
+  // A name like "iPhone" (iOS 16+, React Native) does not tell phones apart: their LAN addresses do.
+  const name = nameKey(hints.name);
+  const address = name && !GENERIC_NAMES.has(name) ? undefined : lanAddress(meta.remote);
+  const id = `${NET_DEVICE_PREFIX}${slug(hints.platform)}-${slug(hints.model)}-${slug(hints.name)}${address ? `-at-${slug(address)}` : ''}`;
   const existing = hub.getDevice(id);
+  const label = hints.name || hints.model || 'Network device';
   const device: DeviceInfo = {
     id,
     platform: hints.platform,
     kind: netDeviceKind(hints),
-    name: hints.name || hints.model || 'Network device',
+    name: address ? `${label} (${address})` : label,
     connection: isLoopback(meta.remote) ? 'local' : 'wifi',
     state: 'online',
     logs: {
