@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · Türkçe
+  <a href="README.md">English</a> · Türkçe · <a href="docs/README.md">Belgeler</a>
 </p>
 
 ![Örnek verilerle Dürbün: canlı loglar, bir isteğin JSON yanıtı, o istekten oluşturulan mock kuralı ve performans grafikleri](docs/images/demo.webp)
@@ -115,7 +115,8 @@ verdiğinizde Wi-Fi her SDK ile çalışır.
 
 ## Kılavuzlar
 
-Kılavuzlar şimdilik yalnızca İngilizce.
+Kılavuzlar şimdilik yalnızca İngilizce. Okura göre sıralanmış tüm kılavuzlar
+[belge dizininde](docs/README.md) listelenir.
 
 | Kılavuz | Kimin için, ne anlatır |
 |---|---|
@@ -287,7 +288,7 @@ npm run build
 npm start
 ```
 
-Arayüz http://localhost:9750 adresinde açılır; Chrome, Brave, Edge, Arc veya Chromium kuruluysa adres
+Arayüz http://127.0.0.1:9750 adresinde açılır; Chrome, Brave, Edge, Arc veya Chromium kuruluysa adres
 çubuğu olmayan bir uygulama penceresinde.
 
 ```
@@ -297,55 +298,30 @@ node dist/durbun.mjs [--port 9750] [--sdk-port 9751] [--demo] [--no-open] [--lan
 
 Ayarlar, mock kuralları, akışlar, ortamlar ve çalıştırma geçmişi `~/.durbun` içinde saklanır.
 
-## Mac uygulamasını derlemek
-
-```bash
-npm install
-npm run app:dist
-```
-
-`apps/desktop/release/` içinde `Durbun-<sürüm>-arm64.dmg` ve `mac-arm64/Dürbün.app` oluşur (bu Mac için,
-ad-hoc imzalı). `npm run app:release` Apple silicon ve Intel için DMG ve ZIP üretir. `CSC_NAME` (ya da
-`CSC_LINK` + `CSC_KEY_PASSWORD`) bir "Developer ID Application" sertifikasını gösteriyorsa uygulama hardened
-runtime ile imzalanır; `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER` (ya da `APPLE_ID` +
-`APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`) da varsa noter onayına gönderilir.
-
-`npm run app` uygulamayı depodaki `dist/` ile çalıştırır. İkinci bir kopya ya da test için: `DURBUN_PORT`,
-`DURBUN_SDK_PORT`, `DURBUN_DATA_DIR` (varsayılan `~/.durbun`), `DURBUN_USER_DATA_DIR` (pencere durumu,
-tek kopya kilidi ve günlükler), `DURBUN_DEMO=1`, `DURBUN_DEBUG=1`.
-
 ## Kaldırma
 
-1. Dürbün'ü kapatın (⌘Q) ve Uygulamalar klasöründen Çöp Sepeti'ne taşıyın.
-2. Verilerini de silmek için:
-   - `~/.durbun`: ayarlar (`settings.json`), mock kuralları (`mocks.json`), akışlar (`flows/`), çalıştırma
-     geçmişi (`flow-runs/`), ortamlar (`environments.json`), yedekleme ayarları (`backup.json`) ve geçici
-     dosyalar. Başka bir klasöre yazdığınız yedekler orada kalır.
+1. **Dürbün → Girişte Aç** seçeneğini açtıysanız önce kapatın (ya da sonradan Sistem Ayarları → Genel → Giriş
+   Öğeleri'nden Dürbün'ü kaldırın).
+2. Dürbün'ü kapatın (⌘Q) ve Uygulamalar klasöründen Çöp Sepeti'ne taşıyın. Normal kapanışta Dürbün, takılı
+   Android telefonlarda kurduğu port yönlendirmelerini kaldırır. Dürbün normal kapanmadıysa bunları
+   `adb reverse --remove-all` ile kaldırın (bu komut o telefonda başka araçların kurduğu yönlendirmeleri de
+   kaldırır).
+3. Verilerini de silmek için şunları silin:
+   - `~/.durbun` (ya da `--data-dir` ile verdiğiniz klasör): ayarlar (`settings.json`), mock kuralları
+     (`mocks.json`), akışlar (`flows/`), çalıştırma geçmişi (`flow-runs/`), ortamlar (`environments.json`),
+     yedekleme ayarları (`backup.json`), Slack webhook adresi (`slack.json`) ve geçici dosyalar. Başka bir
+     klasöre yazdığınız yedekler orada kalır.
    - `~/Library/Application Support/Dürbün`: pencere durumu, arayüz tercihleri, uygulamanın kendi ayarları
-     (`desktop.json`), tanılama günlüğü ve çökme dökümleri.
+     (`desktop.json`), tanılama günlüğü (`logs/`) ve çökme dökümleri (`Crashpad/`).
    - `~/Library/Preferences/dev.durbun.desktop.plist`: macOS'in uygulama için tuttuğu tercihler.
-3. Uygulamalarınıza eklediğiniz SDK paketlerini kaldırın.
+   - `~/Library/Saved Application State/dev.durbun.desktop.savedState`: macOS'in kaydettiği pencere durumu
+     (varsa).
+4. Uygulamalarınıza eklediğiniz SDK paketlerini kaldırın.
 
-## Geliştirme
+## Katkıda bulunma
 
-```bash
-npm run dev          # sunucu kaynaktan (değişince yeniden başlar) + Vite, http://localhost:5173
-npm run typecheck
-npm test
-npm run app:test     # Mac uygulaması
-```
-
-| Klasör | İçerik |
-|---|---|
-| `packages/protocol` | Sunucu, arayüz ve SDK'ların paylaştığı veri tipleri ve komutlar |
-| `packages/server` | Cihaz sürücüleri (adb, simctl, devicectl, idevicesyslog), SDK bağlantıları, Dart VM Service köprüsü, HTTP/WebSocket API, demo, CLI |
-| `packages/ui` | React arayüzü: Loglar, Ağ, Mock'lar, Performans, Cihaz, Akışlar ([yapı](packages/ui/src/README-ui.md)) |
-| `apps/desktop` | Mac uygulaması (Electron) |
-| `sdks/*` | Flutter, Android, iOS ve React Native SDK'ları |
-| `SPEC.md` | Ürün ve mühendislik şartnamesi |
-
-Pull request açmadan önce [CONTRIBUTING.md](CONTRIBUTING.md)'yi, güvenlik açığı bildirmek için
-[SECURITY.md](SECURITY.md)'yi okuyun.
+Kaynaktan derleme, Mac uygulamasının derlenmesi, geliştirme komutları ve depo yapısı
+[CONTRIBUTING.md](CONTRIBUTING.md)'de (İngilizce). Güvenlik açığı bildirmek için [SECURITY.md](SECURITY.md)'ye bakın.
 
 ## Sürümleme
 

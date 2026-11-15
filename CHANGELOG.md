@@ -154,6 +154,10 @@ All notable changes to Dürbün are listed here. The format follows
   the `@durbun/react-native/noop` entry keeps the SDK out of release bundles.
 - Guides in `docs/guides`: Dürbün for testers, troubleshooting by symptom, mock rules, versions and
   upgrading, and Dürbün in test builds. The Android and iOS SDK guides gain a "Test builds" section.
+- `docs/README.md` lists every guide by reader. The bug report form asks for the build type, the connection
+  and the diagnostic info, and questions have their own place in Discussions. The security policy covers
+  files from someone else, backups, flows and updates, says what is out of scope and when to expect an
+  answer.
 - React Native / JS SDK: when no connection is made within 10 seconds, one console note lists the addresses
   tried and the fix for the device, and a line confirms when it connects.
 - Android and iOS SDKs: when no desktop connects within about 10 seconds, one console line says what was

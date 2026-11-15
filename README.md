@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  English · <a href="README.tr.md">Türkçe</a>
+  English · <a href="README.tr.md">Türkçe</a> · <a href="docs/README.md">Docs</a>
 </p>
 
 ![Dürbün with sample data: live logs, a request's JSON response, a mock rule made from that request, and performance charts](docs/images/demo.webp)
@@ -112,6 +112,8 @@ iPhones for the Flutter and iOS SDKs. A React Native app on an iPhone connects o
 allowed.
 
 ## Guides
+
+Every guide, sorted by reader, is listed in [the docs index](docs/README.md).
 
 | Guide | For |
 |---|---|
@@ -280,7 +282,7 @@ npm run build
 npm start
 ```
 
-The interface opens at http://localhost:9750, in a chromeless app window when Chrome, Brave, Edge, Arc or
+The interface opens at http://127.0.0.1:9750, in a chromeless app window when Chrome, Brave, Edge, Arc or
 Chromium is installed.
 
 ```
@@ -290,55 +292,29 @@ node dist/durbun.mjs [--port 9750] [--sdk-port 9751] [--demo] [--no-open] [--lan
 
 Settings, mock rules, flows, environments and run history live in `~/.durbun`.
 
-## Build the Mac app
-
-```bash
-npm install
-npm run app:dist
-```
-
-This builds `Durbun-<version>-arm64.dmg` and `mac-arm64/Dürbün.app` in `apps/desktop/release/`, ad-hoc
-signed for this Mac. `npm run app:release` builds the Apple silicon and Intel DMG and ZIP. With a
-"Developer ID Application" certificate in `CSC_NAME` (or `CSC_LINK` + `CSC_KEY_PASSWORD`) the app is signed
-with the hardened runtime, and with `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER` (or
-`APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`) it is also notarized.
-
-`npm run app` runs the app against the repository's `dist/`. For a second copy or tests, set
-`DURBUN_PORT`, `DURBUN_SDK_PORT`, `DURBUN_DATA_DIR` (default `~/.durbun`), `DURBUN_USER_DATA_DIR` (window
-state, single-instance lock and logs), `DURBUN_DEMO=1` or `DURBUN_DEBUG=1`.
-
 ## Uninstall
 
-1. Quit Dürbün (⌘Q) and move it from Applications to the Trash.
-2. To remove its data as well, delete:
-   - `~/.durbun`: settings (`settings.json`), mock rules (`mocks.json`), flows (`flows/`), run history
-     (`flow-runs/`), environments (`environments.json`), backup settings (`backup.json`) and temporary files.
-     Backups you wrote into another folder stay there.
+1. If you turned on **Dürbün → Open at Login**, turn it off first (or remove Dürbün later in System Settings →
+   General → Login Items).
+2. Quit Dürbün (⌘Q) and move it from Applications to the Trash. A normal quit removes the port forwards
+   Dürbün set up on plugged-in Android phones. If Dürbün did not quit normally, remove them with
+   `adb reverse --remove-all` (this also removes forwards other tools set on that phone).
+3. To remove its data as well, delete:
+   - `~/.durbun` (or the folder you passed with `--data-dir`): settings (`settings.json`), mock rules
+     (`mocks.json`), flows (`flows/`), run history (`flow-runs/`), environments (`environments.json`), backup
+     settings (`backup.json`), the Slack webhook (`slack.json`) and temporary files. Backups you wrote into
+     another folder stay there.
    - `~/Library/Application Support/Dürbün`: window state, interface preferences, the app's own settings
-     (`desktop.json`), the diagnostic log and crash dumps.
+     (`desktop.json`), the diagnostic log (`logs/`) and crash dumps (`Crashpad/`).
    - `~/Library/Preferences/dev.durbun.desktop.plist`: what macOS keeps for the app.
-3. Remove the SDK packages from your apps.
+   - `~/Library/Saved Application State/dev.durbun.desktop.savedState`: the window state macOS saves, if
+     present.
+4. Remove the SDK packages from your apps.
 
-## Development
+## Contributing
 
-```bash
-npm run dev          # server from source (restarts on change) + Vite on http://localhost:5173
-npm run typecheck
-npm test
-npm run app:test     # the Mac app
-```
-
-| Folder | Contents |
-|---|---|
-| `packages/protocol` | Data types and commands shared by the server, the interface and the SDKs |
-| `packages/server` | Device drivers (adb, simctl, devicectl, idevicesyslog), SDK connections, the Dart VM Service bridge, HTTP/WebSocket API, demo, CLI |
-| `packages/ui` | The React interface: Logs, Network, Mocks, Performance, Device, Flows ([structure](packages/ui/src/README-ui.md)) |
-| `apps/desktop` | The Mac app (Electron) |
-| `sdks/*` | The Flutter, Android, iOS and React Native SDKs |
-| `SPEC.md` | Product and engineering specification |
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and [SECURITY.md](SECURITY.md) to
-report a vulnerability.
+Building from source, the Mac app build, development commands and the repository layout are in
+[CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Versioning
 

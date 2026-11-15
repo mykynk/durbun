@@ -8,6 +8,29 @@ flows in a repository and import them (**Import a file…**, or drop them on the
 editors such as VS Code complete and check a flow against it). It is generated from the app's node catalog, so it
 always matches the version in this repository.
 
+## Editor support
+
+The Mac app's **Export as a file** saves a flow as `<id>.durbun-flow.json`. To get completion and checks for those
+files in VS Code, map them to the schema in your user or workspace `settings.json`:
+
+```json
+{
+  "json.schemas": [
+    {
+      "fileMatch": ["*.durbun-flow.json"],
+      "url": "https://raw.githubusercontent.com/mykynk/durbun/main/docs/flows/durbun-flow.schema.json"
+    }
+  ]
+}
+```
+
+Flows kept as `~/.durbun/flows/<id>.json` or in your own repository under another name need their own
+`fileMatch` pattern, for example `"flows/*.json"`.
+
+A single file can also name the schema itself with a first line `"$schema": "https://raw.githubusercontent.com/mykynk/durbun/main/docs/flows/durbun-flow.schema.json",`.
+The schema does not list `$schema` as a field, so some editors flag that line, and Dürbün leaves it out when it
+imports the flow. The `json.schemas` setting avoids both.
+
 ## Example
 
 ```json

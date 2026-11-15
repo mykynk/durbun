@@ -46,6 +46,32 @@ work, the mock server is the safer choice.
 
 Run the checks for every part you changed before you open a pull request, and say in it which ones you ran.
 
+## Building the Mac app
+
+```bash
+npm run app:dist
+```
+
+This builds `Durbun-<version>-arm64.dmg` and `mac-arm64/Dürbün.app` in `apps/desktop/release/`, ad-hoc signed
+for this Mac. It overwrites an earlier build in that folder, so quit a copy that runs from there first.
+`npm run app:release` builds the Apple silicon and Intel DMG and ZIP (see [Releasing](#releasing-maintainers)).
+With a "Developer ID Application" certificate in `CSC_NAME` (or `CSC_LINK` + `CSC_KEY_PASSWORD`) the app is
+signed with the hardened runtime, and with `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER` (or
+`APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`) it is also notarized.
+
+`npm run app` runs the app against the repository's `dist/`, and builds `dist/` only when it is missing: run
+`npm run build` after changing the server or the interface.
+
+To run a second copy next to an installed Dürbün, or for tests, set these variables:
+
+| Variable | Effect |
+|---|---|
+| `DURBUN_PORT`, `DURBUN_SDK_PORT` | Interface and SDK ports (default 9750 and 9751) |
+| `DURBUN_DATA_DIR` | Data folder (default `~/.durbun`) |
+| `DURBUN_USER_DATA_DIR` | Window state, single-instance lock and logs (default `~/Library/Application Support/Dürbün`) |
+| `DURBUN_DEMO=1` | Start with demo devices |
+| `DURBUN_DEBUG=1` | More detail in the diagnostic log |
+
 ## Rules that keep the parts in sync
 
 - **Protocol.** Never change an existing type in `packages/protocol/src/index.ts` or

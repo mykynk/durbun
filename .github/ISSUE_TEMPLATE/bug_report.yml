@@ -6,7 +6,8 @@ body:
     attributes:
       value: |
         Thanks for the report. Please search the existing issues first.
-        Security problems go to a private report instead, see [SECURITY.md](https://github.com/mykynk/durbun/blob/main/SECURITY.md).
+        In the Mac app, **Help → Report an Issue…** opens this form with the version and environment filled in, and puts the diagnostic info on the clipboard.
+        Questions go to [Discussions](https://github.com/mykynk/durbun/discussions/categories/q-a). Security problems go to a private report instead, see [SECURITY.md](https://github.com/mykynk/durbun/blob/main/SECURITY.md).
   - type: dropdown
     id: area
     attributes:
@@ -38,6 +39,68 @@ body:
       placeholder: macOS 15.1, Pixel 8 (Android 15), Flutter 3.38
     validations:
       required: true
+  - type: dropdown
+    id: mac
+    attributes:
+      label: Mac
+      options:
+        - Apple silicon
+        - Intel
+        - Not sure
+    validations:
+      required: false
+  - type: dropdown
+    id: install
+    attributes:
+      label: How Dürbün was installed
+      options:
+        - Disk image from GitHub Releases
+        - Command line (npm start)
+        - Built from source
+        - Not relevant (SDK only)
+    validations:
+      required: false
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection
+      description: How the device reaches Dürbün. Pick every one that applies.
+      multiple: true
+      options:
+        - USB
+        - Wi-Fi
+        - iOS simulator
+        - Android emulator
+        - No device involved
+    validations:
+      required: false
+  - type: dropdown
+    id: build-type
+    attributes:
+      label: App build
+      description: The build of your app that shows the problem. Pick every one that applies.
+      multiple: true
+      options:
+        - Debug
+        - Profile
+        - Release
+        - With the Dürbün SDK
+        - Without the SDK (device logs, Dart VM Service)
+    validations:
+      required: false
+  - type: dropdown
+    id: distribution
+    attributes:
+      label: Where the build came from
+      multiple: true
+      options:
+        - Local build (Xcode, Android Studio, flutter run)
+        - TestFlight
+        - Firebase App Distribution
+        - App Store or Google Play
+        - Other
+    validations:
+      required: false
   - type: textarea
     id: what
     attributes:
@@ -60,6 +123,7 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Logs
-      description: "Mac app: Help → Show Diagnostic Log. Remove tokens, cookies and personal data before pasting."
-      render: text
+      label: Logs and diagnostic info
+      description: |
+        Mac app: paste the output of **Help → Copy Diagnostic Info** (versions, ports, the tool check and the last log lines). Tokens, cookies and URL query values are masked in it, but look it over before you post: log lines can still hold personal data. **Help → Show Diagnostic Log** has the full log.
+      placeholder: "### Dürbün diagnostic info"
