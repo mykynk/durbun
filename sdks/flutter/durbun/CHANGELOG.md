@@ -1,3 +1,20 @@
+## Unreleased
+
+- In-app panel: **Tools → Mac connection** says why the app is not connected
+  and what to do next (Mac app not open, USB debugging, wrong address, local
+  network connections off on the Mac, iOS Local Network permission), with the
+  addresses tried. A debug build prints the same once in the console.
+- The Mac's Wi-Fi address can be typed in the panel at run time: tried at
+  once, kept for the next launches, *Use the build's address* goes back. The
+  USB link stays in use.
+- **Tools → App tools**: your `DurbunAction`s and the built-in Flutter,
+  Android and iOS tools work from the panel, without the Mac.
+- When the SDK has not started or is off in the build,
+  `Durbun.showInspector()` opens a page that says why and what to do instead
+  of nothing; a debug build says it in the console too.
+- A one-time "Shake the phone to open the Dürbün panel" hint on the first
+  launch (`DurbunInspector(showHint: false)` turns it off).
+
 ## 0.2.0
 
 - In-app panel: **Send to Slack** on the request and log Share sheets posts

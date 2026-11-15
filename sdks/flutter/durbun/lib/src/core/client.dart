@@ -4,10 +4,12 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'connection_report.dart';
 import 'env/environment.dart';
 import 'http/http_client.dart';
 import 'json_safe.dart';
@@ -138,9 +140,31 @@ class DurbunClient implements HttpCaptureHost {
   final Map<String, DurbunCommandHandler> _commands =
       <String, DurbunCommandHandler>{};
 
+  /// Native actions run from the in-app panel, by command id: their
+  /// `command.result` is answered here instead of going to the desktop.
+  final Map<String, Completer<Map<String, Object?>>> _localCommands =
+      <String, Completer<Map<String, Object?>>>{};
+  int _localSeq = 0;
+
+  /* connection diagnostics (see ConnectionReport) */
+  late final String? _buildHost = resolveDesktopHost(options.host);
+  String? _panelHost;
+  int _endpointGeneration = 0;
+  List<ConnectAttempt> _attempts = const <ConnectAttempt>[];
+  int _failedRounds = 0;
+  bool _trying = false;
+  bool _consoleHinted = false;
+  final Stopwatch _sinceStart = Stopwatch();
+  final List<void Function()> _reportListeners = <void Function()>[];
+
+  /// After this long without a first connection, debug builds print once
+  /// why (see [connectionHintForConsole]).
+  static const Duration kConsoleHintAfter = Duration(seconds: 10);
+
   /* ───────────────────────────── lifecycle ───────────────────────────── */
 
   void _start(TransportConfig? override, Future<void>? helloGate) {
+    _sinceStart.start();
     final config = override ?? _transportConfig();
     _transport = Transport.start(
       config,
@@ -172,26 +196,30 @@ class DurbunClient implements HttpCaptureHost {
     _notifyState();
   }
 
-  TransportConfig _transportConfig() {
-    final endpoints = <TransportEndpoint>[
+  /// The Wi-Fi endpoint in use: the panel's address, else the build's.
+  TransportEndpoint? _lanEndpoint() {
+    final host = _panelHost ?? _buildHost;
+    if (host == null) return null;
+    final (h, p) = splitHostPort(host, options.port);
+    if (h.isEmpty || (h == '127.0.0.1' && p == options.port)) return null;
+    return TransportEndpoint(h, p, connectTimeoutMs: 3000);
+  }
+
+  List<TransportEndpoint> _endpoints() {
+    final lan = _lanEndpoint();
+    return <TransportEndpoint>[
       TransportEndpoint('127.0.0.1', options.port, connectTimeoutMs: 1500),
-    ];
-    final host = resolveDesktopHost(options.host);
-    if (host != null) {
-      final (h, p) = splitHostPort(host, options.port);
-      if (h.isNotEmpty && !(h == '127.0.0.1' && p == options.port)) {
-        endpoints.add(TransportEndpoint(h, p, connectTimeoutMs: 3000));
-      }
-    }
-    if (device.isAndroidEmulator) {
+      if (lan != null) lan,
       // Fallback when adb reverse is not set up: the emulator's alias for the
       // host loopback.
-      endpoints.add(
+      if (device.isAndroidEmulator)
         TransportEndpoint('10.0.2.2', options.port, connectTimeoutMs: 1500),
-      );
-    }
+    ];
+  }
+
+  TransportConfig _transportConfig() {
     return TransportConfig(
-      endpoints: endpoints,
+      endpoints: _endpoints(),
       listenPorts: device.isIosPhysical && options.listenForUsb
           ? deviceListenPorts()
           : const <int>[],
@@ -219,6 +247,11 @@ class DurbunClient implements HttpCaptureHost {
     _resolveMocksReady();
     _configListeners.clear();
     _stateListeners.clear();
+    _reportListeners.clear();
+    for (final c in _localCommands.values) {
+      if (!c.isCompleted) c.completeError(StateError('Dürbün stopped'));
+    }
+    _localCommands.clear();
     _native = null;
     if (identical(_current, this)) _current = null;
     await _transport.close();
@@ -266,6 +299,96 @@ class DurbunClient implements HttpCaptureHost {
       return true;
     } catch (_) {
       return _connection.connected;
+    }
+  }
+
+  /* ───────────────────────────── desktop address & diagnostics ───────────────────────────── */
+
+  /// The address built into the app (`DurbunOptions.host`,
+  /// `--dart-define=DURBUN_HOST`, environment), if any.
+  String? get buildHost => _buildHost;
+
+  /// The address set at run time with [setDesktopHost], if any.
+  String? get panelHost => _panelHost;
+
+  /// Uses [host] (`192.168.1.20` or `192.168.1.20:9751`) as the Wi-Fi
+  /// address instead of the build's, and tries it at once; null goes back
+  /// to the build's address. A link through the old Wi-Fi address is
+  /// closed; the USB link (adb reverse, usbmux) stays.
+  void setDesktopHost(String? host) {
+    if (_disposed) return;
+    final value = host == null || host.trim().isEmpty ? null : host.trim();
+    if (value == _panelHost) return;
+    _panelHost = value;
+    _endpointGeneration++;
+    _attempts = const <ConnectAttempt>[];
+    _failedRounds = 0;
+    _trying = !_connection.connected || _lanEndpoint() != null;
+    try {
+      _transport.setEndpoints(_endpoints());
+    } catch (_) {}
+    _notifyReport();
+  }
+
+  /// Why the app is (not) connected, for the in-app panel.
+  ConnectionReport get connectionReport {
+    final lan = _lanEndpoint();
+    final connected = _connection.connected;
+    return ConnectionReport(
+      connected: connected,
+      via: _connection.via,
+      attempts: connected ? const <ConnectAttempt>[] : _attempts,
+      failedRounds: connected ? 0 : _failedRounds,
+      trying: !connected && _trying,
+      lanEndpoint: lan?.toString(),
+      lanFromPanel: _panelHost != null,
+      buildHost: _buildHost,
+      issue: connected || _attempts.isEmpty
+          ? null
+          : diagnoseConnection(
+              attempts: _attempts,
+              platform: device.platform,
+              isPhysical: device.isPhysical ?? true,
+              lanEndpoint: lan?.toString(),
+            ),
+      everConnected: _everConnected,
+      listensForUsb: device.isIosPhysical && options.listenForUsb,
+    );
+  }
+
+  /// Called when [connectionReport] changes.
+  void addReportListener(void Function() listener) => _reportListeners.add(listener);
+
+  void removeReportListener(void Function() listener) => _reportListeners.remove(listener);
+
+  void _notifyReport() {
+    for (final l in List<void Function()>.of(_reportListeners)) {
+      try {
+        l();
+      } catch (_) {}
+    }
+  }
+
+  void _onRoundFailed(List<Object?> event) {
+    final generation = event.length > 2 ? event[2] : null;
+    if (generation is int && generation != _endpointGeneration) return;
+    final raw = event.length > 1 ? event[1] : null;
+    _attempts = <ConnectAttempt>[
+      if (raw is List)
+        for (final a in raw)
+          if (a is List && a.length >= 2) ConnectAttempt('${a[0]}', '${a[1]}', a.length > 2 ? '${a[2]}' : ''),
+    ];
+    _failedRounds++;
+    _trying = false;
+    _notifyReport();
+    if (!_consoleHinted && !_everConnected && kDurbunDebugMode && _sinceStart.elapsed >= kConsoleHintAfter) {
+      _consoleHinted = true;
+      final text = connectionHintForConsole(connectionReport, port: options.port);
+      _diagnostic(text);
+      try {
+        // Root zone: shown in the `flutter run` console, not captured as an app log.
+        Zone.root.print(text);
+      } catch (_) {}
     }
   }
 
@@ -425,6 +548,48 @@ class DurbunClient implements HttpCaptureHost {
     if (_actions.remove(id) != null) publishActions();
   }
 
+  /// Runs an action from the in-app panel: the app's own ([addAction]) or
+  /// the native layer's. Returns the action's result data (for toggles and
+  /// selects `{value: …}`); throws when it fails or a native one does not
+  /// answer within 9 s. The desktop sees the new values, not the call.
+  Future<Object?> runAction(String id, [Map<String, Object?> params = const <String, Object?>{}]) async {
+    if (_disposed) throw StateError('Dürbün is stopped');
+    final action = _actions[id];
+    if (action != null) {
+      final result = await Future<Object?>.sync(() => action.invoke(params)).timeout(const Duration(seconds: 9));
+      if (action.kind != DurbunActionKind.button) publishActions();
+      return result;
+    }
+    final native = _native;
+    if (native == null || !native.handles(id)) throw ArgumentError('Unknown action: $id');
+    final commandId = 'panel-${++_localSeq}';
+    final completer = _localCommands[commandId] = Completer<Map<String, Object?>>();
+    try {
+      native.forwardCommand(<String, Object?>{'type': 'command', 'id': commandId, 'name': id, 'params': params});
+      final result = await completer.future.timeout(const Duration(seconds: 9));
+      if (result['ok'] != true) throw StateError('${result['error'] ?? 'failed'}');
+      return result['data'];
+    } finally {
+      _localCommands.remove(commandId);
+    }
+  }
+
+  /// A native `command.result` for an action run from the panel: answered
+  /// here, never sent to the desktop.
+  bool _takeLocalResult(String jsonLine) {
+    if (_localCommands.isEmpty || !jsonLine.contains('command.result')) return false;
+    try {
+      final decoded = jsonDecode(jsonLine);
+      if (decoded is! Map || decoded['type'] != 'command.result') return false;
+      final completer = _localCommands[decoded['id']];
+      if (completer == null) return false;
+      if (!completer.isCompleted) completer.complete(decoded.cast<String, Object?>());
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Registers a command that is not shown as an action.
   void registerCommand(String name, DurbunCommandHandler handler) =>
       _commands[name] = handler;
@@ -503,10 +668,16 @@ class DurbunClient implements HttpCaptureHost {
         if (_handshakes == 0) _resolveMocksReady();
       case TransportEvents.connected:
         final welcome = event[1];
+        _attempts = const <ConnectAttempt>[];
+        _failedRounds = 0;
+        _trying = false;
         _applyWelcome(
           welcome is Map ? welcome.cast<String, Object?>() : const {},
           event.length > 2 ? event[2]?.toString() : null,
         );
+        _notifyReport();
+      case TransportEvents.roundFailed:
+        _onRoundFailed(event);
       case TransportEvents.disconnected:
         _handshakes = 0;
         if (_connection.connected) {
@@ -520,6 +691,7 @@ class DurbunClient implements HttpCaptureHost {
         _rawMocks = null;
         _setConnection(DurbunConnection.disconnected);
         _notifyState();
+        _notifyReport();
       case TransportEvents.message:
         final message = event[1];
         if (message is Map) _onServerMessage(message.cast<String, Object?>());
@@ -620,6 +792,7 @@ class DurbunClient implements HttpCaptureHost {
   /// (no trailing newline). It shares this client's buffer and connection.
   void sendEncoded(String jsonLine) {
     if (_disposed || jsonLine.isEmpty) return;
+    if (_takeLocalResult(jsonLine)) return;
     _send(<String, Object?>{kEncodedLineKey: jsonLine});
   }
 

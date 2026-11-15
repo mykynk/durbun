@@ -577,9 +577,188 @@ class InspectorStrings {
   String get srcMetrics => _('Performans ölçümleri', 'Performance samples');
   String get srcMetricsOff => _('DurbunOptions(metrics: false) ile kapatılmış', 'Turned off with DurbunOptions(metrics: false)');
 
-  String get disabled => _(
-    'Dürbün bu derlemede kapalı. Açmak için --dart-define=DURBUN=true ya da DurbunOptions(enabled: true).',
-    'Dürbün is off in this build. Turn it on with --dart-define=DURBUN=true or DurbunOptions(enabled: true).',
+  /* Mac connection (Tools → Mac connection) */
+  String get macConnection => _('Mac bağlantısı', 'Mac connection');
+  String get statusConnected => _('Bağlı', 'Connected');
+  String get statusConnecting => _('Bağlanıyor…', 'Connecting…');
+  String connectingTo(String? endpoint) =>
+      endpoint == null ? _('Masaüstü aranıyor…', 'Looking for the desktop…') : _('$endpoint adresine bağlanılıyor…', 'Connecting to $endpoint…');
+  String get keepsTrying => _(
+    'Uygulama denemeye devam ediyor; bağlanınca bu sayfa kendiliğinden güncellenir.',
+    'The app keeps trying; this page updates by itself once it connects.',
+  );
+  String get attemptsTitle => _('Son deneme', 'Last attempt');
+  String attemptKind(String kind) => switch (kind) {
+    'refused' => _('reddedildi', 'refused'),
+    'timeout' => _('zaman aşımı', 'timed out'),
+    'unreachable' => _('ulaşılamıyor', 'unreachable'),
+    'denied' => _('izin yok', 'not permitted'),
+    'lookup' => _('adres bulunamadı', 'address not found'),
+    'closed' => _('bağlantıyı kapattı', 'closed the connection'),
+    'no-welcome' => _('Dürbün yanıtı gelmedi', 'no Dürbün reply'),
+    _ => _('hata', 'error'),
+  };
+  String get issueDesktopNotRunningTitle => _('Dürbün masaüstü açık değil', 'The Dürbün desktop is not open');
+  String get issueDesktopNotRunningBody => _(
+    'Bu bilgisayarda Dürbün’e ulaşılamadı. Mac’te Dürbün’ü açın; uygulama kendiliğinden bağlanır.',
+    'Nothing answered on this computer. Open Dürbün on the Mac; this app connects by itself.',
+  );
+  String get issueUsbNotSetUpTitle => _('USB bağlantısı yok', 'No USB link to the Mac');
+  String get issueUsbNotSetUpBody => _(
+    'Telefonu USB ile Mac’e bağlayın, USB hata ayıklamayı açın ve Mac’te Dürbün’ü açın; bağlantıyı Dürbün kendisi kurar. Kablo yoksa aşağıya Mac’in adresini girin.',
+    'Connect the phone to the Mac with USB debugging on and open Dürbün on the Mac; it sets up the link itself. Without a cable, enter the Mac’s address below.',
+  );
+  String get issueUsbDesktopClosedTitle => _('Mac’te Dürbün yanıt vermiyor', 'Dürbün on the Mac does not answer');
+  String get issueUsbDesktopClosedBody => _(
+    'USB bağlantısı kurulu ama Mac’te Dürbün açık değil. Dürbün’ü açın.',
+    'The USB link is set up, but Dürbün is not open on the Mac. Open it.',
+  );
+  String get issueIosUsbTitle => _('Mac’in USB’den bağlanması bekleniyor', 'Waiting for the Mac over USB');
+  String get issueIosUsbBody => _(
+    'Mac’te Dürbün’ü açın, iPhone’u kabloyla bağlayın ve sorulursa “Güven”e dokunun. Kablo yoksa aşağıya Mac’in adresini girin.',
+    'Open Dürbün on the Mac, connect this iPhone with a cable and tap “Trust” if asked. Without a cable, enter the Mac’s address below.',
+  );
+  String get issueLanRefusedTitle => _('Mac bağlantıyı kabul etmiyor', 'The Mac does not accept the connection');
+  String issueLanRefusedBody(String host) => _(
+    '$host adresindeki Mac yanıt verdi ama Dürbün bağlantı almıyor. Mac’te Dürbün’ü açın ve Ayarlar’da “Yerel ağ (Wi-Fi) bağlantılarına izin ver”i açın.',
+    'The Mac at $host answered, but Dürbün takes no connections. Open Dürbün on the Mac and turn on Settings → “Allow local network (Wi-Fi) connections”.',
+  );
+  String get issueLanTimeoutTitle => _('Bu adresten yanıt yok', 'No answer from this address');
+  String issueLanTimeoutBody(String host) => _(
+    '$host yanıt vermiyor. Adresi kontrol edin (Mac’teki Dürbün’de Ayarlar bu Mac’in adreslerini gösterir), telefonun Mac ile aynı Wi-Fi ağında olduğundan emin olun ve Mac’in güvenlik duvarına bakın.',
+    '$host does not answer. Check the address (Settings in Dürbün on the Mac lists this Mac’s addresses), make sure the phone is on the same Wi-Fi as the Mac, and check the Mac’s firewall.',
+  );
+  String get issueLanUnreachableTitle => _('Bu adrese ulaşılamıyor', 'This address cannot be reached');
+  String issueLanUnreachableBody(String host, {required bool ios}) =>
+      _('Telefon $host adresine yol bulamıyor: Mac’ten farklı bir ağda olabilir.', 'The phone finds no route to $host: it may be on another network than the Mac.') +
+      (ios
+          ? _(' iPhone’da Ayarlar → Gizlilik ve Güvenlik → Yerel Ağ’da bu uygulamaya izin verin.', ' On the iPhone, allow this app under Settings → Privacy & Security → Local Network.')
+          : '');
+  String get issueLanBadAddressTitle => _('Adres bulunamadı', 'Address not found');
+  String issueLanBadAddressBody(String host) => _(
+    '“$host” çözümlenemedi. Mac’in IP adresini girin, örneğin 192.168.1.20.',
+    '“$host” could not be resolved. Enter the Mac’s IP address, e.g. 192.168.1.20.',
+  );
+  String get issuePermissionTitle => _('Sistem bağlantıya izin vermedi', 'The system did not allow the connection');
+  String issuePermissionBody(String platform) => switch (platform) {
+    'android' => _(
+      'Uygulamanın internet izni yok. Geliştiricinin ana AndroidManifest.xml dosyasına android.permission.INTERNET eklemesi gerekir (release ve profile derlemeleri).',
+      'The app has no internet permission. The developer needs to add android.permission.INTERNET to the main AndroidManifest.xml (release and profile builds).',
+    ),
+    'ios' => _(
+      'iPhone’da Ayarlar → Gizlilik ve Güvenlik → Yerel Ağ’da bu uygulamaya izin verin.',
+      'On the iPhone, allow this app under Settings → Privacy & Security → Local Network.',
+    ),
+    _ => _('Uygulamanın ağ izni yok.', 'The app has no network permission.'),
+  };
+  String get issueNotDurbunTitle => _('Yanıt veren Dürbün değil', 'What answered is not Dürbün');
+  String get issueNotDurbunBody => _(
+    'Bu adreste bir program yanıt verdi ama bu uygulamayı Dürbün masaüstü olarak kabul etmedi. Adresi ve portu kontrol edin, Mac’teki Dürbün’ü güncelleyin.',
+    'A program answered at this address but did not take this app as a Dürbün desktop. Check the address and the port, and update Dürbün on the Mac.',
+  );
+  String get issueOtherTitle => _('Bağlanılamadı', 'Could not connect');
+  String get issueOtherBody => _('Aşağıdaki denemeye bakın.', 'See the attempt below.');
+  String get macAddress => _('Mac’in adresi (Wi-Fi)', 'Mac’s address (Wi-Fi)');
+  String get macAddressHint => _('192.168.1.20 ya da 192.168.1.20:9751', '192.168.1.20 or 192.168.1.20:9751');
+  String get macAddressHelp => _(
+    'Adresi Mac’teki Dürbün’de Ayarlar → “Yerel ağ (Wi-Fi) bağlantılarına izin ver” altında bulursunuz. Telefon ve Mac aynı Wi-Fi ağında olmalı.',
+    'Find it in Dürbün on the Mac under Settings → “Allow local network (Wi-Fi) connections”. The phone and the Mac must be on the same Wi-Fi.',
+  );
+  String get connect => _('Bağlan', 'Connect');
+  String get addressEmpty => _('Bir adres girin', 'Enter an address');
+  String get addressBadHost => _('Bir IP adresi ya da ad girin, örneğin 192.168.1.20', 'Enter an IP address or name, e.g. 192.168.1.20');
+  String get addressBadPort => _('Port 1 ile 65535 arasında bir sayı olmalı', 'The port must be a number from 1 to 65535');
+  String addressSaved(String address) => _(
+    'Bu telefonda kayıtlı: $address. Sonraki açılışlarda da kullanılır.',
+    'Saved on this phone: $address. Also used on the next launches.',
+  );
+  String addressFromBuild(String address) => _('Derlemedeki adres: $address', 'Address in this build: $address');
+  String get addressNone => _(
+    'Bu derlemede adres yok; yalnızca USB ve simülatör bağlantısı denenir.',
+    'No address in this build; only USB and the simulator connection are tried.',
+  );
+  String get useBuildAddress => _('Derlemedeki adrese dön', 'Use the build’s address');
+  String get forgetAddress => _('Adresi unut', 'Forget the address');
+  String get usbStaysInUse => _(
+    'USB bağlantısı sürdükçe o kullanılır; Wi-Fi adresi USB bağlantısı yokken denenir.',
+    'While the USB link is up it stays in use; the Wi-Fi address is tried when it is not.',
+  );
+
+  /* app tools (Tools → App tools) */
+  String get appTools => _('Uygulama araçları', 'App tools');
+  String get appToolsHint => _('Uygulamanın kendi kontrolleri', 'The app’s own controls');
+  String toolCount(int n) => _('$n araç', n == 1 ? '1 tool' : '$n tools');
+  String get noToolsTitle => _('Araç yok', 'No tools');
+  String get noToolsBody => _(
+    'Uygulama Durbun.addAction ile buton, anahtar ya da seçim ekleyince burada görünür.',
+    'Buttons, switches and choices the app adds with Durbun.addAction show up here.',
+  );
+  String actionGroup(String? group) => switch (group) {
+    'flutter' => 'Flutter',
+    'android' => 'Android',
+    'ios' => 'iOS',
+    null || '' || 'app' => _('Uygulamaya özel', 'App-specific'),
+    final g => g,
+  };
+  String? actionLabel(String? key) => switch (key) {
+    'flutter.debugPaint' => _('Yerleşim çizgileri (debug paint)', 'Debug paint (layout guides)'),
+    'flutter.repaintRainbow' => _('Yeniden çizimleri renklendir', 'Repaint rainbow'),
+    'flutter.slowAnimations' => _('Yavaş animasyonlar (5×)', 'Slow animations (5×)'),
+    'flutter.performanceOverlay' => _('Performans katmanı', 'Performance overlay'),
+    'flutter.invertOversizedImages' => _('Büyük görselleri ters renkle göster', 'Invert oversized images'),
+    'flutter.brightness' => _('Parlaklık', 'Brightness'),
+    'flutter.platform' => _('Hedef platform', 'Target platform'),
+    'flutter.dumpWidgetTree' => _('Widget ağacı dökümü', 'Dump widget tree'),
+    'flutter.dumpRenderTree' => _('Render ağacı dökümü', 'Dump render tree'),
+    'android.dumpThreads' => _('Thread dökümü', 'Dump threads'),
+    'android.gc' => _('Çöp toplayıcıyı çalıştır (GC)', 'Run garbage collection'),
+    'ios.appearance' => _('Görünüm', 'Appearance'),
+    'ios.slowAnimations' => _('Yavaş animasyonlar', 'Slow animations'),
+    'ios.dumpViewHierarchy' => _('Görünüm hiyerarşisi dökümü', 'Dump view hierarchy'),
+    'ios.dumpUserDefaults' => _('UserDefaults dökümü', 'Dump UserDefaults'),
+    _ => null,
+  };
+  String? actionOption(String value) => switch (value) {
+    'system' => _('Sistem', 'System'),
+    'light' => _('Açık', 'Light'),
+    'dark' => _('Koyu', 'Dark'),
+    'default' => _('Varsayılan', 'Default'),
+    _ => null,
+  };
+  String runConfirm(String label) => _('“$label” çalıştırılsın mı?', 'Run “$label”?');
+  String get run => _('Çalıştır', 'Run');
+  String actionDone(String label) => _('$label çalıştırıldı', '$label done');
+  String actionValue(String label, String value) => '$label: $value';
+  String actionFailed(String label, String error) => _('$label çalıştırılamadı: $error', '$label failed: $error');
+  String get dumpInLogs => _('Döküm Loglar’da', 'The dump is in Logs');
+
+  /* the panel cannot open (DurbunInspector without a running SDK) */
+  String get notStartedTitle => _('Dürbün başlatılmadı', 'Dürbün has not started');
+  String get notStartedBody => _(
+    'Panel, uygulama main() içinde Durbun.run ya da Durbun.init çağırınca çalışır:',
+    'The panel works once the app calls Durbun.run or Durbun.init in main():',
+  );
+  String get offTitle => _('Dürbün bu derlemede kapalı', 'Dürbün is off in this build');
+  String offBody(String reason) => switch (reason) {
+    'release' => _(
+      'Release derlemelerinde Dürbün yalnızca --dart-define=DURBUN=true ile açılır. Derlemeyi bu ayarla yeniden alın.',
+      'In release builds Dürbün runs only with --dart-define=DURBUN=true. Build again with it.',
+    ),
+    'define' => _('Derleme --dart-define=DURBUN=false ile alınmış.', 'The build was made with --dart-define=DURBUN=false.'),
+    'option' => _('Uygulama DurbunOptions(enabled: false) ile kapatmış.', 'The app turns it off with DurbunOptions(enabled: false).'),
+    _ => _('flutter test altında Dürbün kapalıdır; DurbunOptions(enabled: true) ile açılır.', 'Under flutter test Dürbün is off; DurbunOptions(enabled: true) turns it on.'),
+  };
+  String get panelOffTitle => _('Panel kapalı', 'The panel is off');
+  String get panelOffBody => _(
+    'Uygulama paneli DurbunOptions(inspector: false) ile kapatmış; masaüstüne gönderim sürüyor.',
+    'The app turns the panel off with DurbunOptions(inspector: false); data still goes to the desktop.',
+  );
+  String get unsupportedTitle => _('Bu platformda çalışmaz', 'Not available on this platform');
+  String get unsupportedBody => _('Dürbün web’de bir şey yakalamaz.', 'Dürbün captures nothing on the web.');
+  String get shakeHint => _('Dürbün panelini açmak için telefonu sallayın', 'Shake the phone to open the Dürbün panel');
+  String get shakeHintSimulator => _(
+    'Simülatörde: Device → Shake. Emülatörde: Extended controls → Virtual sensors → Shake.',
+    'Simulator: Device → Shake. Emulator: Extended controls → Virtual sensors → Shake.',
   );
 
   String size(int bytes) => formatBytes(bytes);

@@ -28,7 +28,11 @@ abstract final class TransportEvents {
   /// (timeout, closed, or another link won).
   static const String handshakeFailed = 'handshake-failed';
 
-  /// `['round-failed']`: a full round of client attempts failed.
+  /// `['round-failed', attempts, generation]`: a full round of client
+  /// attempts failed. `attempts` lists `[endpoint, kind, detail]` per tried
+  /// endpoint (kinds: see [AttemptKind]); `generation` counts
+  /// [TransportCore.setEndpoints] calls, so an owner can ignore a round that
+  /// started before the endpoints changed.
   static const String roundFailed = 'round-failed';
 
   /// `['connected', welcomeMap, via]`.
@@ -45,6 +49,59 @@ abstract final class TransportEvents {
 
   /// `['diag', text]`: diagnostics for the developer console.
   static const String diag = 'diag';
+}
+
+/// Why one client attempt failed (`round-failed` events).
+abstract final class AttemptKind {
+  /// Nothing listens on that port (the host answered with a reset).
+  static const String refused = 'refused';
+
+  /// No answer within the connect timeout (wrong address, other network,
+  /// firewall).
+  static const String timeout = 'timeout';
+
+  /// No route to the host or network (also iOS's denied Local Network
+  /// permission).
+  static const String unreachable = 'unreachable';
+
+  /// The operating system refused the socket (Android without the INTERNET
+  /// permission, sandboxed macOS without the network client entitlement).
+  static const String denied = 'denied';
+
+  /// The host name could not be resolved.
+  static const String lookup = 'lookup';
+
+  /// The peer accepted the connection and closed it before the welcome.
+  static const String closed = 'closed';
+
+  /// The peer accepted the connection but sent no welcome in time.
+  static const String noWelcome = 'no-welcome';
+
+  /// Anything else.
+  static const String error = 'error';
+
+  /// Sorts a connect error into one of the kinds above.
+  static String classify(Object error) {
+    final text = error.toString().toLowerCase();
+    int? code;
+    if (error is SocketException) code = error.osError?.errorCode;
+    if (text.contains('failed host lookup')) return lookup;
+    // errno: Darwin / Linux (Android) / Windows.
+    if (code == 61 || code == 111 || code == 10061 || text.contains('connection refused')) {
+      return refused;
+    }
+    if (error is TimeoutException || code == 60 || code == 110 || code == 10060 || text.contains('timed out')) {
+      return timeout;
+    }
+    if (code == 65 || code == 51 || code == 113 || code == 101 || code == 10065 || code == 10051 ||
+        text.contains('no route to host') || text.contains('network is unreachable')) {
+      return unreachable;
+    }
+    if (code == 1 || code == 13 || text.contains('operation not permitted') || text.contains('permission denied')) {
+      return denied;
+    }
+    return AttemptKind.error;
+  }
 }
 
 class TransportEndpoint {
@@ -161,6 +218,10 @@ class TransportCore {
   final TransportConfig config;
   final void Function(List<Object?> event) _emit;
 
+  /// Client endpoints tried each round; [setEndpoints] replaces them.
+  late List<TransportEndpoint> _endpoints = List<TransportEndpoint>.of(config.endpoints);
+  int _generation = 0;
+
   final ListQueue<_Queued> _queue = ListQueue<_Queued>();
   int _queuedCost = 0;
   int _dropped = 0;
@@ -237,6 +298,30 @@ class TransportCore {
     if (_active != null) _schedulePump();
   }
 
+  /// Replaces the client endpoints (e.g. a Mac address entered on the phone)
+  /// and starts a new round at once. An active link through an endpoint
+  /// that is no longer listed is closed, so the next round reaches the new
+  /// one; a link through a kept endpoint or the USB listener stays.
+  void setEndpoints(List<TransportEndpoint> endpoints) {
+    if (_stopped) return;
+    _endpoints = List<TransportEndpoint>.of(endpoints);
+    _generation++;
+    final active = _active;
+    if (active != null && active.via.startsWith('tcp ') &&
+        !_endpoints.any((e) => active.via == 'tcp $e')) {
+      active.close('the desktop address changed');
+    }
+    _wake();
+  }
+
+  /// Ends every pending backoff sleep (the client loop tries again now).
+  void _wake() {
+    for (final s in _sleepers.toList()) {
+      if (!s.isCompleted) s.complete();
+    }
+    _sleepers.clear();
+  }
+
   /// Emits `['flushed', token, ok]` once everything queued so far was written
   /// to an active connection (ok=true) or after [timeoutMs] (ok=false).
   void requestFlush(int token, int timeoutMs) {
@@ -300,29 +385,44 @@ class TransportCore {
         await (_helloWaiter ??= Completer<void>()).future;
         continue;
       }
-      if (config.endpoints.isEmpty) {
+      final endpoints = _endpoints;
+      final generation = _generation;
+      if (endpoints.isEmpty) {
         // Listener-only mode: just wait while the listener does the work.
         await _sleep(config.maxBackoffMs);
         continue;
       }
       var connected = false;
-      for (final endpoint in config.endpoints) {
-        if (_stopped || _active != null) break;
-        connected = await _attempt(endpoint);
+      final attempts = <Object?>[];
+      for (final endpoint in endpoints) {
+        if (_stopped || _active != null || generation != _generation) break;
+        final failure = await _attempt(endpoint);
+        connected = failure == null;
         if (connected) break;
+        attempts.add(<Object?>['$endpoint', failure.$1, failure.$2]);
       }
       if (_stopped) break;
       if (connected || _active != null) {
         backoff = config.minBackoffMs;
         continue;
       }
-      _emit(const <Object?>[TransportEvents.roundFailed]);
+      if (generation != _generation) {
+        // The endpoints changed mid-round: start over with the new ones.
+        backoff = config.minBackoffMs;
+        continue;
+      }
+      _emit(<Object?>[TransportEvents.roundFailed, attempts, generation]);
       await _sleep(backoff);
+      if (generation != _generation) {
+        backoff = config.minBackoffMs;
+        continue;
+      }
       backoff = math.min(backoff * 2, config.maxBackoffMs);
     }
   }
 
-  Future<bool> _attempt(TransportEndpoint endpoint) async {
+  /// Null when connected, else why not: `(kind, detail)` (see [AttemptKind]).
+  Future<(String, String)?> _attempt(TransportEndpoint endpoint) async {
     Socket socket;
     try {
       socket = await Socket.connect(
@@ -330,14 +430,27 @@ class TransportCore {
         endpoint.port,
         timeout: Duration(milliseconds: endpoint.connectTimeoutMs),
       );
-    } catch (_) {
-      return false;
+    } catch (e) {
+      return (AttemptKind.classify(e), _shortError(e));
     }
     if (_stopped || _active != null) {
       socket.destroy();
-      return false;
+      return (AttemptKind.error, 'another connection was made');
     }
-    return _handshake(_Conn(this, socket, 'tcp $endpoint'));
+    final conn = _Conn(this, socket, 'tcp $endpoint');
+    if (await _handshake(conn)) return null;
+    final reason = conn.closeReason ?? '';
+    if (reason == 'closed by the desktop' || reason.startsWith('socket error')) {
+      return (AttemptKind.closed, reason);
+    }
+    return (AttemptKind.noWelcome, 'no welcome within ${config.handshakeTimeoutMs ~/ 1000} s');
+  }
+
+  static String _shortError(Object e) {
+    final text = e is SocketException
+        ? <String>[e.message, if (e.osError != null) e.osError!.message].where((s) => s.isNotEmpty).join(': ')
+        : e.toString();
+    return text.length > 160 ? '${text.substring(0, 160)}…' : text;
   }
 
   Future<void> _listenLoop() async {
@@ -649,6 +762,9 @@ class _Conn {
   Map<String, Object?>? welcome;
   bool active = false;
   bool closed = false;
+
+  /// The first reason it was closed for.
+  String? closeReason;
   bool sawPing = false;
   int _lastInbound = DateTime.now().millisecondsSinceEpoch;
 
@@ -717,6 +833,7 @@ class _Conn {
   void close(String reason) {
     if (closed) return;
     closed = true;
+    closeReason = reason;
     _handshakeTimer?.cancel();
     _watchdog?.cancel();
     final completer = _handshake;

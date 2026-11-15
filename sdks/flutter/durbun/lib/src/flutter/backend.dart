@@ -3,8 +3,44 @@
 // backend_stub.dart. Must not import dart:io.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show Listenable;
+
+import '../core/connection_report.dart';
 import '../core/options.dart';
 import '../core/types.dart';
+
+/// How the SDK's start went, for the in-app panel when it cannot open.
+enum DurbunStartState {
+  /// `Durbun.run` / `Durbun.init` was not called (yet).
+  notStarted,
+
+  /// Off in this build (see [DurbunOffReason]).
+  off,
+
+  /// Running, with the panel turned off (`DurbunOptions.inspector: false`).
+  inspectorOff,
+
+  /// Running with the panel.
+  running,
+
+  /// No dart:io (Flutter web): nothing is captured.
+  unsupported,
+}
+
+/// Why the SDK is off in this build.
+enum DurbunOffReason {
+  /// `DurbunOptions(enabled: false)`.
+  option,
+
+  /// `--dart-define=DURBUN=false`.
+  define,
+
+  /// A release build without `--dart-define=DURBUN=true`.
+  release,
+
+  /// Under `flutter test` without `enabled: true`.
+  flutterTest,
+}
 
 abstract class DurbunBackend {
   /// True once the SDK runs (enabled and started).
@@ -76,4 +112,29 @@ abstract class DurbunBackend {
   /// Desktop state for the in-app inspector: `{connected, via, appId, config,
   /// mocks, hello}`; null when the SDK is off.
   Map<String, Object?>? inspectorState();
+
+  /// How the last start went.
+  DurbunStartState get startState;
+
+  /// Why it is off, when [startState] is [DurbunStartState.off].
+  DurbunOffReason? get offReason;
+
+  /// Whether this runs under `flutter test`.
+  bool get inFlutterTest;
+
+  /// Why the app is (not) connected to the desktop; null when off.
+  ConnectionReport? get connectionReport;
+
+  /// Fires when [connectionReport], the actions or their values change.
+  Listenable get changes;
+
+  /// Uses [address] as the Mac's Wi-Fi address from now on and keeps it for
+  /// the next launches; null goes back to the build's address.
+  Future<void> setDesktopHost(String? address);
+
+  /// Descriptors of the app's and the native layer's actions (wire format).
+  List<Map<String, Object?>> get actions;
+
+  /// Runs one of [actions] from the panel (see `DurbunClient.runAction`).
+  Future<Object?> runAction(String id, Map<String, Object?> params);
 }

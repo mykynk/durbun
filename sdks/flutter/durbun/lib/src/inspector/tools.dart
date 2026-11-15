@@ -1,11 +1,14 @@
-/// The tools sheet: the app and its desktop connection, then Mocks (while
-/// connected), Performance, Statistics and Device & SDK (each a page of its own),
-/// Export session, Previous run (with `keepPreviousRun`) and Clear.
+/// The tools sheet: the app and its desktop connection, then Mac connection,
+/// App tools, Mocks (while connected), Performance, Statistics and Device &
+/// SDK (each a page of its own), Export session, Previous run (with
+/// `keepPreviousRun`) and Clear.
 library;
 
 import 'package:flutter/material.dart';
 
-import '../flutter/durbun.dart' show Durbun, durbunInspectorState;
+import '../flutter/durbun.dart' show Durbun, durbunBackend, durbunInspectorState;
+import 'actions_view.dart';
+import 'connection_view.dart';
 import 'export_sheet.dart';
 import 'info_view.dart';
 import 'perf_view.dart';
@@ -67,11 +70,14 @@ class _ToolsSheet extends StatelessWidget {
     }
 
     final journal = RunJournal.of(store);
+    final backend = durbunBackend();
     return StreamBuilder<Object?>(
       stream: Durbun.connection,
       builder: (context, _) => ListenableBuilder(
-        listenable: Listenable.merge(<Listenable>[store, if (journal != null) journal.previous]),
+        listenable: Listenable.merge(<Listenable>[store, backend.changes, if (journal != null) journal.previous]),
         builder: (context, _) {
+          final report = backend.connectionReport;
+          final tools = backend.actions.length;
           final previous = journal?.previous.value;
           final state = durbunInspectorState();
           final hello = (state?['hello'] as Map?) ?? store.hello;
@@ -126,12 +132,35 @@ class _ToolsSheet extends StatelessWidget {
                               style: DurbunType.monoStyle(size: 11.5, color: c.textMeta, height: 1.35),
                             ),
                             const SizedBox(height: 8),
-                            _ConnectionStatus(connected: connected, label: connected ? t.connectedVia(via) : t.onPhoneOnly),
+                            _ConnectionStatus(
+                              connected: connected,
+                              label: connected
+                                  ? t.connectedVia(via)
+                                  : report != null && (report.trying || report.attempts.isEmpty)
+                                      ? t.statusConnecting
+                                      : t.onPhoneOnly,
+                            ),
                           ],
                         ),
                       ),
                     ],
                   ),
+                ),
+              ]),
+              const SizedBox(height: 16),
+              _Group(children: <Widget>[
+                _ToolRow(
+                  icon: Icons.link_rounded,
+                  label: t.macConnection,
+                  value: connectionShortText(t, report),
+                  onTap: () => open(t.macConnection, ConnectionView(store: store)),
+                ),
+                _ToolRow(
+                  icon: Icons.tune_rounded,
+                  label: t.appTools,
+                  hint: t.appToolsHint,
+                  value: tools == 0 ? null : t.toolCount(tools),
+                  onTap: () => open(t.appTools, const AppToolsView()),
                 ),
               ]),
               const SizedBox(height: 16),

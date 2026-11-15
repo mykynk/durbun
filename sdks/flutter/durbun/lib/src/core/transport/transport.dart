@@ -8,7 +8,7 @@ import 'dart:isolate';
 
 import 'transport_core.dart';
 
-export 'transport_core.dart' show TransportConfig, TransportEndpoint, TransportEvents;
+export 'transport_core.dart' show AttemptKind, TransportConfig, TransportEndpoint, TransportEvents;
 
 typedef TransportEventHandler = void Function(List<Object?> event);
 
@@ -33,6 +33,10 @@ abstract class Transport {
   void setHello(Map<String, Object?> hello);
 
   void send(Map<String, Object?> message, {bool volatile = false});
+
+  /// Replaces the client endpoints and tries them at once (see
+  /// [TransportCore.setEndpoints]).
+  void setEndpoints(List<TransportEndpoint> endpoints);
 
   /// Completes with true once everything sent so far reached the desktop's
   /// socket, false on timeout or when not connected long enough.
@@ -105,6 +109,10 @@ abstract class _BatchingTransport extends Transport {
       _enqueue(<Object?>['send', message, volatile]);
 
   @override
+  void setEndpoints(List<TransportEndpoint> endpoints) =>
+      _enqueue(<Object?>['endpoints', <Object?>[for (final e in endpoints) e.toMap()]]);
+
+  @override
   Future<bool> flush(Duration timeout) {
     if (_closed) return Future<bool>.value(false);
     final token = ++_flushToken;
@@ -142,6 +150,11 @@ void _applyBatch(TransportCore core, List<Object?> batch) {
         );
       case 'flush':
         core.requestFlush(command[1] as int, command[2] as int);
+      case 'endpoints':
+        core.setEndpoints(<TransportEndpoint>[
+          for (final e in command[1] as List<Object?>)
+            TransportEndpoint.fromMap(e as Map<Object?, Object?>),
+        ]);
     }
   }
 }

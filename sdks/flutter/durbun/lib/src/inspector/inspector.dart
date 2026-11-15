@@ -5,16 +5,20 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../flutter/durbun.dart' show durbunBackend;
 import 'format.dart';
 import 'panel.dart';
+import 'panel_prefs.dart';
 import 'run_file.dart';
 import 'run_log.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
+import 'unavailable_view.dart';
 
 /// Puts Dürbün's in-app inspector into the app: shake the phone to open a
 /// panel with logs, network requests, mocks, performance and device info. It
@@ -34,8 +38,16 @@ import 'theme.dart';
 /// navigator; its own pages, sheets and toasts stay inside it (route
 /// observers and the app's snack bars never see them).
 ///
+/// The panel opens by shaking the phone ([openOnShake]), from the bubble
+/// ([showBubble]) or from your own code with [DurbunInspector.show]. The
+/// first launch with the SDK running shows a short "shake to open" hint
+/// once ([showHint]).
+///
 /// When Dürbün is off in a build (`DurbunOptions.enabled`, `DURBUN=false`,
-/// `DurbunOptions.inspector: false`) it only shows [child].
+/// `DurbunOptions.inspector: false`) or `Durbun.run` was not called, it
+/// only shows [child]: shaking does nothing, [DurbunInspector.show] opens a
+/// page that says why and what to do, and a debug build says the same once
+/// in the console.
 class DurbunInspector extends StatefulWidget {
   const DurbunInspector({
     super.key,
@@ -49,6 +61,7 @@ class DurbunInspector extends StatefulWidget {
     this.maxLogs = DurbunInspectorStore.kDefaultMaxLogs,
     this.maxBodyBytes = DurbunInspectorStore.kDefaultMaxBodyBytes,
     this.keepPreviousRun = false,
+    this.showHint = true,
   });
 
   /// For `MaterialApp.builder` / `CupertinoApp.builder`.
@@ -104,11 +117,26 @@ class DurbunInspector extends StatefulWidget {
   /// web.
   final bool keepPreviousRun;
 
+  /// On the first launch with the SDK running, shows "Shake the phone to
+  /// open the Dürbün panel" at the bottom of the screen for a few seconds,
+  /// once per install (kept in the app's cache directory). Only when
+  /// [openOnShake] is on and [showBubble] is off. Set false to never show it.
+  final bool showHint;
+
   static final ValueNotifier<int> _openRequests = ValueNotifier<int>(0);
 
   /// Opens the panel (no-op when no [DurbunInspector] is mounted), e.g. from
-  /// a debug menu or a long press of your own.
+  /// a debug menu or a long press of your own. When the SDK does not run it
+  /// opens a page that says why (not started, off in this build, panel
+  /// turned off) and what to do.
   static void show() => _openRequests.value++;
+
+  /// Tests: lets the once-per-process hint and console line come again.
+  @visibleForTesting
+  static void debugResetOnce() {
+    _DurbunInspectorState._hintChecked = false;
+    _DurbunInspectorState._consoleChecked = false;
+  }
 
   @override
   State<DurbunInspector> createState() => _DurbunInspectorState();
@@ -121,6 +149,16 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   bool _open = false;
   Offset? _bubble;
   DurbunInspectorStore? _watched;
+
+  /// Process-wide: the hint and the console line come at most once, also
+  /// when the app rebuilds or remounts the inspector.
+  static bool _hintChecked = false;
+  static bool _consoleChecked = false;
+  static const String kHintPref = 'shake-hint-shown';
+  Timer? _hintTimer;
+  Timer? _hintHide;
+  OverlayEntry? _hint;
+  Timer? _consoleTimer;
 
   DurbunInspectorStore get _store =>
       widget.store ?? DurbunInspectorStore.instance;
@@ -135,6 +173,8 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
     DurbunInspector._openRequests.addListener(_openPanel);
     WidgetsBinding.instance.addObserver(this);
     _syncShake();
+    _scheduleConsoleNote();
+    _scheduleHint();
   }
 
   @override
@@ -184,6 +224,7 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
     setState(() {});
     _syncShake();
     _syncPreviousRun();
+    _scheduleHint();
   }
 
   @override
@@ -201,7 +242,71 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
     _watched?.attachedListenable.removeListener(_attachedChanged);
     WidgetsBinding.instance.removeObserver(this);
     _setShake(false);
+    _consoleTimer?.cancel();
+    _hintTimer?.cancel();
+    _removeHint();
     super.dispose();
+  }
+
+  /// Debug builds: when the SDK does not feed the panel a few seconds after
+  /// start, says why in the console once (the panel would stay closed).
+  void _scheduleConsoleNote() {
+    if (!kDebugMode || _consoleChecked || widget.store != null) return;
+    final backend = durbunBackend();
+    if (backend.inFlutterTest) return;
+    _consoleChecked = true;
+    _consoleTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted || _enabled) return;
+      try {
+        final text = inspectorUnavailableConsoleText(backend.startState, backend.offReason);
+        if (text != null) debugPrint(text);
+      } catch (_) {}
+    });
+  }
+
+  /// Once per install: "shake to open" at the bottom for a few seconds,
+  /// when shaking is the only way in.
+  void _scheduleHint() {
+    if (_hintChecked ||
+        !widget.showHint ||
+        !widget.openOnShake ||
+        widget.showBubble ||
+        widget.store != null ||
+        !_enabled ||
+        !panelPrefsAvailable) {
+      return;
+    }
+    _hintChecked = true;
+    _hintTimer = Timer(const Duration(seconds: 2), () => unawaited(_showHint()));
+  }
+
+  Future<void> _showHint() async {
+    try {
+      if (await readPanelPref(kHintPref) != null) return;
+      if (!mounted || _open) return;
+      // Shown only when it is kept, so it never comes back on every launch.
+      if (!await writePanelPref(kHintPref, '1')) return;
+      if (!mounted || _open) return;
+      final overlay = _navigator()?.overlay;
+      if (overlay == null) return;
+      final device = _store.hello?['device'];
+      final simulator = device is Map && device['isPhysical'] == false;
+      _hint = OverlayEntry(
+        builder: (context) => ShakeHint(simulator: simulator, onDismiss: _removeHint),
+      );
+      overlay.insert(_hint!);
+      _hintHide = Timer(const Duration(seconds: 8), _removeHint);
+    } catch (_) {
+      // A hint is a nicety: the app never sees its errors.
+    }
+  }
+
+  void _removeHint() {
+    _hintHide?.cancel();
+    _hintHide = null;
+    final hint = _hint;
+    _hint = null;
+    if (hint != null && hint.mounted) hint.remove();
   }
 
   /// Listens for shakes only while it can open the panel: the app in front
@@ -246,7 +351,9 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   }
 
   Future<void> _openPanel() async {
-    if (_open || !mounted || !_enabled) return;
+    if (_open || !mounted) return;
+    _removeHint();
+    if (!_enabled) return _openUnavailable();
     final navigator = _navigator();
     if (navigator == null) return;
     setState(() => _open = true);
@@ -270,6 +377,27 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
       }
       store.markSeen();
       store.panelOpen.value = false;
+    }
+  }
+
+  /// [DurbunInspector.show] without a running SDK: a page that says why.
+  Future<void> _openUnavailable() async {
+    final navigator = _navigator();
+    if (navigator == null) return;
+    setState(() => _open = true);
+    late final MaterialPageRoute<void> route;
+    route = MaterialPageRoute<void>(
+      settings: const RouteSettings(name: kInspectorRouteName),
+      fullscreenDialog: true,
+      builder: (routeContext) => panelLocalizations(
+        routeContext,
+        DurbunTheme.wrap(routeContext, InspectorUnavailablePage(onClose: () => _close(route))),
+      ),
+    );
+    try {
+      await navigator.push<void>(route);
+    } finally {
+      if (mounted) setState(() => _open = false);
     }
   }
 
@@ -400,6 +528,73 @@ class InspectorBubble extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// "Shake the phone to open the Dürbün panel", over the bottom of the app
+/// for a few seconds on the first launch.
+class ShakeHint extends StatelessWidget {
+  const ShakeHint({super.key, required this.simulator, required this.onDismiss});
+
+  /// Adds how to shake a simulator or an emulator.
+  final bool simulator;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: 12 + (MediaQuery.maybeOf(context)?.padding.bottom ?? 0),
+      child: panelLocalizations(
+        context,
+        DurbunTheme.wrap(
+          context,
+          Builder(builder: (context) {
+            final c = DurbunColors.of(context);
+            final t = InspectorStrings.of(context);
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: Material(
+                  key: const ValueKey<String>('durbun-shake-hint'),
+                  color: c.bgElevated,
+                  elevation: 6,
+                  shadowColor: const Color(0x66000000),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(DurbunRadius.lg),
+                    side: BorderSide(color: c.border),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+                    child: Row(
+                      children: <Widget>[
+                        const DurbunLogo(size: 32),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(t.shakeHint, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: c.text)),
+                              if (simulator) ...<Widget>[
+                                const SizedBox(height: 2),
+                                Text(t.shakeHintSimulator, style: TextStyle(fontSize: 12, color: c.textMuted)),
+                              ],
+                            ],
+                          ),
+                        ),
+                        TextButton(onPressed: onDismiss, child: Text(t.done)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
     );
   }
 }

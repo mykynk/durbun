@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/body.dart';
 import '../core/client.dart';
+import '../core/connection_report.dart';
 import '../core/env/environment.dart';
 import '../core/http/http_client.dart';
 import '../core/http/tracker.dart';
@@ -15,6 +16,7 @@ import '../core/options.dart';
 import '../core/print_capture.dart';
 import '../core/protocol.dart';
 import '../core/types.dart';
+import '../inspector/panel_prefs_io.dart';
 import '../inspector/store.dart';
 import 'backend.dart';
 import 'commands.dart';
@@ -44,7 +46,33 @@ bool resolveDurbunEnabled(
         ) &&
         !(inFlutterTest ?? isFlutterTestEnvironment));
 
+/// Why [resolveDurbunEnabled] said no for [options].
+DurbunOffReason durbunOffReason(
+  DurbunOptions options, {
+  bool releaseMode = kReleaseMode,
+  bool defineGiven = kDurbunDefineGiven,
+  bool defineValue = kDurbunDefine,
+}) {
+  if (options.enabled == false) return DurbunOffReason.option;
+  if (defineGiven && !defineValue) return DurbunOffReason.define;
+  if (releaseMode && !defineGiven) return DurbunOffReason.release;
+  return DurbunOffReason.flutterTest;
+}
+
+/// The panel's kept Mac address (see [DurbunBackend.setDesktopHost]).
+const String kDesktopHostPref = 'desktop-host';
+
+class _Changes extends ChangeNotifier {
+  void ping() => notifyListeners();
+}
+
 class IoDurbunBackend implements DurbunBackend {
+  /// Shared by every backend (`Durbun.dispose` replaces the backend; the
+  /// panel keeps listening).
+  static final _Changes _changes = _Changes();
+
+  DurbunStartState _startState = DurbunStartState.notStarted;
+  DurbunOffReason? _offReason;
   DurbunClient? _client;
   DurbunOptions? _options;
   FlutterErrorHooks? _errors;
@@ -85,7 +113,11 @@ class IoDurbunBackend implements DurbunBackend {
     required bool zoneCapturesPrint,
     List<DurbunAction> actions = const <DurbunAction>[],
   }) {
-    if (isActive || !resolveDurbunEnabled(options)) return;
+    if (isActive) return;
+    if (!resolveDurbunEnabled(options)) {
+      _markOff(options);
+      return;
+    }
     final appZone = Zone.current;
     try {
       // The first hello waits (≤ 3 s) for the native layer, so its
@@ -99,6 +131,12 @@ class IoDurbunBackend implements DurbunBackend {
       );
       _client = client;
       _options = options;
+      _startState = options.inspector ? DurbunStartState.running : DurbunStartState.inspectorOff;
+      _offReason = null;
+      client
+        ..addReportListener(_changes.ping)
+        ..addStateListener(_changes.ping);
+      _loadSavedHost(client);
       // Actions added before the start (the hello is still held back, so they
       // are in the first one).
       if (actions.isNotEmpty) client.runInternal(() => client.addActions(actions));
@@ -156,6 +194,26 @@ class IoDurbunBackend implements DurbunBackend {
     }
   }
 
+  void _markOff(DurbunOptions options) {
+    if (isActive) return;
+    _startState = DurbunStartState.off;
+    _offReason = durbunOffReason(options);
+    _changes.ping();
+  }
+
+  /// A Mac address entered in the panel on an earlier launch wins over the
+  /// build's.
+  void _loadSavedHost(DurbunClient client) {
+    unawaited(() async {
+      try {
+        final saved = await readPanelPref(kDesktopHostPref);
+        if (saved == null || client.isDisposed || !identical(_client, client)) return;
+        final address = checkDesktopAddress(saved).address;
+        if (address != null) client.runInternal(() => client.setDesktopHost(address));
+      } catch (_) {}
+    }());
+  }
+
   /// Re-chains hooks the app may have replaced after we installed ours
   /// (HttpOverrides.global, FlutterError.onError, PlatformDispatcher.onError)
   /// and attaches frame timings once the binding exists.
@@ -199,7 +257,10 @@ class IoDurbunBackend implements DurbunBackend {
     DurbunOptions options, {
     List<DurbunAction> actions = const <DurbunAction>[],
   }) {
-    if (!resolveDurbunEnabled(options)) return Future<void>.sync(body);
+    if (!resolveDurbunEnabled(options)) {
+      _markOff(options);
+      return Future<void>.sync(body);
+    }
     // A binding created before run() (e.g. ensureInitialized() for
     // Firebase.initializeApp) belongs to the outer zone: running runApp in a
     // new zone would print Flutter's "Zone mismatch" error on every launch.
@@ -342,9 +403,63 @@ class IoDurbunBackend implements DurbunBackend {
   }
 
   @override
+  DurbunStartState get startState => _startState;
+
+  @override
+  DurbunOffReason? get offReason => _offReason;
+
+  @override
+  bool get inFlutterTest => isFlutterTestEnvironment;
+
+  @override
+  ConnectionReport? get connectionReport {
+    final client = _client;
+    if (client == null || client.isDisposed) return null;
+    try {
+      return client.connectionReport;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Listenable get changes => _changes;
+
+  @override
+  Future<void> setDesktopHost(String? address) async {
+    final client = _client;
+    if (client == null || client.isDisposed) return;
+    client.runInternal(() => client.setDesktopHost(address));
+    await writePanelPref(kDesktopHostPref, address);
+  }
+
+  @override
+  List<Map<String, Object?>> get actions {
+    final client = _client;
+    if (client == null || client.isDisposed) return const <Map<String, Object?>>[];
+    try {
+      return client.describeActions();
+    } catch (_) {
+      return const <Map<String, Object?>>[];
+    }
+  }
+
+  @override
+  Future<Object?> runAction(String id, Map<String, Object?> params) {
+    final client = _client;
+    if (client == null || client.isDisposed) {
+      return Future<Object?>.error(StateError('Dürbün is not running'));
+    }
+    return client.runAction(id, params);
+  }
+
+  @override
   Future<void> dispose() async {
     final client = _client;
     if (client == null) return;
+    client
+      ..removeReportListener(_changes.ping)
+      ..removeStateListener(_changes.ping);
     _guardian?.cancel();
     _guardian = null;
     final native = _native;
@@ -366,7 +481,9 @@ class IoDurbunBackend implements DurbunBackend {
       ..helloProvider = null;
     _client = null;
     _options = null;
+    _startState = DurbunStartState.notStarted;
     await client.dispose();
+    _changes.ping();
   }
 
   /* ───────────── adapters outside dart:io (package:durbun_dio) ───────────── */

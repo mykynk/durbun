@@ -60,6 +60,14 @@ All notable changes to Dürbün are listed here. The format follows
 - Logs and Network say when the memory limit has dropped the oldest lines or requests.
 - An iPhone with Developer Mode off says so, and actions that need it explain how to turn it on.
 - Importing a masked recording says that `••••` values are masks.
+- Flutter in-app panel: **Tools → Mac connection** says why the app is not connected to the Mac and what to
+  do next, with the addresses tried; debug builds print the same once in the console.
+- Flutter in-app panel: the Mac's Wi-Fi address can be typed in at run time. It is kept for later launches,
+  and "Use the build's address" goes back.
+- Flutter in-app panel: **Tools → App tools** runs the app's own `DurbunAction`s and the built-in tools from
+  the phone, without the Mac.
+- Flutter: `Durbun.showInspector()` without a running SDK opens a page that says why and what to do, and the
+  first launch shows a one-time "shake to open" hint (`DurbunInspector(showHint: false)` turns it off).
 - Guides in `docs/guides`: Dürbün for testers, troubleshooting by symptom, mock rules, versions and
   upgrading, and Dürbün in test builds. The Android and iOS SDK guides gain a "Test builds" section.
 - React Native / JS SDK: when no connection is made within 10 seconds, one console note lists the addresses

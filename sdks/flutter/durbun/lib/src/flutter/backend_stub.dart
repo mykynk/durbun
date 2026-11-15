@@ -2,6 +2,9 @@
 // callable, the app body still runs, nothing is captured.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ChangeNotifier, Listenable;
+
+import '../core/connection_report.dart';
 import '../core/options.dart';
 import '../core/types.dart';
 import 'backend.dart';
@@ -86,4 +89,31 @@ class _StubBackend implements DurbunBackend {
 
   @override
   Map<String, Object?>? inspectorState() => null;
+
+  @override
+  DurbunStartState get startState => DurbunStartState.unsupported;
+
+  @override
+  DurbunOffReason? get offReason => null;
+
+  @override
+  bool get inFlutterTest => false;
+
+  @override
+  ConnectionReport? get connectionReport => null;
+
+  static final ChangeNotifier _changes = ChangeNotifier();
+
+  @override
+  Listenable get changes => _changes;
+
+  @override
+  Future<void> setDesktopHost(String? address) async {}
+
+  @override
+  List<Map<String, Object?>> get actions => const <Map<String, Object?>>[];
+
+  @override
+  Future<Object?> runAction(String id, Map<String, Object?> params) =>
+      Future<Object?>.error(UnsupportedError('Dürbün does not run on this platform'));
 }

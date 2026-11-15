@@ -140,8 +140,10 @@ MaterialApp(
 
 Nothing is drawn over your app. **Shake the phone** to open the panel (iOS
 simulator: *Device → Shake*; Android emulator: *Extended controls → Virtual
-sensors → Shake*). No Mac connection is required, so a tester can inspect the
-app on their own phone. The panel carries the desktop's design (colors, level
+sensors → Shake*). The first launch shows a short "Shake the phone to open the
+Dürbün panel" hint at the bottom of the screen, once per install
+(`DurbunInspector(showHint: false, …)` turns it off). No Mac connection is
+required, so a tester can inspect the app on their own phone. The panel carries the desktop's design (colors, level
 and status colors, tag colors, light and dark theme) and its tabs:
 
 - **Logs:** a live stream (newest at the bottom; it stops following when you
@@ -226,6 +228,24 @@ Limits and settings:
 - You can also open the panel from your own debug menu or a button with
   `Durbun.showInspector()`. Use `openOnShake: false` to turn shake detection
   off, or `showBubble: true` to show a small Dürbün button on screen.
+- The panel needs the SDK running (`Durbun.run` / `Durbun.init`). When it is
+  not, or Dürbün is off in the build (a release build without
+  `--dart-define=DURBUN=true`, `DURBUN=false`, `enabled: false`,
+  `inspector: false`), shaking does nothing, `Durbun.showInspector()` opens a
+  page that says why and what to do, and a debug build prints the same once in
+  the console.
+- **Tools → Mac connection** shows whether the desktop is connected, and if
+  not, why and what to do next (the Mac app is not open, USB debugging, wrong
+  address, local network connections off on the Mac, iOS Local Network
+  permission), with the addresses tried. The Mac's Wi-Fi address can be typed
+  here (`192.168.1.20` or `192.168.1.20:9751`): it is tried at once, kept for
+  the next launches (in the app's cache directory) and used instead of the
+  build's address; *Use the build's address* / *Forget the address* goes back.
+  The USB link keeps working alongside it.
+- **Tools → App tools** lists your `DurbunAction`s and the built-in Flutter,
+  Android and iOS tools: switches, choices and buttons work on the phone
+  without the Mac (your own buttons ask before they run). The desktop sees the
+  new values.
 - Shake detection works only while the app is in the foreground. On Android it
   reads the accelerometer (no permission needed); on iOS it uses the system's
   shake gesture (no permission needed).
@@ -294,7 +314,9 @@ logs and requests (Settings → Slack), with its own webhook.
 ## Release, Firebase and store builds
 
 Each project decides whether a build runs Dürbün, store builds included. The SDK
-does not look at where the app was installed from.
+does not look at where the app was installed from. The steps for builds you hand
+to testers (Firebase App Distribution, TestFlight, ad hoc) are in
+[Dürbün in test builds](https://github.com/mykynk/durbun/blob/main/docs/guides/qa-builds.md).
 
 | Build | Dürbün |
 |---|---|
@@ -390,6 +412,9 @@ Durbun.addAction(DurbunAction.button(
 ));
 ```
 
+The same actions are in the in-app panel under Tools → App tools, so a tester
+can use them on the phone without the Mac.
+
 ### If you already use a logging package
 
 Packages that write with `print` are captured already. To keep levels and tags,
@@ -433,6 +458,10 @@ lookup", `HandshakeException`, "timed out"; Dio recognizes the latter as
 
 ## USB or Wi-Fi
 
+When the app does not connect, the panel's **Tools → Mac connection** page says
+why; [Troubleshooting](https://github.com/mykynk/durbun/blob/main/docs/guides/troubleshooting.md)
+lists more symptoms and fixes.
+
 - **Android (USB or emulator):** no setup. The desktop runs
   `adb reverse tcp:9751` and the SDK connects to `127.0.0.1:9751` (on emulators,
   `10.0.2.2` is the fallback).
@@ -441,7 +470,9 @@ lookup", `HandshakeException`, "timed out"; Dio recognizes the latter as
   `127.0.0.1:9752–9755` ports, and the desktop connects through usbmux.
 - **Wi-Fi:** provide the Mac's IP address with
   `DurbunOptions(host: '192.168.1.20')` or
-  `flutter run --dart-define=DURBUN_HOST=192.168.1.20`.
+  `flutter run --dart-define=DURBUN_HOST=192.168.1.20`, or type it on the
+  phone in the in-app panel (Tools → Mac connection; kept for the next
+  launches, no rebuild needed).
   In the Dürbün Mac app, turn on Settings → "Allow local network (Wi-Fi)
   connections" (when you run the server from the repository instead, start it
   with `node dist/durbun.mjs --lan`). On iOS 14+, add a local
@@ -451,6 +482,12 @@ lookup", `HandshakeException`, "timed out"; Dio recognizes the latter as
   <key>NSLocalNetworkUsageDescription</key>
   <string>To connect to the Dürbün developer tool</string>
   ```
+
+When the app cannot reach the desktop, a debug build prints one line in the
+console about 10 seconds after start (once, only if it never connected): what
+was tried, the likely reason and the next step for USB, Wi-Fi, a wrong address
+or the Mac app not allowing local network connections. The in-app panel shows
+the same under Tools → Mac connection and on the Device & SDK page.
 
 While there is no connection, the SDK buffers the last 5,000 messages, retries
 with a backoff from 0.5 s to 3 s, and sends the buffered messages in order once

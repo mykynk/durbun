@@ -4,11 +4,13 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../flutter/durbun.dart' show Durbun, durbunInspectorState;
+import '../flutter/durbun.dart' show Durbun, durbunBackend, durbunInspectorState;
+import 'connection_view.dart';
 import 'format.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
+import 'tools.dart' show ToolPage;
 import 'widgets.dart';
 
 EdgeInsets _pad(BuildContext context) => EdgeInsets.fromLTRB(12, 12, 12, 20 + MediaQuery.paddingOf(context).bottom);
@@ -129,12 +131,14 @@ class InfoView extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
+    final backend = durbunBackend();
     return StreamBuilder<Object?>(
       stream: Durbun.connection,
       builder: (context, _) => ListenableBuilder(
-        listenable: store,
+        listenable: Listenable.merge(<Listenable>[store, backend.changes]),
         builder: (context, _) {
           final state = durbunInspectorState();
+          final report = backend.connectionReport;
           final hello = (state?['hello'] as Map?) ?? store.hello;
           final app = hello?['app'] as Map?;
           final device = hello?['device'] as Map?;
@@ -229,7 +233,7 @@ class InfoView extends StatelessWidget {
                   ].where((s) => s.isNotEmpty).join(' · ')),
                   _InfoRow(
                     t.desktop,
-                    connected ? t.connectedVia(via) : t.notConnected,
+                    connected ? t.connectedVia(via) : connectionStatusText(t, report),
                     color: connected ? c.success : c.textMuted,
                     dot: connected ? c.success : c.textSubtle,
                   ),
@@ -238,7 +242,27 @@ class InfoView extends StatelessWidget {
                   _InfoRow(t.kept, '${t.logs} ${store.logs.length} · ${t.network} ${store.calls.length} · ${formatBytes(store.bodyBytes)}'),
                 ],
               ),
-              if (!connected) ...<Widget>[const SizedBox(height: 10), Callout(title: t.offlineTitle, body: t.offlineBody)],
+              if (!connected) ...<Widget>[
+                if ((report == null ? null : connectionIssueText(t, report, platform)) case final issue?) ...<Widget>[
+                  const SizedBox(height: 10),
+                  Callout(title: issue.$1, body: issue.$2, tone: CalloutTone.warning),
+                ],
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: DButton(
+                    label: t.macConnection,
+                    icon: Icons.link_rounded,
+                    trailingIcon: Icons.chevron_right_rounded,
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (routeContext) =>
+                          DurbunTheme.wrap(routeContext, ToolPage(title: t.macConnection, child: ConnectionView(store: store))),
+                    )),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Callout(title: t.offlineTitle, body: t.offlineBody),
+              ],
               SectionTitle(t.whatYouSee),
               _Card(
                 padding: EdgeInsets.zero,

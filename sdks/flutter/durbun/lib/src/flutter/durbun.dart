@@ -216,6 +216,10 @@ abstract final class Durbun {
   }
 }
 
+/// The backend behind [Durbun], for the in-app inspector (not exported):
+/// start state, connection report, Mac address, actions.
+DurbunBackend durbunBackend() => Durbun._backend;
+
 /// Desktop state for the in-app inspector (not exported from the package).
 Map<String, Object?>? durbunInspectorState() {
   try {
