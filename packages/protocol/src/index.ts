@@ -11,6 +11,7 @@ import type { FlowRun, FlowRunDelta, FlowSummary } from './flows/types';
 
 export * from './flows/index';
 export * from './package';
+export * from './secrets';
 
 export const PROTOCOL_VERSION = 1;
 export const PRODUCT_NAME = 'Dürbün';
@@ -32,6 +33,20 @@ export type LogLevel = 'verbose' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 export const LOG_LEVELS: readonly LogLevel[] = ['verbose', 'debug', 'info', 'warn', 'error', 'fatal'];
 export function levelRank(level: LogLevel): number {
   return LOG_LEVELS.indexOf(level);
+}
+
+/**
+ * Level of a request's row in the log list (kind 'network'), from the request's outcome: a failed request or a
+ * 5xx response is an error, a 4xx response a warning, anything else (pending, cancelled, 1xx-3xx) info.
+ * The server raises the row's level when the outcome arrives; a client that already holds the row applies the
+ * same rule to the network entry the row's netId names.
+ */
+export function networkLogLevel(entry: { state?: string; status?: number }): LogLevel {
+  if (entry.state === 'failed') return 'error';
+  const status = typeof entry.status === 'number' ? entry.status : 0;
+  if (status >= 500) return 'error';
+  if (status >= 400) return 'warn';
+  return 'info';
 }
 
 /** HTTP header as an ordered [name, value] pair (duplicates allowed, order preserved). */
@@ -759,6 +774,11 @@ export interface SessionExport {
   metrics?: MetricSample[];
   /** Apps the devices reported (SPEC §10.2). Optional: older exports have none. */
   deviceApps?: DeviceApp[];
+  /**
+   * true: secret header values, cookies, secret-looking query parameters and body fields were replaced by
+   * "••••" when the file was written (GET /api/export without mask=0). Absent in raw exports.
+   */
+  masked?: boolean;
 }
 
 /* ────────────────────────────── SDK wire protocol ────────────────────────────── */

@@ -10,6 +10,7 @@
  * "application/json") are never linked.
  */
 import type { Header } from '../index';
+import { isSecretName, nameWords } from '../secrets';
 import { layoutFlow } from './layout';
 import { FLOW_FORMAT, FLOW_VERSION, type FlowDoc, type FlowEdge, type FlowNode } from './types';
 
@@ -45,13 +46,7 @@ export interface FlowFromRequestsResult {
 }
 
 const DROPPED = new Set(['host', 'content-length', 'connection', 'keep-alive', 'transfer-encoding', 'te', 'upgrade', 'expect', 'http2-settings', 'proxy-connection', 'accept-encoding']);
-const SECRET_HEADERS = new Set(['authorization', 'proxy-authorization', 'cookie', 'x-api-key', 'api-key', 'apikey', 'x-auth-token', 'x-access-token', 'x-session-token', 'x-csrf-token', 'x-xsrf-token']);
 const BORING_RESPONSE_HEADERS = new Set(['date', 'content-type', 'content-length', 'server', 'connection', 'vary', 'cache-control', 'expires', 'pragma', 'age', 'via', 'accept-ranges', 'content-encoding', 'transfer-encoding', 'last-modified', 'strict-transport-security', 'access-control-allow-origin', 'access-control-allow-headers', 'access-control-allow-methods', 'x-powered-by', 'alt-svc', 'cf-ray', 'cf-cache-status', 'nel', 'report-to', 'x-cache', 'x-amz-cf-id', 'x-amz-cf-pop', 'server-timing', 'x-envoy-upstream-service-time', 'etag']);
-
-/** Words of a field / header / query name that mark its value as a secret. */
-const SECRET_WORDS = new Set(['password', 'passwd', 'pass', 'pwd', 'passcode', 'passphrase', 'secret', 'token', 'otp', 'pin', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'cookie', 'signature', 'sig', 'credential', 'credentials', 'jwt', 'apikey', 'appcheck']);
-/** A word that is a secret only after one of these (`api_key`, `accessKey`; not `idempotency-key`). */
-const KEY_PREFIXES = new Set(['api', 'access', 'private', 'secret', 'subscription', 'client', 'app', 'master']);
 
 // The protocol package has no DOM/Node typings; both runtimes (browser, Node) have these globals.
 const G = globalThis as unknown as {
@@ -77,24 +72,6 @@ function decode(text: string): string {
   } catch {
     return text;
   }
-}
-
-/** Words of a name: `newPassword` → new, password; `X-Goog-Api-Key` → x, goog, api, key. */
-function nameWords(name: string): string[] {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-}
-
-/** Does a field, header or query name hold a secret (password, token, api key, session, cookie…)? */
-function isSecretName(name: string): boolean {
-  if (SECRET_HEADERS.has(name.toLowerCase())) return true;
-  const words = nameWords(name);
-  if (words.length === 1 && words[0] === 'key') return true;
-  return words.some((w, i) => SECRET_WORDS.has(w) || (w === 'key' && i > 0 && KEY_PREFIXES.has(words[i - 1]!)));
 }
 
 /** A value that is an id or a token rather than a word: worth linking when it is a whole value. */
