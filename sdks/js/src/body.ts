@@ -270,9 +270,19 @@ export function looksLikeText(bytes: Uint8Array): boolean {
   return true;
 }
 
+/** Content types of responses that stay open (same list as the Android SDK). */
+const STREAMING_TYPES = ['text/event-stream', 'application/x-ndjson', 'application/stream+json', 'application/grpc', 'multipart/x-mixed-replace', 'video/', 'audio/'];
+
+/** A response that stays open (SSE, NDJSON, media…): reported when its headers arrive, never read whole. */
+export function isStreamingContentType(contentType: string | undefined): boolean {
+  if (!contentType) return false;
+  const ct = contentType.trim().toLowerCase();
+  return STREAMING_TYPES.some((t) => ct.startsWith(t));
+}
+
 /* ────────────────────────────── WireBody builders ────────────────────────────── */
 
-function sizeOnly(size: number): WireBody {
+export function sizeOnly(size: number): WireBody {
   return { encoding: 'utf8', data: '', size, truncated: true };
 }
 
@@ -523,7 +533,7 @@ export function captureRequestBody(
   }
   if (isFormDataLike(body)) {
     // Multipart bytes are produced by the platform; report a readable field summary instead.
-    return bodyFromString(formDataSummary(body), 'application/json', cfg);
+    return cfg.captureBodies ? bodyFromString(formDataSummary(body), 'application/json', cfg) : undefined;
   }
   if (isBlobLike(body)) return bodyFromBlob(body, contentType, cfg);
   if (isArrayBufferLike(body)) return bodyFromBytes(new Uint8Array(body), contentType, cfg);
@@ -533,7 +543,7 @@ export function captureRequestBody(
   if (typeof b.nodeType === 'number') {
     // Document (web)
     const XS = g.XMLSerializer;
-    if (typeof XS === 'function') {
+    if (typeof XS === 'function' && cfg.captureBodies) {
       try {
         return bodyFromString(new XS().serializeToString(body), contentType || 'application/xml', cfg);
       } catch {

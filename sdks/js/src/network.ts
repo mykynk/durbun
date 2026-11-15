@@ -6,6 +6,8 @@ export interface NetworkHost {
   readonly bodyConfig: BodyConfig;
   nextRequestId(): string;
   emit(message: SdkNetRequest | SdkNetResponse | SdkNetError): void;
+  /** A warning row on the desktop (tag "durbun"), e.g. a mock rule that could not be applied. */
+  notice(message: string): void;
   /** First enabled matching mock rule for this request, if any. */
   findMock(method: string, url: string): MockRule | undefined;
   /** Requests that must never be captured or mocked (the desktop itself, the Metro dev server, user list). */

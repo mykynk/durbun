@@ -11,6 +11,7 @@ import { describeEnvironment, detectRuntime, devServerOrigin, type EnvironmentIn
 import { installErrorHandlers, isRejectionWarning, type ErrorReport } from './errors.js';
 import { installFetchPatch } from './fetch.js';
 import { formatArgs } from './format.js';
+import { connectionHint } from './hints.js';
 import { errorInfo, isErrorLike, previewValue, toJsonSafe } from './jsonSafe.js';
 import { MetricsSampler, metricsSupported } from './metrics.js';
 import { findMockRule, normalizeRules } from './mocks.js';
@@ -34,7 +35,7 @@ import {
   type ServerWelcome,
 } from './protocol.js';
 import { RingBuffer } from './ringBuffer.js';
-import { errorMessage, g, originOfUrl, randomId, setTimer, type AnyRecord } from './util.js';
+import { clearTimer, errorMessage, g, originOfUrl, randomId, setTimer, type AnyRecord, type TimerHandle } from './util.js';
 import { SDK_NAME, SDK_VERSION } from './version.js';
 import { installXhrPatch } from './xhr.js';
 
@@ -50,6 +51,8 @@ interface Buffered {
   text: string;
   /** Console lines buffered before the desktop told us whether it already has device logs. */
   consoleLevel?: LogLevel;
+  /** The same message without its body data, used first when the buffer is over its size limit. */
+  lite?: string;
 }
 
 /** Messages flushed per tick after a reconnect (keeps the JS thread responsive). */
@@ -58,8 +61,11 @@ const FLUSH_CHUNK = 250;
 const HIGH_WATER_BYTES = 4 * 1024 * 1024;
 /** Shown instead of a `redactHeaders` value (the Android, iOS and Flutter SDKs use the same marker). */
 const REDACTED = '••••';
-/** Total size of buffered messages kept while disconnected. */
-const MAX_BUFFERED_CHARS = 32 * 1024 * 1024;
+/**
+ * Total size of buffered messages kept while disconnected (about 8 MB). Past it the oldest bodies go
+ * first (the request row stays, its body shows as truncated), then the oldest messages.
+ */
+export const MAX_BUFFERED_CHARS = 8 * 1024 * 1024;
 
 function sanitizeConfig(input: unknown, previous: SdkConfig): SdkConfig {
   const next = { ...previous };
@@ -100,6 +106,11 @@ export class DurbunClient implements NetworkHost {
   private builtIns = new Map<string, { descriptor: AppActionDescriptor; handler: ActionHandler }>();
   private unsubscribeActions: (() => void) | undefined;
   private warnedNoSocket = false;
+  /** When a desktop was last known to be there (start counts: one may be about to accept us). */
+  private desktopSeenAt = 0;
+  private everWelcomed = false;
+  private hintTimer: TimerHandle | undefined;
+  private hintShown = false;
 
   constructor(
     options: DurbunOptions = {},
@@ -107,7 +118,9 @@ export class DurbunClient implements NetworkHost {
   ) {
     this.runtime = detectRuntime();
     this.opts = resolveOptions(options, this.runtime);
-    this.buffer = new RingBuffer<Buffered>(this.opts.maxBufferedMessages, MAX_BUFFERED_CHARS);
+    this.buffer = new RingBuffer<Buffered>(this.opts.maxBufferedMessages, MAX_BUFFERED_CHARS, (item) =>
+      item.lite !== undefined ? { item: { text: item.lite, consoleLevel: item.consoleLevel }, weight: item.lite.length } : undefined,
+    );
     this.env = describeEnvironment(this.overrides(), this.runtime);
   }
 
@@ -137,6 +150,7 @@ export class DurbunClient implements NetworkHost {
       return false;
     }
     this.started = true;
+    this.desktopSeenAt = Date.now();
     for (const url of this.opts.urls) {
       const origin = originOfUrl(url.replace(/^ws/i, 'http'));
       if (origin) this.ignoreOrigins.push(origin);
@@ -180,12 +194,18 @@ export class DurbunClient implements NetworkHost {
     );
     this.conn.start();
     this.debug(`started; desktop candidates: ${this.opts.urls.join(', ')}`);
+    this.hintTimer = setTimer(() => {
+      this.hintTimer = undefined;
+      this.showConnectionHint();
+    }, this.timing.connectHintMs ?? DEFAULT_TIMING.connectHintMs ?? 10_000);
     return true;
   }
 
   stop(): void {
     if (!this.started) return;
     this.started = false;
+    clearTimer(this.hintTimer);
+    this.hintTimer = undefined;
     try {
       this.metrics?.stop();
     } catch {
@@ -305,8 +325,23 @@ export class DurbunClient implements NetworkHost {
     this.emit(msg);
   }
 
+  /**
+   * Bodies are read only while a desktop is connected, during the first 30 s after start (one may be about
+   * to accept us) and for 30 s after it went away. Otherwise requests are recorded with their size only, so
+   * an app that keeps `Durbun.start()` with Dürbün closed pays no body reads.
+   */
+  notice(message: string): void {
+    if (!this.started) return;
+    this.emit({ type: 'log', ts: Date.now(), level: 'warn', tag: 'durbun', message });
+  }
+
   get bodyConfig(): BodyConfig {
-    return { captureBodies: this.config.captureBodies, maxBodyBytes: this.config.maxBodyBytes };
+    return { captureBodies: this.config.captureBodies && this.bodiesWanted(), maxBodyBytes: this.config.maxBodyBytes };
+  }
+
+  private bodiesWanted(): boolean {
+    if (this.conn && this.conn.isActive) return true;
+    return Date.now() - this.desktopSeenAt < (this.timing.noDesktopGraceMs ?? DEFAULT_TIMING.noDesktopGraceMs ?? 30_000);
   }
 
   nextRequestId(): string {
@@ -370,9 +405,21 @@ export class DurbunClient implements NetworkHost {
       if (conn && conn.isActive && this.buffer.size === 0 && conn.bufferedAmount < HIGH_WATER_BYTES) {
         if (conn.send(text)) return;
       }
-      this.buffer.push({ text, consoleLevel }, text.length);
+      this.buffer.push({ text, consoleLevel, lite: this.liteText(message) }, text.length);
       if (conn && conn.isActive) this.scheduleFlush(conn.bufferedAmount >= HIGH_WATER_BYTES ? 50 : 0);
     });
+  }
+
+  /** A request / response with body data, serialized without the data (size kept, marked truncated). */
+  private liteText(message: SdkToServer): string | undefined {
+    if (message.type !== 'net.request' && message.type !== 'net.response') return undefined;
+    const body = message.body;
+    if (!body || !body.data) return undefined;
+    try {
+      return JSON.stringify({ ...message, body: { encoding: 'utf8', data: '', size: body.size, truncated: true } });
+    } catch {
+      return undefined;
+    }
   }
 
   /** `redactHeaders` applied to a captured request / response (same marker as the native SDKs). */
@@ -486,6 +533,13 @@ export class DurbunClient implements NetworkHost {
     this.config = sanitizeConfig(msg.config, this.config);
     this.configKnown = true;
     this.mocks = normalizeRules(msg.mocks);
+    this.desktopSeenAt = Date.now();
+    this.everWelcomed = true;
+    clearTimer(this.hintTimer);
+    this.hintTimer = undefined;
+    // After the "not connected" note, say that it worked.
+    if (this.hintShown) this.consoleOut('info', `[Dürbün] Connected to ${this.conn ? this.conn.url : 'Dürbün'}.`);
+    this.hintShown = false;
     this.debug(`connected as ${msg.appId} (${this.conn ? this.conn.url : ''})`);
     this.startMetrics();
     this.flushStep();
@@ -515,6 +569,7 @@ export class DurbunClient implements NetworkHost {
     // Mock rules hold only while the peer that pushed them is connected: whoever answered the hello is not
     // authenticated yet. The desktop sends them again in its next welcome.
     this.mocks = [];
+    this.desktopSeenAt = Date.now();
     this.debug('desktop connection lost; buffering');
     this.metrics?.stop();
   }
@@ -566,8 +621,28 @@ export class DurbunClient implements NetworkHost {
     }
   }
 
+  /** Once per start: no desktop has accepted the app yet — say which addresses were tried and what to do. */
+  private showConnectionHint(): void {
+    if (!this.started || this.everWelcomed || this.hintShown || this.isConnected) return;
+    this.hintShown = true;
+    quietly(() => {
+      try {
+        const text = connectionHint({
+          runtime: this.runtime,
+          device: this.env.device,
+          urls: this.opts.urls,
+          openedUrl: this.conn ? this.conn.lastOpenedUrl : undefined,
+          explicitHost: this.opts.explicitHost,
+        });
+        this.consoleOut('info', text);
+      } catch {
+        // ignore
+      }
+    });
+  }
+
   /** Writes to the console without being captured by our own console patch. */
-  private consoleOut(method: 'debug' | 'warn', text: string): void {
+  private consoleOut(method: 'debug' | 'info' | 'warn', text: string): void {
     quietly(() => {
       try {
         const c = g.console;

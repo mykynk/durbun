@@ -58,6 +58,8 @@ export interface DurbunOptions {
 
 export interface ResolvedOptions {
   urls: string[];
+  /** The app gave `url` or `host` itself (no automatic candidates). */
+  explicitHost: boolean;
   captureConsole: boolean | 'auto';
   captureNetwork: boolean;
   captureErrors: boolean;
@@ -118,6 +120,7 @@ export function resolveOptions(options: DurbunOptions, runtime: Runtime): Resolv
     : [];
   return {
     urls: resolveUrls(options, runtime),
+    explicitHost: (typeof options.url === 'string' && options.url.trim() !== '') || (typeof options.host === 'string' && options.host.trim() !== ''),
     captureConsole: options.captureConsole === undefined ? 'auto' : options.captureConsole === 'auto' ? 'auto' : !!options.captureConsole,
     captureNetwork: options.captureNetwork !== false,
     captureErrors: options.captureErrors !== false,

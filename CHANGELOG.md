@@ -36,6 +36,11 @@ All notable changes to Dürbün are listed here. The format follows
 - Flutter in-app panel: the Performance page no longer shows a "Dart heap" tile and chart line that never
   filled.
 - `durbun_dio` works with dio 5.4 again.
+- React Native: server-sent events and other open streams over XHR appear as soon as their headers arrive
+  instead of staying pending.
+- React Native: binary mock bodies arrive intact when they are valid UTF-8; other binary bodies on `blob`
+  responses go to the network with a warning instead of arriving corrupted.
+- React Native: watching a request no longer switches React Native to chunk-by-chunk response delivery.
 
 ### Changed
 
@@ -43,6 +48,8 @@ All notable changes to Dürbün are listed here. The format follows
 - Network "Clear" (and ⌘⌫) asks first, with the number of requests; Shift skips the question.
 - Crash records from the last 7 days (was 24 hours) are read when a phone connects.
 - The SDK guides point to the Mac app's "Allow local network (Wi-Fi) connections" setting for Wi-Fi.
+- React Native / JS SDK: while Dürbün is closed the SDK stops reading bodies after 30 seconds and keeps at
+  most about 8 MB waiting; the oldest bodies are dropped before any request row.
 - `npm run app:release` stops when the Developer ID or notarization variables are missing
   (`DURBUN_ALLOW_UNSIGNED=1` for a deliberate ad-hoc build) and verifies the built apps.
   `scripts/check-versions.mjs` covers lockfiles, the no-op SDK and the install snippets in the docs, and can
@@ -53,6 +60,8 @@ All notable changes to Dürbün are listed here. The format follows
 - Logs and Network say when the memory limit has dropped the oldest lines or requests.
 - An iPhone with Developer Mode off says so, and actions that need it explain how to turn it on.
 - Importing a masked recording says that `••••` values are masks.
+- React Native / JS SDK: when no connection is made within 10 seconds, one console note lists the addresses
+  tried and the fix for the device, and a line confirms when it connects.
 
 ## [0.2.0] - 2026-11-12
 

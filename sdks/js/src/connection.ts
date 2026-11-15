@@ -29,6 +29,10 @@ export interface ConnectionTiming {
   connectTimeoutMs: number;
   welcomeTimeoutMs: number;
   idleTimeoutMs: number;
+  /** Client: print the "not connected" note when no desktop accepted the app this long after start. */
+  connectHintMs?: number;
+  /** Client: bodies are still read this long after start, or after the desktop went away. */
+  noDesktopGraceMs?: number;
 }
 
 export const DEFAULT_TIMING: ConnectionTiming = {
@@ -37,6 +41,8 @@ export const DEFAULT_TIMING: ConnectionTiming = {
   connectTimeoutMs: 8_000,
   welcomeTimeoutMs: 10_000,
   idleTimeoutMs: 45_000,
+  connectHintMs: 10_000,
+  noDesktopGraceMs: 30_000,
 };
 
 export interface ConnectionHandlers {
@@ -90,6 +96,7 @@ export class Connection {
   private connectTimer: TimerHandle | undefined;
   private welcomeTimer: TimerHandle | undefined;
   private idleTimer: TimerHandle | undefined;
+  private opened: string | undefined;
 
   constructor(
     private readonly urls: readonly string[],
@@ -106,6 +113,11 @@ export class Connection {
 
   get url(): string {
     return this.currentUrl;
+  }
+
+  /** The last candidate whose WebSocket opened (whether or not the desktop then welcomed us). */
+  get lastOpenedUrl(): string | undefined {
+    return this.opened;
   }
 
   get bufferedAmount(): number {
@@ -219,6 +231,7 @@ export class Connection {
   private adopt(ws: WebSocketLike, url: string): void {
     this.current = ws;
     this.currentUrl = url;
+    this.opened = url;
     this.state = 'handshaking';
     ws.onmessage = (ev: { data?: unknown }) => this.onData(ws, ev ? ev.data : undefined);
     ws.onclose = () => this.drop(ws);

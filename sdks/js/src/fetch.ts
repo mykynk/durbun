@@ -9,7 +9,7 @@
  * Streams that never end on their own (SSE, NDJSON, gRPC, media) are reported as soon as the headers
  * arrive, with their size only.
  */
-import { bodyFromBytes, captureRequestBody, inferContentType, utf8Encode, base64Decode, type BodyConfig } from './body.js';
+import { bodyFromBytes, captureRequestBody, inferContentType, isStreamingContentType, utf8Encode, base64Decode, type BodyConfig } from './body.js';
 import { findHeader, headersFromInit } from './headers.js';
 import { describeMockFailure, mockDelayMs, statusText, type FailAction, type RespondAction } from './mocks.js';
 import { fetchGuard, type NetworkHost } from './network.js';
@@ -227,14 +227,7 @@ async function readStreamPrefix(stream: AnyRecord, max: number): Promise<{ bytes
   return { bytes, total, complete };
 }
 
-/** Content types of responses that stay open (same list as the Android SDK). */
-const STREAMING_TYPES = ['text/event-stream', 'application/x-ndjson', 'application/stream+json', 'application/grpc', 'multipart/x-mixed-replace', 'video/', 'audio/'];
-
-export function isStreamingContentType(contentType: string | undefined): boolean {
-  if (!contentType) return false;
-  const ct = contentType.trim().toLowerCase();
-  return STREAMING_TYPES.some((t) => ct.startsWith(t));
-}
+export { isStreamingContentType };
 
 function declaredLength(headers: Header[]): number | undefined {
   const lengthHeader = Number(findHeader(headers, 'content-length'));

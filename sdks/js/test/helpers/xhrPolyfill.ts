@@ -327,7 +327,11 @@ export class RnXHR {
     return null;
   }
 
+  /** Like React Native: listening to 'readystatechange' or 'progress' switches to chunk-by-chunk delivery. */
+  _incrementalEvents = false;
+
   addEventListener(type: string, fn: Listener): void {
+    if (type === 'readystatechange' || type === 'progress') this._incrementalEvents = true;
     (this._listeners[type] ||= []).push(fn);
   }
 

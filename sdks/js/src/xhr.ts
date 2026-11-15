@@ -19,8 +19,11 @@ import {
   inferContentType,
   isArrayBufferLike,
   isBlobLike,
+  isStreamingContentType,
+  sizeOnly,
   utf8Decode,
   utf8Encode,
+  utf8Length,
 } from './body.js';
 import { findHeader, parseRawHeaders, toRawHeaders } from './headers.js';
 import { describeMockFailure, mockDelayMs, statusText, type RespondAction } from './mocks.js';
@@ -170,22 +173,61 @@ function invalidStateError(message: string): Error {
   return err;
 }
 
-function makeBlob(bytes: Uint8Array | undefined, text: string, contentType: string | undefined): unknown {
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * A Blob holding exactly `bytes`, or undefined when this runtime cannot build one. React Native's Blob takes
+ * only string and Blob parts and stores strings as UTF-8, so there the bytes survive only when they are
+ * valid UTF-8 (text, JSON, SVG…); other binary data (images, PDFs) has no exact JS-side form.
+ */
+function binaryBlob(bytes: Uint8Array, text: string, contentType: string | undefined): unknown {
   const BlobCtor = g.Blob;
-  if (typeof BlobCtor !== 'function') return null;
+  if (typeof BlobCtor !== 'function') return undefined;
   const opts = contentType ? { type: contentType } : undefined;
-  if (bytes) {
-    try {
-      return new BlobCtor([bytes], opts);
-    } catch {
-      // React Native's Blob only accepts string/Blob parts: fall back to text
-    }
+  try {
+    return new BlobCtor([bytes], opts);
+  } catch {
+    // React Native: string parts only
   }
+  if (!sameBytes(utf8Encode(text), bytes)) return undefined;
   try {
     return new BlobCtor([text], opts);
   } catch {
+    return undefined;
+  }
+}
+
+function makeBlob(bytes: Uint8Array | undefined, text: string, contentType: string | undefined): unknown {
+  const BlobCtor = g.Blob;
+  if (typeof BlobCtor !== 'function') return null;
+  if (bytes) {
+    const blob = binaryBlob(bytes, text, contentType);
+    if (blob !== undefined) return blob;
+  }
+  try {
+    return new BlobCtor([text], contentType ? { type: contentType } : undefined);
+  } catch {
     return null;
   }
+}
+
+/** Can a `respond` mock be delivered intact for this response type? (Binary Blob bodies in React Native may not.) */
+function mockBodyDeliverable(responseType: string, action: RespondAction): boolean {
+  if (responseType !== 'blob' || action.bodyEncoding !== 'base64' || !action.body) return true;
+  const BlobCtor = g.Blob;
+  if (typeof BlobCtor !== 'function') return true;
+  try {
+    new BlobCtor([new Uint8Array(0)]);
+    return true; // byte parts are supported
+  } catch {
+    // React Native: only valid UTF-8 survives the string part
+  }
+  const bytes = base64Decode(action.body);
+  return sameBytes(utf8Encode(utf8Decode(bytes)), bytes);
 }
 
 function parseDocument(text: string, contentType: string | undefined): unknown {
@@ -229,6 +271,8 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
   if (typeof XHR !== 'function' || !XHR.prototype) return [];
   const proto = XHR.prototype as AnyRecord;
   const records = new WeakMap<object, XhrRecord>();
+  /** Mock rules already reported as not applicable (one note per rule). */
+  const notedRules = new Set<string>();
 
   /* ── reporting helpers ── */
 
@@ -301,9 +345,11 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
     rec.listeners = undefined;
   };
 
-  const captureResponseBody = (xhr: AnyRecord, contentType: string | undefined): WireBody | Promise<WireBody | undefined> | undefined => {
+  const captureResponseBody = (xhr: AnyRecord, headers: Header[]): WireBody | Promise<WireBody | undefined> | undefined => {
     const cfg = host.bodyConfig;
+    const contentType = findHeader(headers, 'content-type');
     const responseType = attempt(() => String(xhr.responseType || ''), '');
+    if (!cfg.captureBodies) return responseSize(xhr, responseType, headers);
     switch (responseType) {
       case '':
       case 'text': {
@@ -346,6 +392,20 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
     }
   };
 
+  /** Size only, from what the response already holds: never reads, decodes or serializes the body. */
+  const responseSize = (xhr: AnyRecord, responseType: string, headers: Header[]): WireBody | undefined => {
+    const declared = Number(findHeader(headers, 'content-length'));
+    if (isFinite(declared) && declared > 0) return sizeOnly(declared);
+    if (responseType === '' || responseType === 'text') {
+      const text = attempt<unknown>(() => xhr.responseText, undefined);
+      return typeof text === 'string' && text.length > 0 ? sizeOnly(utf8Length(text)) : undefined;
+    }
+    const value = attempt<unknown>(() => xhr.response, null);
+    if (responseType === 'arraybuffer' && isArrayBufferLike(value) && value.byteLength > 0) return sizeOnly(value.byteLength);
+    if (responseType === 'blob' && isBlobLike(value) && typeof value.size === 'number' && value.size > 0) return sizeOnly(value.size);
+    return undefined;
+  };
+
   const timings = (rec: XhrRecord, endTs: number): Timings | undefined => {
     if (rec.headersAt === undefined || rec.startTs === undefined) return undefined;
     return { wait: Math.max(0, rec.headersAt - rec.startTs), receive: Math.max(0, endTs - rec.headersAt) };
@@ -365,7 +425,7 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
       const headers = parseRawHeaders(attempt<unknown>(() => xhr.getAllResponseHeaders(), ''));
       let body: WireBody | Promise<WireBody | undefined> | undefined;
       try {
-        body = captureResponseBody(xhr, findHeader(headers, 'content-type'));
+        body = captureResponseBody(xhr, headers);
       } catch (e) {
         host.debug('xhr response body', e);
         body = undefined;
@@ -401,8 +461,42 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
     );
   };
 
+  /**
+   * A response that stays open (SSE, NDJSON, media…; the list `fetch` uses): reported as soon as its headers
+   * arrive, with its declared size only, like the fetch capture. Its end (load / abort) is not reported again.
+   */
+  const completeStreaming = (xhr: AnyRecord, rec: XhrRecord): boolean => {
+    if (rec.done) return true;
+    const headers = parseRawHeaders(attempt<unknown>(() => xhr.getAllResponseHeaders(), ''));
+    if (!isStreamingContentType(findHeader(headers, 'content-type'))) return false;
+    rec.done = true;
+    unwatch(xhr, rec);
+    const ts = Date.now();
+    const status = attempt(() => Number(xhr.status) || 0, 0);
+    const text = attempt(() => String(xhr.statusText || ''), '');
+    const declared = Number(findHeader(headers, 'content-length'));
+    const startTs = rec.startTs as number;
+    after(rec, undefined, () =>
+      host.emit({
+        type: 'net.response',
+        id: rec.id as string,
+        ts,
+        status,
+        ...(text ? { statusText: text } : {}),
+        headers,
+        ...(isFinite(declared) && declared > 0 ? { body: sizeOnly(declared) } : {}),
+        timings: { wait: Math.max(0, ts - startTs), receive: 0 },
+        ...mockFields(rec),
+      }),
+    );
+    return true;
+  };
+
   const watch = (xhr: AnyRecord, rec: XhrRecord) => {
     if (typeof xhr.addEventListener !== 'function') return;
+    // React Native switches a request to incremental (chunk by chunk) delivery when anyone listens to
+    // 'readystatechange' or 'progress'; our listener must not make the app's responses more expensive.
+    const incremental = attempt<unknown>(() => xhr._incrementalEvents, undefined);
     const add = (type: string, fn: (ev: unknown) => void) => {
       try {
         xhr.addEventListener(type, fn);
@@ -412,9 +506,23 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
       }
     };
     add('readystatechange', () => {
-      if (records.get(xhr) !== rec || rec.headersAt !== undefined) return;
-      if (attempt(() => Number(xhr.readyState) || 0, 0) >= 2) rec.headersAt = Date.now();
+      if (records.get(xhr) !== rec || rec.headersAt !== undefined || rec.done) return;
+      if (attempt(() => Number(xhr.readyState) || 0, 0) >= 2) {
+        rec.headersAt = Date.now();
+        try {
+          completeStreaming(xhr, rec);
+        } catch (e) {
+          host.debug('xhr stream', e);
+        }
+      }
     });
+    if (typeof incremental === 'boolean') {
+      try {
+        xhr._incrementalEvents = incremental;
+      } catch {
+        // ignore
+      }
+    }
     add('load', () => complete(xhr, rec, 'load'));
     add('error', () => complete(xhr, rec, 'error'));
     add('timeout', () => complete(xhr, rec, 'timeout'));
@@ -687,6 +795,16 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
         } catch (e) {
           host.debug('xhr send', e);
           if (rec.id === undefined) return original.apply(this, args);
+        }
+        if (rule && rule.action.type === 'respond' && !mockBodyDeliverable(attempt(() => String(this.responseType || ''), ''), rule.action)) {
+          // Better the real response than corrupted bytes: say why once, and let the request through.
+          if (!notedRules.has(rule.id)) {
+            notedRules.add(rule.id);
+            host.notice(
+              `Mock rule "${rule.name || rule.url}" was not applied to ${rec.method} ${rec.url}: React Native cannot hold this binary (base64) body in a Blob response without corrupting it, so the request went to the network. Text, JSON and arraybuffer responses are mocked as usual.`,
+            );
+          }
+          rule = undefined;
         }
         if (rule) {
           rec.rule = rule;
