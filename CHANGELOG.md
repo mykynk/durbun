@@ -4,6 +4,56 @@ All notable changes to Dürbün are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org). The Mac app, the server and every SDK share one version.
 
+## [Unreleased]
+
+### Security
+
+- Requests sent from the Mac (resends and flow steps) can no longer reach Dürbün's own server or its device
+  gateway, directly, by name or through a redirect. Other services on this Mac still work, and a flow warns
+  before it runs a step that calls one.
+- Session exports and HAR files mask secret values by default: credential headers, cookies, and token and
+  password fields in URLs and bodies. Saving an unmasked file is an explicit choice with a warning. Exports
+  no longer contain local file paths.
+- A share package with run history contains only the runs of the flows you picked and the sub-flows they
+  call, and says how many.
+- React Native guide: the Android notes no longer suggest a manual `adb reverse` command that would have
+  opened Dürbün's whole API to apps on the phone.
+
+### Fixed
+
+- React Native: unhandled promise rejections are reported again in dev builds of React Native 0.71 and later,
+  once each, with the original stack where React Native keeps it.
+- Importing a session file kept no device apps (name, version, build type, installer, crash counts). Session
+  files written by a newer version are imported instead of refused.
+- Failed requests and 5xx responses count as errors in the log (4xx as warnings), so "errors only" shows them.
+- Crash notifications work from any tab and for every connected device, and name the app and the device.
+- "Show in context" and jumps from other tabs no longer erase your log filters: a bar shows what is turned
+  off for the moment, and "Back to my filters" restores them.
+- HAR export of a device or an app contains only that scope's requests.
+- Crash share reports from apps without the SDK include the app name, version (build) and install source.
+- Flutter: builds with Android Gradle Plugin 9 and built-in Kotlin, and still with older versions
+  (Flutter 3.27+).
+- Flutter in-app panel: the Performance page no longer shows a "Dart heap" tile and chart line that never
+  filled.
+- `durbun_dio` works with dio 5.4 again.
+
+### Changed
+
+- Export session and Export HAR open a dialog that shows the scope and the counts before saving.
+- Network "Clear" (and ⌘⌫) asks first, with the number of requests; Shift skips the question.
+- Crash records from the last 7 days (was 24 hours) are read when a phone connects.
+- The SDK guides point to the Mac app's "Allow local network (Wi-Fi) connections" setting for Wi-Fi.
+- `npm run app:release` stops when the Developer ID or notarization variables are missing
+  (`DURBUN_ALLOW_UNSIGNED=1` for a deliberate ad-hoc build) and verifies the built apps.
+  `scripts/check-versions.mjs` covers lockfiles, the no-op SDK and the install snippets in the docs, and can
+  write a new version with `--write`.
+
+### Added
+
+- Logs and Network say when the memory limit has dropped the oldest lines or requests.
+- An iPhone with Developer Mode off says so, and actions that need it explain how to turn it on.
+- Importing a masked recording says that `••••` values are masks.
+
 ## [0.2.0] - 2026-11-12
 
 ### Added

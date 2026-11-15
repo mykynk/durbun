@@ -106,7 +106,7 @@ basis).
 |---|---|
 | **Simulator** | Nothing. The SDK connects to `127.0.0.1:9751`; `SIMULATOR_UDID` lets the desktop match the right simulator. |
 | **iPhone/iPad over USB** | Nothing. The SDK listens on the first free port in `127.0.0.1:9752…9755` on the device, and the desktop connects through usbmux. Only loopback is listened on, so nobody on the network can connect and no Local Network permission is needed. |
-| **Wi-Fi** | Call `Durbun.start(options: .init(host: "192.168.1.20"))` or set `DURBUN_HOST=192.168.1.20` in the Xcode scheme. Add `NSLocalNetworkUsageDescription` to Info.plist (iOS asks for permission on the first connection) and start the desktop with `durbun --lan`. |
+| **Wi-Fi** | Call `Durbun.start(options: .init(host: "192.168.1.20"))` or set `DURBUN_HOST=192.168.1.20` in the Xcode scheme. Add `NSLocalNetworkUsageDescription` to Info.plist (iOS asks for permission on the first connection) and in the Dürbün Mac app turn on Settings → "Allow local network (Wi-Fi) connections" (when you run the server from the repository instead, start it with `node dist/durbun.mjs --lan`). |
 
 If the connection drops, the SDK retries forever with a 0.5 s to 3 s backoff. Meanwhile it keeps the last
 5,000 messages in memory and sends them in order once connected (a single warning line is added if some had to

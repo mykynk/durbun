@@ -212,8 +212,10 @@ SDK bağlantısında henüz eşleşme ve şifreleme yok:
 - Wi-Fi'de trafik yerel ağdan şifresiz geçer.
 - SDK'lar release derlemelerinde siz açmadıkça kapalıdır. Açtığınız derlemeler, örneğin iç test derlemeleri,
   burada anlatıldığı gibi davranır.
-- Yakalanan veride token'lar ve kişisel veriler olabilir. Başlık değerlerini her SDK'nın `redactHeaders`
-  seçeneğiyle gizleyin; dışa aktarmalar ve HAR dosyaları yakalanan her şeyi içerir.
+- Yakalanan veride token'lar ve kişisel veriler olabilir. Oturum dışa aktarımları ve HAR dosyaları, maskesiz
+  dışa aktarmayı siz seçmedikçe gizli değerleri (kimlik başlıkları, çerezler, token ve parola alanları)
+  maskeler; log satırlarının içindeki metin maskelenmez. Bir değerin Mac'e hiç gelmemesi için onu her SDK'nın
+  `redactHeaders` seçeneğiyle gizleyin.
 - Slack incoming webhook adresine sahip olan herkes o kanala mesaj atabilir. Mac uygulaması adresi veri
   klasöründeki `slack.json` dosyasında (yalnızca sizin kullanıcınız okuyabilir) tutar ve bir daha göstermez.
   Flutter panelinin webhook'u derleme komutunuzdan gelir (`--dart-define=DURBUN_SLACK_WEBHOOK`) ve o derlemenin
@@ -221,7 +223,8 @@ SDK bağlantısında henüz eşleşme ve şifreleme yok:
 - Ortamların gizli değerleri ve yedek parolası veri klasöründe, yalnızca sizin kullanıcınızın okuyabileceği
   dosyalarda tutulur. Paylaşılan paketlerde asla bulunmaz; yedeklerde yalnızca parolanızla şifrelenmiş olarak
   bulunur. Bir akış içinde yazan istekleri ve cihaz işlemlerini çalıştırır; başkalarından gelen akışları
-  güvendiğiniz kişilerden açın, yapay zekânın yazdığını çalıştırmadan önce okuyun.
+  güvendiğiniz kişilerden açın, yapay zekânın yazdığını çalıştırmadan önce okuyun. Mac'ten gönderilen istekler
+  (akışlar ve yeniden gönderimler) Dürbün'ün kendi portlarına ulaşamaz.
 
 SDK'larla Mac uygulaması arasında eşleşme planlanıyor.
 

@@ -888,7 +888,8 @@ impossible and the UI says so plainly (`noOutsideNetwork`), without blaming the 
 
 ### 10.3 Crash reports (any build)
 - Android `dumpsys dropbox --print <tag>` for `data_app_crash`, `data_app_anr`, `data_app_native_crash`,
-  `SYSTEM_TOMBSTONE` (third-party packages only): on connect the last 24 h, then every 30 s new records.
+  `SYSTEM_TOMBSTONE` (third-party packages only): on connect the last 7 days (`CRASH_HISTORY_MS`, at most 50 records per tag per
+  pass, newest first), then every 30 s new records.
   Each record → `LogEntry` kind `crash`/`anr`, `origin 'dropbox'`, `data: {origin:'dropbox', package,
   process, pid?, reportTs, previousLaunch: reportTs < watchStart}`, `error` with type/message/stack;
   `upsertDeviceApp({crashReportsDelta:1})`. De-duplicate against live logcat crashes (same pid or same

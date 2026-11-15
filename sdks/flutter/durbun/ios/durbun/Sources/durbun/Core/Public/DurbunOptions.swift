@@ -5,7 +5,8 @@ import Foundation
 public struct DurbunOptions: Sendable {
     /// Desktop address for Wi-Fi connections, e.g. `"192.168.1.20"`. When nil the `DURBUN_HOST`
     /// environment variable (set it in the Xcode scheme) is used. Requires
-    /// `NSLocalNetworkUsageDescription` in Info.plist and `durbun --lan` on the desktop.
+    /// `NSLocalNetworkUsageDescription` in Info.plist and, in the Mac app, Settings →
+    /// "Allow local network (Wi-Fi) connections".
     public var host: String?
     /// Desktop SDK port used for the simulator (127.0.0.1) and for `host`. Default 9751.
     public var port: UInt16

@@ -208,8 +208,10 @@ The SDK connection itself is not paired or encrypted yet:
 - Over Wi-Fi the traffic crosses the local network unencrypted.
 - The SDKs are off in release builds unless you turn them on. Builds you turn them on for, such as internal
   test builds, behave as described here.
-- Captured data can include tokens and personal data. Hide header values with each SDK's `redactHeaders`
-  option; exports and HAR files contain whatever was captured.
+- Captured data can include tokens and personal data. Session exports and HAR files mask secret values
+  (credential headers, cookies, token and password fields) unless you choose an unmasked export; text inside
+  log lines is not masked. To keep a value off the Mac altogether, hide it with each SDK's `redactHeaders`
+  option.
 - A Slack incoming webhook URL lets anyone who has it post to its channel. The Mac app keeps it in
   `slack.json` in its data folder (readable only by your user) and never shows it again. The Flutter panel's
   webhook comes from your build command (`--dart-define=DURBUN_SLACK_WEBHOOK`) and is compiled into that
@@ -217,7 +219,7 @@ The SDK connection itself is not paired or encrypted yet:
 - Environment secrets and the backup passphrase are kept in the data folder, readable only by your user.
   Shared packages never contain them; backups contain them only encrypted with your passphrase. A flow runs
   the requests and device actions written in it, so open flows from people you trust, and read what an AI
-  wrote before you run it.
+  wrote before you run it. Requests sent from the Mac (flows and resends) cannot reach Dürbün's own ports.
 
 Pairing between the SDKs and the Mac app is planned.
 

@@ -204,8 +204,9 @@ a log entry) and **Run garbage collection**.
   automatically, and the SDK connects to `127.0.0.1:9751` on the device. There is nothing to configure. To
   check, run `adb reverse --list`.
 - **Emulator:** the same, plus `10.0.2.2:9751` (the Mac itself) is tried as a fallback.
-- **Wi-Fi only (no adb):** enable LAN mode on the desktop (`durbun --lan`, or Settings → "Allow local network
-  (Wi-Fi) connections") and pass the Mac's IP address:
+- **Wi-Fi only (no adb):** in the Dürbün Mac app, turn on Settings → "Allow local network (Wi-Fi) connections"
+  (when you run the server from the repository instead, start it with `node dist/durbun.mjs --lan`), and pass
+  the Mac's IP address:
 
   ```kotlin
   Durbun.start(this, DurbunOptions(host = "192.168.1.20"))
