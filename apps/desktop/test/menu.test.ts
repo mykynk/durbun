@@ -1,7 +1,7 @@
 import type { MenuItemConstructorOptions } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import { pickLanguage, STRINGS } from '../src/i18n';
-import { appMenuTemplate, serverLabel, trayMenuTemplate, trayNeedsAttention, updateMenuItem, type MenuHandlers } from '../src/menu';
+import { appMenuTemplate, dockMenuTemplate, serverLabel, trayMenuTemplate, trayNeedsAttention, updateMenuItem, type MenuHandlers } from '../src/menu';
 
 const handlers = (): MenuHandlers => ({
   showWindow: vi.fn(),
@@ -20,6 +20,7 @@ const handlers = (): MenuHandlers => ({
   openFile: vi.fn(),
   copyDiagnostics: vi.fn(),
   setVerboseLog: vi.fn(),
+  newWindow: vi.fn(),
 });
 
 function flatten(items: MenuItemConstructorOptions[]): MenuItemConstructorOptions[] {
@@ -173,6 +174,22 @@ describe('updates, login item and files in the menus', () => {
     expect(item).toMatchObject({ type: 'checkbox', checked: true });
     (item.click as (i: { checked: boolean }) => void)({ checked: false });
     expect(h.setVerboseLog).toHaveBeenCalledWith(false);
+  });
+  it('DURBUN_DEBUG decides verbose logging: the item shows it and cannot change it', () => {
+    const item = find(appMenuTemplate(STRINGS.en, handlers(), { canOpenInBrowser: true, verboseLog: true, verboseLogLocked: true }), 'Verbose Diagnostic Log')!;
+    expect(item).toMatchObject({ checked: true, enabled: false });
+    expect(find(appMenuTemplate(STRINGS.en, handlers(), { canOpenInBrowser: true }), 'Verbose Diagnostic Log')!.enabled).toBe(true);
+  });
+  it('Window → New Window takes ⌘N; the Dock menu offers it too, in both languages', () => {
+    const h = handlers();
+    const item = find(appMenuTemplate(STRINGS.tr, h, { canOpenInBrowser: true }), 'Yeni Pencere')!;
+    expect(item.accelerator).toBe('CmdOrCtrl+N');
+    (item.click as () => void)();
+    expect(h.newWindow).toHaveBeenCalledOnce();
+    const dock = dockMenuTemplate(STRINGS.en, h);
+    expect(dock.map((i) => i.label)).toEqual(['New Window']);
+    (dock[0]!.click as () => void)();
+    expect(h.newWindow).toHaveBeenCalledTimes(2);
   });
   it('the tray shows a running download and marks warnings and failures', () => {
     const items = trayMenuTemplate(STRINGS.en, { kind: 'running', port: 9750, warnings: [] }, handlers(), { update: { kind: 'downloading', version: '0.3.0' }, openAtLogin: true });

@@ -28,6 +28,8 @@ export interface MenuHandlers {
   /** Help → Verbose Diagnostic Log (asks to restart). */
   setVerboseLog(on: boolean): void;
   openLicenses(): void;
+  /** Window → New Window (⌘N) and the Dock menu: another window on the same server. */
+  newWindow(): void;
 }
 
 export interface MenuOptions {
@@ -37,6 +39,8 @@ export interface MenuOptions {
   update?: UpdatePhase;
   openAtLogin?: boolean;
   verboseLog?: boolean;
+  /** DURBUN_DEBUG decides verbose logging: the item shows it and cannot change it. */
+  verboseLogLocked?: boolean;
 }
 
 /** The update item: what it does follows the update's phase (a download shows here while it runs). */
@@ -110,6 +114,8 @@ export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: MenuOptions):
     {
       label: t.window,
       submenu: [
+        { label: t.newWindow, accelerator: 'CmdOrCtrl+N', click: () => h.newWindow() },
+        { type: 'separator' },
         { role: 'minimize', label: t.minimize },
         { role: 'zoom', label: t.zoom },
         { role: 'close', label: t.close },
@@ -125,7 +131,7 @@ export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: MenuOptions):
         { label: t.docs, click: () => h.openDocs() },
         { label: t.reportIssue, click: () => h.reportIssue() },
         { label: t.copyDiagnostics, click: () => h.copyDiagnostics() },
-        { label: t.verboseLog, type: 'checkbox', checked: opts.verboseLog === true, click: (item) => h.setVerboseLog(Boolean(item?.checked)) },
+        { label: t.verboseLog, type: 'checkbox', checked: opts.verboseLog === true, enabled: opts.verboseLogLocked !== true, click: (item) => h.setVerboseLog(Boolean(item?.checked)) },
         { type: 'separator' },
         { label: t.openInBrowser, enabled: opts.canOpenInBrowser, click: () => h.openInBrowser() },
         { label: t.openDataDir, click: () => h.openDataDir() },
@@ -135,6 +141,11 @@ export function appMenuTemplate(t: Strings, h: MenuHandlers, opts: MenuOptions):
       ],
     },
   ];
+}
+
+/** The Dock icon's menu (macOS adds the open windows and Quit itself). */
+export function dockMenuTemplate(t: Strings, h: MenuHandlers): MenuItemConstructorOptions[] {
+  return [{ label: t.newWindow, click: () => h.newWindow() }];
 }
 
 export type ServerState =

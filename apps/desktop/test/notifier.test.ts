@@ -42,12 +42,25 @@ describe('createNotifier', () => {
     const onClick = vi.fn();
     const send = vi.fn();
     const notifier = createNotifier({ log, onClick, isFocused: () => false });
-    notifier.show(req('n1', 'durbun-crash'), { isDestroyed: () => false, send } as never);
+    const page = { isDestroyed: () => false, send };
+    notifier.show(req('n1', 'durbun-crash'), page as never);
     shown[0]!.emit('click');
-    expect(onClick).toHaveBeenCalledOnce();
+    // the window of the page that sent it comes forward (more than one window may be open)
+    expect(onClick).toHaveBeenCalledWith(page);
     expect(send).toHaveBeenCalledWith('durbun:notification-click', 'n1');
     // the clicked one is gone: a new crash with the tag does not try to close it again
     notifier.show(req('n2', 'durbun-crash'), sender);
     expect(shown[0]!.closed).toBe(false);
+  });
+
+  it('a click after the page is gone still brings a window forward', () => {
+    shown.length = 0;
+    const onClick = vi.fn();
+    const send = vi.fn();
+    const notifier = createNotifier({ log, onClick, isFocused: () => false });
+    notifier.show(req('n3', ''), { isDestroyed: () => true, send } as never);
+    shown[0]!.emit('click');
+    expect(onClick).toHaveBeenCalledWith(undefined);
+    expect(send).not.toHaveBeenCalled();
   });
 });

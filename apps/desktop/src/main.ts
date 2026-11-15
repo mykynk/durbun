@@ -2,9 +2,10 @@
  * Dürbün for macOS (SPEC §10.7). Double-click → the Dürbün server starts inside this process (the
  * bundled dist/server.mjs, UI from dist/ui) and its UI opens in a window. No terminal, no commands.
  *
- *  - single instance (a second launch focuses the window)
+ *  - single instance (a second launch focuses the window used last); Window → New Window (⌘N, Dock menu)
+ *    opens more windows on the same server (windows.ts)
  *  - PATH / ANDROID_HOME / … from the login shell before the server starts (Finder gives a bare env)
- *  - port 9750 / SDK 9751 (DURBUN_PORT / DURBUN_SDK_PORT override); a Dürbün already on the port is
+ *  - port 9750 / SDK 9751 (DURBUN_PORT / DURBUN_SDK_PORT, else the ports saved in Settings: appConfig.ts); a Dürbün already on the port is
  *    reused once it proves it is one (health + its UI; replaced by our own server when it stops); a port
  *    held by another program → a nearby free port
  *  - the window loads http://127.0.0.1:<port>, the host the probe checked (never "localhost", which
@@ -26,18 +27,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { splashUrl, statusPageUrl, syncFullScreen, TRAFFIC_LIGHTS } from './chrome';
 import { applyLoginShellEnv, SHELL_ENV_TIMEOUT_MS, type ShellEnvKey, type ShellEnvResult } from './env';
 import { pickLanguage, shortPath, STRINGS, type Strings } from './i18n';
-import { createPrefsStore, parsePrefsPatch, prefsView, startupOptions } from './desktopPrefs';
+import { checkConfigPatch, configView, resolveConfig } from './appConfig';
+import { createPrefsStore, parsePrefsPatch, prefsView } from './desktopPrefs';
 import { diagnosticsText, issueUrl, lastLines, shortLocation } from './diagnostics';
 import { createQuitFlow } from './lifecycle';
 import { installFileLog, pruneCrashDumps, type FileLog, type ScopedLogger } from './log';
-import { appMenuTemplate, serverLabel, trayMenuTemplate, trayNeedsAttention, type MenuHandlers, type ServerState } from './menu';
+import { appMenuTemplate, dockMenuTemplate, serverLabel, trayMenuTemplate, trayNeedsAttention, type MenuHandlers, type ServerState } from './menu';
 import { decideNavigation, isAllowedPermission, isAllowedRequest, isAppUrl, REQUEST_FILTER_URLS } from './navigation';
 import { attachNotices, bundledServerVersion, serverWarnings } from './notices';
 import { createNotifier, type Notifier, type NotifyRequest } from './notifier';
 import { createOpenQueue, OPEN_EXTENSIONS, readOpened } from './openFiles';
 import { parseSummary, sameSummary, SUMMARY_INTERVAL_MS, type Summary } from './summary';
 import { devIconPath, serverPaths } from './paths';
-import { DEFAULT_HTTP_PORT, DEFAULT_SDK_PORT, isPortFree, parsePortEnv, probeDurbun, proveDurbun, watchAttached, type DurbunProbe } from './ports';
+import { DEFAULT_HTTP_PORT, DEFAULT_SDK_PORT, isPortFree, probeDurbun, proveDurbun, watchAttached, type DurbunProbe } from './ports';
 import { createReloadGuard, resolveFailure, type FailureChoice } from './recovery';
 import { runSelfTest, type ConsoleEntry } from './selftest';
 import { DATA_DIR_IN_USE, startedOrigin, startOrAttachServer } from './startup';
@@ -46,6 +48,7 @@ import { renderTrayBitmap } from './trayIcon';
 import { createUpdateFlow, type MessageBoxRequest, type UpdatePhase } from './updateFlow';
 import { autoCheckDue, bundlePath, createRateLimiter, parseCodesign, REPO_URL, selfUpdateSupport, shouldAskAutoCheck, shouldOfferMove, updateArch, type SignatureKind } from './updates';
 import { fitBounds, MIN_SIZE, readWindowState, THEME_BACKGROUND, writeWindowState, type Theme, type WindowState } from './windowState';
+import { cascadeBounds, closeDecision, createWindowRegistry, mayTakeOpenedFiles } from './windows';
 
 /** The part of dist/server.mjs this app uses (packages/server/src/server.ts). */
 interface EmbeddedServer {
@@ -78,6 +81,7 @@ interface ServerModule {
 }
 
 const STOP_TIMEOUT_MS = 12_000;
+const DEFAULT_PORTS = { httpPort: DEFAULT_HTTP_PORT, sdkPort: DEFAULT_SDK_PORT } as const;
 /** The one-time preference move must never hold the window back for long. */
 const STORAGE_MIGRATION_TIMEOUT_MS = 4_000;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -115,7 +119,10 @@ function run(): void {
   }));
 
   let t: Strings = STRINGS.en;
-  let win: BrowserWindow | null = null;
+  /** Every window shows the same server; the first one is the main window (windows.ts). */
+  const windows = createWindowRegistry<BrowserWindow>();
+  /** Web contents whose window shows the loaded UI (not the splash or a status page). */
+  const uiLoaded = new Set<number>();
   let tray: Tray | null = null;
   let server: EmbeddedServer | null = null;
   let startInFlight: Promise<EmbeddedServer> | null = null;
@@ -143,6 +150,10 @@ function run(): void {
   let signatureRead: Promise<void> = Promise.resolve();
   let updatePhase: UpdatePhase = { kind: 'idle' };
   let installingUpdate = false;
+  /** The ports and verbosity this run's server started with (what Settings compares a saved change to). */
+  let startedWith: { httpPort: number; sdkPort: number; verbose: boolean } | undefined;
+  /** The window whose UI takes the files opened from Finder (its web contents id). */
+  let openTarget: number | null = null;
 
   // Files opened from Finder can arrive before 'ready' (the app was not running): they wait for the UI.
   const openQueue = createOpenQueue();
@@ -161,18 +172,30 @@ function run(): void {
     shell.openExternal(url).catch((err) => log.warn(`could not open ${url}: ${(err as Error).message}`));
   };
 
-  const showWindow = () => {
-    if (!app.isReady()) return; // 'activate' can arrive before 'ready'; the window comes with ready
-    if (!win || win.isDestroyed()) createWindow();
-    if (!win) return;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
+  /** Brings `target` (else the window used last, else a new main window) to the front. */
+  const showWindow = (target?: BrowserWindow): BrowserWindow | undefined => {
+    if (!app.isReady()) return undefined; // 'activate' can arrive before 'ready'; the window comes with ready
+    const w = target && !target.isDestroyed() ? target : (windows.current() ?? createWindow());
+    if (w.isMinimized()) w.restore();
+    w.show();
+    w.focus();
     app.focus({ steal: true });
+    return w;
+  };
+  /** The window the user works in (a dialog's parent), if one is on screen. */
+  const visibleWindow = (): BrowserWindow | undefined => {
+    const w = windows.current();
+    return w && w.isVisible() ? w : undefined;
+  };
+  /** Sends a 'durbun:command' to every window whose UI is loaded (`except`: the window that asked). */
+  const sendToWindows = (command: string, except?: WebContents) => {
+    if (!appOrigin) return;
+    for (const w of windows.all()) if (w.webContents !== except && uiLoaded.has(w.webContents.id)) w.webContents.send('durbun:command', command);
   };
 
   const handlers: MenuHandlers = {
-    showWindow,
+    showWindow: () => void showWindow(),
+    newWindow: () => newWindow(),
     openInBrowser: () => {
       if (appOrigin) openExternal(appOrigin);
     },
@@ -182,16 +205,16 @@ function run(): void {
     showLog: () => shell.showItemInFolder(log.file),
     quit: () => app.quit(),
     openSettings: () => {
-      showWindow();
-      if (win && !win.isDestroyed() && appOrigin) win.webContents.send('durbun:command', 'settings');
+      const w = showWindow();
+      if (w && appOrigin) w.webContents.send('durbun:command', 'settings');
     },
     openDocs: () => openExternal(`${REPO_URL}/tree/main/docs/guides`),
     reportIssue: () => void reportIssue(),
     copyDiagnostics: () => void copyDiagnostics(),
     checkForUpdates: () => void updates.check('manual'),
     restartToUpdate: () => void updates.offerRestart(),
-    setAutoUpdateCheck: (on) => void setAutoUpdateCheck(on).then(notifyPrefsChanged),
-    setOpenAtLogin: (on) => void setOpenAtLogin(on).then(notifyPrefsChanged),
+    setAutoUpdateCheck: (on) => void setAutoUpdateCheck(on).then(() => notifyPrefsChanged()),
+    setOpenAtLogin: (on) => void setOpenAtLogin(on).then(() => notifyPrefsChanged()),
     setVerboseLog: (on) => void setVerboseLog(on),
     openFile: () => void pickFiles(),
     openLicenses: () => {
@@ -202,7 +225,7 @@ function run(): void {
   };
 
   const box = (opts: Electron.MessageBoxOptions) => {
-    const parent = win && !win.isDestroyed() && win.isVisible() ? win : undefined;
+    const parent = visibleWindow();
     return parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts);
   };
 
@@ -252,7 +275,7 @@ function run(): void {
       updatePhase = phase;
       refreshMenus();
       // The Dock icon shows activity while the update downloads (Squirrel.Mac reports no progress).
-      if (win && !win.isDestroyed()) win.setProgressBar(phase.kind === 'downloading' ? 2 : -1);
+      for (const w of windows.all()) w.setProgressBar(phase.kind === 'downloading' ? 2 : -1);
     },
     log,
   });
@@ -267,7 +290,8 @@ function run(): void {
   let autoUpdateStarted = false;
   async function autoUpdateTick(): Promise<void> {
     if (!app.isPackaged || selfTestFile || isQuitting()) return;
-    if (shouldAskAutoCheck(prefs.get(), app.isPackaged) && win && !win.isDestroyed() && win.isVisible() && win.isFocused()) {
+    const focused = windows.current();
+    if (shouldAskAutoCheck(prefs.get(), app.isPackaged) && focused && focused.isVisible() && focused.isFocused()) {
       const before = prefs.get().autoUpdateCheck;
       await updates.askAboutAutoCheck();
       refreshMenus();
@@ -308,16 +332,22 @@ function run(): void {
 
   /* ───────────── files opened from Finder / File → Open… (openFiles.ts) ───────────── */
 
-  let uiLoaded = false;
+  /** The files go to the window the user works in (the one that keeps waiting for them, if it is still open). */
   function deliverOpenedFiles(): void {
     if (openQueue.size === 0 || !app.isReady()) return;
-    showWindow();
+    const waiting = openTarget === null ? undefined : windows.byWebContentsId(openTarget);
+    const w = showWindow(waiting);
+    if (!w) return;
+    openTarget = w.webContents.id;
     // The UI asks for the files itself (it also does when it starts); this tells a loaded UI they are there.
-    if (win && !win.isDestroyed() && appOrigin && uiLoaded) win.webContents.send('durbun:command', 'open-file');
+    if (appOrigin && uiLoaded.has(w.webContents.id)) w.webContents.send('durbun:command', 'open-file');
   }
 
   ipcMain.handle('durbun:take-opened-files', async (event) => {
     if (!isTrustedSender(event.sender, event.senderFrame?.url)) return [];
+    // Another window that loads at this moment asks too: the files stay for the window they went to.
+    if (!mayTakeOpenedFiles({ senderId: event.sender.id, targetId: openTarget, targetAlive: openTarget !== null && !!windows.byWebContentsId(openTarget) })) return [];
+    openTarget = null;
     const files = openQueue.take();
     const results = await Promise.all(files.map((f) => readOpened(f, { size: async (p) => (await fsp.stat(p)).size, read: (p) => fsp.readFile(p, 'utf8') })));
     const out: { name: string; text: string }[] = [];
@@ -332,7 +362,7 @@ function run(): void {
   });
 
   async function pickFiles(): Promise<void> {
-    const parent = win && !win.isDestroyed() && win.isVisible() ? win : undefined;
+    const parent = visibleWindow();
     const opts: Electron.OpenDialogOptions = {
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Dürbün, HAR', extensions: OPEN_EXTENSIONS }],
@@ -456,9 +486,9 @@ function run(): void {
 
   const currentPrefs = () => prefsView(prefs.get(), { openAtLogin: readOpenAtLogin(), available: app.isPackaged });
 
-  /** The UI's Settings rows read the values again after a change made in the menus. */
-  function notifyPrefsChanged(): void {
-    if (win && !win.isDestroyed() && appOrigin && uiLoaded) win.webContents.send('durbun:command', 'prefs-changed');
+  /** The UI's Settings rows read the values again after a change made in the menus or another window. */
+  function notifyPrefsChanged(except?: WebContents): void {
+    sendToWindows('prefs-changed', except);
   }
 
   ipcMain.handle('durbun:prefs-get', (event) => (isTrustedSender(event.sender, event.senderFrame?.url) ? currentPrefs() : null));
@@ -469,18 +499,53 @@ function run(): void {
     if (patch.autoUpdateCheck !== undefined) await setAutoUpdateCheck(patch.autoUpdateCheck);
     if (patch.openAtLogin !== undefined) await setOpenAtLogin(patch.openAtLogin);
     refreshMenus();
+    notifyPrefsChanged(event.sender);
     return currentPrefs();
   });
+
+  /* ───────────── ports and verbose logging (appConfig.ts) ───────────── */
+
+  const resolvedConfig = () => resolveConfig(process.env, prefs.get(), DEFAULT_PORTS);
+  const currentConfig = () =>
+    configView(process.env, prefs.get(), DEFAULT_PORTS, startedWith, {
+      httpPort: state.kind === 'running' || state.kind === 'attached' ? state.port : undefined,
+      // An attached Dürbün's SDK port is not known here; this app's own server says whether it listens.
+      sdkPort: state.kind === 'running' && server?.sdkListening ? (server.info?.ports?.sdk ?? startedWith?.sdkPort) : undefined,
+    });
+
+  ipcMain.handle('durbun:config-get', (event) => (isTrustedSender(event.sender, event.senderFrame?.url) ? currentConfig() : null));
+  ipcMain.handle('durbun:config-set', async (event, raw: unknown) => {
+    if (!isTrustedSender(event.sender, event.senderFrame?.url)) return null;
+    const check = checkConfigPatch(raw, process.env, prefs.get(), DEFAULT_PORTS);
+    if (!check.ok) return { ok: false, error: check.error, field: check.field, config: currentConfig() };
+    await prefs.update(check.prefs);
+    const next = resolvedConfig();
+    log.info(`settings for the next start: HTTP ${next.httpPort} (${next.source.httpPort}), SDK ${next.sdkPort} (${next.source.sdkPort}), verbose ${next.verbose ? 'on' : 'off'} (${next.source.verboseLog})`);
+    refreshMenus();
+    sendToWindows('config-changed', event.sender);
+    return { ok: true, config: currentConfig() };
+  });
+  // Settings → Restart: the usual quit path first (the server stops, port forwards and log streams end).
+  ipcMain.handle('durbun:relaunch', (event) => {
+    if (!isTrustedSender(event.sender, event.senderFrame?.url) || selfTestFile || isQuitting()) return false;
+    relaunchApp('restart asked in Settings');
+    return true;
+  });
+
+  function relaunchApp(reason: string): void {
+    log.info(`restarting: ${reason}`);
+    app.relaunch();
+    app.quit();
+  }
 
   /** Help → Verbose Diagnostic Log: the server's logger is set up at start, so it asks to restart. */
   async function setVerboseLog(on: boolean): Promise<void> {
     await prefs.update({ verboseLog: on });
     refreshMenus();
+    sendToWindows('config-changed');
     const { response } = await box({ type: 'question', message: t.verboseRestartTitle(on), detail: t.verboseRestartMessage, buttons: [t.restartNow, t.later], defaultId: 0, cancelId: 1 });
     if (response !== 0) return;
-    log.info(`restarting for verbose logging ${on ? 'on' : 'off'}`);
-    app.relaunch();
-    app.quit();
+    relaunchApp(`verbose logging ${on ? 'on' : 'off'}`);
   }
 
   /* ───────────── menu-bar summary (summary.ts) ───────────── */
@@ -510,7 +575,7 @@ function run(): void {
     }
   }
 
-  /** Once: closing the window does not stop Dürbün (users took it for a quit and left the SDK port open). */
+  /** Once: closing the last window does not stop Dürbün (users took it for a quit and left the SDK port open). */
   function closeNoteOnce(): void {
     if (prefs.get().closeNoteShown || selfTestFile) return;
     void prefs.update({ closeNoteShown: true });
@@ -580,11 +645,24 @@ function run(): void {
     });
 
   const refreshMenus = () => {
+    const config = resolvedConfig();
     Menu.setApplicationMenu(
       Menu.buildFromTemplate(
-        appMenuTemplate(t, handlers, { canOpenInBrowser: appOrigin !== null, autoUpdateCheck: prefs.get().autoUpdateCheck, update: updatePhase, openAtLogin, verboseLog: prefs.get().verboseLog }),
+        appMenuTemplate(t, handlers, {
+          canOpenInBrowser: appOrigin !== null,
+          autoUpdateCheck: prefs.get().autoUpdateCheck,
+          update: updatePhase,
+          openAtLogin,
+          verboseLog: config.verbose,
+          verboseLogLocked: config.source.verboseLog === 'env',
+        }),
       ),
     );
+    try {
+      app.dock?.setMenu(Menu.buildFromTemplate(dockMenuTemplate(t, handlers)));
+    } catch {
+      /* no Dock (a test run) */
+    }
     if (tray && !tray.isDestroyed()) {
       const trayMenu = Menu.buildFromTemplate(trayMenuTemplate(t, state, handlers, { update: updatePhase, openAtLogin, summary }));
       // Opening the menu asks for fresh counts (they show the next time it opens or on the next tick).
@@ -620,7 +698,12 @@ function run(): void {
   });
   const isQuitting = () => quitFlow.quitting;
 
-  const notifier: Notifier = createNotifier({ log, onClick: showWindow, isFocused: () => !!win && !win.isDestroyed() && win.isFocused() });
+  // A notification click brings forward the window whose page sent it (that page runs the click), else the one used last.
+  const notifier: Notifier = createNotifier({
+    log,
+    onClick: (sender) => void showWindow(sender ? windows.byWebContentsId(sender.id) : undefined),
+    isFocused: () => windows.all().some((w) => w.isFocused()),
+  });
 
   /* ───────────── security: what the renderer may load, ask for and open ───────────── */
 
@@ -676,7 +759,7 @@ function run(): void {
   });
   ipcMain.on('durbun:theme', (event, theme: unknown) => {
     if (!isTrustedSender(event.sender, event.senderFrame?.url) || (theme !== 'dark' && theme !== 'light')) return;
-    if (win && !win.isDestroyed()) win.setBackgroundColor(THEME_BACKGROUND[theme]);
+    windows.byWebContentsId(event.sender.id)?.setBackgroundColor(THEME_BACKGROUND[theme]);
     if (winState.theme !== theme) {
       winState = { ...winState, theme };
       void writeWindowState(stateFile, winState);
@@ -694,16 +777,25 @@ function run(): void {
     refreshMenus();
   });
 
+  /** IPC only from one of the app's windows, and only while it shows the local server's UI. */
   function isTrustedSender(sender: WebContents, frameUrl: string | undefined): boolean {
-    return !!win && !win.isDestroyed() && sender === win.webContents && !!appOrigin && !!frameUrl && isAppUrl(frameUrl, appOrigin);
+    const w = windows.byWebContentsId(sender.id);
+    return !!w && w.webContents === sender && !!appOrigin && !!frameUrl && isAppUrl(frameUrl, appOrigin);
   }
 
   /* ───────────── window ───────────── */
 
-  function createWindow(): void {
+  /**
+   * A window on the server. The first one is the main window: it opens where it was last time and hides on
+   * close. Another one (`from`: the window it opens from) cascades from that window and closes for good.
+   */
+  function createWindow(opts: { from?: BrowserWindow } = {}): BrowserWindow {
+    const main = !windows.main();
     const primary = screen.getPrimaryDisplay();
     const areas = [primary, ...screen.getAllDisplays().filter((d) => d.id !== primary.id)].map((d) => d.workArea);
-    const bounds = fitBounds(winState.bounds, areas);
+    const fitted = fitBounds(main ? winState.bounds : undefined, areas);
+    const from = opts.from && !opts.from.isDestroyed() && !opts.from.isFullScreen() ? opts.from.getBounds() : undefined;
+    const bounds = main ? fitted : cascadeBounds(from, (from ? screen.getDisplayMatching(from) : primary).workArea, fitted);
     const theme = currentTheme();
     const w = new BrowserWindow({
       ...bounds,
@@ -725,12 +817,13 @@ function run(): void {
         spellcheck: false,
       },
     });
-    win = w;
-    if (winState.maximized) w.maximize();
+    const wcId = w.webContents.id;
+    windows.add(w, { main });
+    if (main && winState.maximized) w.maximize();
     w.once('ready-to-show', () => {
       if (w.isDestroyed()) return;
       // Opened at login: Dürbün captures from the menu bar until the user opens the window.
-      if (startHidden) {
+      if (main && startHidden) {
         startHidden = false;
         return;
       }
@@ -739,8 +832,9 @@ function run(): void {
     });
 
     let saveTimer: NodeJS.Timeout | undefined;
+    // Only the main window's size and place are kept for the next launch.
     const saveBounds = () => {
-      if (w.isDestroyed() || w.isFullScreen() || w.isMinimized()) return;
+      if (!windows.isMain(w) || w.isDestroyed() || w.isFullScreen() || w.isMinimized()) return;
       winState = { ...winState, maximized: w.isMaximized(), bounds: w.isMaximized() ? winState.bounds : w.getBounds() };
       void writeWindowState(stateFile, winState);
     };
@@ -752,18 +846,24 @@ function run(): void {
     w.on('move', scheduleSave);
     w.on('close', (event) => {
       saveBounds();
-      // macOS: closing the window keeps Dürbün running in the menu bar (capture continues), except while
-      // an update closes it to restart.
-      if (!isQuitting() && !installingUpdate) {
+      // macOS: closing the main window hides it and Dürbün keeps capturing in the menu bar (said once, when
+      // no window is left on screen); another window closes for good. A quit or an update closes them all.
+      const decision = closeDecision({ quitting: isQuitting() || installingUpdate, isMain: windows.isMain(w), otherVisible: windows.visibleOthers(w) });
+      if (decision.action === 'hide') {
         event.preventDefault();
         w.hide();
-        closeNoteOnce();
       }
+      if (decision.lastWindow) closeNoteOnce();
     });
     w.on('closed', () => {
-      if (win === w) win = null;
+      if (saveTimer) clearTimeout(saveTimer);
+      windows.remove(w);
+      uiLoaded.delete(wcId);
     });
-    w.on('focus', () => notifier.clearBadge());
+    w.on('focus', () => {
+      windows.focused(w);
+      notifier.clearBadge();
+    });
     syncFullScreen(w, (on) => {
       if (!w.isDestroyed()) w.webContents.send('durbun:fullscreen', on);
     });
@@ -800,12 +900,12 @@ function run(): void {
     // the window never stays blank. A successful load starts the count again.
     let retries = 0;
     wc.on('did-start-loading', () => {
-      uiLoaded = false;
+      uiLoaded.delete(wcId);
     });
     wc.on('did-finish-load', () => {
       if (!appOrigin || !isAppUrl(wc.getURL(), appOrigin)) return;
       retries = 0;
-      uiLoaded = true;
+      uiLoaded.add(wcId);
       deliverOpenedFiles();
     });
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
@@ -836,6 +936,20 @@ function run(): void {
     });
 
     void w.loadURL(appOrigin ?? statusPage(theme));
+    return w;
+  }
+
+  /** Window → New Window (⌘N), the Dock menu: another window on the same server, next to the one in use. */
+  function newWindow(): void {
+    if (!app.isReady() || isQuitting()) return;
+    // No window on screen (the main one hides on close): that one comes back first, where it was.
+    const from = visibleWindow();
+    if (!from) {
+      showWindow(windows.main());
+      return;
+    }
+    createWindow({ from }); // it shows (and takes the focus) on 'ready-to-show'
+    log.info(`new window (${windows.size} open)`);
   }
 
   /**
@@ -847,14 +961,16 @@ function run(): void {
     if (isQuitting()) return;
     appOrigin = origin;
     refreshMenus();
-    if (!win || win.isDestroyed()) createWindow();
-    else void win.loadURL(origin);
+    // Every window shows the UI (another port after an attached Dürbün stopped: all of them move).
+    if (windows.size === 0) createWindow();
+    else for (const w of windows.all()) void w.loadURL(origin);
+    const win = windows.main();
     if (win) moveZoomLevel(win, origin);
     if (selfTestFile && win) {
       win.webContents.once('did-finish-load', () =>
         void runSelfTest({
           reportFile: selfTestFile,
-          wc: win!.webContents,
+          wc: win.webContents,
           externalOpened,
           consoleLog,
           notifier,
@@ -868,9 +984,9 @@ function run(): void {
             dataDir,
             shellEnv: shellEnv && { shell: shellEnv.result.shell, ms: shellEnv.result.ms, error: shellEnv.result.error, changed: shellEnv.changed },
             path: process.env.PATH,
-            windowBounds: win && !win.isDestroyed() ? win.getBounds() : null,
-            windowButtonPosition: win && !win.isDestroyed() ? win.getWindowButtonPosition() : null,
-            zoomLevel: win && !win.isDestroyed() ? win.webContents.getZoomLevel() : null,
+            windowBounds: !win.isDestroyed() ? win.getBounds() : null,
+            windowButtonPosition: !win.isDestroyed() ? win.getWindowButtonPosition() : null,
+            zoomLevel: !win.isDestroyed() ? win.webContents.getZoomLevel() : null,
             isPackaged: app.isPackaged,
             logFile: log.file,
           }),
@@ -948,7 +1064,7 @@ function run(): void {
     stopWatch = null;
     const wasFailed = state.kind === 'failed';
     setState({ kind: 'starting' });
-    if (wasFailed && !appOrigin && win && !win.isDestroyed()) void win.loadURL(statusPage(currentTheme()));
+    if (wasFailed && !appOrigin) for (const w of windows.all()) void w.loadURL(statusPage(currentTheme()));
     const paths = serverPaths({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() });
     if (!existsSync(paths.entry)) return fail(t.missingBundle(paths.entry));
     let mod: ServerModule;
@@ -958,10 +1074,11 @@ function run(): void {
     } catch (err) {
       return fail(`${(err as Error).message}`);
     }
-    // Environment first (a second copy, tests), then desktop.json (an app started from Finder), then defaults.
-    const startup = startupOptions(process.env, prefs.get(), { httpPort: DEFAULT_HTTP_PORT, sdkPort: DEFAULT_SDK_PORT }, parsePortEnv);
+    // Environment first (a second copy, tests), then desktop.json (Settings in an app started from Finder), then defaults.
+    const startup = resolvedConfig();
     const { httpPort, sdkPort, verbose } = startup;
-    if (startup.source.httpPort === 'prefs' || startup.source.sdkPort === 'prefs') log.info(`ports from desktop.json: HTTP ${httpPort}, SDK ${sdkPort}`);
+    startedWith = { httpPort, sdkPort, verbose };
+    if (startup.source.httpPort === 'file' || startup.source.sdkPort === 'file') log.info(`ports from Settings (desktop.json): HTTP ${httpPort}, SDK ${sdkPort}`);
     const uiDir = existsSync(path.join(paths.uiDir, 'index.html')) ? paths.uiDir : undefined;
     // "Is it a real Dürbün?": the server's own health check (GET /api/health), plus a semver version and
     // the Dürbün UI (or its no-UI page) at "/" before the window is handed to it.
@@ -1051,7 +1168,7 @@ function run(): void {
     // The window says why instead of "starting…", and the dialog keeps Retry within reach.
     appOrigin = null;
     refreshMenus();
-    if (win && !win.isDestroyed()) void win.loadURL(statusPage(currentTheme()));
+    for (const w of windows.all()) void w.loadURL(statusPage(currentTheme()));
     showWindow();
     const options = {
       type: 'error' as const,
@@ -1064,7 +1181,7 @@ function run(): void {
     const choices: FailureChoice[] = ['retry', 'log', 'quit'];
     const choice = await resolveFailure(
       async () => {
-        const parent = win && !win.isDestroyed() ? win : undefined;
+        const parent = windows.current();
         const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
         return choices[response] ?? 'quit';
       },
@@ -1110,10 +1227,10 @@ function run(): void {
   /* ───────────── lifecycle ───────────── */
 
   app.on('second-instance', () => {
-    log.info('second launch: bringing the window forward');
+    log.info('second launch: bringing the window used last forward');
     showWindow();
   });
-  app.on('activate', () => showWindow());
+  app.on('activate', () => void showWindow());
   // Stay in the menu bar when the window closes (it is only hidden anyway), except during a quit.
   app.on('window-all-closed', () => quitFlow.windowAllClosed());
   app.on('before-quit', (event) => {
@@ -1175,7 +1292,7 @@ function run(): void {
       log.warn(`menu-bar icon unavailable: ${(err as Error).message}`);
     }
     refreshMenus();
-    if (!win || win.isDestroyed()) createWindow();
+    if (windows.size === 0) createWindow();
     // Before the server starts: a move relaunches the app.
     await offerMoveToApplications();
     if (isQuitting()) return;

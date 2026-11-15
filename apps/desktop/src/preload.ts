@@ -60,10 +60,6 @@ const bridge = {
     ipcRenderer.send('durbun:notification-close', String(id));
   },
   /**
-   * Files opened from Finder or File → Open… that wait for the UI ({ name, text } each). The main process
-   * sends the 'open-file' command when there are some; the UI also asks once when it starts.
-   */
-  /**
    * The Mac app's own settings for the UI's Settings rows. `get` and `set` resolve to the current values
    * ({ autoUpdateCheck: boolean | null (not asked yet), openAtLogin, openAtLoginAvailable }); a change made
    * in the menus arrives as the 'prefs-changed' command, so the UI reads them again.
@@ -79,6 +75,33 @@ const bridge = {
       return ipcRenderer.invoke('durbun:prefs-set', clean);
     },
   },
+  /**
+   * Ports and verbose logging of the embedded server (appConfig.ts ConfigView): each field has `value` (what
+   * the next start uses), `source` ('env' | 'file' | 'default'), `saved`, `default`, `env` and `pending`;
+   * `restartNeeded` and `listening` sit beside them. `set` takes numbers / a boolean, or null to go back to the
+   * default, and resolves to { ok: true, config } or { ok: false, error, field, config }. A change made in
+   * the menus or another window arrives as the 'config-changed' command.
+   */
+  config: {
+    get(): Promise<unknown> {
+      return ipcRenderer.invoke('durbun:config-get');
+    },
+    set(patch: { httpPort?: unknown; sdkPort?: unknown; verboseLog?: unknown }): Promise<unknown> {
+      const clean: { httpPort?: number | null; sdkPort?: number | null; verboseLog?: boolean | null } = {};
+      if (typeof patch?.httpPort === 'number' || patch?.httpPort === null) clean.httpPort = patch.httpPort;
+      if (typeof patch?.sdkPort === 'number' || patch?.sdkPort === null) clean.sdkPort = patch.sdkPort;
+      if (typeof patch?.verboseLog === 'boolean' || patch?.verboseLog === null) clean.verboseLog = patch.verboseLog;
+      return ipcRenderer.invoke('durbun:config-set', clean);
+    },
+  },
+  /** Restarts the app (the server stops cleanly first); resolves to false when it cannot restart now. */
+  relaunch(): Promise<boolean> {
+    return ipcRenderer.invoke('durbun:relaunch').then((ok: unknown) => ok === true);
+  },
+  /**
+   * Files opened from Finder or File → Open… that wait for the UI ({ name, text } each). The main process
+   * sends the 'open-file' command when there are some; the UI also asks once when it starts.
+   */
   takeOpenedFiles(): Promise<{ name: string; text: string }[]> {
     return ipcRenderer.invoke('durbun:take-opened-files').then((files: unknown) =>
       Array.isArray(files) ? files.filter((f): f is { name: string; text: string } => !!f && typeof f.name === 'string' && typeof f.text === 'string') : [],

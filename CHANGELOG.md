@@ -129,6 +129,10 @@ All notable changes to Dürbün are listed here. The format follows
 - Device tab: actions that are missing on a device are listed with the reason (a tool on the Mac or a
   setting on the phone) and a link to System check.
 - Settings shows the Mac app's own options: check for updates automatically and open at login.
+- Mac app: **Window → New Window** (⌘N, also in the Dock menu) opens another window, so two devices can be
+  watched side by side. Clicking a notification brings forward the window that sent it.
+- Mac app: the ports and the verbose diagnostic log can be kept in the app's own settings file, so a copy
+  opened from Finder no longer needs environment variables for them; environment variables still win.
 - Keyboard: the sidebar is one Tab stop with arrow keys, `i` opens "What can I see?", and Shift+F10 opens a
   request's menu in the network list. Flow steps announce their connections to screen readers.
 - Mac app: `.durbun` packages and backups and `.durbun.json` recordings open from Finder (double click, Open

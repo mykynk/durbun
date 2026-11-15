@@ -23,7 +23,7 @@ export interface DesktopPrefs {
   verboseLog?: boolean;
   /**
    * Ports for an app started from Finder, where environment variables are out of reach (DURBUN_PORT and
-   * DURBUN_SDK_PORT still win). Written by hand or by a later Settings row.
+   * DURBUN_SDK_PORT still win; appConfig.ts resolves and checks them). Written by the UI's Settings rows.
    */
   httpPort?: number;
   sdkPort?: number;
@@ -83,27 +83,6 @@ export function createPrefsStore(file: string): { get(): DesktopPrefs; update(pa
       return chain;
     },
   };
-}
-
-/**
- * Ports and verbosity for the embedded server: an environment variable first (a second copy, tests), then
- * desktop.json, then the default. `source` says where each port came from (for the log).
- */
-export function startupOptions(
-  env: Record<string, string | undefined>,
-  prefs: DesktopPrefs,
-  defaults: { httpPort: number; sdkPort: number },
-  parsePort: (value: string | undefined, fallback: number) => number,
-): { httpPort: number; sdkPort: number; verbose: boolean; source: { httpPort: 'env' | 'prefs' | 'default'; sdkPort: 'env' | 'prefs' | 'default' } } {
-  const pick = (envName: string, pref: number | undefined, fallback: number) => {
-    const fromEnv = parsePort(env[envName], Number.NaN);
-    if (!Number.isNaN(fromEnv)) return { port: fromEnv, source: 'env' as const };
-    if (pref !== undefined) return { port: pref, source: 'prefs' as const };
-    return { port: fallback, source: 'default' as const };
-  };
-  const http = pick('DURBUN_PORT', prefs.httpPort, defaults.httpPort);
-  const sdk = pick('DURBUN_SDK_PORT', prefs.sdkPort, defaults.sdkPort);
-  return { httpPort: http.port, sdkPort: sdk.port, verbose: Boolean(env.DURBUN_DEBUG) || prefs.verboseLog === true, source: { httpPort: http.source, sdkPort: sdk.source } };
 }
 
 /* ───────────── the UI's Settings rows (preload: durbunDesktop.prefs) ───────────── */

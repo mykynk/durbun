@@ -187,6 +187,7 @@ export interface Strings {
   zoom: string;
   close: string;
   front: string;
+  newWindow: string;
   help: string;
   openInBrowser: string;
   openDataDir: string;
@@ -319,6 +320,7 @@ const tr: Strings = {
   zoom: 'Büyüt/Küçült',
   close: 'Pencereyi Kapat',
   front: 'Tümünü Öne Getir',
+  newWindow: 'Yeni Pencere',
   help: 'Yardım',
   openInBrowser: 'Tarayıcıda Aç',
   openDataDir: 'Veri Klasörünü Aç (~/.durbun)',
@@ -508,6 +510,7 @@ const en: Strings = {
   zoom: 'Zoom',
   close: 'Close Window',
   front: 'Bring All to Front',
+  newWindow: 'New Window',
   help: 'Help',
   openInBrowser: 'Open in Browser',
   openDataDir: 'Open Data Folder (~/.durbun)',

@@ -119,7 +119,7 @@ describe('notice wording', () => {
 /** A settings.json warning exactly as packages/server/src/config.ts loadConfig sends it. */
 const settingsNotice = (detail: string) => ({ code: 'config.invalid', params: { file: 'settings.json', detail }, message: `settings.json: ${detail}` });
 const noop = () => {};
-const handlers: MenuHandlers = { showWindow: noop, openInBrowser: noop, openDataDir: noop, showLog: noop, quit: noop, openSettings: noop, openDocs: noop, reportIssue: noop, checkForUpdates: noop, openLicenses: noop, restartToUpdate: noop, setAutoUpdateCheck: noop, setOpenAtLogin: noop, openFile: noop, copyDiagnostics: noop, setVerboseLog: noop };
+const handlers: MenuHandlers = { showWindow: noop, openInBrowser: noop, openDataDir: noop, showLog: noop, quit: noop, openSettings: noop, openDocs: noop, reportIssue: noop, checkForUpdates: noop, openLicenses: noop, restartToUpdate: noop, setAutoUpdateCheck: noop, setOpenAtLogin: noop, openFile: noop, copyDiagnostics: noop, setVerboseLog: noop, newWindow: noop };
 /** The lines of the tray's Warnings submenu, as the user reads them. */
 function trayLines(t: (typeof STRINGS)['tr'], notices: unknown[]): string[] {
   const items = trayMenuTemplate(t, { kind: 'running', port: 9750, warnings: serverWarnings(t, { notices }) }, handlers);

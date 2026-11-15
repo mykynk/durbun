@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createPrefsStore, parseDesktopPrefs, parsePrefsPatch, prefsView, readDesktopPrefs, startupOptions } from '../src/desktopPrefs';
-import { parsePortEnv } from '../src/ports';
+import { createPrefsStore, parseDesktopPrefs, parsePrefsPatch, prefsView, readDesktopPrefs } from '../src/desktopPrefs';
+import { resolveConfig } from '../src/appConfig';
 import { parseSummary, sameSummary } from '../src/summary';
 import { diagnosticsText, doctorLines, issueUrl, lastLines, maskSecrets, shortLocation } from '../src/diagnostics';
 import { STRINGS } from '../src/i18n';
@@ -221,11 +221,11 @@ describe('Settings bridge values', () => {
 describe('ports and verbose logging for an app started from Finder', () => {
   const defaults = { httpPort: 9750, sdkPort: 9751 };
   it('environment first, then desktop.json, then the defaults', () => {
-    expect(startupOptions({}, {}, defaults, parsePortEnv)).toEqual({ httpPort: 9750, sdkPort: 9751, verbose: false, source: { httpPort: 'default', sdkPort: 'default' } });
-    expect(startupOptions({}, { httpPort: 9850, sdkPort: 9851, verboseLog: true }, defaults, parsePortEnv)).toMatchObject({ httpPort: 9850, sdkPort: 9851, verbose: true, source: { httpPort: 'prefs' } });
-    expect(startupOptions({ DURBUN_PORT: '9950', DURBUN_DEBUG: '1' }, { httpPort: 9850 }, defaults, parsePortEnv)).toMatchObject({ httpPort: 9950, sdkPort: 9751, verbose: true, source: { httpPort: 'env', sdkPort: 'default' } });
+    expect(resolveConfig({}, {}, defaults)).toEqual({ httpPort: 9750, sdkPort: 9751, verbose: false, source: { httpPort: 'default', sdkPort: 'default', verboseLog: 'default' } });
+    expect(resolveConfig({}, { httpPort: 9850, sdkPort: 9851, verboseLog: true }, defaults)).toMatchObject({ httpPort: 9850, sdkPort: 9851, verbose: true, source: { httpPort: 'file', verboseLog: 'file' } });
+    expect(resolveConfig({ DURBUN_PORT: '9950', DURBUN_DEBUG: '1' }, { httpPort: 9850 }, defaults)).toMatchObject({ httpPort: 9950, sdkPort: 9751, verbose: true, source: { httpPort: 'env', sdkPort: 'default', verboseLog: 'env' } });
     // A broken variable falls through to the file.
-    expect(startupOptions({ DURBUN_SDK_PORT: 'abc' }, { sdkPort: 9851 }, defaults, parsePortEnv).sdkPort).toBe(9851);
+    expect(resolveConfig({ DURBUN_SDK_PORT: 'abc' }, { sdkPort: 9851 }, defaults).sdkPort).toBe(9851);
   });
   it('desktop.json keeps only real ports', () => {
     expect(parseDesktopPrefs({ httpPort: 70000, sdkPort: 9751.5, verboseLog: 'yes' })).toEqual({});

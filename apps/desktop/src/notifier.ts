@@ -1,6 +1,6 @@
 /**
  * Shows the UI's notifications (sent by the preload's Notification shim) as macOS notifications.
- * Clicking one brings the window to the front and fires the page's onclick. As with the web API, a
+ * Clicking one brings the window whose page sent it to the front and fires the page's onclick. As with the web API, a
  * notification replaces the previous one with the same tag (the UI tags crash alerts 'durbun-crash'),
  * so a crash loop does not pile up in Notification Center. When macOS refuses
  * (Electron's notifications need a code-signed app; this build is unsigned/ad-hoc) the Dock icon
@@ -29,7 +29,7 @@ export interface Notifier {
 
 const MAX_LIVE = 20;
 
-export function createNotifier(opts: { log: FileLog; onClick(): void; isFocused(): boolean }): Notifier {
+export function createNotifier(opts: { log: FileLog; onClick(sender: WebContents | undefined): void; isFocused(): boolean }): Notifier {
   // Electron removes a notification when its object is garbage-collected: keep the recent ones.
   const live = new Map<string, Notification>();
   const byTag = new Map<string, string>(); // tag → id of the notification showing it
@@ -83,8 +83,9 @@ export function createNotifier(opts: { log: FileLog; onClick(): void; isFocused(
         n.on('show', () => record(req.id, 'shown'));
         n.on('click', () => {
           forget(req.id);
-          opts.onClick();
-          if (!sender.isDestroyed()) sender.send('durbun:notification-click', req.id);
+          const alive = !sender.isDestroyed();
+          opts.onClick(alive ? sender : undefined);
+          if (alive) sender.send('durbun:notification-click', req.id);
         });
         n.on('close', () => forget(req.id));
         n.on('failed', (_event, error) => {
