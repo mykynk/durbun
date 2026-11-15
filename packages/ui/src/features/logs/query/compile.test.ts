@@ -114,6 +114,14 @@ describe('is:', () => {
     expect(matches('is:marker')).toEqual(['marker']);
   });
 
+  it('oom = an app the system closed for memory (iOS Jetsam, Android low-memory killer)', () => {
+    expect(matches('is:oom')).toEqual([]);
+    expect(compile('is:oom').test(entry({ message: 'x', data: { termination: 'jetsam', frontmost: true } }))).toBe(true);
+    expect(compile('is:oom').test(entry({ message: 'x', data: { termination: 'low-memory', visible: false } }))).toBe(true);
+    expect(compile('is:oom').test(entry({ message: 'x', data: { termination: 'SIGNAL 6 Abort trap: 6' } }))).toBe(false);
+    expect(compile('is:oom level:error').test(entry({ message: 'x', level: 'info', data: { termination: 'low-memory' } }))).toBe(false);
+  });
+
   it('error = level ≥ error (iOS fault is error, not fatal)', () => {
     expect(matches('is:error')).toEqual(matches('level:error'));
     expect(matches('is:error')).toContain('iosFault');

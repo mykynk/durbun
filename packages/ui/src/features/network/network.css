@@ -242,6 +242,15 @@
   min-height: 0;
   min-width: 0;
 }
+/* Keyboard focus on the grid: an inset ring (an outer one is clipped by the panel) and the selected row outlined. */
+.net-table:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: 0;
+}
+.net-table:focus-visible .net-row.is-selected {
+  box-shadow: inset 2px 0 0 var(--focus-ring);
+}
 .net-thead {
   flex-shrink: 0;
   overflow: hidden;

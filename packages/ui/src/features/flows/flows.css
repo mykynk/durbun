@@ -288,6 +288,51 @@
   color: var(--text-muted);
   line-height: var(--lh-tight);
 }
+/* Examples: one click adds a ready flow (a lighter row under the four ways in). */
+.fl-welcome__starters {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  margin-top: 14px;
+  text-align: left;
+}
+.fl-welcome__starters-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.fl-welcome__starter {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.fl-welcome__starter > svg {
+  margin-top: 3px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.fl-welcome__starter:hover {
+  border-color: var(--border);
+  background: var(--bg-hover);
+}
+.fl-welcome__starter-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.fl-welcome__starter .fl-welcome__title {
+  font-size: var(--fs-sm);
+}
 .fl-welcome__points {
   margin: 18px 0 0;
   padding: 0 0 0 18px;
@@ -1285,6 +1330,56 @@
   color: var(--text-subtle);
   font-size: var(--fs-xs);
   line-height: var(--lh-tight);
+}
+/* Connections: one line per output port, its links as chips, then a picker to add one. */
+.fl-conn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.fl-conn__port {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.fl-conn__label {
+  padding-top: 5px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.fl-conn__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.fl-conn__link,
+.fl-conn__from {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 0 2px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+.fl-conn__from {
+  padding-right: 8px;
+}
+.fl-conn__none {
+  padding-top: 5px;
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+}
+.fl-conn__links .select-wrap {
+  flex: 1 1 160px;
+  min-width: 0;
 }
 .fl-insp__error {
   margin: 0;
@@ -2345,6 +2440,17 @@ textarea.fl-input {
   margin: 0;
   padding-left: 16px;
 }
+.fl-import__ai {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.fl-import__diff {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
 .fl-import__items {
   display: flex;
   flex-direction: column;
@@ -2562,4 +2668,32 @@ textarea.fl-input {
   border-radius: var(--radius-sm);
   background: var(--bg-active);
   color: var(--text);
+}
+
+/* Environment certificate setting. */
+.fl-env__tls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.fl-env__tls-title {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.fl-env__tls-label {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.fl-env__tls-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fl-env__tls-row > span {
+  flex: 1 1 200px;
 }

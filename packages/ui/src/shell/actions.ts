@@ -1,4 +1,5 @@
-import { importSession } from '../data/api';
+import { HarImportError, harToSession, looksLikeHar } from '@durbun/protocol';
+import { importSession, type ImportResult } from '../data/api';
 import { sendCommand } from '../data/commands';
 import { useHub } from '../data/stores/hub';
 import { getScope, setScope } from '../data/stores/scope';
@@ -30,8 +31,70 @@ export function exportHar(): void {
 }
 
 const SESSION_EXT = /\.(json|durbun)$/i;
-const TEXT_EXT = /\.(json|durbun|md|txt)$/i;
-const INSTALL_EXT = /\.(apk|aab|ipa|app|zip)$/i;
+const TEXT_EXT = /\.(json|durbun|md|txt|har)$/i;
+const HAR_EXT = /\.har$/i;
+
+/**
+ * A HAR (browser developer tools, a proxy, Dürbün's own export) opens as an imported recording of its requests.
+ * Said plainly: a HAR has no log lines, device or app, so the recording has none either.
+ */
+async function importHar(file: File): Promise<void> {
+  const id = toast({ kind: 'info', title: t('shell.io.importing', { name: file.name }), duration: 0 });
+  try {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      throw new HarImportError('har.notHar', 'Not JSON');
+    }
+    // The recording is named after the file, without the extension (the server strips only its own ones).
+    const name = file.name.replace(/\.har$/i, '').trim() || file.name;
+    const har = harToSession(parsed, { name });
+    const result = await importSession(har.session, { name });
+    const { deviceIds } = result;
+    toast.dismiss(id);
+    sayImportLimits(result);
+    const first = deviceIds[0];
+    const notes = [t('shell.io.harOnlyRequests'), ...(har.skipped ? [t('shell.io.harSkipped', { count: har.skipped })] : []), ...(har.masked ? [t('transfer.data.importedMasked')] : [])];
+    toast.success(t('shell.io.harImported', { count: har.requests }), {
+      description: `${file.name}${har.creator ? ` · ${har.creator}` : ''} · ${notes.join(' ')}`,
+      duration: 9000,
+      action: first ? { label: t('shell.io.showRequests'), onClick: () => showImported(first) } : undefined,
+    });
+    if (first) showImported(first);
+  } catch (err) {
+    toast.dismiss(id);
+    const code = err instanceof HarImportError ? err.code : undefined;
+    toast.error(t('shell.io.importFailed'), { description: code === 'har.empty' ? t('shell.io.harEmpty') : code === 'har.notHar' ? t('shell.io.harInvalid') : errorMessage(err) });
+  }
+}
+
+/**
+ * The import shares the live memory limits: when part of the file did not fit, or live lines made room for it,
+ * said in plain words with the setting that moves the limit (nothing is lost silently).
+ */
+function sayImportLimits(r: ImportResult): void {
+  const dropped = (r.dropped?.logs ?? 0) + (r.dropped?.requests ?? 0);
+  const evicted = (r.evicted?.logs ?? 0) + (r.evicted?.requests ?? 0);
+  if (!dropped && !evicted) return;
+  const parts: string[] = [];
+  if (r.dropped?.logs) parts.push(t('shell.io.limits.droppedLogs', { count: r.dropped.logs }));
+  if (r.dropped?.requests) parts.push(t('shell.io.limits.droppedRequests', { count: r.dropped.requests }));
+  if (r.evicted?.logs) parts.push(t('shell.io.limits.evictedLogs', { count: r.evicted.logs }));
+  if (r.evicted?.requests) parts.push(t('shell.io.limits.evictedRequests', { count: r.evicted.requests }));
+  toast.warn(t('shell.io.limits.title'), {
+    description: `${parts.join(' ')} ${t('shell.io.limits.hint')}`,
+    duration: 15_000,
+    action: { label: t('shell.io.limits.settings'), onClick: () => ui.openSettings('logs') },
+  });
+}
+
+/** The imported HAR's device, on the Network tab (a HAR has nothing for Logs to show). */
+function showImported(deviceId: string): void {
+  setScope({ kind: 'device', deviceId });
+  ui.setTab('network');
+}
+const INSTALL_EXT = /\.(apk|apks|xapk|aab|ipa|app|zip)$/i;
 
 /**
  * Import a Dürbün file, by what it holds: a package (.durbun) or a flow file asks what to bring in, a session
@@ -50,6 +113,15 @@ export async function importFile(file: File): Promise<void> {
     kind = sniffFormat(await file.slice(0, 64 * 1024).text());
   } catch {
     /* unreadable: the session import below reports it */
+  }
+  if (HAR_EXT.test(file.name)) return importHar(file);
+  // A HAR saved as .json: its head says so.
+  if (kind === 'unknown' && /\.json$/i.test(file.name)) {
+    try {
+      if (looksLikeHar(await file.slice(0, 4096).text())) return importHar(file);
+    } catch {
+      /* unreadable: the session import below reports it */
+    }
   }
   if (kind === 'package' || kind === 'flow') {
     try {
@@ -70,8 +142,10 @@ export async function importFile(file: File): Promise<void> {
   const id = toast({ kind: 'info', title: t('shell.io.importing', { name: file.name }), duration: 0 });
   try {
     const masked = await isMaskedSessionFile(file);
-    const { deviceIds } = await importSession(file);
+    const result = await importSession(file);
+    const { deviceIds } = result;
     toast.dismiss(id);
+    sayImportLimits(result);
     const first = deviceIds[0];
     toast.success(t('code.import.done', { count: deviceIds.length }), {
       // A masked recording shows •••• where tokens were: said here so nobody hunts for a missing value.
@@ -87,7 +161,7 @@ export async function importFile(file: File): Promise<void> {
 }
 
 export async function pickAndImport(): Promise<void> {
-  const [file] = await pickFiles({ accept: '.json,.durbun,.md,.txt,application/json' });
+  const [file] = await pickFiles({ accept: '.json,.durbun,.md,.txt,.har,application/json' });
   if (file) await importFile(file);
 }
 

@@ -972,3 +972,25 @@
 .dv-explain {
   margin: 0;
 }
+
+/* Unavailable actions: quieter than the working cards, one line per hidden card with its reason. */
+.dv-card--quiet {
+  opacity: 0.92;
+}
+.dv-hidden {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dv-hidden li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.dv-hidden__card {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}

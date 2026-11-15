@@ -172,6 +172,11 @@ function RunHeader({ run, flow, onRunId, onRerun, onClose, report }: { run: Flow
         </span>
         {tg?.deviceName || tg?.appId ? <span className="fl-runpanel__target">{[tg.deviceName, tg.appName ?? tg.appId].filter(Boolean).join(' · ')}</span> : null}
         {run.environment ? <span className="fl-runpanel__target">{run.environment.name}</span> : null}
+        {run.environment?.tls ? (
+          <span className={run.environment.tls === 'unverified' ? 'fl-chip is-warn' : 'fl-chip'} title={t(`flows.runPanel.tlsHint.${run.environment.tls}`)}>
+            {t(`flows.runPanel.tls.${run.environment.tls}`)}
+          </span>
+        ) : null}
         {run.trigger.kind === 'event' ? <span className="fl-chip is-accent">{t('flows.runPanel.automatic')}</span> : null}
       </div>
       <span className="grow" />
@@ -362,7 +367,7 @@ function History({ flow, current, onPick }: { flow: FlowDoc; current: string; on
           </span>
         </span>
       ),
-      hint: r.trigger.kind === 'event' ? t('flows.runPanel.automatic') : r.target?.deviceName,
+      hint: [r.environment?.tls === 'unverified' ? t('flows.runPanel.tls.unverified') : '', r.trigger.kind === 'event' ? t('flows.runPanel.automatic') : r.target?.deviceName].filter(Boolean).join(' · ') || undefined,
       checked: r.id === current,
       onSelect: () => onPick(r.id),
     }));

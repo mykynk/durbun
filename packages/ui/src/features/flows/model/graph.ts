@@ -361,3 +361,17 @@ export function upstream(flow: FlowDoc, id: string): Set<string> {
   }
   return seen;
 }
+
+/** A node's outgoing links per port, in the port order of its type (ports without a link are left out). */
+export function linksOf(flow: FlowDoc, id: string): { port: FlowPort; to: string[] }[] {
+  const node = flow.nodes.find((n) => n.id === id);
+  if (!node) return [];
+  return flowNodePorts(node.type)
+    .map((port) => ({ port, to: flow.edges.filter((e) => e.from === id && (e.port ?? 'out') === port).map((e) => e.to) }))
+    .filter((l) => l.to.length > 0);
+}
+
+/** Steps that lead into [id]. */
+export function linksInto(flow: FlowDoc, id: string): { from: string; port: FlowPort }[] {
+  return flow.edges.filter((e) => e.to === id).map((e) => ({ from: e.from, port: (e.port ?? 'out') as FlowPort }));
+}

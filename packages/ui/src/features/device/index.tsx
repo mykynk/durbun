@@ -28,6 +28,7 @@ import { InfoCard, stateTone } from './InfoCard';
 import { InputCard } from './InputCard';
 import { LocationCard } from './LocationCard';
 import { hasAction, hasAnyAction, isReadOnlyDevice, osLine } from './model';
+import { hiddenDeviceCards } from '../../data/explain';
 import { OpenUrlCard } from './OpenUrlCard';
 import { ProcessesCard } from './ProcessesCard';
 import { PushCard } from './PushCard';
@@ -37,6 +38,8 @@ import { ScreenshotCard, captureScreenshot } from './ScreenshotCard';
 import { LogsCard, StatusBarCard } from './SmallCards';
 import { useMedia } from './stores';
 import { VmCard } from './VmCard';
+import { HiddenCardsCard } from './HiddenCards';
+import { OverridesCard } from './OverridesCard';
 
 const APP_ACTIONS: DeviceActionId[] = ['list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install'];
 const LOOK_ACTIONS: DeviceActionId[] = ['appearance', 'font-scale', 'animations'];
@@ -218,8 +221,10 @@ function DevicePage({ device, apps, preferredAppId, active }: { device: DeviceIn
   const online = device.state === 'online' && !readOnly;
   const can = (a: DeviceActionId) => online && hasAction(device, a);
   const canAny = (list: DeviceActionId[]) => online && hasAnyAction(device, list);
+  const hiddenCount = online ? hiddenDeviceCards(device).length : 0;
 
   const actionCards = [
+    online && device.settingOverrides?.length ? <OverridesCard key="overrides" device={device} /> : null,
     can('screenshot') || hasShots ? <ScreenshotCard key="shot" device={device} canTake={can('screenshot')} /> : null,
     can('open-url') ? <OpenUrlCard key="url" device={device} apps={appRows} /> : null,
     canAny(LOOK_ACTIONS) ? <AppearanceCard key="look" device={device} /> : null,
@@ -244,11 +249,12 @@ function DevicePage({ device, apps, preferredAppId, active }: { device: DeviceIn
         <div className="dv-col" role="region" aria-label={t('device.columns.actions')}>
           {actionCards.length > 0 ? (
             actionCards
-          ) : online ? (
+          ) : online && hiddenCount === 0 ? (
             <Callout tone="info" title={t('device.noActions')}>
               {device.id.startsWith('net:') ? t('device.codes.device.networkOnly') : t('device.noActionsHint')}
             </Callout>
           ) : null}
+          {online ? <HiddenCardsCard device={device} /> : null}
         </div>
       </div>
     </div>

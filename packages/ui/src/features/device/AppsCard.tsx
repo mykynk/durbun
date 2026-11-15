@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
-import { Eraser, LayoutGrid, Play, RefreshCw, RotateCcw, Square, Trash, Upload } from 'lucide-react';
+import { Archive, Eraser, LayoutGrid, Play, RefreshCw, RotateCcw, Square, Trash, Upload } from 'lucide-react';
 import type { AppSession, DeviceActionId, DeviceInfo } from '@durbun/protocol';
 import { api } from '../../data';
 import {
@@ -24,10 +24,12 @@ import { checkInstallFile, filterApps, hasAction, installAccept, installTarget, 
 import { loadInstalledApps, useInstalledApps } from './stores';
 import { ActionErrorCallout, DeviceCard, useDeviceAction, type ActionError } from './useAction';
 
-type AppOp = 'launch' | 'stop' | 'restart' | 'clearData' | 'uninstall';
-const OPS: { op: AppOp; action: DeviceActionId; icon: typeof Play; danger?: boolean }[] = [
+type AppOp = 'launch' | 'stop' | 'stopBackground' | 'restart' | 'clearData' | 'uninstall';
+const OPS: { op: AppOp; action: DeviceActionId; icon: typeof Play; danger?: boolean; params?: Record<string, unknown>; android?: boolean }[] = [
   { op: 'launch', action: 'app-launch', icon: Play },
   { op: 'stop', action: 'app-stop', icon: Square },
+  // What the system does under memory pressure (not a force stop): reopening from Recents tests state restoration.
+  { op: 'stopBackground', action: 'app-stop', icon: Archive, params: { background: true }, android: true },
   { op: 'restart', action: 'app-restart', icon: RotateCcw },
   { op: 'clearData', action: 'app-clear-data', icon: Eraser, danger: true },
   { op: 'uninstall', action: 'app-uninstall', icon: Trash, danger: true },
@@ -61,7 +63,7 @@ export function AppsCard({ device, sessions, preferredAppId, active }: { device:
   const fallbackId = preferredAppId && rows.some((r) => r.id === preferredAppId) ? preferredAppId : rows.find((r) => r.sdk)?.id;
   const selectedId = selected && rows.some((r) => r.id === selected) ? selected : (fallbackId ?? null);
   const sel = rows.find((r) => r.id === selectedId);
-  const ops = OPS.filter((o) => hasAction(device, o.action));
+  const ops = OPS.filter((o) => hasAction(device, o.action) && (!o.android || device.platform === 'android'));
   const listError = entry?.error !== undefined ? describeError(entry.error) : null;
 
   const doOp = async (o: (typeof OPS)[number]) => {
@@ -78,9 +80,9 @@ export function AppsCard({ device, sessions, preferredAppId, active }: { device:
       if (!ok) return;
     }
     const r = await run({
-      key: o.action,
+      key: o.op,
       action: o.action,
-      params: { appId: sel.id },
+      params: { appId: sel.id, ...o.params },
       success: t(`device.apps.done.${o.op}`, { app }),
       failure: t(`device.apps.failed.${o.op}`, { app }),
     });
@@ -180,8 +182,9 @@ export function AppsCard({ device, sessions, preferredAppId, active }: { device:
                 size="sm"
                 variant={o.danger ? 'ghost' : 'secondary'}
                 icon={o.icon}
-                loading={isPending(o.action)}
-                disabled={busy && !isPending(o.action)}
+                loading={isPending(o.op)}
+                disabled={busy && !isPending(o.op)}
+                title={o.op === 'stopBackground' ? t('device.apps.stopBackgroundHint') : undefined}
                 className={o.danger ? 'dv-danger-text' : undefined}
                 onClick={() => void doOp(o)}
               >

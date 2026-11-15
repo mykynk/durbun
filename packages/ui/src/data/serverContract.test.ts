@@ -5,7 +5,7 @@
  * what the dialog says; the server's answer must match.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS, type FlowRun, type LogEntry, type NetworkEntry, type SessionExport } from '@durbun/protocol';
+import { DEFAULT_SETTINGS, harToSession, type FlowRun, type LogEntry, type NetworkEntry, type SessionExport } from '@durbun/protocol';
 
 /*
  * The server is loaded at run time from its sources (vite-node compiles them); a static import would make the UI
@@ -36,7 +36,7 @@ import { logStore } from './logStore';
 import { networkStore } from './networkStore';
 import { isMaskedSessionFile, scopeExportCounts, scopeExportParams } from '../features/transfer/dataExport';
 import { flowsWithCalls, runsOfFlows } from '../features/transfer/runs';
-import { exportUrl } from './api';
+import { exportUrl, type ImportResult } from './api';
 import { compileScope } from './scope';
 import { useHub } from './stores/hub';
 import { bugWindow, collectLogs, collectRequests, logsText } from '../features/report/model';
@@ -133,6 +133,27 @@ describe('real server: HAR', () => {
     const open = await har({ ids: [list[0]!.id], mask: false });
     expect(open.log._durbun?.masked).toBeUndefined();
     expect(JSON.stringify(open)).toContain('secret-value');
+  });
+
+  it('(f) a HAR converted by the importer opens as one imported device holding its requests', async () => {
+    await start();
+    const file = await json<unknown>('/api/har', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    const converted = harToSession(file, { name: 'checkout' });
+    expect(converted.requests).toBe(3);
+    const res = await json<ImportResult>('/api/import?name=checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(converted.session) });
+    expect(res.deviceIds).toHaveLength(1);
+    // What really loaded, as the import toast reads it.
+    expect(res.imported).toEqual({ logs: 0, requests: 3 });
+    expect(res.dropped).toEqual({ logs: 0, requests: 0 });
+    expect(res.evicted).toEqual({ logs: 0, requests: 0 });
+    const all = JSON.parse(await raw('/api/export?mask=0')) as SessionExport;
+    const device = all.devices.find((d) => d.id === res.deviceIds[0]);
+    expect(device?.name).toContain('checkout');
+    const imported = all.network.filter((n) => n.deviceId === res.deviceIds[0]);
+    expect(imported).toHaveLength(3);
+    expect(imported.every((n) => n.status === 200 && n.host === 'api.example.com')).toBe(true);
+    // The import is honest about what a HAR lacks: no log line and no app arrive with it.
+    expect(all.logs.filter((l) => l.deviceId === res.deviceIds[0])).toHaveLength(0);
   });
 });
 

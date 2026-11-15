@@ -190,3 +190,52 @@ function noteOnline(memory: HoldMemory, d: DeviceInfo, now: number): void {
   else if (on && was === undefined && Number.isFinite(d.firstSeen)) memory.onlineAt.set(d.id, Math.min(d.firstSeen, now));
   memory.online.set(d.id, on);
 }
+
+/** The OS part of a twin suffix ("Android 14", "iOS 17.4"). */
+function osLabel(d: DeviceInfo): string | undefined {
+  if (!d.osVersion) return undefined;
+  if (d.platform === 'android') return `Android ${d.osVersion}`;
+  if (d.platform === 'ios') return `iOS ${d.osVersion}`;
+  return d.osVersion;
+}
+
+/** The last four characters of the phone's own serial; a Wi-Fi transport (ip:port, mDNS name) is not a serial. */
+function serialTail(d: DeviceInfo): string | undefined {
+  const s = (d.hardwareSerial ?? d.serial)?.trim();
+  if (!s || s.includes(':') || s.includes('._') || s.length < 4) return undefined;
+  return `…${s.slice(-4)}`;
+}
+
+function connectionTail(d: DeviceInfo): string | undefined {
+  return d.connection === 'usb' ? 'USB' : d.connection === 'wifi' ? 'Wi-Fi' : undefined;
+}
+
+/**
+ * Two devices with the same name (two "Galaxy A73"s on one desk) get a short suffix that tells them apart: the OS
+ * version when it differs, else the end of the phone's serial, else USB / Wi-Fi. Devices with a unique name get
+ * none; a candidate is used only when no other same-name device has the same value.
+ */
+export function twinSuffixes(devices: Iterable<DeviceInfo>): Map<string, string> {
+  const byName = new Map<string, DeviceInfo[]>();
+  for (const d of devices) {
+    if (d.id === 'desktop' || d.id.startsWith('import:')) continue;
+    const key = d.name.trim().toLowerCase();
+    let list = byName.get(key);
+    if (!list) byName.set(key, (list = []));
+    list.push(d);
+  }
+  const out = new Map<string, string>();
+  for (const twins of byName.values()) {
+    if (twins.length < 2) continue;
+    for (const d of twins) {
+      for (const pick of [osLabel, serialTail, connectionTail]) {
+        const value = pick(d);
+        if (value && twins.every((o) => o === d || pick(o) !== value)) {
+          out.set(d.id, value);
+          break;
+        }
+      }
+    }
+  }
+  return out;
+}

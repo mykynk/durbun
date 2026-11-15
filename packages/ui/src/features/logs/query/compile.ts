@@ -192,6 +192,12 @@ function term(node: QueryNode, ctx: Ctx): Built {
           return pred((e) => e.kind === 'crash', 1);
         case 'anr':
           return pred((e) => e.kind === 'anr', 1);
+        case 'oom':
+          // Apps the system closed for memory (iOS Jetsam, Android low-memory killer).
+          return pred((e) => {
+            const term = e.data && typeof e.data === 'object' ? (e.data as { termination?: unknown }).termination : undefined;
+            return term === 'jetsam' || term === 'low-memory';
+          }, 1);
         case 'network':
           return pred((e) => e.kind === 'network', 1);
         case 'event':

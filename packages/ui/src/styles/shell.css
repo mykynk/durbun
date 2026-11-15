@@ -235,6 +235,13 @@
 .sb-row.is-selected .sb-device-icon__dot {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, var(--bg-app));
 }
+.sb-twin {
+  flex-shrink: 0;
+  font-size: var(--fs-xs, 11px);
+  font-weight: 400;
+  color: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+}
 .sb-conn {
   flex-shrink: 0;
   height: 15px;

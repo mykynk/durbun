@@ -201,7 +201,7 @@ describe('install', () => {
     expect(installTarget({ platform: 'android', kind: 'physical' })).toBe('android');
     expect(installTarget({ platform: 'ios', kind: 'simulator' })).toBe('ios-sim');
     expect(installTarget({ platform: 'ios', kind: 'physical' })).toBe('ios-device');
-    expect(installAccept('android')).toBe('.apk');
+    expect(installAccept('android')).toBe('.apk,.apks,.xapk');
     expect(installAccept('ios-sim')).toBe('.app,.zip');
     expect(fileExtension('Pati-release.APK')).toBe('.apk');
     expect(checkInstallFile({ name: 'app.apk', size: 10 }, 'android')).toEqual({ ok: true });

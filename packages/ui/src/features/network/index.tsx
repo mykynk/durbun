@@ -54,7 +54,7 @@ import {
   type SortState,
 } from './model/columns';
 import { COPY_FORMATS } from './model/copyAs';
-import { NetworkTable, type RevealRequest } from './components/NetworkTable';
+import { NetworkTable, type MenuPoint, type RevealRequest } from './components/NetworkTable';
 import { FilterBar, MainToolbar } from './components/Toolbars';
 import { DetailPanel } from './components/DetailPanel';
 import { ReplayDialog } from './components/ReplayDialog';
@@ -285,7 +285,7 @@ export default function NetworkView() {
     ];
   };
 
-  const onRowContextMenu = useEvent((id: string, ev: MouseEvent) => {
+  const onRowContextMenu = useEvent((id: string, ev: MenuPoint) => {
     const e = networkStore.get(id);
     if (!e) return;
     openContextMenu(ev, rowMenu(e));

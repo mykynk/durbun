@@ -76,3 +76,28 @@ export function crashWhen(e: Pick<LogEntry, 'ts' | 'origin' | 'data'>, now = Dat
   const sameDay = a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   return sameDay ? entryClock(e) : formatDateTime(e.ts);
 }
+
+/**
+ * An app the system closed to free memory (iOS Jetsam report, Android low-memory killer line): `data.termination`
+ * 'jetsam' / 'low-memory'. `visible` is the one the user was looking at (iOS frontmost, Android visible adj): to a
+ * tester that is a crash; background kills are routine.
+ */
+export function memoryKill(e: Pick<LogEntry, 'data'>): { visible: boolean } | undefined {
+  const d = data(e);
+  const kind = d?.termination;
+  if (kind === 'jetsam') return { visible: d?.frontmost === true };
+  if (kind === 'low-memory') return { visible: d?.visible === true };
+  return undefined;
+}
+
+/** A memory kill of the app on screen: it raises the crash banner and joins the crash filter. */
+export function isVisibleMemoryKill(e: Pick<LogEntry, 'data'>): boolean {
+  return memoryKill(e)?.visible === true;
+}
+
+/** Android "Displayed …: +612ms" lines (`data.startup`): how long the screen took to appear, and whether it was the full draw. */
+export function appStartupOf(e: Pick<LogEntry, 'data'>): { ms: number; total?: number; fullyDrawn: boolean } | undefined {
+  const s = data(e)?.startup as { ms?: unknown; total?: unknown; kind?: unknown } | undefined;
+  if (!s || typeof s !== 'object' || typeof s.ms !== 'number') return undefined;
+  return { ms: s.ms, ...(typeof s.total === 'number' ? { total: s.total } : {}), fullyDrawn: s.kind === 'fully-drawn' };
+}

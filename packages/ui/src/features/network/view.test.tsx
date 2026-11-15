@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import type { MockRule, NetworkEntry, UiCommand } from '@durbun/protocol';
 import { networkStore, ui, useMocks } from '../../data';
 import { __resetCommandsForTests, setCommandTransport } from '../../data/commands';
-import { ConfirmHost, toast } from '../../components';
+import { ConfirmHost, ContextMenuHost, toast } from '../../components';
 import { isMac } from '../../lib/platform';
 import NetworkView from './index';
 import MocksView from '../mocks/index';
@@ -161,5 +161,30 @@ describe('NetworkView clear and cross-tab jumps', () => {
     act(() => opts.action.onClick());
     expect(input.value).toBe('status:404');
     expect(screen.getByRole('button', { name: '5xx' }).getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+describe('NetworkView keyboard', () => {
+  it('the table is one Tab stop that names the selected row and opens its menu with Shift+F10', async () => {
+    // jsdom has no layout: scrolling the selected row into view is a no-op here.
+    Element.prototype.scrollIntoView ??= () => undefined;
+    render(
+      <>
+        <NetworkView />
+        <ContextMenuHost />
+      </>,
+    );
+    act(() => {
+      networkStore.upsert([entry('a'), entry('b', { status: 404 })]);
+      networkStore.flush();
+    });
+    const grid = screen.getByRole('grid');
+    expect(grid.tabIndex).toBe(0);
+    expect(grid.getAttribute('aria-activedescendant')).toBeNull();
+    grid.focus();
+    fireEvent.keyDown(grid, { key: 'ArrowDown' });
+    await waitFor(() => expect(grid.getAttribute('aria-activedescendant')).toMatch(/^net-row-/));
+    fireEvent.keyDown(grid, { key: 'F10', shiftKey: true });
+    await waitFor(() => expect(screen.getByRole('menu')).toBeTruthy());
   });
 });

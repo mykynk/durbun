@@ -71,7 +71,7 @@ import { rankOf, type LogRow, type RowFilter, type SourceToggles } from './model
 import { buildHighlighter } from './model/highlight';
 import { appIdentity, type AppIdentity } from './model/frames';
 import { exportCount, exportFileName, exportJson, exportTxt } from './model/export';
-import { makeTerm, pushHistory, sanitizeSavedFilters, toggleTerm, type QueryField, type SavedFilter } from './model/queryEdit';
+import { makeTerm, normalizeQuery, PRESETS, pushHistory, sanitizeSavedFilters, toggleTerm, type QueryField, type SavedFilter } from './model/queryEdit';
 import { useLiveCrashes } from './live';
 import { deviceAppForEntry, sessionForEntry } from './model/appOf';
 import { contextPartKeys, mergeContext, revealNeeds, type RevealContext } from './model/reveal';
@@ -1117,7 +1117,7 @@ export default function LogsView() {
       </div>
       {bannerCrashes.length ? <CrashBanner crashes={bannerCrashes} appName={appName} device={deviceMark} onGoto={gotoCrash} onReport={reportCrash} onDismiss={dismissCrash} /> : null}
       {paused ? <PausedBar pending={snap.pending} onResume={togglePause} /> : null}
-      {ctx ? <ContextBar parts={contextPartKeys(ctx)} scopeName={ctx.scope ? scopeDisplayName(ctx.scope, useHub.getState()) : undefined} onBack={leaveContext} /> : null}
+      {ctx ? <ContextBar parts={contextPartKeys(ctx)} queryName={ctx.query ? queryChipName(userApplied, saved) : undefined} scopeName={ctx.scope ? scopeDisplayName(ctx.scope, useHub.getState()) : undefined} onBack={leaveContext} /> : null}
       {!empty && atTop && (logStore.dropped > 0 || logStore.size >= logStore.maxEntries) ? (
         <DroppedNote dropped={logStore.dropped} limit={logStore.maxEntries} since={model.row(0)?.e.ts} onOpenSettings={() => ui.openSettings('logs')} />
       ) : null}
@@ -1185,4 +1185,13 @@ export default function LogsView() {
       <SavedFiltersDialog open={dialog === 'saved'} onClose={() => setDialog(null)} saved={saved} onChange={(next) => setSaved(next)} onApply={setQueryUser} />
     </div>
   );
+}
+
+/** The chip's name when the applied query is a quick filter or a saved filter (the user pressed it, typed nothing). */
+function queryChipName(applied: string, saved: readonly SavedFilter[]): string | undefined {
+  const q = normalizeQuery(applied);
+  if (!q) return undefined;
+  const preset = PRESETS.find((p) => normalizeQuery(p.query) === q);
+  if (preset) return t(preset.labelKey);
+  return saved.find((f) => normalizeQuery(f.query) === q)?.name;
 }

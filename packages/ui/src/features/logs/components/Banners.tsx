@@ -4,6 +4,7 @@ import type { LogEntry } from '@durbun/protocol';
 import { Button, IconButton, formatClock } from '../../../components';
 import { t, useT } from '../../../i18n';
 import { analyzeEntry } from '../model/analyze';
+import { isVisibleMemoryKill } from '../model/records';
 import type { DeviceMark } from './LogRow';
 
 /** "Pati çöktü · <headline>" for a crash-like entry. */
@@ -11,6 +12,7 @@ export function crashTitle(e: LogEntry, appName: string | undefined): string {
   const a = analyzeEntry(e);
   const app = appName ?? t('logs.crash.appFallback');
   const c = a.crash;
+  if (!c && isVisibleMemoryKill(e)) return t('logs.crash.memory', { app });
   if (!c) return e.message;
   if (c.previousLaunch) return t('logs.crash.previous', { app });
   if (c.kind === 'anr') return t('logs.crash.anr', { app });
@@ -128,9 +130,10 @@ export const IosScopeNote = memo(function IosScopeNote({ device, onOpenSettings,
  * filters that hid it are suspended for this view only. Says which, and offers the way back. Editing a filter
  * keeps the view (the bar goes away).
  */
-export const ContextBar = memo(function ContextBar({ parts, scopeName, onBack }: { parts: readonly string[]; scopeName?: string; onBack(): void }) {
+export const ContextBar = memo(function ContextBar({ parts, scopeName, queryName, onBack }: { parts: readonly string[]; scopeName?: string; queryName?: string; onBack(): void }) {
   useT(); // re-render on language change (memoized)
-  const names = parts.filter((p) => p !== 'scope').map((p) => t(`logs.context.part.${p}`));
+  // A pressed chip is named as such: the user did not write a query.
+  const names = parts.filter((p) => p !== 'scope').map((p) => (p === 'query' && queryName ? t('logs.context.part.chip', { name: queryName }) : t(`logs.context.part.${p}`)));
   const list = names.join(', ');
   const text =
     names.length && scopeName

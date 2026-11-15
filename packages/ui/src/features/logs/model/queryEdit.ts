@@ -84,7 +84,8 @@ export interface FilterPreset {
 /** Built-in quick filters (SPEC §7.3 saved filters). */
 export const PRESETS: readonly FilterPreset[] = [
   { id: 'errors', labelKey: 'logs.presets.errors', query: 'level:error' },
-  { id: 'crashes', labelKey: 'logs.presets.crashes', query: 'is:crash | is:anr | (tag=:flutter level:error)' },
+  // A memory kill of the app on screen (level error) is a crash to the tester; background kills are routine.
+  { id: 'crashes', labelKey: 'logs.presets.crashes', query: 'is:crash | is:anr | (is:oom level:error) | (tag=:flutter level:error)' },
   { id: 'network', labelKey: 'logs.presets.network', query: 'is:network' },
   { id: 'flutter', labelKey: 'logs.presets.flutter', query: 'is:flutter' },
   { id: 'events', labelKey: 'logs.presets.events', query: 'is:event' },

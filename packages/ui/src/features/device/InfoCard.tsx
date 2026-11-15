@@ -50,6 +50,10 @@ export function InfoCard({ device }: { device: DeviceInfo }) {
       : { full: BatteryFull, medium: BatteryMedium, low: BatteryLow }[batteryBucket(battery.level)]
     : Battery;
   const serialLabel = device.platform === 'ios' ? t('device.info.udid') : t('device.info.serial');
+  // The phone's own serial, when adb knows it by another name (an ip:port or mDNS name over Wi-Fi).
+  const hardwareSerial = device.hardwareSerial && device.hardwareSerial !== device.serial ? device.hardwareSerial : undefined;
+  // Other ways the device is reachable right now (USB in use, wireless debugging also on).
+  const standby = (device.connections ?? []).filter((c, i, all) => c !== device.connection && c !== 'unknown' && all.indexOf(c) === i);
 
   return (
     <DeviceCard section="info" title={t('device.info.title')} icon={Smartphone}>
@@ -68,20 +72,31 @@ export function InfoCard({ device }: { device: DeviceInfo }) {
         ) : null}
         {device.manufacturer ? <Row label={t('device.info.manufacturer')}>{device.manufacturer}</Row> : null}
         {os ? <Row label={t('device.info.os')}>{os}</Row> : null}
+        {hardwareSerial ? (
+          <Row label={t('device.info.serial')}>
+            <span className="dv-info__inline">
+              <span className="mono selectable truncate" title={hardwareSerial}>
+                {hardwareSerial}
+              </span>
+              <CopyButton value={hardwareSerial} size="xs" label={t('device.info.copySerial')} />
+            </span>
+          </Row>
+        ) : null}
         {device.serial ? (
-          <Row label={serialLabel}>
+          // Over Wi-Fi adb names the phone by its address: said as such, the phone's own serial is above.
+          <Row label={hardwareSerial ? t('device.info.adbAddress') : serialLabel}>
             <span className="dv-info__inline">
               <span className="mono selectable truncate" title={device.serial}>
                 {device.serial}
               </span>
-              <CopyButton value={device.serial} size="xs" label={t('device.info.copySerial')} />
+              <CopyButton value={device.serial} size="xs" label={hardwareSerial ? t('device.info.copyAddress') : t('device.info.copySerial')} />
             </span>
           </Row>
         ) : null}
         <Row label={t('device.info.connection')}>
-          <span className="dv-info__inline">
+          <span className="dv-info__inline" title={standby.length ? t('device.info.standbyHint') : undefined}>
             <ConnIcon size={14} aria-hidden className="dv-info__icon" />
-            {t(`device.info.connectionType.${device.connection}`)}
+            {[t(`device.info.connectionType.${device.connection}`), ...standby.map((c) => t('device.info.standby', { type: t(`device.info.connectionType.${c}`) }))].join(' · ')}
           </span>
         </Row>
         <Row label={t('device.info.kind')}>{t(`device.info.kindType.${device.kind}`)}</Row>

@@ -313,6 +313,8 @@ registerMessages('network', {
       done: 'Yeniden gönderildi · {status} · {duration}',
       failed: 'Yeniden gönderilen istek başarısız oldu',
       error: 'İstek yeniden gönderilemedi',
+      tlsOffer: 'Sunucu sertifikası kabul edilmedi. Güvendiğiniz bir test sunucusuysa doğrulamadan yeniden gönderebilirsiniz.',
+      resendUnverified: 'Doğrulamadan gönder',
     },
     replayDialog: {
       title: 'Düzenle ve gönder',
@@ -391,7 +393,7 @@ registerMessages('network', {
       title: { one: 'En eski {count, number} istek silindi.', other: 'En eski {count, number} istek silindi.' },
       titleFull: 'İstek belleği dolu.',
       body: 'Dürbün bellekte en fazla {limit, number} istek tutar; yenileri geldikçe en eskileri silinir.',
-      since: 'En eski istek {time} tarihli.',
+      since: 'Liste {time} itibarıyla başlıyor.',
       settings: 'Sınırı değiştir',
     },
     copyNotes: {
@@ -751,6 +753,8 @@ registerMessages('network', {
       done: 'Replayed · {status} · {duration}',
       failed: 'The replayed request failed',
       error: 'Could not replay the request',
+      tlsOffer: 'The server certificate was not accepted. If this is a test server you trust, you can resend without verifying.',
+      resendUnverified: 'Resend without verifying',
     },
     replayDialog: {
       title: 'Edit and send',
@@ -829,7 +833,7 @@ registerMessages('network', {
       title: { one: 'The oldest {count, number} request was dropped.', other: 'The oldest {count, number} requests were dropped.' },
       titleFull: 'The request memory is full.',
       body: 'Dürbün keeps at most {limit, number} requests in memory; as new ones arrive the oldest are dropped.',
-      since: 'The oldest request is from {time}.',
+      since: 'The list starts at {time}.',
       settings: 'Change the limit',
     },
     copyNotes: {

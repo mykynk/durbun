@@ -13,6 +13,7 @@ export * from './flows/index';
 export * from './package';
 export * from './secrets';
 export * from './bugReport';
+export * from './har';
 
 export const PROTOCOL_VERSION = 1;
 export const PRODUCT_NAME = 'Dürbün';

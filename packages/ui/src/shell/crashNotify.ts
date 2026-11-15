@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 import type { LogEntry } from '@durbun/protocol';
-import { isCrashEntry, keptAfter, logStore, type LogStore } from '../data/logStore';
+import { keptAfter, logStore, type LogStore } from '../data/logStore';
 import { isImportedDevice, useHub } from '../data/stores/hub';
 import { ui } from '../data/stores/ui';
 import { bugReport } from '../features/report/store';
 import { getPrefs } from '../data/stores/prefs';
-import { isLiveEntry, isQuietCrashRecord, mergeCrashes } from '../features/logs/live';
+import { isBannerCrash, isLiveEntry, isQuietCrashRecord, mergeCrashes } from '../features/logs/live';
 import { deviceAppForEntry, sessionForEntry } from '../features/logs/model/appOf';
 import { deviceDisplayName } from '../i18n';
 import { notifyDesktop } from '../lib/notify';
@@ -23,7 +23,7 @@ export function watchLiveCrashes(store: Pick<LogStore, 'entries' | 'kept' | 'gen
   let recent: LogEntry[] = [];
   let gen = store.generation;
   let cursor = store.lastId;
-  const wanted = (e: LogEntry) => isCrashEntry(e) && isLiveEntry(e) && !isImportedDevice(e.deviceId) && !isQuietCrashRecord(e);
+  const wanted = (e: LogEntry) => isBannerCrash(e) && isLiveEntry(e) && !isImportedDevice(e.deviceId) && !isQuietCrashRecord(e);
   return store.subscribe(() => {
     if (store.generation !== gen) {
       gen = store.generation;

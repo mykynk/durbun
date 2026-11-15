@@ -46,6 +46,7 @@ registerMessages('logsQuery', {
       event: 'Özel olaylar',
       marker: 'İşaretler',
       stacktrace: 'Yığın izi (stack trace) içerenler',
+      oom: 'Sistemin bellek için kapattığı uygulamalar',
       flutter: 'Flutter hataları ve logları',
     },
     age: {
@@ -149,6 +150,7 @@ registerMessages('logsQuery', {
       event: 'Custom events',
       marker: 'Markers',
       stacktrace: 'Lines with a stack trace',
+      oom: 'Apps the system closed to free memory',
       flutter: 'Flutter errors and logs',
     },
     age: {

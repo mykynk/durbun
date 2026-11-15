@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Package } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
@@ -37,7 +37,7 @@ import { usePersistentState } from '../hooks';
 import { formatClock, formatCompact } from '../lib/format';
 import { appVersion, connectionLabel, deviceSubtitle, importLabel, isNetworkOnly, stateTone } from './labels';
 import { setDemo, toggleSidebar } from './actions';
-import { createHoldMemory, isGroupSelected, layoutDeviceApps, orderDevices, type HoldMemory } from './sidebarModel';
+import { createHoldMemory, isGroupSelected, layoutDeviceApps, orderDevices, twinSuffixes, type HoldMemory } from './sidebarModel';
 
 const SECTION_ORDER: DeviceGroup[] = ['live', 'demo', 'import', 'other'];
 
@@ -61,6 +61,7 @@ export function Sidebar() {
   const now = Date.now();
   const ordered = orderDevices(Object.values(deviceMap), now, hold.current);
   const devices = ordered.devices;
+  const twins = twinSuffixes(devices);
   useWakeAt(ordered.wakeAt, wake);
 
   const by = new Map<DeviceGroup, DeviceInfo[]>();
@@ -75,11 +76,23 @@ export function Sidebar() {
   const toggleDevice = (id: string) =>
     setCollapsedDevices((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]));
 
+  // One Tab stop for the whole tree (WAI-ARIA tree): arrows, Home and End move inside it.
+  const treeRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const root = treeRef.current;
+    if (!root) return;
+    syncRovingTabStop(root);
+    // Rows come and go without this component rendering (older sessions unfold, devices fold).
+    const observer = new MutationObserver(() => syncRovingTabStop(root));
+    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected'] });
+    return () => observer.disconnect();
+  }, []);
   const onTreeKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
     const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-sb-item]')];
     const idx = items.indexOf(document.activeElement as HTMLElement);
-    const next = items[e.key === 'ArrowDown' ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1)];
+    const to = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : e.key === 'ArrowDown' ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
+    const next = items[to];
     if (next) {
       e.preventDefault();
       next.focus();
@@ -102,9 +115,13 @@ export function Sidebar() {
 
         <div
           className="sb-scroll"
+          ref={treeRef}
           role="tree"
           aria-label={t('shell.sidebar.devices')}
           onKeyDown={onTreeKeyDown}
+          onFocus={(e) => {
+            if ((e.target as HTMLElement).hasAttribute('data-sb-item')) syncRovingTabStop(e.currentTarget, e.target as HTMLElement);
+          }}
           onClick={(e) => {
             // Picking a scope in the narrow overlay closes it.
             if (narrow && overlay && (e.target as HTMLElement).closest('[data-sb-item]')) ui.setSidebarOverlay(false);
@@ -132,6 +149,7 @@ export function Sidebar() {
                   expanded={!collapsedDevices.includes(d.id)}
                   onToggle={() => toggleDevice(d.id)}
                   hold={hold.current!}
+                  twin={twins.get(d.id)}
                 />
               ))}
             </div>
@@ -210,6 +228,7 @@ function SidebarRow({ compact, selected, icon, title, subtitle, meta, tooltip, o
       type="button"
       data-sb-item
       role="treeitem"
+      tabIndex={-1}
       aria-level={level}
       aria-selected={selected}
       aria-expanded={onToggle ? expanded : undefined}
@@ -284,6 +303,7 @@ function DeviceNode({
   expanded,
   onToggle,
   hold,
+  twin,
 }: {
   device: DeviceInfo;
   groups: AppGroup[];
@@ -292,6 +312,8 @@ function DeviceNode({
   expanded: boolean;
   onToggle: () => void;
   hold: HoldMemory;
+  /** Tells this device from another one with the same name (see twinSuffixes). */
+  twin?: string;
 }) {
   const t = useT();
   const appOnDevice =
@@ -333,9 +355,10 @@ function DeviceNode({
         dim={disconnected}
         title={
           <>
-            <span className="truncate" title={name}>
+            <span className="truncate" title={twin ? `${name} · ${twin}` : name}>
               {name}
             </span>
+            {twin && twin !== conn ? <span className="sb-twin">{twin}</span> : null}
             {conn ? <span className="sb-conn">{conn}</span> : null}
           </>
         }
@@ -356,7 +379,7 @@ function DeviceNode({
           ) : undefined
         }
         meta={count > 0 && !desktop ? formatCompact(count) : undefined}
-        tooltip={[name, subtitle, stateText].filter(Boolean).join(' · ')}
+        tooltip={[twin ? `${name} (${twin})` : name, subtitle, stateText].filter(Boolean).join(' · ')}
         onSelect={() => setScope({ kind: 'device', deviceId: device.id })}
         expanded={groups.length > 0 ? expanded : undefined}
         onToggle={groups.length > 0 ? onToggle : undefined}
@@ -443,10 +466,18 @@ function AppNode({ group, device, scope }: { group: AppGroup; device: DeviceInfo
           type="button"
           data-sb-item
           role="treeitem"
+          tabIndex={-1}
           aria-level={2}
           aria-selected={selected}
+          aria-keyshortcuts="I"
           className="sb-row__main"
           onClick={select}
+          onKeyDown={(e) => {
+            // "What can I see?" for the focused app, without a Tab stop of its own.
+            if (e.key.toLowerCase() !== 'i' || e.metaKey || e.ctrlKey || e.altKey) return;
+            e.preventDefault();
+            e.currentTarget.parentElement?.querySelector<HTMLButtonElement>('[data-sb-info]')?.click();
+          }}
           aria-label={`${name}${version ? ` ${version}` : ''} · ${stateText}`}
           title={`${group.bundleId}${version ? ` · ${version}` : ''}`}
         >
@@ -469,10 +500,10 @@ function AppNode({ group, device, scope }: { group: AppGroup; device: DeviceInfo
           </span>
           <StatusDot tone={live ? 'success' : 'neutral'} pulse={group.connected} size={7} title={stateText} className={clsx(!live && 'dot--hollow')} />
         </button>
-        <WhatCanISeeButton groupKey={group.key} className="sb-app__info" />
+        <WhatCanISeeButton groupKey={group.key} className="sb-app__info" tabIndex={-1} data-sb-info shortcut="I" />
       </div>
       {older > 0 ? (
-        <button type="button" className="sb-older" aria-expanded={showSessions} onClick={() => setShowSessions((v) => !v)}>
+        <button type="button" data-sb-item tabIndex={-1} className="sb-older" aria-expanded={showSessions} onClick={() => setShowSessions((v) => !v)}>
           <ChevronRight size={11} className={clsx('sb-older__chev', showSessions && 'is-open')} aria-hidden />
           {t('shell.sidebar.olderSessions', { count: older })}
         </button>
@@ -485,6 +516,7 @@ function AppNode({ group, device, scope }: { group: AppGroup; device: DeviceInfo
               type="button"
               data-sb-item
               role="treeitem"
+              tabIndex={-1}
               aria-level={3}
               aria-selected={exactSelected === s.id}
               className={clsx('sb-session', exactSelected === s.id && 'is-selected')}
@@ -501,4 +533,19 @@ function AppNode({ group, device, scope }: { group: AppGroup; device: DeviceInfo
       ) : null}
     </div>
   );
+}
+
+/**
+ * Roving tab stop: exactly one tree row is reachable with Tab, the focused one, else the selected one, else the
+ * first. Every other row has tabIndex -1 and is reached with the arrow keys.
+ */
+function syncRovingTabStop(root: HTMLElement, focused?: HTMLElement): void {
+  const items = [...root.querySelectorAll<HTMLElement>('[data-sb-item]')];
+  if (items.length === 0) return;
+  const active = focused ?? (items.includes(document.activeElement as HTMLElement) ? (document.activeElement as HTMLElement) : undefined);
+  const stop = active ?? items.find((el) => el.getAttribute('aria-selected') === 'true') ?? items[0]!;
+  for (const el of items) {
+    const want = el === stop ? 0 : -1;
+    if (el.tabIndex !== want) el.tabIndex = want;
+  }
 }

@@ -144,17 +144,42 @@ export function importUrl(name?: string): string {
 export async function importSession(
   input: File | Blob | SessionExport | string,
   options?: AbortSignal | ImportOptions,
-): Promise<{ deviceIds: string[] }> {
+): Promise<ImportResult> {
   const opts: ImportOptions = isAbortSignal(options) ? { signal: options } : (options ?? {});
   const name = opts.name ?? (typeof File !== 'undefined' && input instanceof File ? input.name : undefined);
   const body: BodyInit = typeof input === 'string' || input instanceof Blob ? input : JSON.stringify(input);
-  const res = await json<{ deviceIds?: string[] }>(importUrl(name), {
+  const res = await json<Partial<ImportResult>>(importUrl(name), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
     signal: opts.signal,
   });
-  return { deviceIds: Array.isArray(res.deviceIds) ? res.deviceIds : [] };
+  const counts = (v: unknown): ImportCounts | undefined => {
+    const o = v as Partial<ImportCounts> | undefined;
+    return o && typeof o.logs === 'number' && typeof o.requests === 'number' ? { logs: o.logs, requests: o.requests } : undefined;
+  };
+  return {
+    deviceIds: Array.isArray(res.deviceIds) ? res.deviceIds : [],
+    ...(counts(res.imported) ? { imported: counts(res.imported) } : {}),
+    ...(counts(res.dropped) ? { dropped: counts(res.dropped) } : {}),
+    ...(counts(res.evicted) ? { evicted: counts(res.evicted) } : {}),
+  };
+}
+
+export interface ImportCounts {
+  logs: number;
+  requests: number;
+}
+
+/**
+ * `POST /api/import`: the new devices and what really loaded. The import shares the live memory limits:
+ * `dropped` is what of the file did not fit, `evicted` what live data it pushed out (older servers send neither).
+ */
+export interface ImportResult {
+  deviceIds: string[];
+  imported?: ImportCounts;
+  dropped?: ImportCounts;
+  evicted?: ImportCounts;
 }
 
 function isAbortSignal(v: unknown): v is AbortSignal {

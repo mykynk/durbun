@@ -32,6 +32,7 @@ import { sdkHostLines } from './sdkHosts';
 import { Snippet } from './Snippet';
 import { SLACK_ADD_URL, toSlackText } from '../lib/slack';
 import { Group, OfflineNote, Row, SectionHeader } from './settingsParts';
+import { useDesktopPrefs } from './desktopPrefs';
 import { BackupSection } from '../features/transfer/BackupSection';
 
 /** Inclusive ranges the server accepts (packages/server/src/config.ts SETTINGS_LIMITS); KB for bodies. */
@@ -774,6 +775,7 @@ function AboutSection() {
           <OfflineNote />
         )}
       </Group>
+      <DesktopAppGroup />
       <Group title={t('shell.settings.uiPrefs')}>
         <Row label={t('shell.settings.resetUi')} hint={t('shell.settings.resetUiHint')}>
           <Button size="sm" variant="secondary" icon={RotateCcw} onClick={() => void onReset()}>
@@ -782,5 +784,37 @@ function AboutSection() {
         </Row>
       </Group>
     </>
+  );
+}
+
+/** The Mac app's own settings (the same switches as its menus); hidden in a browser and the CLI. */
+function DesktopAppGroup() {
+  const t = useT();
+  const { available, prefs, saving, set } = useDesktopPrefs();
+  if (!available) return null;
+  const change = async (patch: { autoUpdateCheck?: boolean; openAtLogin?: boolean }) => {
+    if (!(await set(patch))) toast.error(t('shell.settings.desktop.failed'));
+  };
+  const notAsked = prefs?.autoUpdateCheck === null;
+  const loginOff = prefs ? !prefs.openAtLoginAvailable : false;
+  return (
+    <Group title={t('shell.settings.desktop.title')}>
+      <Row label={t('shell.settings.desktop.autoUpdate')} hint={notAsked ? t('shell.settings.desktop.autoUpdateNotAsked') : t('shell.settings.desktop.autoUpdateHint')}>
+        <Toggle
+          checked={prefs?.autoUpdateCheck === true}
+          disabled={!prefs || saving}
+          onChange={(v) => void change({ autoUpdateCheck: v })}
+          aria-label={t('shell.settings.desktop.autoUpdate')}
+        />
+      </Row>
+      <Row label={t('shell.settings.desktop.openAtLogin')} hint={loginOff ? t('shell.settings.desktop.openAtLoginUnavailable') : t('shell.settings.desktop.openAtLoginHint')}>
+        <Toggle
+          checked={prefs?.openAtLogin === true}
+          disabled={!prefs || saving || loginOff}
+          onChange={(v) => void change({ openAtLogin: v })}
+          aria-label={t('shell.settings.desktop.openAtLogin')}
+        />
+      </Row>
+    </Group>
   );
 }

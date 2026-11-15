@@ -23,6 +23,7 @@ import {
   buildBadgeHint,
   buildBadgeLabel,
   capabilityLabel,
+  crashReaderNote,
   crashReaderText,
   frameReaderText,
   reasonText,
@@ -261,7 +262,14 @@ export function SourcesPanel({ item, onNavigate }: { item: ExplainedApp; onNavig
 }
 
 /** ⓘ button that opens "Neler görünüyor?" for an app group. */
-export function WhatCanISeeButton({ groupKey, size = 'xs', className, label }: { groupKey: string; size?: 'xs' | 'sm'; className?: string; label?: string }) {
+export function WhatCanISeeButton({
+  groupKey,
+  size = 'xs',
+  className,
+  label,
+  shortcut,
+  ...rest
+}: { groupKey: string; size?: 'xs' | 'sm'; className?: string; label?: string; shortcut?: string; tabIndex?: number; 'data-sb-info'?: boolean }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
@@ -271,7 +279,9 @@ export function WhatCanISeeButton({ groupKey, size = 'xs', className, label }: {
         ref={ref}
         icon={Info}
         size={size}
+        {...rest}
         label={label ?? t('sources.title')}
+        shortcut={shortcut}
         className={clsx('src-info-btn', open && 'is-open', className)}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -556,6 +566,12 @@ export function CrashRecordsNote({ onlyProblems, className }: { onlyProblems?: b
   return (
     <p className={clsx('src-crash-note src-crash-note--ok', className)}>
       <strong>{t('sources.crashEmpty.noneTitle')}.</strong> {t('sources.crashEmpty.none', { device: one ? deviceDisplayName(one) : undefined })}
+      {st.readable.map(crashReaderNote).filter(Boolean).map((note, i) => (
+        <span key={i} className="src-crash-note__how">
+          {' '}
+          {note}
+        </span>
+      ))}
     </p>
   );
 }

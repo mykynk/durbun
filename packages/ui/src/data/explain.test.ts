@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSession, DeviceApp, DeviceInfo } from '@durbun/protocol';
-import { buildBadgeOf, buildKindOf, explainContext, explainRow, explainSources, type ExplainCapability, type ExplainInput, type ExplainResult } from './explain';
+import { buildBadgeOf, buildKindOf, explainContext, hiddenDeviceCards, explainRow, explainSources, type ExplainCapability, type ExplainInput, type ExplainResult } from './explain';
 
 /* ───────────── fixtures (shapes as the server sends them) ───────────── */
 
@@ -522,5 +522,22 @@ describe('buildBadgeOf', () => {
     expect(buildBadgeOf({ device: device('import:1'), sessions: [session(PIXEL)] })).toBeUndefined();
     expect(buildBadgeOf({ deviceApp: deviceApp(PIXEL, { buildType: 'release', source: 'other-store', installer: 'com.google.android.packageinstaller' }), sessions: [] })).toBe('apk');
     expect(buildBadgeOf({ deviceApp: deviceApp(PIXEL, { buildType: 'release', source: 'other-store', installer: 'com.huawei.appmarket' }), sessions: [] })).toBe('other-store');
+  });
+});
+
+describe('hiddenDeviceCards', () => {
+  const iphone = (actions: string[], stateCode?: string) =>
+    ({ id: 'ios:00008110', platform: 'ios', kind: 'physical', state: 'online', stateCode, actions }) as Parameters<typeof hiddenDeviceCards>[0];
+  it('names the iPhone cards a missing tool hides, with the reason', () => {
+    expect(hiddenDeviceCards(iphone(['screenshot', 'screen-record', 'logs-restart']))).toEqual([
+      { card: 'apps', reason: 'devicectl' },
+      { card: 'openUrl', reason: 'devicectl' },
+    ]);
+    expect(hiddenDeviceCards(iphone(['list-apps', 'logs-restart'], 'device.developerModeOff')).map((h) => h.reason)).toEqual(['developerMode', 'developerMode', 'developerMode']);
+  });
+  it('says nothing for Android, simulators or a fully equipped iPhone', () => {
+    expect(hiddenDeviceCards({ ...iphone([]), id: 'android:x', platform: 'android' })).toEqual([]);
+    expect(hiddenDeviceCards({ ...iphone([]), id: 'ios-sim:x', kind: 'simulator' })).toEqual([]);
+    expect(hiddenDeviceCards(iphone(['list-apps', 'open-url', 'screenshot', 'screen-record', 'logs-restart']))).toEqual([]);
   });
 });

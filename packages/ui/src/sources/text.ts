@@ -969,6 +969,12 @@ export function crashReaderText(device: Pick<DeviceInfo, 'readers'>): string {
   return st && st.status !== 'ok' ? readerText(st, 'crashReportsUnavailable') : '';
 }
 
+/** How the crash records are read when the reader works another way (e.g. through libimobiledevice); '' otherwise. */
+export function crashReaderNote(device: Pick<DeviceInfo, 'readers'>): string {
+  const st = device.readers?.crashReports;
+  return st && st.status === 'ok' && st.code ? tCode(st.code, { detail: st.detail }, st.detail ?? '') : '';
+}
+
 /**
  * Why a reader of the device does not work: the text for the server's code (`reader.<id>.<reason>`), else the
  * generic sentence with the server's English detail, else the generic sentence alone.

@@ -8,6 +8,18 @@ import { MethodBadge, StatusBadge, Tooltip, formatBytes, formatClock, formatDura
 import { t, type Lang } from '../../../i18n';
 import { columnWidth, fitColumns, gridTemplate, minTableWidth, type ColumnDef, type ColumnId, type ColumnPrefs, type SortKey, type SortState } from '../model/columns';
 import { shortTypeLabel } from '../model/filters';
+
+/** Where a row menu opens: the pointer, or the selected row for the keyboard. */
+export interface MenuPoint {
+  clientX: number;
+  clientY: number;
+  preventDefault?: () => void;
+}
+
+/** DOM id of a row, for `aria-activedescendant` (request ids are not guaranteed to be id-safe). */
+function rowDomId(id: string): string {
+  return `net-row-${id.replace(/\s/g, '_')}`;
+}
 import { displayUrl, splitPathQuery } from '../model/http';
 import { barLayout, rangeOf, timingBreakdown, type TimeRange } from '../model/waterfall';
 import { shortErrorKey } from '../model/errors';
@@ -34,7 +46,8 @@ export interface NetworkTableProps {
   /** Row picked as the first side of a comparison. */
   compareBaseId: string | null;
   onRowClick: (id: string, e: MouseEvent) => void;
-  onRowContextMenu: (id: string, e: MouseEvent) => void;
+  /** Right click, or Shift+F10 / the context menu key on the focused table (the selected row). */
+  onRowContextMenu: (id: string, at: MenuPoint) => void;
   slowMs: number;
   /** Where new rows appear ('bottom' for oldest-first, 'top' for newest-first) or null (sorted by a value). */
   followEdge: 'bottom' | 'top' | null;
@@ -185,7 +198,26 @@ export const NetworkTable = memo(function NetworkTable(props: NetworkTableProps)
   const style = { '--net-cols': template, '--net-min-w': `${minWidth}px`, '--net-row-h': `${rowHeight}px` } as CSSProperties;
 
   return (
-    <div ref={tableRef} className="net-table" style={style} role="grid" aria-label={props['aria-label']} aria-rowcount={rowIds.length + 1} aria-multiselectable={false}>
+    <div
+      ref={tableRef}
+      className="net-table"
+      style={style}
+      role="grid"
+      aria-label={props['aria-label']}
+      aria-rowcount={rowIds.length + 1}
+      aria-multiselectable={false}
+      // One Tab stop; the arrow keys (the tab's shortcuts) move the selection and a screen reader follows it.
+      tabIndex={0}
+      aria-activedescendant={selectedId && rowIds.includes(selectedId) ? rowDomId(selectedId) : undefined}
+      onKeyDown={(ev) => {
+        if (!((ev.key === 'F10' && ev.shiftKey) || ev.key === 'ContextMenu') || !selectedId) return;
+        const row = tableRef.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(selectedId)}"]`);
+        const box = row?.getBoundingClientRect() ?? tableRef.current?.getBoundingClientRect();
+        if (!box) return;
+        ev.preventDefault();
+        props.onRowContextMenu(selectedId, { clientX: box.left + Math.min(160, box.width / 3), clientY: box.top + box.height / 2 });
+      }}
+    >
       <div ref={headerRef} className="net-thead" role="rowgroup" onContextMenu={props.onHeaderContextMenu}>
         <div className="net-thead__row" role="row" aria-rowindex={1}>
           {columns.map((c, i) => (
@@ -322,7 +354,7 @@ interface RowProps {
   slowMs: number;
   lang: Lang;
   onClick: (id: string, e: MouseEvent) => void;
-  onContextMenu: (id: string, e: MouseEvent) => void;
+  onContextMenu: (id: string, at: MenuPoint) => void;
 }
 
 function rowTone(e: NetworkEntry): string | undefined {
@@ -340,6 +372,7 @@ const Row = memo(
         className={clsx('net-row', rowTone(e), selected && 'is-selected', marked && 'is-marked', e.state === 'pending' && 'is-pending')}
         style={{ transform: `translateY(${top}px)` }}
         role="row"
+        id={rowDomId(e.id)}
         aria-rowindex={index + 2}
         aria-selected={selected}
         data-id={e.id}

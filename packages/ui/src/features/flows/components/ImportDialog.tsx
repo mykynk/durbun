@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { clsx } from 'clsx';
-import { CircleAlert, FileUp, Import, Package, TriangleAlert } from 'lucide-react';
-import type { PackageConflict } from '@durbun/protocol';
-import { Button, Callout, Checkbox, Dialog, SegmentedControl, Spinner, Textarea, pickFiles, toast } from '../../../components';
+import { CircleAlert, ClipboardCopy, FileUp, GitCompareArrows, Import, Package, TriangleAlert } from 'lucide-react';
+import type { FlowDoc, PackageConflict } from '@durbun/protocol';
+import { Button, Callout, Checkbox, Dialog, SegmentedControl, Spinner, Textarea, copyText, pickFiles, toast } from '../../../components';
 import { api } from '../../../data';
 import type { FlowImportItem } from '../../../data/api';
-import { errorText, useT } from '../../../i18n';
+import { errorText, useLanguage, useT } from '../../../i18n';
+import { flowDiff, isEmptyDiff, issuesForAi } from '../model/aiFeedback';
+import { nodeName } from '../model/text';
 import { FLOW_FILE_ACCEPT, readPicked, transfer } from '../../transfer/store';
 import { IssueList } from './NodeInspector';
 
@@ -77,6 +79,7 @@ export function ImportPreview({
 }) {
   const t = useT();
   const [openIssues, setOpenIssues] = useState<string | null>(null);
+  const [openDiff, setOpenDiff] = useState<string | null>(null);
   const clashes = items.filter((i) => i.exists && i.differs).length;
   if (loading && !items.length) {
     return (
@@ -92,6 +95,12 @@ export function ImportPreview({
       </Callout>
     );
   }
+  // Everything the AI needs to fix its answer, in English with step ids and paths (the list here is worded for people).
+  const forAi = issuesForAi(items, problems);
+  const copyForAi = async () => {
+    if (await copyText(forAi)) toast.success(t('flows.import.aiCopied'), { description: t('flows.import.aiCopiedHint') });
+    else toast.error(t('flows.ai.copyFailed'));
+  };
   return (
     <div className="fl-import__preview">
       {problems.length ? (
@@ -101,7 +110,16 @@ export function ImportPreview({
               <li key={i}>{problemText(p, t)}</li>
             ))}
           </ul>
+          {problems.length > 8 ? <p className="fl-insp__hint">{t('flows.import.moreProblems', { count: problems.length - 8 })}</p> : null}
         </Callout>
+      ) : null}
+      {forAi ? (
+        <div className="fl-import__ai">
+          <span className="fl-insp__hint">{t('flows.import.aiHint')}</span>
+          <Button size="sm" variant="secondary" icon={ClipboardCopy} onClick={() => void copyForAi()}>
+            {t('flows.import.copyForAi')}
+          </Button>
+        </div>
       ) : null}
       {items.length ? (
         <ul className="fl-import__items" aria-label={t('flows.import.found', { count: items.length })}>
@@ -135,11 +153,18 @@ export function ImportPreview({
                     {errors ? t('flows.header.errors', { count: errors }) : t('flows.header.warnings', { count: warns })}
                   </button>
                 ) : null}
+                {it.exists && it.differs ? (
+                  <button type="button" className="fl-issues-chip" onClick={() => setOpenDiff((o) => (o === it.flow.id ? null : it.flow.id))} aria-expanded={openDiff === it.flow.id}>
+                    <GitCompareArrows size={12} aria-hidden />
+                    {t('flows.import.showChanges')}
+                  </button>
+                ) : null}
                 {openIssues === it.flow.id ? (
                   <div className="fl-import__issues">
                     <IssueList issues={it.issues} nodes={it.flow.nodes} />
                   </div>
                 ) : null}
+                {openDiff === it.flow.id ? <ImportDiff incoming={it.flow} /> : null}
               </li>
             );
           })}
@@ -164,6 +189,52 @@ export function ImportPreview({
           />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** What replacing the saved flow with the incoming one changes, step by step (read when opened). */
+function ImportDiff({ incoming }: { incoming: FlowDoc }) {
+  const t = useT();
+  const lang = useLanguage();
+  const [saved, setSaved] = useState<FlowDoc | null | 'error'>(null);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    api.getFlow(incoming.id, ctrl.signal).then(
+      (r) => setSaved(r.flow),
+      (err: unknown) => {
+        if ((err as { name?: string })?.name !== 'AbortError') setSaved('error');
+      },
+    );
+    return () => ctrl.abort();
+  }, [incoming.id]);
+  if (saved === null) {
+    return (
+      <div className="fl-import__issues">
+        <Spinner size={12} /> {t('flows.import.reading')}
+      </div>
+    );
+  }
+  if (saved === 'error') return <p className="fl-import__issues fl-insp__hint">{t('flows.import.diffFailed')}</p>;
+  const d = flowDiff(saved, incoming);
+  const step = (n: FlowDoc['nodes'][number]) => `${nodeName(n, lang)} (${n.id})`;
+  const lines: string[] = [];
+  if (d.renamed) lines.push(t('flows.import.diff.renamed', { from: saved.name, to: incoming.name }));
+  for (const n of d.added) lines.push(t('flows.import.diff.added', { step: step(n) }));
+  for (const n of d.removed) lines.push(t('flows.import.diff.removed', { step: step(n) }));
+  for (const c of d.changed) lines.push(t('flows.import.diff.changed', { step: step(c.node), fields: c.fields.join(', ') }));
+  if (d.linksAdded || d.linksRemoved) lines.push(t('flows.import.diff.links', { added: d.linksAdded, removed: d.linksRemoved }));
+  return (
+    <div className="fl-import__issues" role="region" aria-label={t('flows.import.showChanges')}>
+      {isEmptyDiff(d) ? (
+        <p className="fl-insp__hint">{t('flows.import.diff.layoutOnly')}</p>
+      ) : (
+        <ul className="fl-import__problems fl-import__diff">
+          {lines.map((l, i) => (
+            <li key={i}>{l}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

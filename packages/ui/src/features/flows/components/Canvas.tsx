@@ -15,6 +15,7 @@ import {
   hasErrorPort,
   inputPoint,
   intersects,
+  linksOf,
   moveNodes,
   NODE_H,
   NODE_W,
@@ -497,6 +498,16 @@ export const Canvas = memo(function Canvas(props: CanvasProps) {
   );
 
   /* ── render data ── */
+  // What a screen reader hears for each step's connections (the edge drawing is hidden from it).
+  const linkText = useMemo(() => {
+    const names = new Map(flow.nodes.map((n) => [n.id, nodeName(n, lang)]));
+    const out = new Map<string, string>();
+    for (const n of flow.nodes) {
+      const parts = linksOf(flow, n.id).map((l) => t('flows.canvas.links', { port: t(`flows.port.${l.port}`), targets: l.to.map((id) => names.get(id) ?? id).join(', ') }));
+      if (parts.length) out.set(n.id, parts.join('; '));
+    }
+    return out;
+  }, [flow, lang, t]);
   const nodes = useMemo(() => (dragPos ? flow.nodes.map((n) => (dragPos.has(n.id) ? { ...n, position: dragPos.get(n.id)! } : n)) : flow.nodes), [flow.nodes, dragPos]);
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const edges = useMemo(
@@ -577,6 +588,7 @@ export const Canvas = memo(function Canvas(props: CanvasProps) {
             dim={!!dimmed?.has(n.id)}
             connecting={!!wire}
             wireTarget={wire?.target === n.id}
+            links={linkText.get(n.id) ?? t('flows.canvas.noLinks')}
           />
         ))}
         {selectedEdge && !readOnly ? (
@@ -614,11 +626,13 @@ interface NodeCardProps {
   dim: boolean;
   connecting: boolean;
   wireTarget: boolean;
+  /** Spoken connections: "Next: Open app; On error: Report". */
+  links: string;
 }
 
 const PORT_LABEL: Partial<Record<FlowPort, string>> = { true: 'flows.port.true', false: 'flows.port.false', loop: 'flows.port.loop', done: 'flows.port.done' };
 
-const NodeCard = memo(function NodeCard({ node, lang, onFocusNode, onOpen, selected, issues, run, dim, connecting, wireTarget }: NodeCardProps) {
+const NodeCard = memo(function NodeCard({ node, lang, onFocusNode, onOpen, selected, issues, run, dim, connecting, wireTarget, links }: NodeCardProps) {
   const t = useT();
   const spec = flowNodeSpec(node.type);
   const Icon = nodeIcon(node.type);
@@ -635,7 +649,7 @@ const NodeCard = memo(function NodeCard({ node, lang, onFocusNode, onOpen, selec
       style={{ transform: `translate(${p.x}px, ${p.y}px)`, width: NODE_W, height: NODE_H, ['--node-color' as string]: color }}
       role="group"
       aria-roledescription={t('flows.node.role')}
-      aria-label={`${nodeName(node, lang)} (${node.id})${summary ? `: ${summary}` : ''}`}
+      aria-label={`${nodeName(node, lang)} (${node.id})${summary ? `: ${summary}` : ''}. ${links}`}
       tabIndex={0}
       onFocus={(e) => {
         if (e.target === e.currentTarget) onFocusNode(node.id);

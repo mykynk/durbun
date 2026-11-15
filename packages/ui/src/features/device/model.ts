@@ -329,7 +329,7 @@ export function installTarget(d: Pick<DeviceInfo, 'platform' | 'kind'>): Install
 }
 
 const ACCEPT: Record<InstallTarget, string[]> = {
-  android: ['.apk'],
+  android: ['.apk', '.apks', '.xapk'],
   'ios-sim': ['.app', '.zip'],
   'ios-device': ['.ipa', '.zip'],
 };

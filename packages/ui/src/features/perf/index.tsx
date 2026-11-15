@@ -28,6 +28,7 @@ import {
 import { useLanguage, useT } from '../../i18n';
 import { describeError } from '../device/codes';
 import { ExplainEmpty, FrameStatsNote, mainPidOf, useScopeExplain } from '../../sources';
+import { RangeBar } from './RangeBar';
 import { requestDeviceSection } from '../device/request';
 import './i18n';
 import './perf.css';
@@ -209,6 +210,11 @@ export default function PerfView() {
   const data = usePerfData({ target, sessions, apps, window: win, pausedAt, active, flutterLike, describeAnnotation });
 
   const togglePause = useCallback(() => setPausedAt((p) => (p === null ? Date.now() : null)), []);
+  // A range dragged on a chart (ms): what happened then, with links to Logs and Network. Cleared with the target.
+  const [range, setRange] = useState<readonly [number, number] | null>(null);
+  const selectRange = useCallback((from: number, to: number) => setRange([from, to]), []);
+  const clearRange = useCallback(() => setRange(null), []);
+  useEffect(() => setRange(null), [tKey]);
   useShortcut('Space', togglePause, { enabled: active && target !== null });
 
   const label = target
@@ -537,7 +543,7 @@ export default function PerfView() {
   }
   const firstChart = showCpu ? 'cpu' : showMemory ? 'memory' : showFrames ? 'frames' : showRequests ? 'requests' : 'logs';
   const rectProps = (name: string) => (name === firstChart ? { onPlotRect: (r: PlotRect) => setPlotRect((p) => (p && p.left === r.left && p.width === r.width ? p : r)) } : {});
-  const common = { xRange, colors, annotations, timeFormat, tooltipTime, syncKey: SYNC_KEY, emptyText: t('perf.charts.noData') };
+  const common = { xRange, colors, annotations, timeFormat, tooltipTime, syncKey: SYNC_KEY, emptyText: t('perf.charts.noData'), onSelectRange: selectRange, selection: range };
   const legendRate = (v: number) => fmt.rate(v);
   const avgNote = data.rateStep > 1 ? t('perf.charts.average', { step: data.rateStep }) : undefined;
 
@@ -750,6 +756,11 @@ export default function PerfView() {
               </Callout>
             ) : null}
             <EventLane annotations={annotations} from={data.from} to={data.to} rect={plotRect} />
+            {range ? (
+              <RangeBar from={range[0]} to={range[1]} logIn={data.logInTarget} netIn={data.netInTarget} onClear={clearRange} />
+            ) : (
+              <p className="pf-range-hint">{t('perf.charts.selectHint')}</p>
+            )}
             {!metricsPresent ? <div className="pf-chart pf-chart--empty">{metricsEmpty()}</div> : null}
             {showCpu ? (
               <TimeChart

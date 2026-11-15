@@ -1,7 +1,8 @@
-import { BatteryFull, Eraser, PanelTop, RotateCcw, ScrollText, Signal, Sparkles, Wifi } from 'lucide-react';
-import type { DeviceInfo } from '@durbun/protocol';
+import { BatteryFull, Eraser, Maximize2, PanelTop, RotateCcw, ScrollText, Signal, Sparkles, Wifi } from 'lucide-react';
+import type { DeviceInfo, LogBufferSizeData } from '@durbun/protocol';
+import { formatBytes } from '../../lib/format';
 import { Button, StatusDot } from '../../components';
-import { useT } from '../../i18n';
+import { useT, type TFunction } from '../../i18n';
 import { logStreamText } from './codes';
 import { LOG_TONE } from './InfoCard';
 import { hasAction } from './model';
@@ -82,6 +83,39 @@ export function LogsCard({ device }: { device: DeviceInfo }) {
           </Button>
         </div>
       ) : null}
+      {canRestart && device.platform === 'android' && device.kind !== 'virtual' ? (
+        <div className="dv-action-row">
+          <div className="dv-action-row__text">
+            <span className="dv-action-row__title">{t('device.logs.grow')}</span>
+            <span className="dv-hint">{t('device.logs.growHint')}</span>
+          </div>
+          <Button
+            size="sm"
+            icon={Maximize2}
+            loading={isPending('logs-buffer')}
+            onClick={() =>
+              void run({
+                key: 'logs-buffer',
+                action: 'logs-restart',
+                params: { bufferSize: '16M' },
+                success: (data) => bufferSizeText(data, t),
+                failure: t('device.logs.growFailed'),
+              })
+            }
+          >
+            {t('device.logs.growButton')}
+          </Button>
+        </div>
+      ) : null}
     </DeviceCard>
   );
+}
+
+/** "Log buffer is now 16 MB instead of 256 KB" from the reply (the main buffer), else the plain line. */
+function bufferSizeText(data: unknown, t: TFunction): string {
+  const d = data as Partial<LogBufferSizeData> | undefined;
+  const before = d?.before?.main;
+  const after = d?.after?.main;
+  if (typeof before === 'number' && typeof after === 'number' && before !== after) return t('device.logs.grownFrom', { before: formatBytes(before), after: formatBytes(after) });
+  return t('device.logs.grown');
 }

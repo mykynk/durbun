@@ -74,6 +74,7 @@ const DETAILS: Detail[] = [
   [/^screenshot: (yes|no) · screen recording: (yes|no)$/, 'devicectlCaps', (m) => ({ shot: yesNo(m[1]), rec: yesNo(m[2]) })],
   [/^Install Xcode 15 or newer/, 'devicectlMissing'],
   [/^not needed \(devicectl captures screenshots\)$/, 'screenshotNotNeeded'],
+  [/^not found \(optional: used for iPhones devicectl cannot read/, 'fallbackOptional'],
   [/^not found$/, 'notFound'],
   [
     /^(\d+) attached(?: \((.+)\))? · auto-attach (on|off)/,

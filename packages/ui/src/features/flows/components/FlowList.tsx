@@ -1,13 +1,14 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
 import { ChevronDown, CircleAlert, Copy, Ellipsis, FileDown, FileUp, ListPlus, Play, Plus, Share2, Sparkles, Trash, Workflow, Zap } from 'lucide-react';
+import { STARTERS, type Starter, type StarterId } from '../model/starters';
 import type { FlowSummary } from '@durbun/protocol';
 import { Button, DropdownMenu, EmptyState, Highlight, SearchInput, Spinner, StatusDot, Tooltip, formatRelative, openContextMenu, type MenuItem, type Tone } from '../../../components';
 import { useFlows } from '../../../data';
 import { useT } from '../../../i18n';
 import { transfer } from '../../transfer/store';
 
-export type NewFlowKind = 'blank' | 'requests' | 'ai' | 'import';
+export type NewFlowKind = 'blank' | 'requests' | 'ai' | 'import' | `starter:${StarterId}`;
 
 export interface FlowListProps {
   summaries: FlowSummary[];
@@ -25,14 +26,23 @@ export interface FlowListProps {
 
 const RUN_TONE: Record<string, Tone> = { passed: 'success', failed: 'danger', cancelled: 'neutral', running: 'accent' };
 
-export function newFlowMenu(t: ReturnType<typeof useT>, onNew: (kind: NewFlowKind) => void): MenuItem[] {
-  return [
+export function newFlowMenu(t: ReturnType<typeof useT>, onNew: (kind: NewFlowKind) => void, opts: { starters?: boolean } = {}): MenuItem[] {
+  const items: MenuItem[] = [
     { label: t('flows.new.blank'), icon: Plus, description: t('flows.new.blankHint'), onSelect: () => onNew('blank') },
     { label: t('flows.new.requests'), icon: ListPlus, description: t('flows.new.requestsHint'), onSelect: () => onNew('requests') },
     { label: t('flows.new.ai'), icon: Sparkles, description: t('flows.new.aiHint'), onSelect: () => onNew('ai') },
     { type: 'separator' },
     { label: t('flows.new.import'), icon: FileUp, description: t('flows.new.importHint'), onSelect: () => onNew('import') },
   ];
+  if (opts.starters) {
+    items.push({ type: 'separator' }, { type: 'label', label: t('flows.new.fromStarter') });
+    for (const s of STARTERS) items.push(starterMenuItem(t, s, onNew));
+  }
+  return items;
+}
+
+export function starterMenuItem(t: ReturnType<typeof useT>, s: Starter, onNew: (kind: NewFlowKind) => void): MenuItem {
+  return { label: t(`flows.starters.${s.id}.name`), icon: s.icon, description: t(`flows.starters.${s.id}.hint`), onSelect: () => onNew(`starter:${s.id}`) };
 }
 
 /** Left column of the Flows tab: every saved flow with its last run, automation and problems. */
@@ -100,7 +110,7 @@ export function FlowList({ summaries, loaded, selectedId, active, onOpen, onNew,
     <div className="fl-list" aria-label={t('flows.list.label')}>
       <div className="fl-list__head">
         <SearchInput value={query} onChange={setQuery} placeholder={t('flows.list.search')} size="sm" shortcut="Mod+F" shortcutEnabled={active} className="fl-list__search" />
-        <DropdownMenu items={() => newFlowMenu(t, onNew)} minWidth={300} aria-label={t('flows.new.title')}>
+        <DropdownMenu items={() => newFlowMenu(t, onNew, { starters: true })} minWidth={300} aria-label={t('flows.new.title')}>
           {(p) => (
             <Button size="sm" variant="primary" icon={Plus} iconRight={ChevronDown} {...p}>
               {t('flows.new.button')}

@@ -60,6 +60,7 @@ import { EnvironmentsDialog } from './components/EnvironmentsDialog';
 import { EnvPicker, PreflightChip, RunButton, RunDialog, TargetPicker, runRequest, usePreflight, useRunTarget, type RunDialogState } from './components/RunControls';
 import { RunPanel } from './components/RunPanel';
 import { FlowList, newFlowMenu, type NewFlowKind } from './components/FlowList';
+import { STARTERS, starterFlow, type StarterId } from './model/starters';
 import { ImportFlowsDialog } from './components/ImportDialog';
 import { AiPackDialog } from './components/AiDialog';
 import { FromRequestsDialog } from './components/FromRequestsDialog';
@@ -479,14 +480,30 @@ export default function FlowsView() {
     }
     setDialog({ kind: 'import', text: texts.length === 1 ? texts[0]! : `[${texts.map((x) => x.trim()).join(',\n')}]` });
   }, [t]);
+  // An example flow, added in one click: named in the UI language, opened on the canvas, ready to run.
+  const createStarter = useCallback(
+    async (id: StarterId) => {
+      if (!(await leaveOk())) return;
+      try {
+        const doc = starterFlow(id, t);
+        const r = await api.createFlow({ ...doc, name: freeName(doc.name, summaries.map((f) => f.name)) });
+        setSelectedId(r.flow.id);
+        toast.success(t('flows.new.starterAdded', { name: r.flow.name }), { description: t('flows.new.starterAddedHint') });
+      } catch (err) {
+        toast.error(t('flows.new.failed'), { description: flowErrorText(err) });
+      }
+    },
+    [leaveOk, setSelectedId, summaries, t],
+  );
   const onNew = useCallback(
     (kind: NewFlowKind) => {
-      if (kind === 'blank') void createBlank();
+      if (kind.startsWith('starter:')) void createStarter(kind.slice('starter:'.length) as StarterId);
+      else if (kind === 'blank') void createBlank();
       else if (kind === 'requests') setDialog({ kind: 'requests' });
       else if (kind === 'ai') setDialog({ kind: 'ai', flowId: null });
       else void importFromFile();
     },
-    [createBlank, importFromFile],
+    [createBlank, createStarter, importFromFile],
   );
   const duplicateFlow = useCallback(
     async (id: string) => {
@@ -1176,6 +1193,18 @@ function Welcome({ onNew }: { onNew(kind: NewFlowKind): void }) {
               </button>
             );
           })}
+        </div>
+        <div className="fl-welcome__starters" role="group" aria-label={t('flows.new.fromStarter')}>
+          <span className="fl-welcome__starters-title">{t('flows.new.fromStarter')}</span>
+          {STARTERS.map((s) => (
+            <button key={s.id} type="button" className="fl-welcome__starter" onClick={() => onNew(`starter:${s.id}`)}>
+              <s.icon size={14} aria-hidden />
+              <span className="fl-welcome__starter-text">
+                <span className="fl-welcome__title">{t(`flows.starters.${s.id}.name`)}</span>
+                <span className="fl-welcome__hint">{t(`flows.starters.${s.id}.hint`)}</span>
+              </span>
+            </button>
+          ))}
         </div>
         <ul className="fl-welcome__points">
           <li>{t('flows.empty.point1')}</li>

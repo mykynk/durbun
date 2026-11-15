@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSession, DeviceApp, DeviceInfo } from '@durbun/protocol';
 import { groupApps, type AppGroup } from '../data/stores/hub';
-import { HOLD_MS, compareApps, createHoldMemory, layoutDeviceApps, orderDevices } from './sidebarModel';
+import { HOLD_MS, compareApps, createHoldMemory, layoutDeviceApps, orderDevices, twinSuffixes } from './sidebarModel';
 
 const IPHONE = 'ios:00008130-000A1B2C3D4E5F60';
 const PIXEL = 'android:R5CT20XK9QM';
@@ -193,5 +193,28 @@ describe('sidebar layout: a flapping USB connection does not fold, unfold or reo
     expect(settled.devices.map((d) => d.id)).toEqual(['android:bbbb', 'ios:aaaa']);
     // A device that was never seen connected goes straight to its place.
     expect(orderDevices([device('ios:cccc', 0, 'disconnected'), b], t0, createHoldMemory()).devices.map((d) => d.id)).toEqual(['android:bbbb', 'ios:cccc']);
+  });
+});
+
+describe('same-name devices get a suffix', () => {
+  const dev = (id: string, over: Partial<DeviceInfo> = {}): DeviceInfo =>
+    ({ id, platform: 'android', kind: 'physical', name: 'Galaxy A73', connection: 'usb', state: 'online', logs: { status: 'streaming' }, actions: [], firstSeen: 1, lastSeen: 1, ...over }) as DeviceInfo;
+
+  it('prefers a differing OS version, then the serial end, then the connection', () => {
+    expect([...twinSuffixes([dev('a', { osVersion: '14' }), dev('b', { osVersion: '13' })])]).toEqual([
+      ['a', 'Android 14'],
+      ['b', 'Android 13'],
+    ]);
+    const bySerial = twinSuffixes([dev('a', { osVersion: '14', serial: 'R58N12ABCD' }), dev('b', { osVersion: '14', serial: '192.168.1.5:5555', hardwareSerial: 'R58N12WXYZ', connection: 'wifi' })]);
+    expect(bySerial.get('a')).toBe('…ABCD');
+    expect(bySerial.get('b')).toBe('…WXYZ');
+    const byConn = twinSuffixes([dev('a', { serial: '192.168.1.5:5555', connection: 'wifi' }), dev('b', { serial: 'adb-R58N._adb-tls-connect._tcp', connection: 'usb' })]);
+    expect(byConn.get('a')).toBe('Wi-Fi');
+    expect(byConn.get('b')).toBe('USB');
+  });
+
+  it('leaves unique names and imported recordings alone', () => {
+    expect(twinSuffixes([dev('a'), dev('b', { name: 'Pixel 8' })]).size).toBe(0);
+    expect(twinSuffixes([dev('a'), dev('import:1', { name: 'Galaxy A73' })]).size).toBe(0);
   });
 });

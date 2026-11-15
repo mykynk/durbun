@@ -7,7 +7,7 @@ import { LOG_LEVELS, type LogLevel, type LogSource } from '@durbun/protocol';
 /** Canonical query keys (aliases: `msg` → message, `package` → process). */
 export type QueryKey = 'tag' | 'message' | 'process' | 'pid' | 'level' | 'source' | 'app' | 'is' | 'age';
 export type QueryOp = ':' | '=:' | '~:';
-export type IsValue = 'crash' | 'anr' | 'error' | 'json' | 'network' | 'event' | 'marker' | 'stacktrace' | 'flutter';
+export type IsValue = 'crash' | 'anr' | 'oom' | 'error' | 'json' | 'network' | 'event' | 'marker' | 'stacktrace' | 'flutter';
 
 /** Display / suggestion order of the keys. */
 export const QUERY_KEYS: readonly QueryKey[] = ['level', 'tag', 'message', 'process', 'app', 'is', 'source', 'age', 'pid'];
@@ -33,7 +33,7 @@ export const KEY_OPERATORS: Readonly<Record<QueryKey, readonly QueryOp[]>> = {
   age: [':'],
 };
 
-export const IS_VALUES: readonly IsValue[] = ['crash', 'anr', 'error', 'json', 'network', 'event', 'marker', 'stacktrace', 'flutter'];
+export const IS_VALUES: readonly IsValue[] = ['crash', 'anr', 'oom', 'error', 'json', 'network', 'event', 'marker', 'stacktrace', 'flutter'];
 export const SOURCE_VALUES: readonly LogSource[] = ['device', 'app', 'system'];
 export const AGE_PRESETS: readonly string[] = ['30s', '1m', '5m', '15m', '1h'];
 

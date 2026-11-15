@@ -1,5 +1,5 @@
 import type { NetworkEntry, ReplayOverrides } from '@durbun/protocol';
-import { api, logStore, sendCommand, ui, useHub } from '../../data';
+import { api, logStore, onNotice, sendCommand, ui, useHub } from '../../data';
 import { copyText, downloadUrl, formatBytes, formatDuration, toast } from '../../components';
 import { errorText, t } from '../../i18n';
 import { copyAs, type CopyFormat, type CopyNote } from './model/copyAs';
@@ -64,10 +64,21 @@ export async function copyEntryAs(e: NetworkEntry, format: CopyFormat): Promise<
 /** `net.replay` (optionally edited). Resolves with the new entry (state may be 'failed'), or null on error. */
 export async function replayRequest(e: NetworkEntry, overrides?: ReplayOverrides): Promise<NetworkEntry | null> {
   const toastId = toast({ kind: 'info', title: t('network.replay.sending', { method: overrides?.method ?? e.method, host: e.host }), duration: 0 });
+  // The server says before its reply when the certificate was refused (a test server with its own CA).
+  let tlsRejected = false;
+  const off = onNotice((n) => {
+    if (n.code === 'replay.tlsRejected') tlsRejected = true;
+  });
   try {
     const res = await sendCommand({ name: 'net.replay', id: e.id, overrides });
     toast.dismiss(toastId);
-    if (res.state === 'failed') {
+    if (res.state === 'failed' && tlsRejected && !overrides?.skipTlsVerify) {
+      toast.error(t('network.replay.failed'), {
+        description: `${res.error ?? ''} ${t('network.replay.tlsOffer')}`.trim(),
+        duration: 15_000,
+        action: { label: t('network.replay.resendUnverified'), onClick: () => void replayRequest(e, { ...overrides, skipTlsVerify: true }) },
+      });
+    } else if (res.state === 'failed') {
       toast.error(t('network.replay.failed'), { description: res.error });
     } else {
       toast.success(t('network.replay.done', { status: res.status ?? '—', duration: formatDuration(res.duration) }));
@@ -77,6 +88,8 @@ export async function replayRequest(e: NetworkEntry, overrides?: ReplayOverrides
     toast.dismiss(toastId);
     toast.error(t('network.replay.error'), { description: errorText(err) });
     return null;
+  } finally {
+    off();
   }
 }
 

@@ -44,17 +44,8 @@ export interface ExportCounts {
 export function scopeExportCounts(scope: Scope, hub: Pick<HubState, 'apps' | 'devices' | 'deviceApps' | 'processes'> = useHub.getState()): ExportCounts {
   const compiled = compileScope(scope, hub);
   const devices = scope.kind === 'all' ? Object.keys(hub.devices).filter((id) => id !== DESKTOP_DEVICE_ID).length : 1;
-  return { logs: scope.kind === 'app' && scope.exact ? sessionFileLines(compiled) : scopeLogTotal(compiled, logStore), requests: scopeNetworkCounts(compiled, networkStore).total, devices };
-}
-
-/**
- * One session's file (`appId`) holds that session's lines and its process's device lines, not the device's own
- * connect separators the scope shows around them.
- */
-function sessionFileLines(compiled: ReturnType<typeof compileScope>): number {
-  let n = 0;
-  for (const list of [logStore.kept, logStore.entries]) for (const e of list) if (compiled.logs(e) && !(e.source === 'system' && !e.appId)) n++;
-  return n;
+  // Every scope's file holds what the scope shows, the device's connect / log-stream lines included.
+  return { logs: scopeLogTotal(compiled, logStore), requests: scopeNetworkCounts(compiled, networkStore).total, devices };
 }
 
 /** Request ids a HAR of this scope holds; undefined = every request (the "all" scope). */

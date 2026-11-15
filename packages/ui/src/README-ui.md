@@ -244,7 +244,9 @@ Use `compiled.key` as the memo key for scans (it changes when the app's sessions
   `{ badge, rows[logs|network|metrics|crashes|mocks|tools] {status, sources, reasons, actions}, notes, context }`.
   Extra exports: `buildBadgeOf()`, `buildKindOf()`, `explainContext()`, `explainRow()`,
   `screenshotAvailability(device)` (`yes | noDevice | imported | offline | unsupported`: whether "Report a bug" can take
-  a fresh screenshot, and the reason it shows when not).
+  a fresh screenshot, and the reason it shows when not), `hiddenDeviceCards(device)` (the Device tab's actions an
+  online physical iPhone cannot offer yet and why: developer mode, devicectl, screenshot tool, screen recording,
+  syslog; shown by `features/device/HiddenCards.tsx`, which links to the System check).
 - `src/sources/`: `useAppExplain(groupKey)`, `useScopeExplain()`, `pickEmptyReason(capability, scope, {includePartial})`,
   `<SourceBadge badge short?>`, `<BuildBadgeChip>`, `<SourcesPanel item>`, `<WhatCanISeeButton groupKey>` (the ⓘ popover),
   `<ScopeSourcesButton>` (top bar), `<ExplainEmpty capability fallback onAction? includePartial?>` (renders the reasons when
@@ -289,7 +291,7 @@ with `tCode(code, data, fallback)`. Default timeouts: 15 s; `device.action` 30 s
 | `api.bodyUrl(id, 'request'|'response', { download? })` | raw body URL (for `<img src>`, download links) |
 | `api.searchNetwork(text, { ids?, caseSensitive?, signal? })` | `POST /api/network/search` → `string[]` |
 | `api.exportUrl({ deviceId?, appId?, bundleId?, mask? })` | `GET /api/export` URL. Masked unless `mask: false` (adds `mask=0`); a masked file ends with `"masked": true`. An app scope exports by `deviceId` + `bundleId` (every session plus its device lines), an exact one by `appId` (`scopeExportParams` in `features/transfer/dataExport.ts`) |
-| `api.importSession(input, signal | { name?, signal? })` | `POST /api/import?name=<file name>` → `{ deviceIds }` (a `File` sends its own name; the server labels the imported devices with it) |
+| `api.importSession(input, signal | { name?, signal? })` | `POST /api/import?name=<file name>` → `ImportResult { deviceIds, imported?, dropped?, evicted? }` (a `File` sends its own name; the server labels the imported devices with it). `shell/actions.ts` warns when `dropped` / `evicted` is above 0 and links to Settings → Logs. A `.har` (or a `.json` that `looksLikeHar`) is converted with `harToSession` (`@durbun/protocol`) and sent through the same call: requests only, no logs, no device actions |
 | `api.harExport(ids?, { mask?, signal? })` / `api.downloadHar(ids?, filename?, { mask? })` | `POST /api/har` `{ ids?, mask? }`: no `ids` = every request; masked unless `mask: false` (`log._durbun.masked`) |
 | `api.bugReport(req)` → `{ blob, fileName, skipped }` | `POST /api/bug-report` (`BugReportRequest`): one .zip with `report.md`, `logs.txt`, `requests.har`, the screenshot, an iOS crash report and `recording.durbun.json` of the window; masked unless `mask: false`; `skipped` names parts the server could not add (`X-Durbun-Skipped`). `api.exportUrl` also takes `fromTs` / `toTs` on the server (a bad value: `export.invalidTime`) |
 | `api.doctor()` | `GET /api/doctor` → `ToolCheck[]` |
@@ -495,3 +497,18 @@ monospace content at `var(--log-fs)`, row height `var(--row-h)`. Detail panes: `
 - Dates/times in logs: `formatTime(ts, { format: prefs.timeFormat, base, prev })`; sizes/durations via
   `formatBytes`/`formatDuration` (they follow the UI language: "4,2 KB", "1,23 sn").
 - Don't import from `src/shell/*` (shell internals may change); everything public is in the three barrels.
+- Contrast: `styles/contrast.test.ts` keeps `--text-muted` and `--text-subtle` at 4.5:1 or more on every background
+  token in the dark, light and OS-fallback blocks (and subtle below muted). Change those tokens only with that test.
+- Keyboard: the sidebar is one Tab stop (roving `tabIndex`, arrows, Home / End, `i` opens "Ne görebilirim?" on an app
+  row); the network grid is focusable with `aria-activedescendant`, and Shift+F10 / the ContextMenu key opens the
+  selected row's menu. Keep both when changing those views.
+- Crash banners: `isBannerCrash` (`features/logs/live.ts`) = crashes plus memory kills by the system
+  (`data.termination` jetsam / low-memory, `is:oom` in queries); Flutter layout overflow (`isLayoutError`) is a
+  quiet error, never a crash banner.
+- Performance charts: a drag selects a time range (`TimeChart onSelectRange`); `features/perf/RangeBar.tsx` links to
+  the first error, the logs and the requests of that range (`rangeContents`).
+- Flows: one-click starter flows live in `features/flows/model/starters.ts` (each must pass `validateFlow`);
+  `model/aiFeedback.ts` turns import problems into English text for the AI and diffs an imported flow against the
+  one it replaces.
+- Mac app prefs: `shell/desktopPrefs.ts` reads `window.durbunDesktop.prefs` (`get` / `set`, refreshed on the
+  `durbun:command` event `prefs-changed`; `null` = not asked yet). Without the bridge the Settings rows are hidden.

@@ -45,6 +45,9 @@ export interface TimeChartProps {
   /** Overlay text when there is nothing to draw. */
   emptyText?: string;
   onPlotRect?: (rect: PlotRect) => void;
+  /** Dragging across the plot picks a time range (ms); the selection stays drawn until `selection` is null. */
+  onSelectRange?: (from: number, to: number) => void;
+  selection?: readonly [number, number] | null;
   ariaLabel: string;
 }
 
@@ -108,10 +111,11 @@ export const TimeChart = memo(function TimeChart(props: TimeChartProps) {
       height: Math.max(60, Math.floor(rect.height)),
       padding: [10, 10, 0, 0],
       legend: { show: false },
-      select: { show: false, left: 0, top: 0, width: 0, height: 0 },
+      // A horizontal drag selects a time range (no zoom: the window buttons own the scale).
+      select: { show: !!p.onSelectRange, left: 0, top: 0, width: 0, height: 0 },
       cursor: {
         sync: { key: p.syncKey, setSeries: false },
-        drag: { x: false, y: false, setScale: false },
+        drag: { x: !!p.onSelectRange, y: false, setScale: false, dist: 6 },
         focus: { prox: -1 },
         y: false,
         points: {
@@ -188,6 +192,15 @@ export const TimeChart = memo(function TimeChart(props: TimeChartProps) {
           },
         ],
         setSize: [(u) => report(u)],
+        setSelect: [
+          (u) => {
+            const sel = u.select;
+            if (!latest.current.onSelectRange || sel.width < 4) return;
+            const from = u.posToVal(sel.left, 'x');
+            const to = u.posToVal(sel.left + sel.width, 'x');
+            if (Number.isFinite(from) && Number.isFinite(to) && to > from) latest.current.onSelectRange(Math.round(from * 1000), Math.round(to * 1000));
+          },
+        ],
         draw: [(u) => drawAnnotations(u)],
         setCursor: [(u) => updateTip(u)],
       },
@@ -294,6 +307,17 @@ export const TimeChart = memo(function TimeChart(props: TimeChartProps) {
     if (!u) return;
     u.setData([xs as number[], ...ys.map((y) => y as (number | null)[])] as uPlot.AlignedData);
   }, [xs, ys, xRange]);
+
+  // The page cleared the range (or picked one on another chart): drop this chart's drawn selection.
+  const selection = props.selection;
+  const selFrom = selection?.[0];
+  useEffect(() => {
+    const u = uRef.current;
+    if (!u || !u.select || u.select.width <= 0) return;
+    // Keep the drawing only on the chart the range was dragged on.
+    const drawnFrom = u.posToVal(u.select.left, 'x') * 1000;
+    if (selFrom === undefined || Math.abs(drawnFrom - selFrom) > 1) u.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false);
+  }, [selFrom]);
 
   // Annotation-only changes need a redraw.
   useEffect(() => {

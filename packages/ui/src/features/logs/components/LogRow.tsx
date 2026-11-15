@@ -13,6 +13,7 @@ import {
   History,
   Hourglass,
   Layers,
+  MemoryStick,
   OctagonX,
   Play,
   Plug,
@@ -34,7 +35,7 @@ import { frameDisplayText, parseStack, type AppIdentity, type StackLine } from '
 import { highlightSegments, type Highlighter } from '../model/highlight';
 import { flapSummary, flapTimeRange, systemText } from '../model/systemText';
 import { isPreviousLaunch, type LogRow } from '../model/types';
-import { crashWhen, crashedBuildOf, recordUnsymbolicated } from '../model/records';
+import { appStartupOf, crashWhen, crashedBuildOf, memoryKill, recordUnsymbolicated } from '../model/records';
 import { entrySourceText, isDeviceCrashRecord } from '../../../sources/text';
 import type { TimeFormat } from '../../../data';
 
@@ -205,6 +206,25 @@ function Badges({ row, a, expanded }: { row: LogRow; a: EntryAnalysis; expanded:
       <button key="ln" type="button" tabIndex={-1} className={clsx('lg-badge', open && 'is-open')} data-act="lines" title={open ? t('logs.row.collapse') : t('logs.row.expandLines')}>
         {open ? t('logs.row.collapse') : t('logs.row.moreLines', { count: a.extra })}
       </button>,
+    );
+  }
+  const startup = appStartupOf(row.e);
+  if (startup) {
+    const ms = startup.total ?? startup.ms;
+    parts.push(
+      <span key="su" className="lg-twin lg-startup tnum" title={t(startup.fullyDrawn ? 'logs.row.startupFullTip' : 'logs.row.startupTip')}>
+        <Hourglass size={10} aria-hidden />
+        <span className="lg-twin__text">{t(startup.fullyDrawn ? 'logs.row.startupFull' : 'logs.row.startup', { time: formatDuration(ms) })}</span>
+      </span>,
+    );
+  }
+  const kill = memoryKill(row.e);
+  if (kill) {
+    parts.push(
+      <span key="oom" className={clsx('lg-twin', 'lg-memkill', kill.visible && 'is-visible')} title={t('logs.row.memoryKillTip')}>
+        <MemoryStick size={10} aria-hidden />
+        <span className="lg-twin__text">{t('logs.row.memoryKill')}</span>
+      </span>,
     );
   }
   if (row.twin) {

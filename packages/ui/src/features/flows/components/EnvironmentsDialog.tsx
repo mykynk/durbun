@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
 import { ClipboardPaste, CopyPlus, Eye, EyeOff, Globe, Lock, Plus, Trash, X } from 'lucide-react';
-import { VAR_NAME_RE, type FlowEnvironment, type FlowEnvironments } from '@durbun/protocol';
-import { Button, Callout, Checkbox, Dialog, IconButton, Tooltip, confirm, toast, useShortcut } from '../../../components';
-import { useT } from '../../../i18n';
+import { VAR_NAME_RE, type FlowEnvironment, type FlowEnvironmentTls, type FlowEnvironments } from '@durbun/protocol';
+import { Button, Callout, Checkbox, Dialog, IconButton, Tooltip, confirm, pickFiles, toast, useShortcut } from '../../../components';
+import { ApiError } from '../../../data';
+import { tCode, useT } from '../../../i18n';
 import { flowErrorText } from '../model/errors';
 import { emptyEnvironments, newEnvId, parseEnvText, saveEnvironments, useEnvironments } from '../model/envStore';
 
@@ -20,6 +21,7 @@ export function EnvironmentsDialog({ open, onClose, usedKeys = [] }: Environment
   const server = useEnvironments();
   const [draft, setDraft] = useState<FlowEnvironments | null>(null);
   const [current, setCurrent] = useState<string | null>(null);
+  const [caError, setCaError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [reveal, setReveal] = useState<ReadonlySet<string>>(new Set());
   const [pasting, setPasting] = useState<string | null>(null);
@@ -80,6 +82,8 @@ export function EnvironmentsDialog({ open, onClose, usedKeys = [] }: Environment
       toast.success(t('flows.env.saved'));
       onClose();
     } catch (err) {
+      // A certificate that does not parse: said next to the field as well (the save was refused).
+      if (err instanceof ApiError && err.code === 'env.tls.invalidCa') setCaError(flowErrorText(err));
       toast.error(t('flows.env.saveFailed'), { description: flowErrorText(err) });
     } finally {
       setSaving(false);
@@ -283,11 +287,78 @@ export function EnvironmentsDialog({ open, onClose, usedKeys = [] }: Environment
                   </div>
                 ) : null}
                 <p className="fl-insp__hint">{t('flows.env.secretNote')}</p>
+                <TlsSection
+                  env={env}
+                  error={caError}
+                  onChange={(tls) => {
+                    setCaError(null);
+                    updateEnv(env.id, (x) => {
+                      const { tls: _old, ...rest } = x;
+                      return tls ? { ...rest, tls } : rest;
+                    });
+                  }}
+                />
               </>
             )}
           </div>
         </div>
       )}
     </Dialog>
+  );
+}
+
+/** The environment's certificate setting: extra trusted certificates, or no verification (with its warning). */
+function TlsSection({ env, error, onChange }: { env: FlowEnvironment; error: string | null; onChange(tls: FlowEnvironmentTls | undefined): void }) {
+  const t = useT();
+  const tls = env.tls ?? {};
+  const set = (patch: FlowEnvironmentTls) => {
+    const next = { ...tls, ...patch };
+    if (!next.ca?.trim()) delete next.ca;
+    if (!next.skipVerify) delete next.skipVerify;
+    onChange(Object.keys(next).length ? next : undefined);
+  };
+  const pick = async () => {
+    const [file] = await pickFiles({ accept: '.pem,.crt,.cer,.txt' });
+    if (file) set({ ca: await file.text() });
+  };
+  return (
+    <section className="fl-env__tls" aria-labelledby={`tls-${env.id}`}>
+      <h4 id={`tls-${env.id}`} className="fl-env__tls-title">
+        {t('flows.env.tls.title')}
+      </h4>
+      <p className="fl-insp__hint">{t('flows.env.tls.hint')}</p>
+      <label className="fl-env__tls-label" htmlFor={`tls-ca-${env.id}`}>
+        {t('flows.env.tls.ca')}
+      </label>
+      <textarea
+        id={`tls-ca-${env.id}`}
+        className={clsx('fl-input mono', error && 'is-invalid')}
+        rows={4}
+        value={tls.ca ?? ''}
+        placeholder={t('flows.env.tls.caPlaceholder')}
+        aria-invalid={!!error || undefined}
+        aria-describedby={`tls-ca-hint-${env.id}`}
+        onChange={(e) => set({ ca: e.target.value })}
+      />
+      <div className="fl-env__tls-row">
+        <span id={`tls-ca-hint-${env.id}`} className={error ? 'fl-insp__error' : 'fl-insp__hint'}>
+          {error ?? t('flows.env.tls.caHint')}
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => void pick()}>
+          {t('flows.env.tls.pickFile')}
+        </Button>
+        {tls.ca ? (
+          <Button size="sm" variant="ghost" onClick={() => set({ ca: '' })}>
+            {t('flows.env.tls.clear')}
+          </Button>
+        ) : null}
+      </div>
+      <Checkbox checked={!!tls.skipVerify} onChange={(c) => set({ skipVerify: c })} label={t('flows.env.tls.skip')} />
+      {tls.skipVerify ? (
+        <Callout tone="warn" compact>
+          {`${tCode('preflight.env.insecureTls', { env: env.name }, '')}. ${t('flows.env.tls.skipWarn')}`}
+        </Callout>
+      ) : null}
+    </section>
   );
 }

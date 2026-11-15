@@ -52,6 +52,8 @@ All notable changes to Dürbün are listed here. The format follows
 - A React Native app connected over Wi-Fi attaches to the plugged-in phone that runs it, and several iPhones
   no longer collapse into one row.
 - An app's session export holds the same lines as the app's view shows, device lines included.
+- A Flutter layout overflow is shown as an error line instead of a crash banner.
+- Secondary text has more contrast in both themes.
 - Slack: when Slack limits the rate, the message says how long to wait.
 - iOS SDK: URLSessions that differ only in their additional headers (a new token after each login) share one
   capture slot, so long-running apps no longer stop showing requests of new sessions. When the limit of
@@ -119,6 +121,16 @@ All notable changes to Dürbün are listed here. The format follows
   the check.
 - Importing a recording says how much of it fit when the file is larger than the log limit.
 - Demo mode comes with two example flows.
+- HAR files open in Dürbün: the import button, a drop on the window, or a `.har` file opened with the Mac
+  app.
+- Performance: drag a time range on a chart to jump to its first error, its log lines and its requests.
+- Flows: three starter flows in the new-flow menu and on the welcome page; an import that has problems can
+  be copied as a text for your AI tool, and an imported flow shows what it changes step by step.
+- Device tab: actions that are missing on a device are listed with the reason (a tool on the Mac or a
+  setting on the phone) and a link to System check.
+- Settings shows the Mac app's own options: check for updates automatically and open at login.
+- Keyboard: the sidebar is one Tab stop with arrow keys, `i` opens "What can I see?", and Shift+F10 opens a
+  request's menu in the network list. Flow steps announce their connections to screen readers.
 - Mac app: `.durbun` packages and backups and `.durbun.json` recordings open from Finder (double click, Open
   With, the Dock icon), also when Dürbün is not running; **File → Open…** (⌘O).
 - Mac app: **Help → Copy Diagnostic Info**; **Report an Issue…** fills in the version and environment and

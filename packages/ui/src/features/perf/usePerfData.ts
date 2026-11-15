@@ -87,6 +87,9 @@ export interface PerfData {
   annotations: Annotation[];
   logBuckets: RateBuckets;
   netBuckets: RateBuckets;
+  /** The target's log lines and requests (for "what happened in this range"). */
+  logInTarget: (e: LogEntry) => boolean;
+  netInTarget: (e: NetworkEntry) => boolean;
 }
 
 /** Re-render every `ms` while enabled (moving time window). */
@@ -295,10 +298,12 @@ export function usePerfData(opts: {
       annotations,
       logBuckets: traffic.buckets,
       netBuckets,
+      logInTarget: logPredicate,
+      netInTarget: netPredicate,
     };
     // tick: the window slides every second while live.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [samples, present, trafficRev, netBuckets, win, pausedAt, tick, flutterLike]);
+  }, [samples, present, trafficRev, netBuckets, win, pausedAt, tick, flutterLike, logPredicate, netPredicate]);
 }
 
 /** Label of an annotated log entry (system lines localized, crashes → their headline). */

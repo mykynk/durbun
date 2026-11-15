@@ -613,3 +613,27 @@ export function screenshotAvailability(device: Pick<DeviceInfo, 'id' | 'state' |
 export function explainRow(result: ExplainResult, capability: ExplainCapability): ExplainRow | undefined {
   return result.rows.find((r) => r.capability === capability);
 }
+
+/** A Device tab card that is hidden on this device, and why (a tool or a phone setting, not the platform). */
+export type HiddenDeviceCard = 'apps' | 'screenshot' | 'openUrl' | 'record' | 'logs';
+export type HiddenCardReason = 'developerMode' | 'devicectl' | 'screenshotTool' | 'screenRecord' | 'syslog';
+
+const IPHONE_CARDS: readonly { card: HiddenDeviceCard; action: string; reason: HiddenCardReason; devMode: boolean }[] = [
+  { card: 'apps', action: 'list-apps', reason: 'devicectl', devMode: false },
+  { card: 'openUrl', action: 'open-url', reason: 'devicectl', devMode: true },
+  { card: 'screenshot', action: 'screenshot', reason: 'screenshotTool', devMode: true },
+  { card: 'record', action: 'screen-record', reason: 'screenRecord', devMode: true },
+  { card: 'logs', action: 'logs-restart', reason: 'syslog', devMode: false },
+];
+
+/**
+ * Cards a connected iPhone would show with every tool in place, but does not: each with the likeliest reason
+ * (Developer Mode off, devicectl / Xcode missing, no screenshot tool, no idevicesyslog). Android and simulators get
+ * every action from adb / simctl, so a missing card there is the platform, not a tool, and is not listed.
+ */
+export function hiddenDeviceCards(device: Pick<DeviceInfo, 'id' | 'platform' | 'kind' | 'state' | 'stateCode' | 'actions'>): { card: HiddenDeviceCard; reason: HiddenCardReason }[] {
+  if (device.platform !== 'ios' || device.kind !== 'physical' || device.state !== 'online' || !device.id.startsWith('ios:')) return [];
+  const devModeOff = device.stateCode === 'device.developerModeOff';
+  const have = new Set<string>(device.actions);
+  return IPHONE_CARDS.filter((c) => !have.has(c.action)).map((c) => ({ card: c.card, reason: devModeOff && c.devMode ? 'developerMode' : c.reason }));
+}

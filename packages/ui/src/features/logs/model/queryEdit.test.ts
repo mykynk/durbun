@@ -35,7 +35,7 @@ describe('query editing from clicks', () => {
   });
 
   it('has the built-in presets from the brief', () => {
-    expect(PRESETS.map((p) => p.query)).toEqual(['level:error', 'is:crash | is:anr | (tag=:flutter level:error)', 'is:network', 'is:flutter', 'is:event']);
+    expect(PRESETS.map((p) => p.query)).toEqual(['level:error', 'is:crash | is:anr | (is:oom level:error) | (tag=:flutter level:error)', 'is:network', 'is:flutter', 'is:event']);
   });
 
   it('sanitizes persisted saved filters', () => {

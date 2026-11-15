@@ -25,7 +25,7 @@ const GROUP_ORDER: CheckGroup[] = ['durbun', 'android', 'ios', 'flutter', 'other
 export function checkGroup(id: string): CheckGroup {
   if (['node', 'data-dir', 'ui-build', 'port-http', 'port-sdk'].includes(id)) return 'durbun';
   if (id === 'adb' || id.startsWith('driver-android')) return 'android';
-  if (['simctl', 'usbmuxd', 'idevicesyslog', 'devicectl', 'idevicescreenshot', 'xcrun'].includes(id) || id.startsWith('driver-ios')) return 'ios';
+  if (['simctl', 'usbmuxd', 'idevicesyslog', 'devicectl', 'idevicescreenshot', 'idevicecrashreport', 'ideviceinstaller', 'xcrun'].includes(id) || id.startsWith('driver-ios')) return 'ios';
   if (id.startsWith('flutter')) return 'flutter';
   return 'other';
 }

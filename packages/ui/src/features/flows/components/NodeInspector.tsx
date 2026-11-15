@@ -1,8 +1,9 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { ChevronDown, ChevronRight, Copy, CopyPlus, ExternalLink, EyeOff, Eye, Play, Trash, TriangleAlert } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, CopyPlus, ExternalLink, EyeOff, Eye, Play, Trash, TriangleAlert, X } from 'lucide-react';
 import {
   DEVICE_ACTION_SUPPORT,
+  flowNodePorts,
   flowNodeSpec,
   type FlowDoc,
   type FlowIssue,
@@ -14,7 +15,7 @@ import {
 import { Button, Callout, CopyButton, IconButton, JsonTree, Select, Toggle, Tooltip, copyText, toast, formatDuration } from '../../../components';
 import { api, ui, useSlackStatus } from '../../../data';
 import { tCode, useLanguage, useT } from '../../../i18n';
-import { renameNode, renameProblem, updateNode } from '../model/graph';
+import { connect, connectProblem, edgeKey, linksInto, removeEdges, renameNode, renameProblem, updateNode } from '../model/graph';
 import { nodeIcon } from '../model/icons';
 import { statusKey, stepError, stepText } from '../model/run';
 import { GROUP_COLOR, formatSpan, issueText, nodeDescription, nodeName, nodeTitle, optionLabel, outputText, paramHint, paramLabel, paramPlaceholder } from '../model/text';
@@ -155,6 +156,8 @@ export function NodeInspector(props: NodeInspectorProps) {
 
       <Outputs flow={flow} node={node} flows={flows} />
 
+      <Connections flow={flow} node={node} apply={apply} />
+
       {lastStep ? <LastStep step={lastStep} /> : null}
 
       <button type="button" className="fl-insp__more" onClick={() => setAdvanced((a) => !a)} aria-expanded={advanced}>
@@ -182,6 +185,86 @@ function Section({ title, children, aside }: { title: string; children: ReactNod
       </div>
       {children}
     </section>
+  );
+}
+
+/* ───────────── connections ───────────── */
+
+/**
+ * Where each output of this step goes, editable without the pointer: a target picker per port and a remove button
+ * per link (the canvas draws the same edges). Also which steps lead here.
+ */
+function Connections({ flow, node, apply }: { flow: FlowDoc; node: FlowNode; apply: NodeInspectorProps['apply'] }) {
+  const t = useT();
+  const lang = useLanguage();
+  const ports = flowNodePorts(node.type);
+  const byId = new Map(flow.nodes.map((n) => [n.id, n]));
+  const name = (id: string) => {
+    const n = byId.get(id);
+    return n ? nodeName(n, lang) : id;
+  };
+  const incoming = linksInto(flow, node.id);
+  if (ports.length === 0 && incoming.length === 0) return null;
+  return (
+    <Section title={t('flows.inspector.connections')}>
+      <p className="fl-insp__hint">{t('flows.inspector.connectionsHint')}</p>
+      <div className="fl-conn">
+        {ports.map((port) => {
+          const portName = t(`flows.port.${port}`);
+          const edges = flow.edges.filter((e) => e.from === node.id && (e.port ?? 'out') === port);
+          const targets = flow.nodes.filter((n) => !connectProblem(flow, node.id, port, n.id));
+          return (
+            <div key={port} className="fl-conn__port" role="group" aria-label={portName}>
+              <span className="fl-conn__label">{portName}</span>
+              <div className="fl-conn__links">
+                {edges.length === 0 ? <span className="fl-conn__none">{t('flows.inspector.notConnected')}</span> : null}
+                {edges.map((e) => (
+                  <span key={edgeKey(e)} className="fl-conn__link">
+                    <span className="truncate">{name(e.to)}</span>
+                    <IconButton
+                      icon={X}
+                      size="xs"
+                      label={t('flows.inspector.removeLink', { port: portName, target: name(e.to) })}
+                      onClick={() => apply((f) => removeEdges(f, new Set([edgeKey(e)])))}
+                    />
+                  </span>
+                ))}
+                <Select
+                  size="sm"
+                  value=""
+                  disabled={targets.length === 0}
+                  aria-label={t('flows.inspector.connectTo', { port: portName })}
+                  onChange={(ev) => {
+                    const to = ev.target.value;
+                    if (to) apply((f) => connect(f, node.id, port, to));
+                  }}
+                >
+                  <option value="">{targets.length ? t('flows.inspector.addLink') : t('flows.inspector.noTargets')}</option>
+                  {targets.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {nodeName(n, lang)} ({n.id})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+          );
+        })}
+        {incoming.length ? (
+          <div className="fl-conn__port">
+            <span className="fl-conn__label">{t('flows.inspector.incoming')}</span>
+            <div className="fl-conn__links">
+              {incoming.map((l) => (
+                <span key={`${l.from}:${l.port}`} className="fl-conn__from">
+                  {name(l.from)}
+                  {l.port !== 'out' ? <span className="muted"> · {t(`flows.port.${l.port}`)}</span> : null}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </Section>
   );
 }
 
