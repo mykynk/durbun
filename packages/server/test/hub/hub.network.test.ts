@@ -270,3 +270,52 @@ describe('desktop requests', () => {
     expect(hub.getNetworkDetail('replay:1')!.responseBody!.data).toBe('{"id":4821}');
   });
 });
+
+describe('request rows follow the outcome (Logs "errors only")', () => {
+  const rowOf = (h: Hub, netId: string) => h.getLogs().find((l) => l.kind === 'network' && l.netId === netId)!;
+
+  it('raises the row: 5xx and network errors → error, 4xx → warn; keeps id and position', () => {
+    hub = makeHub();
+    hub.upsertDevice(device('android:A1'));
+    const app = hub.registerApp(appInput('android:A1'));
+    for (const id of ['ok', 'missing', 'boom', 'down', 'gone', 'stopped', 'open']) hub.netRequest(app.id, req(id));
+    const ids = hub.getLogs().map((l) => l.id);
+    expect(rowOf(hub, `${app.id}:ok`).level).toBe('info');
+    hub.netResponse(app.id, res('ok'));
+    hub.netResponse(app.id, res('missing', { status: 404 }));
+    hub.netResponse(app.id, res('boom', { status: 503 }));
+    hub.netError(app.id, { type: 'net.error', id: 'down', ts: 10_500, error: 'Connection refused' });
+    hub.netError(app.id, { type: 'net.error', id: 'stopped', ts: 10_500, error: 'Cancelled', cancelled: true });
+    expect(rowOf(hub, `${app.id}:ok`).level).toBe('info');
+    expect(rowOf(hub, `${app.id}:missing`).level).toBe('warn');
+    expect(rowOf(hub, `${app.id}:boom`).level).toBe('error');
+    expect(rowOf(hub, `${app.id}:down`).level).toBe('error');
+    expect(rowOf(hub, `${app.id}:stopped`).level).toBe('info');
+    expect(rowOf(hub, `${app.id}:open`).level).toBe('info');
+    // A late response after a failure upgrades the request and its row.
+    hub.netResponse(app.id, res('down'));
+    expect(rowOf(hub, `${app.id}:down`).level).toBe('info');
+    // The app goes away: its pending request fails, and so does its row.
+    hub.markAppDisconnected(app.id);
+    expect(rowOf(hub, `${app.id}:open`).level).toBe('error');
+    // Rows changed in place: same ids, same order (new lines only after them).
+    expect(hub.getLogs().slice(0, ids.length).map((l) => l.id)).toEqual(ids);
+  });
+
+  it('desktop requests are recorded with their level; imports of older files get it from the request', () => {
+    hub = makeHub();
+    hub.recordDesktopRequest({ id: '', deviceId: '', source: 'replay', method: 'GET', url: 'https://x.test/a', host: 'x.test', path: '/a', startTs: 1, state: 'complete', status: 500, requestHeaders: [], hasRequestBody: false, hasResponseBody: false });
+    expect(hub.getLogs().at(-1)).toMatchObject({ kind: 'network', level: 'error' });
+
+    hub.upsertDevice(device('android:A1'));
+    const app = hub.registerApp(appInput('android:A1'));
+    hub.netRequest(app.id, req('1'));
+    hub.netResponse(app.id, res('1', { status: 401 }));
+    const file = hub.exportSession({ appId: app.id });
+    expect(file.logs.find((l) => l.kind === 'network')!.level).toBe('warn');
+    // An older file wrote every request row as info.
+    const old = { ...file, logs: file.logs.map((l) => (l.kind === 'network' ? { ...l, level: 'info' as const } : l)) };
+    const { deviceIds } = hub.importSession(JSON.parse(JSON.stringify(old)), 'old');
+    expect(hub.getLogs().find((l) => l.deviceId === deviceIds[0] && l.kind === 'network')!.level).toBe('warn');
+  });
+});

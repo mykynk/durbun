@@ -6,6 +6,7 @@
 import { isTextContentType, type Header, type NetworkDetail, type NetworkEntry, type ReplayOverrides, type WireBody } from '@durbun/protocol';
 import type { Hub } from '../types';
 import { headerValue } from './har';
+import { assertNotOwnServer, DESKTOP_REQUEST_HEADER, DESKTOP_REQUEST_HEADER_VALUE, isThisMacHostname, OwnServerRequestError, type OwnTargetGuard } from './ownTargets';
 
 export const REPLAY_TIMEOUT_MS = 30_000;
 export const DESKTOP_DEVICE_ID = 'desktop';
@@ -26,6 +27,13 @@ const DROPPED_REQUEST_HEADERS = new Set([
 ]);
 const TOKEN_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 const BODYLESS_METHODS = new Set(['GET', 'HEAD']);
+/** Redirects followed per request (the fetch standard's limit). */
+export const MAX_REDIRECTS = 20;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+/** Headers that describe the body: dropped when a redirect turns the request into a GET (fetch standard). */
+const BODY_HEADERS = new Set(['content-type', 'content-encoding', 'content-language', 'content-location']);
+/** Credentials that never follow a redirect to another origin (as undici does). */
+const CROSS_ORIGIN_DROPPED = new Set(['authorization', 'proxy-authorization', 'cookie']);
 
 export class ReplayError extends Error {
   constructor(
@@ -176,6 +184,8 @@ export interface ReplayOptions {
   maxBodyBytes: number;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /** Refuses requests to Dürbün's own ports on this Mac (ownTargets.ts). */
+  guard?: OwnTargetGuard;
 }
 
 /** A request the Mac sends itself (replay, flows). */
@@ -205,6 +215,11 @@ export interface DesktopSendOptions {
   record?: boolean;
   /** Rewrites the texts of the recorded copy (URL, headers, text bodies, error): a flow masks its secrets. */
   redact?: (text: string) => string;
+  /**
+   * Refuses requests to Dürbün's own ports on this Mac, before the first hop and every redirect
+   * (OwnServerRequestError, nothing recorded).
+   */
+  guard?: OwnTargetGuard;
 }
 
 export interface DesktopResponse {
@@ -237,8 +252,69 @@ function redactDetail(detail: NetworkDetail, redact: (text: string) => string): 
 
 let replayCounter = 0;
 
-/** Send a request from the Mac and record it on the virtual 'desktop' device. Network failures come back as a failed detail. */
-export async function sendDesktopRequest(opts: DesktopSendOptions, req: DesktopRequest): Promise<DesktopResponse> {
+const MARKER = DESKTOP_REQUEST_HEADER.toLowerCase();
+
+/** The headers without any desktop marker (one the caller passed, e.g. from a recorded request, is dropped). */
+function withoutMarker(headers: Header[]): Header[] {
+  return headers.some(([k]) => k.toLowerCase() === MARKER) ? headers.filter(([k]) => k.toLowerCase() !== MARKER) : headers;
+}
+
+/**
+ * The headers one hop sends: the desktop marker only when the hop's host is this Mac (a local proxy could forward
+ * to Dürbün's port; checkLocalAccess refuses marked requests). Remote targets never see it: the replay stays as
+ * close to the original as possible, and their Host header already defeats DNS rebinding.
+ */
+function hopHeaders(headers: Header[], url: URL): Header[] {
+  return isThisMacHostname(url.hostname) ? [...headers, [DESKTOP_REQUEST_HEADER, DESKTOP_REQUEST_HEADER_VALUE]] : headers;
+}
+
+/**
+ * fetch with redirects followed here instead of by undici, so each hop's target is checked (ownTargets.ts) and
+ * carries the desktop marker only when it is this Mac (hopHeaders).
+ * Follows the fetch standard: at most MAX_REDIRECTS hops; 303 (and 301/302 after a POST) turn into a GET
+ * without a body; credentials are dropped when the origin changes.
+ */
+async function fetchFollowing(
+  doFetch: typeof fetch,
+  first: URL,
+  init: { method: string; headers: Header[]; body?: Buffer; signal: AbortSignal },
+  redirect: 'follow' | 'manual',
+  guard: OwnTargetGuard | undefined,
+): Promise<{ res: Response; url: string }> {
+  let url = first;
+  let { method, headers, body } = init;
+  await assertNotOwnServer(url, guard);
+  for (let hop = 0; ; hop++) {
+    const res = await doFetch(url.toString(), { method, headers: hopHeaders(headers, url), body, redirect: 'manual', signal: init.signal });
+    const location = res.headers.get('location');
+    if (redirect === 'manual' || !REDIRECT_STATUSES.has(res.status) || location === null) return { res, url: url.toString() };
+    await res.body?.cancel().catch(() => undefined);
+    if (hop >= MAX_REDIRECTS) throw new Error(`Too many redirects (more than ${MAX_REDIRECTS})`);
+    let next: URL;
+    try {
+      next = new URL(location, url);
+    } catch {
+      throw new Error(`Invalid redirect location "${location}"`);
+    }
+    if (next.protocol !== 'http:' && next.protocol !== 'https:') throw new Error(`Redirect to an unsupported URL (${next.protocol})`);
+    await assertNotOwnServer(next, guard, 'redirect');
+    if (((res.status === 301 || res.status === 302) && method === 'POST') || (res.status === 303 && method !== 'GET' && method !== 'HEAD')) {
+      method = 'GET';
+      body = undefined;
+      headers = headers.filter(([k]) => !BODY_HEADERS.has(k.toLowerCase()));
+    }
+    if (next.origin !== url.origin) headers = headers.filter(([k]) => !CROSS_ORIGIN_DROPPED.has(k.toLowerCase()));
+    url = next;
+  }
+}
+
+/**
+ * Send a request from the Mac and record it on the virtual 'desktop' device. Network failures come back as a
+ * failed detail; a target that is Dürbün's own server throws OwnServerRequestError (nothing sent or recorded).
+ */
+export async function sendDesktopRequest(opts: DesktopSendOptions, input: DesktopRequest): Promise<DesktopResponse> {
+  // The recorded copy shows what the user sent: the marker is added per hop (fetchFollowing), never recorded.
+  const req: DesktopRequest = { ...input, headers: withoutMarker(input.headers) };
   const timeoutMs = opts.timeoutMs ?? REPLAY_TIMEOUT_MS;
   const doFetch = opts.fetchImpl ?? fetch;
   const { host, path } = splitUrl(req.url);
@@ -272,15 +348,15 @@ export async function sendDesktopRequest(opts: DesktopSendOptions, req: DesktopR
   const t0 = performance.now();
   try {
     const timeout = AbortSignal.timeout(timeoutMs);
-    const res = await doFetch(req.url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body,
-      redirect: opts.redirect ?? 'follow',
-      signal: opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout,
-    });
+    const { res, url: reached } = await fetchFollowing(
+      doFetch,
+      new URL(req.url),
+      { method: req.method, headers: req.headers, body: req.body, signal: opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout },
+      opts.redirect ?? 'follow',
+      opts.guard,
+    );
     const tHeaders = performance.now();
-    if (typeof res.url === 'string' && res.url) finalUrl = res.url;
+    finalUrl = reached;
     const read = await readCapped(res, readCap);
     body = read.data;
     size = read.size;
@@ -299,6 +375,7 @@ export async function sendDesktopRequest(opts: DesktopSendOptions, req: DesktopR
     detail.hasResponseBody = size > 0;
     if (size > 0) detail.responseBody = toWireBody(body.subarray(0, recordCap), size, responseContentType);
   } catch (err) {
+    if (err instanceof OwnServerRequestError) throw err;
     const tEnd = performance.now();
     detail.state = 'failed';
     detail.error = opts.signal?.aborted ? 'Cancelled' : describeFetchError(err, timeoutMs);
@@ -319,7 +396,7 @@ export async function replayRequest(
   if (!original) throw new ReplayError(`Request ${id} is no longer available`, 'net.unknown');
   const prepared = prepareReplay(original, overrides);
   const res = await sendDesktopRequest(
-    { hub: opts.hub, maxBodyBytes: opts.maxBodyBytes, timeoutMs: opts.timeoutMs, fetchImpl: opts.fetchImpl, source: 'replay', idPrefix: 'replay' },
+    { hub: opts.hub, maxBodyBytes: opts.maxBodyBytes, timeoutMs: opts.timeoutMs, fetchImpl: opts.fetchImpl, guard: opts.guard, source: 'replay', idPrefix: 'replay' },
     { method: prepared.method, url: prepared.url, headers: prepared.headers, body: prepared.body },
   );
   return { entry: res.entry!, warnings: prepared.warnings };

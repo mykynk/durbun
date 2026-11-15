@@ -37,6 +37,7 @@ import {
 } from '@durbun/protocol';
 import { appScope } from '../hub/appScope';
 import { sendDesktopRequest } from '../http/replay';
+import { OwnServerRequestError } from '../http/ownTargets';
 import type { CommandReply } from '../http/commands';
 import type { Hub } from '../types';
 import { AbortedError, shortHash, shortText, sleep } from './util';
@@ -71,6 +72,8 @@ export interface FlowServices {
   slack?: { status(): Promise<{ configured: boolean }>; send(raw: unknown): Promise<void> };
   maxBodyBytes(): number;
   fetchImpl?: typeof fetch;
+  /** Dürbün's own listening ports: http.request never goes to them on this Mac (http/ownTargets.ts). */
+  ownPorts?: () => number[];
   now(): number;
 }
 
@@ -469,7 +472,7 @@ const httpRequest: Executor = async (api) => {
   }
 
   const timeoutMs = ownTimeout(api, 30_000);
-  const res = await sendDesktopRequest(
+  const send = sendDesktopRequest(
     {
       hub: api.services.hub,
       maxBodyBytes: api.services.maxBodyBytes(),
@@ -483,9 +486,14 @@ const httpRequest: Executor = async (api) => {
       record: api.flowRecordRequests,
       // The Network tab copy can be exported or sent to Slack: it never carries the run's secrets.
       redact: (text) => api.mask(text),
+      guard: { ownPorts: api.services.ownPorts ?? (() => []) },
     },
     { method, url: url.toString(), headers, body },
   );
+  const res = await send.catch((err: unknown) => {
+    if (err instanceof OwnServerRequestError) throw new StepError(api.mask(err.message), err.code, { method, url: api.mask(url.toString()), port: err.params.port });
+    throw err;
+  });
   if (api.signal.aborted) throw new AbortedError();
   const d = res.detail;
   const netId = res.entry?.id;

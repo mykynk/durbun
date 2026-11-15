@@ -38,6 +38,15 @@ export const isRecord = (v: unknown): v is Record<string, unknown> =>
 export const finite = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 export const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
 
+/**
+ * The one version rule of session files (HTTP import and the hub alike): a positive whole number. Version 1 is
+ * the current format; newer files import too, their unknown fields ignored. Returns the problem, if any.
+ */
+export function sessionVersionProblem(version: unknown): string | undefined {
+  if (typeof version === 'number' && Number.isInteger(version) && version >= 1) return undefined;
+  return `Unsupported session file version ${String(version)}`;
+}
+
 export function normLevel(level: unknown): LogLevel {
   return typeof level === 'string' && LEVELS.has(level) ? (level as LogLevel) : 'info';
 }

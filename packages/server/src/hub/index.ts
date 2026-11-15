@@ -12,6 +12,7 @@ import type {
   DeviceApp,
   DeviceInfo,
   LogEntry,
+  LogLevel,
   LogOrigin,
   MetricSample,
   NetworkDetail,
@@ -21,7 +22,7 @@ import type {
   SessionExport,
   UiNotice,
 } from '@durbun/protocol';
-import { levelRank } from '@durbun/protocol';
+import { levelRank, networkLogLevel } from '@durbun/protocol';
 import type { ClearEvent, CreateHubOptions, DeviceLogInput, Hub, HubChange, SystemLogInput } from '../types';
 import { SERVER_VERSION } from '../version';
 import { appScope } from './appScope';
@@ -52,6 +53,7 @@ import {
   sanitizeImportedDevice,
   sanitizeImportedLog,
   sanitizeImportedNetwork,
+  sessionVersionProblem,
   toMessage,
 } from './sanitize';
 
@@ -85,6 +87,8 @@ export const IMPORT_DEVICE_PREFIX = 'import:';
 export const IMPORT_NAME_PREFIX = '📁 ';
 
 const ERROR_RANK = levelRank('error');
+/** Request rows whose level may still follow their outcome (oldest dropped first: a request that never ends). */
+const MAX_OPEN_NET_ROWS = 10_000;
 const MAX_PROCESSES_PER_DEVICE = 4096;
 
 const pidKey = (deviceId: string, pid: number) => `${deviceId}\u0000${pid}`;
@@ -126,6 +130,12 @@ export function createHub(opts: CreateHubOptions): Hub {
   const keptCrashes = new RingBuffer<LogEntry>(MAX_KEPT_CRASH_LOGS);
   const maxKeptBytes = opts.maxKeptCrashBytes !== undefined && opts.maxKeptCrashBytes > 0 ? opts.maxKeptCrashBytes : MAX_KEPT_CRASH_BYTES;
   let keptBytes = 0;
+  /**
+   * The log row of each request whose outcome may still change (net id → row, insertion order, at most
+   * MAX_OPEN_NET_ROWS): its level follows the outcome (networkLogLevel) when the response or error arrives.
+   * The row is changed in place: it keeps its id and position, history and exports carry the new level.
+   */
+  const openNetRows = new Map<string, LogEntry>();
   const devices = new Map<string, DeviceInfo>();
   const apps = new Map<string, AppSession>();
   /** deviceId + sessionKey → app id (session reuse on reconnect). */
@@ -202,6 +212,20 @@ export function createHub(opts: CreateHubOptions): Hub {
   /** Every stored row in id order: kept crashes (older than the ring) first, then the ring. */
   function allLogs(): LogEntry[] {
     return keptCrashes.size === 0 ? logs.toArray() : keptCrashes.toArray().concat(logs.toArray());
+  }
+
+  function trackNetRow(netId: string, row: LogEntry): void {
+    openNetRows.delete(netId);
+    openNetRows.set(netId, row);
+    if (openNetRows.size > MAX_OPEN_NET_ROWS) openNetRows.delete(openNetRows.keys().next().value!);
+  }
+
+  /** The request's outcome arrived: its row takes the outcome's level; a completed request's row is final. */
+  function settleNetRow(entry: NetworkEntry): void {
+    const row = openNetRows.get(entry.id);
+    if (!row) return;
+    row.level = networkLogLevel(entry);
+    if (entry.state === 'complete') openNetRows.delete(entry.id);
   }
 
   function appendLogs(entries: LogEntry[], tap = true): void {
@@ -600,6 +624,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     app.connected = false;
     app.disconnectedAt = Date.now();
     const failed = network.failPending(id, DISCONNECTED_ERROR, appLastTs.get(id));
+    for (const entry of failed) settleNetRow(entry);
     appLastTs.delete(id); // only needed for requests still pending; a reconnect notes it again
     batcher.appChanged(app);
     pushSystem(app.deviceId, appDisconnectedLine(app, deviceName(app.deviceId), failed.length));
@@ -747,20 +772,22 @@ export function createHub(opts: CreateHubOptions): Hub {
       };
       attachAppProcess(row, app);
       appendLogs([row]);
+      if (entry.state === 'pending') trackNetRow(id, row);
+      else row.level = networkLogLevel(entry);
     },
 
     netResponse(appId, msg) {
       const app = apps.get(appId);
       if (!app || !msg || disposed) return;
       noteAppTs(appId, msg.ts);
-      network.response(`${appId}:${msg.id}`, appId, app.deviceId, msg);
+      settleNetRow(network.response(`${appId}:${msg.id}`, appId, app.deviceId, msg));
     },
 
     netError(appId, msg) {
       const app = apps.get(appId);
       if (!app || !msg || disposed) return;
       noteAppTs(appId, msg.ts);
-      network.error(`${appId}:${msg.id}`, appId, app.deviceId, msg);
+      settleNetRow(network.error(`${appId}:${msg.id}`, appId, app.deviceId, msg));
     },
 
     pushAppMetrics(appId, sample) {
@@ -791,7 +818,8 @@ export function createHub(opts: CreateHubOptions): Hub {
         deviceId: DESKTOP_DEVICE_ID,
         source: 'system',
         origin: 'durbun',
-        level: 'info',
+        // A desktop request is recorded with its outcome.
+        level: networkLogLevel(entry),
         tag: 'network',
         message: `${entry.method} ${entry.url}`,
         kind: 'network',
@@ -974,7 +1002,9 @@ export function createHub(opts: CreateHubOptions): Hub {
       if (!isRecord(data) || data.format !== 'durbun-session') {
         throw new Error('Not a Dürbün session file (expected format "durbun-session")');
       }
-      if (typeof data.version === 'number' && data.version > 1) {
+      const versionProblem = sessionVersionProblem(data.version);
+      if (versionProblem) throw new Error(versionProblem);
+      if (data.version > 1) {
         logger.warn(`importing a session file of newer version ${data.version}; unknown fields are ignored`);
       }
       const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
@@ -1038,6 +1068,8 @@ export function createHub(opts: CreateHubOptions): Hub {
       }
 
       const netIdMap = new Map<string, string>();
+      /** Level of each imported request's row (files of older versions wrote every request row as info). */
+      const netLevels = new Map<string, LogLevel>();
       for (const raw of list(data.network)) {
         const n = sanitizeImportedNetwork(raw);
         if (!n) continue;
@@ -1046,7 +1078,7 @@ export function createHub(opts: CreateHubOptions): Hub {
         if (network.has(id)) id = `${deviceId}:${n.id}:${nextReplaySeq++}`;
         const app = n.appId ? appMap.get(n.appId) : undefined;
         netIdMap.set(n.id, id);
-        network.record({ ...n, id, deviceId, appId: app?.id });
+        netLevels.set(id, networkLogLevel(network.record({ ...n, id, deviceId, appId: app?.id })));
         if (app) app.stats.requests++;
       }
 
@@ -1070,7 +1102,11 @@ export function createHub(opts: CreateHubOptions): Hub {
         }
         if (e.netId) {
           const mapped = netIdMap.get(e.netId);
-          if (mapped) entry.netId = mapped;
+          if (mapped) {
+            entry.netId = mapped;
+            const level = e.kind === 'network' ? netLevels.get(mapped) : undefined;
+            if (level && levelRank(level) > levelRank(entry.level)) entry.level = level;
+          }
         }
         imported.push(entry);
       }

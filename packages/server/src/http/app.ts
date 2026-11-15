@@ -180,6 +180,9 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
   const sockets = new Set<Socket>();
   const unsubscribers: (() => void)[] = [];
 
+  /** Every port this server listens on: desktop requests (replay, flows) never go to them on this Mac. */
+  const ownPorts = (): number[] => [boundPort, devicePort ?? 0, deps.ports.sdk, sdkListener.port].filter((p) => p > 0);
+
   const allDrivers = (): DeviceDriver[] => (demo ? [...deps.drivers, demo] : [...deps.drivers]);
 
   function info(): ServerInfo {
@@ -233,6 +236,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     onLanChanged,
     replayTimeoutMs: deps.replayTimeoutMs,
     fetchImpl: deps.fetchImpl,
+    ownPorts,
     tempDir: config.tempDir,
   });
 
@@ -244,6 +248,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     router,
     slack,
     fetchImpl: deps.fetchImpl,
+    ownPorts,
     broadcast: (message) => ui.broadcast(message),
     notice: (n) => ui.broadcast({ type: 'notice', ...n }),
     version,

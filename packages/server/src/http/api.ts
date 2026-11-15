@@ -22,7 +22,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import { PRODUCT_NAME, type NetworkDetail, type SessionExport, type ToolCheck } from '@durbun/protocol';
 import { isPlainObject } from '../config';
+import { sessionVersionProblem } from '../hub/sanitize';
 import type { Hub, Logger } from '../types';
+import { cleanHarDetails, cleanSessionExport, localRoots, maskParam } from './exportClean';
 import { buildHar, headerValue } from './har';
 import { parseJsonBuffer } from './jsonParse';
 import type { SlackStore } from './slack';
@@ -114,7 +116,8 @@ export function safeUploadName(name: string): string {
 export function validateSessionExport(raw: unknown): SessionExport {
   if (!isPlainObject(raw)) throw new HttpError(400, 'Not a Dürbün session file (expected a JSON object)', 'import.invalid');
   if (raw.format !== 'durbun-session') throw new HttpError(400, 'Not a Dürbün session file (format is not "durbun-session")', 'import.invalid');
-  if (raw.version !== 1) throw new HttpError(400, `Unsupported session file version ${String(raw.version)}`, 'import.version');
+  const versionProblem = sessionVersionProblem(raw.version);
+  if (versionProblem) throw new HttpError(400, versionProblem, 'import.version');
   for (const key of ['devices', 'apps', 'logs', 'network'] as const) {
     if (!Array.isArray(raw[key])) throw new HttpError(400, `Session file is missing the "${key}" list`, 'import.invalid');
   }
@@ -122,7 +125,8 @@ export function validateSessionExport(raw: unknown): SessionExport {
   const objects = (v: unknown) => (Array.isArray(v) ? v.filter(isPlainObject) : undefined);
   const data: SessionExport = {
     format: 'durbun-session',
-    version: 1,
+    // A newer version passes through: the hub imports what it knows and says so in its log.
+    version: raw.version as SessionExport['version'],
     exportedAt: typeof raw.exportedAt === 'number' ? raw.exportedAt : Date.now(),
     server: isPlainObject(raw.server) && typeof raw.server.version === 'string' ? { version: raw.server.version } : { version: 'unknown' },
     devices: objects(raw.devices) as unknown as SessionExport['devices'],
@@ -132,6 +136,10 @@ export function validateSessionExport(raw: unknown): SessionExport {
   };
   const metrics = objects(raw.metrics);
   if (metrics) data.metrics = metrics as unknown as SessionExport['metrics'];
+  if (raw.deviceApps !== undefined && !Array.isArray(raw.deviceApps)) throw new HttpError(400, 'Session file has an invalid "deviceApps" list', 'import.invalid');
+  const deviceApps = objects(raw.deviceApps);
+  if (deviceApps) data.deviceApps = deviceApps as unknown as SessionExport['deviceApps'];
+  if (raw.masked === true) data.masked = true;
   return data;
 }
 
@@ -263,8 +271,14 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
   async function har(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = await readJson(req, JSON_LIMIT_BYTES);
     let ids: string[] | undefined;
+    // Masked unless the caller asks for the raw file (mask: false).
+    let mask = true;
     if (body !== undefined && body !== null) {
-      if (!isPlainObject(body)) throw new HttpError(400, 'Expected { ids?: string[] }', 'har.invalid');
+      if (!isPlainObject(body)) throw new HttpError(400, 'Expected { ids?: string[], mask?: boolean }', 'har.invalid');
+      if (body.mask !== undefined && body.mask !== null) {
+        if (typeof body.mask !== 'boolean') throw new HttpError(400, 'mask must be true or false', 'har.invalid');
+        mask = body.mask;
+      }
       if (body.ids !== undefined && body.ids !== null) {
         if (!Array.isArray(body.ids) || body.ids.some((x) => typeof x !== 'string')) {
           throw new HttpError(400, 'ids must be a list of strings', 'har.invalid');
@@ -277,7 +291,8 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
       const d = deps.hub.getNetworkDetail(id);
       if (d) details.push(d);
     }
-    const doc = buildHar(details, { name: PRODUCT_NAME, version: deps.version });
+    const doc = buildHar(cleanHarDetails(details, { mask }), { name: PRODUCT_NAME, version: deps.version });
+    if (mask) doc.log._durbun = { ...doc.log._durbun, masked: true };
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Disposition': contentDisposition(`durbun-${fileTimestamp()}.har`),
@@ -300,7 +315,7 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
       if (appId) throw new HttpError(400, 'Give either appId or bundleId, not both', 'export.scopeConflict');
       scope.bundleId = bundleId;
     }
-    const data = deps.hub.exportSession(scope);
+    const data = cleanSessionExport(deps.hub.exportSession(scope), { mask: maskParam(query.get('mask')), roots: localRoots([tempDir]) });
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Disposition': contentDisposition(`durbun-${fileTimestamp()}.durbun.json`),

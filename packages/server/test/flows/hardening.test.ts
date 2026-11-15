@@ -341,11 +341,8 @@ describe('what a run keeps and sends', () => {
   });
 
   it('reports the URL a request ended at after redirects', async () => {
-    h.route(() => {
-      const res = json({ ok: true });
-      Object.defineProperty(res, 'url', { value: 'https://x.test/v2/orders' });
-      return res;
-    });
+    // Dürbün follows redirects itself (each hop is checked against its own server), so the fetch sees both hops.
+    h.route(({ url }) => (url.pathname === '/orders' ? new Response(null, { status: 301, headers: { Location: '/v2/orders' } }) : json({ ok: true })));
     await h.save({ id: 'redir', nodes: [{ id: 'start', type: 'trigger.manual' }, { id: 'req', type: 'http.request', params: { url: 'https://x.test/orders' } }], edges: chain('start', 'req') });
     const run = await h.run('redir');
     expect(step(run.steps, 'req').output).toMatchObject({ url: 'https://x.test/v2/orders' });

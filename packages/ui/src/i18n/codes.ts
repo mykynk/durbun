@@ -76,6 +76,7 @@ export const SERVER_CODES = {
     'device.networkIdle',
     'device.sdkIdle',
     'demo.stopped',
+    'device.developerModeOff',
   ],
   /** `DeviceInfo.logs.code`. */
   logStatuses: [
@@ -153,6 +154,7 @@ export const SERVER_CODES = {
     'replay.invalidMethod',
     'replay.invalidUrl',
     'replay.unsupportedUrl',
+    'net.ownServer',
     'demo.unavailable',
     'demo.timeout',
     'demo.inactive',
@@ -186,6 +188,7 @@ export const SERVER_CODES = {
     'action.openUrlFailed',
     'action.recording.busy',
     'action.recording.notRunning',
+    'action.developerModeOff',
   ],
   /** `DeviceInfo.readers.<id>.code`: why an SDK-less reader (crash records, frame stats) does not work. */
   readers: [
@@ -226,6 +229,8 @@ export const SERVER_CODES = {
     'upload.tooLarge',
     'url.invalid',
   ],
+  /** Flow preflight issues about requests to this Mac (`FlowPreflightIssue.code`, params { host }). */
+  flowTargets: ['preflight.http.ownServer', 'preflight.http.thisMac'],
   /** Flows, packages and backups (flowCodes.ts). */
   ...FLOW_CODES,
 } as const satisfies Record<string, readonly string[]>;
@@ -297,6 +302,7 @@ registerMessages('code', {
     'device.networkIdle': 'Ağ üzerinden bağlı uygulama kalmadı',
     'device.sdkIdle': 'Bağlı uygulama kalmadı; Dürbün bu simülatörü kendisi izlemiyor',
     'demo.stopped': 'Demo modu kapatıldı',
+    'device.developerModeOff': 'Geliştirici Modu kapalı: uygulama başlatma, durdurma, kurma, ekran görüntüsü ve ekran kaydı çalışmaz',
     'device.booting': 'Cihaz açılıyor…',
 
     /* ── log stream states ── */
@@ -382,6 +388,12 @@ registerMessages('code', {
     'replay.invalidMethod': ['Geçersiz HTTP metodu: {detail}', 'Geçersiz HTTP metodu'],
     'replay.invalidUrl': 'Geçersiz URL',
     'replay.unsupportedUrl': 'Yalnızca http ve https istekleri yeniden gönderilebilir',
+    'net.ownServer': 'İstek Dürbün’ün kendi sunucusuna gidiyordu (doğrudan ya da yönlendirmeyle); Dürbün kendisine istek göndermez',
+    'preflight.http.ownServer': [
+      'Bir adım Dürbün’ün kendi sunucusuna ({host}) istek gönderiyor; Dürbün kendisine istek göndermez',
+      'Bir adım Dürbün’ün kendi sunucusuna istek gönderiyor; Dürbün kendisine istek göndermez',
+    ],
+    'preflight.http.thisMac': ['Bir adım bu Mac’teki bir servise ({host}) istek gönderiyor', 'Bir adım bu Mac’teki bir servise istek gönderiyor'],
     'demo.unavailable': 'Bu sürümde demo modu yok',
     'demo.timeout': 'Demo modu zamanında açılıp kapanmadı',
     'demo.unsupportedAction': 'Demo cihazları bu işlemi desteklemiyor',
@@ -399,6 +411,8 @@ registerMessages('code', {
     'action.invalidParams': ['Geçersiz parametre: {detail}', 'Geçersiz parametre'],
     'action.recording.busy': 'Bu cihazda zaten bir ekran kaydı sürüyor',
     'action.recording.notRunning': 'Bu cihazda süren bir ekran kaydı yok',
+    'action.developerModeOff':
+      'iPhone’da Geliştirici Modu kapalı. Ayarlar → Gizlilik ve Güvenlik → Geliştirici Modu’nu açın ve telefonu yeniden başlatın (seçenek görünmüyorsa iPhone’u bir kez Xcode’a bağlayın).',
     'action.unsupported': 'Bu cihaz bu işlemi desteklemiyor',
     'action.deviceOffline': 'Cihaz çevrimdışı ya da kapalı',
     'action.deviceNotFound': 'Cihaz bulunamadı',
@@ -592,6 +606,7 @@ registerMessages('code', {
     'device.networkIdle': 'No app is connected over the network',
     'device.sdkIdle': 'No app is connected, and Dürbün does not watch this simulator itself',
     'demo.stopped': 'Demo mode turned off',
+    'device.developerModeOff': 'Developer Mode is off: starting, stopping and installing apps, screenshots and screen recordings do not work',
     'device.booting': 'Device is booting…',
 
     /* ── log stream states ── */
@@ -677,6 +692,12 @@ registerMessages('code', {
     'replay.invalidMethod': ['Invalid HTTP method: {detail}', 'Invalid HTTP method'],
     'replay.invalidUrl': 'Invalid URL',
     'replay.unsupportedUrl': 'Only http and https requests can be replayed',
+    'net.ownServer': 'The request was going to Dürbün’s own server (directly or through a redirect); Dürbün does not send requests to itself',
+    'preflight.http.ownServer': [
+      'A step sends a request to Dürbün’s own server ({host}); Dürbün does not send requests to itself',
+      'A step sends a request to Dürbün’s own server; Dürbün does not send requests to itself',
+    ],
+    'preflight.http.thisMac': ['A step sends a request to a service on this Mac ({host})', 'A step sends a request to a service on this Mac'],
     'demo.unavailable': 'Demo mode is not available in this build',
     'demo.timeout': 'Demo mode did not start or stop in time',
     'demo.unsupportedAction': 'Demo devices do not support this action',
@@ -694,6 +715,8 @@ registerMessages('code', {
     'action.invalidParams': ['Invalid parameter: {detail}', 'Invalid parameter'],
     'action.recording.busy': 'A screen recording is already running on this device',
     'action.recording.notRunning': 'No screen recording is running on this device',
+    'action.developerModeOff':
+      'Developer Mode is off on the iPhone. Turn it on in Settings → Privacy & Security → Developer Mode and restart the phone (if the switch is not there, connect the iPhone to Xcode once).',
     'action.unsupported': 'This device does not support this action',
     'action.deviceOffline': 'The device is offline or not booted',
     'action.deviceNotFound': 'Device not found',

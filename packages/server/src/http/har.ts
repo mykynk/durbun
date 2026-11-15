@@ -101,6 +101,8 @@ export interface Har {
     creator: { name: string; version: string };
     pages: never[];
     entries: HarEntry[];
+    /** Dürbün's notes on the file: `masked` when secrets were replaced by "••••". */
+    _durbun?: { masked?: boolean };
   };
 }
 

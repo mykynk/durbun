@@ -70,6 +70,8 @@ export interface FlowsModuleDeps {
   router: Pick<CommandRouter, 'handle'>;
   slack?: SlackStore;
   fetchImpl?: typeof fetch;
+  /** Dürbün's own listening ports: http.request steps never go to them on this Mac. */
+  ownPorts?: () => number[];
   broadcast(message: ServerToUi): void;
   notice(n: UiNotice): void;
   version: string;
@@ -145,6 +147,7 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
     slack: deps.slack,
     maxBodyBytes: () => config.settings.maxBodyBytes,
     fetchImpl: deps.fetchImpl,
+    ownPorts: deps.ownPorts,
     now,
     emit: (delta) => deps.broadcast({ type: 'flowRun', ...delta }),
     runEnded: () => broadcastFlows(),

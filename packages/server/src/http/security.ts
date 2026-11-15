@@ -13,9 +13,12 @@
  * A loopback peer is not always this Mac's user: `adb reverse` turns any app on a plugged-in phone into a
  * 127.0.0.1 peer. So adb reverse never points at the HTTP port, only at the device gateway (app.ts), which
  * serves /sdk and GET /api/health and nothing that checkLocalAccess guards.
+ * Requests Dürbün sends itself (replay, flow steps) are loopback peers too: they carry DESKTOP_REQUEST_HEADER
+ * and are refused (ownTargets.ts also stops them before they leave).
  */
 import type { IncomingMessage } from 'node:http';
 import os from 'node:os';
+import { DESKTOP_REQUEST_HEADER } from './ownTargets';
 
 /** Vite dev server port (packages/ui/vite.config.ts, strictPort). */
 export const DEV_UI_PORT = 5173;
@@ -60,6 +63,7 @@ export type AccessResult = { ok: true } | { ok: false; reason: string };
 export function checkLocalAccess(req: Pick<IncomingMessage, 'headers' | 'socket'>, port: number): AccessResult {
   const remote = req.socket?.remoteAddress;
   if (!isLoopbackAddress(remote)) return { ok: false, reason: `client ${remote ?? 'unknown'} is not on this computer` };
+  if (req.headers[DESKTOP_REQUEST_HEADER.toLowerCase()] !== undefined) return { ok: false, reason: 'request sent by Dürbün itself (replay or flow step)' };
   const host = req.headers.host;
   if (!isLoopbackHostHeader(host)) return { ok: false, reason: `unexpected Host header "${host}"` };
   const origin = req.headers.origin;

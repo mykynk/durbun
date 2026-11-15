@@ -137,12 +137,15 @@ describe('REST API', () => {
     t.hub.apps.set('app:1', sampleApp());
     t.hub.addLogs(3_000);
     t.hub.network.set('app:1:7', sampleNetwork());
-    const res = await fetch(`${t.base}/api/export?deviceId=android:R5CT1234`);
+    // mask=0: the raw export (the default is masked, see realHub.test.ts).
+    const res = await fetch(`${t.base}/api/export?deviceId=android:R5CT1234&mask=0`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-disposition')).toMatch(/filename="durbun-.*\.durbun\.json"/);
     const text = await res.text();
     expect(JSON.parse(text)).toEqual(JSON.parse(JSON.stringify(t.hub.exportSession({ deviceId: 'android:R5CT1234' }))));
     expect(text).toBe(JSON.stringify(t.hub.exportSession({ deviceId: 'android:R5CT1234' })));
+    const masked = await (await fetch(`${t.base}/api/export?deviceId=android:R5CT1234`)).json();
+    expect(masked).toMatchObject({ masked: true });
   });
 
   it('GET /api/export?deviceId=…&bundleId=… exports one device app; bundleId needs deviceId and excludes appId', async () => {
@@ -353,7 +356,13 @@ describe('API helpers', () => {
 
   it('validateSessionExport rejects foreign JSON and keeps object entries only', () => {
     expect(() => validateSessionExport([])).toThrow(/session file/);
-    expect(() => validateSessionExport({ format: 'durbun-session', version: 2, devices: [], apps: [], logs: [], network: [] })).toThrow(/version 2/);
+    // One rule with the hub: newer versions import (unknown fields ignored), anything but a whole number >= 1 does not.
+    expect(validateSessionExport({ format: 'durbun-session', version: 2, devices: [], apps: [], logs: [], network: [] }).version).toBe(2);
+    expect(() => validateSessionExport({ format: 'durbun-session', version: 0, devices: [], apps: [], logs: [], network: [] })).toThrow(/version 0/);
+    expect(() => validateSessionExport({ format: 'durbun-session', devices: [], apps: [], logs: [], network: [] })).toThrow(/version undefined/);
+    const withApps = validateSessionExport({ format: 'durbun-session', version: 1, devices: [], apps: [], logs: [], network: [], deviceApps: [{ deviceId: 'a', id: 'x' }, 'junk'], masked: true });
+    expect(withApps.deviceApps).toEqual([{ deviceId: 'a', id: 'x' }]);
+    expect(withApps.masked).toBe(true);
     expect(() => validateSessionExport({ format: 'durbun-session', version: 1, devices: [], apps: [], logs: 'x', network: [] })).toThrow(/"logs"/);
     const v = validateSessionExport({ format: 'durbun-session', version: 1, exportedAt: 5, server: { version: '0.1.0' }, devices: [{ id: 'a' }, 3], apps: [], logs: [null], network: [] });
     expect(v.devices).toEqual([{ id: 'a' }]);

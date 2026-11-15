@@ -16,6 +16,7 @@ import { ConfigValidationError, isPlainObject, type ConfigStore } from '../confi
 import type { DeviceDriver, FlutterVmModule, Hub, Logger, SdkLayer } from '../types';
 import { isUploadedFile } from './api';
 import { replayRequest, ReplayError } from './replay';
+import { OwnServerRequestError } from './ownTargets';
 import { errorMessage } from './util';
 
 export interface CommandReply {
@@ -55,6 +56,8 @@ export interface CommandDeps {
   onLanChanged(lan: boolean): Promise<void>;
   replayTimeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /** Dürbün's own listening ports: a replay never goes to them on this Mac (ownTargets.ts). */
+  ownPorts?: () => number[];
   /** Temp directory of POST /api/upload: an uploaded install file is deleted once its app-install ends. */
   tempDir?: string;
 }
@@ -292,6 +295,7 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
         maxBodyBytes: deps.config.settings.maxBodyBytes,
         timeoutMs: deps.replayTimeoutMs,
         fetchImpl: deps.fetchImpl,
+        guard: { ownPorts: deps.ownPorts ?? (() => []) },
       },
       id,
       overrides,
@@ -365,7 +369,7 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
           return fail(`Unknown command "${name}"`, 'command.unknown');
       }
     } catch (err) {
-      if (err instanceof CommandError || err instanceof ReplayError || err instanceof ConfigValidationError) {
+      if (err instanceof CommandError || err instanceof ReplayError || err instanceof ConfigValidationError || err instanceof OwnServerRequestError) {
         return fail(err.message, err.code);
       }
       deps.logger.error(`command ${name} failed: ${errorMessage(err)}`);

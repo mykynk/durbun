@@ -2,8 +2,11 @@
  * REST body endpoints over the REAL hub with the body shapes real SDKs send: size-only placeholders
  * (capture off / too large) and partial bodies of a broken stream.
  */
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS } from '@durbun/protocol';
+import { DEFAULT_SETTINGS, type SessionExport } from '@durbun/protocol';
+import type { Har } from '../../src/http/har';
 import { createHub } from '../../src/hub/index';
 import type { Hub } from '../../src/types';
 import { silentLogger } from '../../src/util/logger';
@@ -99,5 +102,173 @@ describe('body endpoints with real SDK body shapes', () => {
     const raw = await fetch(`${s.base}/api/network/${id}/body/response`);
     expect(raw.headers.get('x-durbun-truncated')).toBe('1');
     expect(await raw.text()).toBe('{"items":[1,2,3');
+  });
+});
+
+describe('export → import and HAR over the real hub', () => {
+  const PIXEL = 'android:R5CT1234';
+  const BUNDLE = 'com.mykynk.kumbara';
+  const crashFile = path.join(os.homedir(), '.durbun', 'tmp', 'crash', 'R5CT1234', 'Kumbara-2026-11-14.ips');
+
+  async function seeded(): Promise<{ base: string; hub: Hub; netId: string }> {
+    hub = createHub({ settings: { ...DEFAULT_SETTINGS }, logger: silentLogger });
+    t = await startTestApp({ hub });
+    hub.upsertDevice({
+      id: PIXEL,
+      platform: 'android',
+      kind: 'physical',
+      name: 'Pixel 7',
+      connection: 'usb',
+      state: 'online',
+      logs: { status: 'streaming' },
+      actions: [],
+      firstSeen: 1,
+      lastSeen: 1,
+    });
+    hub.upsertDeviceApp({ deviceId: PIXEL, id: BUNDLE, name: 'Kumbara', version: '3.1.0', buildType: 'release', install: { source: 'play', installer: 'com.android.vending' } });
+    const app = hub.registerApp({
+      sessionKey: 's1',
+      deviceId: PIXEL,
+      sdk: { name: 'durbun-flutter', version: '0.2.0', platform: 'flutter' },
+      app: { id: BUNDLE, name: 'Kumbara', pid: 4242 },
+      transport: 'tcp',
+      connected: true,
+      connectedAt: Date.now(),
+      capabilities: ['logs', 'network'],
+      actions: [],
+    });
+    hub.netRequest(app.id, {
+      type: 'net.request',
+      id: '1',
+      ts: Date.now(),
+      method: 'POST',
+      url: 'https://api.example.com/login?lang=tr&access_token=abc123',
+      headers: [
+        ['Authorization', 'Bearer eyJhbGciOi.secret'],
+        ['Cookie', 'sid=s3ss10n; theme=dark'],
+        ['Content-Type', 'application/json'],
+      ],
+      body: { encoding: 'utf8', data: '{"email":"qa@example.com","password":"hunter2","pin":1234}', size: 58 },
+      source: 'dart:io',
+    });
+    hub.netResponse(app.id, {
+      type: 'net.response',
+      id: '1',
+      ts: Date.now(),
+      status: 200,
+      headers: [
+        ['Content-Type', 'application/json'],
+        ['Set-Cookie', 'sid=n3w; Path=/; HttpOnly'],
+      ],
+      body: { encoding: 'utf8', data: '{"token":"t0k3n","user":{"id":7}}', size: 33 },
+    });
+    hub.pushDeviceLogs(PIXEL, [
+      {
+        ts: Date.now(),
+        level: 'fatal',
+        tag: 'crash',
+        message: 'Kumbara crashed',
+        kind: 'crash',
+        origin: 'crash-report',
+        data: { origin: 'crash-report', bundleId: BUNDLE, file: crashFile, frames: [{ sourceFile: path.join(os.homedir(), 'dev', 'kumbara', 'lib', 'main.dart') }] },
+      },
+    ]);
+    return { base: t.base, hub, netId: `${app.id}:1` };
+  }
+
+  it('masks the session export by default, keeps file names only, and imports it back with its device apps', async () => {
+    const s = await seeded();
+    const res = await fetch(`${s.base}/api/export`);
+    expect(res.status).toBe(200);
+    const file = (await res.json()) as SessionExport;
+    expect(file.masked).toBe(true);
+    const net = file.network.find((n) => n.url.startsWith('https://api.example.com/login'))!;
+    expect(net.url).toBe('https://api.example.com/login?lang=tr&access_token=••••');
+    expect(net.requestHeaders).toEqual([
+      ['Authorization', 'Bearer ••••'],
+      ['Cookie', 'sid=••••; theme=••••'],
+      ['Content-Type', 'application/json'],
+    ]);
+    expect(net.requestBody?.data).toBe('{"email":"qa@example.com","password":"••••","pin":"••••"}');
+    expect(net.responseBody?.data).toBe('{"token":"••••","user":{"id":7}}');
+    expect(net.responseHeaders).toContainEqual(['Set-Cookie', 'sid=••••; Path=/; HttpOnly']);
+    const netRow = file.logs.find((l) => l.kind === 'network')!;
+    expect(netRow.message).toBe('POST https://api.example.com/login?lang=tr&access_token=••••');
+    const crash = file.logs.find((l) => l.kind === 'crash')!;
+    expect(crash.data).toMatchObject({ file: 'Kumbara-2026-11-14.ips', frames: [{ sourceFile: 'main.dart' }] });
+    expect(JSON.stringify(file)).not.toContain(os.homedir());
+    expect(file.deviceApps?.map((a) => a.id)).toEqual([BUNDLE]);
+
+    // The masked file imports like any other; the device apps come along (SRV-01).
+    const before = s.hub.getDevices().length;
+    const imported = await fetch(`${s.base}/api/import?name=tester-bug.durbun.json`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(file) });
+    expect(imported.status).toBe(200);
+    const { deviceIds } = (await imported.json()) as { deviceIds: string[] };
+    expect(deviceIds).toHaveLength(1);
+    expect(s.hub.getDevices()).toHaveLength(before + 1);
+    expect(s.hub.getDeviceApps().find((a) => a.deviceId === deviceIds[0])).toMatchObject({
+      id: BUNDLE,
+      version: '3.1.0',
+      buildType: 'release',
+      install: { source: 'play', installer: 'com.android.vending' },
+      running: false,
+    });
+  });
+
+  it('mask=0 exports raw values (paths still cut) and an app-scoped export by bundle id keeps its device app', async () => {
+    const s = await seeded();
+    const raw = (await (await fetch(`${s.base}/api/export?mask=0`)).json()) as SessionExport;
+    expect(raw.masked).toBeUndefined();
+    const net = raw.network.find((n) => n.url.includes('/login'))!;
+    expect(net.requestHeaders[0]).toEqual(['Authorization', 'Bearer eyJhbGciOi.secret']);
+    expect(net.requestBody?.data).toContain('hunter2');
+    expect(raw.logs.find((l) => l.kind === 'crash')!.data).toMatchObject({ file: 'Kumbara-2026-11-14.ips' });
+
+    const scoped = (await (await fetch(`${s.base}/api/export?deviceId=${encodeURIComponent(PIXEL)}&bundleId=${BUNDLE}&mask=1`)).json()) as SessionExport;
+    expect(scoped.masked).toBe(true);
+    expect(scoped.deviceApps?.map((a) => a.id)).toEqual([BUNDLE]);
+  });
+
+  it('one version rule for session files: newer versions import, invalid ones are refused', async () => {
+    const s = await seeded();
+    const file = (await (await fetch(`${s.base}/api/export`)).json()) as SessionExport;
+    const post = (body: unknown) => fetch(`${s.base}/api/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await post({ ...file, version: 2, futureField: { x: 1 } })).status).toBe(200);
+    for (const version of [0, '1', 1.5, undefined]) {
+      const res = await post({ ...file, version });
+      expect(res.status, String(version)).toBe(400);
+      expect(((await res.json()) as { code: string }).code).toBe('import.version');
+    }
+    expect(((await (await post({ ...file, deviceApps: 'nope' })).json()) as { code: string }).code).toBe('import.invalid');
+  });
+
+  it('HAR: masked by default with log._durbun.masked, raw with mask: false', async () => {
+    const s = await seeded();
+    const har = async (body: unknown) => {
+      const res = await fetch(`${s.base}/api/har`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      expect(res.status).toBe(200);
+      return (await res.json()) as Har;
+    };
+    const masked = await har({ ids: [s.netId] });
+    expect(masked.log.version).toBe('1.2');
+    expect(masked.log._durbun).toEqual({ masked: true });
+    const e = masked.log.entries[0]!;
+    expect(e.request.url).toBe('https://api.example.com/login?lang=tr&access_token=••••');
+    expect(e.request.queryString).toContainEqual({ name: 'access_token', value: '••••' });
+    expect(e.request.headers).toContainEqual({ name: 'Authorization', value: 'Bearer ••••' });
+    expect(e.request.cookies).toEqual([
+      { name: 'sid', value: '••••' },
+      { name: 'theme', value: '••••' },
+    ]);
+    expect(e.request.postData?.text).toContain('"password":"••••"');
+    expect(e.response.cookies[0]).toMatchObject({ name: 'sid', value: '••••', path: '/', httpOnly: true });
+    expect(e.response.content.text).toBe('{"token":"••••","user":{"id":7}}');
+    expect(JSON.stringify(masked)).not.toMatch(/hunter2|eyJhbGciOi|s3ss10n|abc123|t0k3n/);
+
+    const raw = await har({ mask: false });
+    expect(raw.log._durbun).toBeUndefined();
+    expect(JSON.stringify(raw)).toContain('hunter2');
+    const bad = await fetch(`${s.base}/api/har`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mask: 'no' }) });
+    expect(bad.status).toBe(400);
   });
 });

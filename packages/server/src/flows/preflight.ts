@@ -16,6 +16,7 @@ import {
   type FlowPreflightIssue,
   type FlowRunRequest,
 } from '@durbun/protocol';
+import { effectivePort, isThisMacHostname } from '../http/ownTargets';
 import type { Hub } from '../types';
 import type { EnvironmentStore } from './environments';
 import type { FlowStore } from './store';
@@ -29,6 +30,8 @@ export interface PrepareDeps {
   flows: Pick<FlowStore, 'get' | 'ids'>;
   envs: Pick<EnvironmentStore, 'resolve'>;
   slackConfigured(): Promise<boolean>;
+  /** Dürbün's own listening ports (an http.request step to one of them on this Mac fails). */
+  ownPorts?: () => number[];
 }
 
 export interface PreparedRun {
@@ -100,6 +103,29 @@ export function envKeys(value: unknown, into = new Set<string>()): Set<string> {
   } else if (Array.isArray(value)) value.forEach((v) => envKeys(v, into));
   else if (value && typeof value === 'object') Object.values(value).forEach((v) => envKeys(v, into));
   return into;
+}
+
+/**
+ * The URL of an http.request step when it can be known before the run (literal, or templates of the environment
+ * and inputs only); undefined otherwise.
+ */
+export function knownStepUrl(value: unknown, env: Record<string, unknown>, inputs: Record<string, unknown>): URL | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  if (templateExpressions(value).some((e) => !/^(env|input)\b/.test(e.split('|')[0]!.trim()))) return undefined;
+  let text: unknown = value;
+  if (value.includes('{{')) {
+    try {
+      text = resolveTemplate(value, { env, input: inputs }, { strict: true });
+    } catch {
+      return undefined;
+    }
+  }
+  try {
+    const url = new URL(String(text).trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function prepareRun(
@@ -206,6 +232,19 @@ export async function prepareRun(
             ...(sub ? { flowId: doc.id } : {}),
             params: { step: spec.title, capability: spec.needs.sdk },
           });
+        }
+      }
+      if (node.type === 'http.request') {
+        const url = knownStepUrl(node.params?.url, envValues, inputs);
+        if (url && isThisMacHostname(url.hostname)) {
+          const port = effectivePort(url);
+          const host = `${url.hostname}:${port}`;
+          const at = { nodeId: node.id, ...(sub ? { flowId: doc.id } : {}) };
+          if ((deps.ownPorts?.() ?? []).includes(port)) {
+            addIssue({ level: 'error', code: 'preflight.http.ownServer', message: `Step ${node.id} sends a request to Dürbün's own server (${host}); Dürbün does not send requests to itself`, ...at, params: { host } });
+          } else {
+            addIssue({ level: 'warn', code: 'preflight.http.thisMac', message: `Step ${node.id} sends a request to a service on this Mac (${host})`, ...at, params: { host } });
+          }
         }
       }
       if (node.type === 'flow.call') {
