@@ -454,12 +454,14 @@ describe('IosDeviceDriver · readers, report links and de-duplication', () => {
     await driver.start(ctx);
     const dev = await waitFor(() => (ctx.hub.devices.get(ID)?.stateCode === 'device.developerModeOff' ? ctx.hub.devices.get(ID) : undefined));
     expect(dev).toMatchObject({ state: 'online', stateDetail: expect.stringContaining('Settings → Privacy & Security → Developer Mode') });
-    // The device refuses (the fake devicectl fails every launch): the reply says why and how to fix it.
+    // The actions that need Developer Mode are not offered; the device says why for each of them.
+    const shown = await waitFor(() => (ctx.hub.devices.get(ID)?.unavailableActions?.length ? ctx.hub.devices.get(ID) : undefined));
+    expect(shown.actions).not.toContain('app-launch');
+    expect(shown.actions).toContain('list-apps');
+    expect(shown.unavailableActions).toContainEqual({ action: 'app-launch', code: 'action.developerModeOff' });
     const launch = await driver.runAction(ID, 'app-launch', { appId: 'com.mykynk.mahalle' });
     expect(launch).toMatchObject({ ok: false, code: 'action.developerModeOff' });
-    expect(launch.message).toMatch(/^Developer Mode is off on this iPhone.*\(.+\)$/s);
-    // Input problems keep their own explanation.
-    expect(await driver.runAction(ID, 'app-launch', { appId: '' })).toMatchObject({ ok: false, code: 'action.invalidParams' });
+    expect(launch.message).toMatch(/^Developer Mode is off on this iPhone/);
     await driver.stop();
     await waitFor(() => liveChildCount() === 0, 5000);
   });

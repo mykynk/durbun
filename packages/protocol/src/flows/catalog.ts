@@ -852,6 +852,17 @@ export const DEVICE_ACTION_SUPPORT: Readonly<Record<DeviceActionId, DeviceSuppor
   'status-bar': { android: 'none', iosSimulator: true, iosDevice: false },
   'screen-record': { android: 'all', iosSimulator: true, iosDevice: true },
   'screen-record-stop': { android: 'all', iosSimulator: true, iosDevice: true },
+  'app-permission': { android: 'all', iosSimulator: true, iosDevice: false },
+  'app-settings': { android: 'all', iosSimulator: false, iosDevice: false },
+  'app-locale': { android: 'all', iosSimulator: false, iosDevice: false },
+  'airplane-mode': { android: 'all', iosSimulator: false, iosDevice: false },
+  wifi: { android: 'all', iosSimulator: false, iosDevice: false },
+  'mobile-data': { android: 'all', iosSimulator: false, iosDevice: false },
+  rotation: { android: 'all', iosSimulator: false, iosDevice: false },
+  'dont-keep-activities': { android: 'all', iosSimulator: false, iosDevice: false },
+  'keychain-reset': { android: 'none', iosSimulator: true, iosDevice: false },
+  'bug-report': { android: 'all', iosSimulator: false, iosDevice: false },
+  'bug-report-cancel': { android: 'all', iosSimulator: false, iosDevice: false },
 };
 
 /** Does a device of this platform/kind support the action? */

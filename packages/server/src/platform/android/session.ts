@@ -12,6 +12,8 @@ import type {
   DeviceReaderState,
   DeviceSettingOverride,
   DeviceState,
+  DeviceUnavailableAction,
+  DeviceUser,
   LogStreamStatus,
 } from '@durbun/protocol';
 import type { DeviceLogInput, DriverContext, Logger, PortForward } from '../../types';
@@ -21,7 +23,10 @@ import { fail } from '../shared/files';
 import { ScreenRecorder } from '../shared/screenRecord';
 import { humanizeModel } from '../shared/text';
 import { every, sleep } from '../shared/timing';
-import { androidActionsFor, runAndroidAction, type SettingOverrides } from './actions';
+import { androidActionAvailability, runAndroidAction } from './actions';
+import { BugReporter } from './bugReport';
+import { overrideKey, type SettingOverrides } from './deviceSettings';
+import { parseCurrentUser, parseUserList } from './users';
 import type { Adb } from './adb';
 import type { DeviceClock } from './deviceClock';
 import { basePackage, DeviceAppTracker } from './deviceApps';
@@ -78,8 +83,8 @@ export interface AndroidSessionDeps {
   publishedApps?: Set<string>;
   /** The phone's `ro.serialno` once read (the driver merges its Wi-Fi transports by it). */
   onHardwareSerial?(serial: string): void;
-  /** Settings Dürbün changed on this phone, by action (kept by the driver across replugs and transports). */
-  settingOverrides?: Map<DeviceActionId, DeviceSettingOverride>;
+  /** Settings Dürbün changed on this phone, by overrideKey (kept by the driver across replugs and transports). */
+  settingOverrides?: Map<string, DeviceSettingOverride>;
 }
 
 export interface AndroidSessionOptions {
@@ -162,6 +167,9 @@ export class AndroidDeviceSession {
   /** DeviceInfo.readers: crash records (dropbox) and frame stats, changes only. */
   private readonly readers = new DeviceReaders((id, state) => this.patchReader(id, state));
   private readonly recorder = new ScreenRecorder((recording) => this.patch({ recording }));
+  private readonly bugReports: BugReporter;
+  /** Users / profiles of the phone (`pm list users`), once read. */
+  private users?: DeviceUser[];
 
   private readonly previous?: HandoverState;
   private connections: ConnectionType[] = [];
@@ -238,6 +246,12 @@ export class AndroidDeviceSession {
       published: deps.publishedApps,
     });
     this.crashes = new CrashIndex(this.id);
+    this.bugReports = new BugReporter({
+      ctx: deps.ctx,
+      label: this.info.name,
+      spawn: (file) => deps.adb()?.spawn(['-s', this.serial, 'bugreport', file]) ?? null,
+      onState: (bugReport) => this.patch({ bugReport }),
+    });
     this.dropbox = new DropboxWatcher({
       adb: deps.adb,
       serial: this.serial,
@@ -378,7 +392,9 @@ export class AndroidDeviceSession {
     this.logsStatus = 'starting';
     await this.loadInfo(gen);
     if (gen !== this.gen || this.disposed) return;
-    this.patch({ actions: this.actions() });
+    await this.loadUsers(gen);
+    if (gen !== this.gen || this.disposed) return;
+    this.patch(this.availabilityPatch());
     await this.refreshProcesses();
     if (gen !== this.gen || this.disposed) return;
     void this.apps.start();
@@ -423,6 +439,7 @@ export class AndroidDeviceSession {
       stateCode: st.code,
       stateDetail: st.detail,
       actions: [],
+      unavailableActions: undefined,
       logs: { status: 'unavailable', via: VIA, code: state === 'unauthorized' ? st.code : 'logs.deviceOffline', detail: st.detail },
     });
     this.logsStatus = 'unavailable';
@@ -441,6 +458,7 @@ export class AndroidDeviceSession {
     const wasOnline = this.online;
     this.gen += 1;
     this.recorder.dispose();
+    this.bugReports.dispose();
     this.stopTimers();
     clearTimeout(this.psTimer);
     this.unsubLogs?.();
@@ -532,6 +550,21 @@ export class AndroidDeviceSession {
     if (emulator && this.info.connection === 'usb') patch.connection = 'local';
     this.patch(patch);
     if (hardwareSerial) this.deps.onHardwareSerial?.(hardwareSerial);
+  }
+
+  /**
+   * Users and profiles (work profile, Secure Folder, a second user): DeviceInfo.users when there is more than
+   * one, so app actions can name one (`userId`).
+   */
+  private async loadUsers(gen: number): Promise<void> {
+    const adb = this.deps.adb();
+    if (!adb || (this.apiLevel !== undefined && this.apiLevel < 17)) return;
+    const r = await adb.shell(this.serial, 'pm list users; echo ___DURBUN_CURRENT___; am get-current-user', { timeoutMs: 15_000 });
+    if (gen !== this.gen || this.disposed || !r.stdout) return;
+    const [list, current] = r.stdout.split('___DURBUN_CURRENT___');
+    const users = parseUserList(list ?? '', parseCurrentUser(current ?? ''));
+    this.users = users.length > 1 ? users : undefined;
+    if (this.users || this.info.users) this.patch({ users: this.users });
   }
 
   private async refreshBattery(): Promise<void> {
@@ -811,15 +844,26 @@ export class AndroidDeviceSession {
   /* ───────────── actions / metrics / forwarding ───────────── */
 
   actions(): DeviceActionId[] {
-    return androidActionsFor({ online: this.online, isEmulator: this.emulator, apiLevel: this.apiLevel });
+    return this.availability().actions;
+  }
+
+  private availability(): { actions: DeviceActionId[]; unavailable: DeviceUnavailableAction[] } {
+    return androidActionAvailability({ online: this.online, isEmulator: this.emulator, apiLevel: this.apiLevel, connection: this.info.connection });
+  }
+
+  private availabilityPatch(): Partial<DeviceInfo> {
+    const { actions, unavailable } = this.availability();
+    return { actions, unavailableActions: unavailable.length ? unavailable : undefined };
   }
 
   async runAction(action: DeviceActionId, params: Record<string, unknown>): Promise<DeviceActionResult> {
     const adb = this.deps.adb();
     if (!adb) return fail('adb is not available', 'action.toolMissing');
     if (!this.online) return fail(`${this.info.name} is not online`, 'action.deviceOffline');
-    if (!this.actions().includes(action)) {
-      return fail(`"${action}" is not available for ${this.info.name}`, 'action.unsupported');
+    const { actions, unavailable } = this.availability();
+    if (!actions.includes(action)) {
+      const why = unavailable.find((u) => u.action === action);
+      return fail(`"${action}" is not available for ${this.info.name}`, why?.code ?? 'action.unsupported', why?.params);
     }
     return runAndroidAction(
       {
@@ -832,6 +876,8 @@ export class AndroidDeviceSession {
         ctx: this.deps.ctx,
         restartLogs: () => this.restartLogs(),
         recorder: this.recorder,
+        bugReports: this.bugReports,
+        ...(this.users ? { users: this.users } : {}),
         ...(this.deps.settingOverrides ? { overrides: this.overridesStore(this.deps.settingOverrides) } : {}),
       },
       action,
@@ -840,18 +886,35 @@ export class AndroidDeviceSession {
   }
 
   /** The driver's override map for this phone, mirrored into `DeviceInfo.settingOverrides`. */
-  private overridesStore(map: Map<DeviceActionId, DeviceSettingOverride>): SettingOverrides {
+  private overridesStore(map: Map<string, DeviceSettingOverride>): SettingOverrides {
     const publish = () => this.patch({ settingOverrides: map.size ? [...map.values()] : undefined });
     return {
-      get: (action) => map.get(action),
+      get: (action, scope) => map.get(overrideKey(action, scope)),
       set: (o) => {
-        map.set(o.action, o);
+        map.set(overrideKey(o.action, { appId: o.appId, key: o.key }), o);
         publish();
       },
-      delete: (action) => {
-        if (map.delete(action)) publish();
+      delete: (action, scope) => {
+        if (map.delete(overrideKey(action, scope))) publish();
       },
     };
+  }
+
+  /**
+   * The Mac woke from sleep: re-check the SDK's adb reverse mappings, start logcat again if it ended (or wait
+   * in a long backoff), refresh the battery. Never throws.
+   */
+  async afterWake(): Promise<void> {
+    if (this.disposed || !this.online) return;
+    try {
+      if (this.router) await this.router.ensure();
+      if (this.disposed || !this.online) return;
+      // Between runs (a backoff wait after it ended): start it now instead of after the wait.
+      if (this.logcat?.active && !this.logcat.running) this.startLogcat();
+      await this.refreshBattery();
+    } catch (e) {
+      this.deps.logger.debug(`${this.serial}: wake check failed: ${(e as Error).message}`);
+    }
   }
 
   watchMetrics(target: MetricsTarget, enabled: boolean): void {

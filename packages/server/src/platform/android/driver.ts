@@ -1,6 +1,9 @@
 /**
- * Android driver: polls `adb devices -l` every 2 s (after `adb start-server`) and runs one
- * AndroidDeviceSession per phone. Degrades to "unavailable" when adb is missing.
+ * Android driver: follows the adb server's device list (`host:track-devices-l` over its socket, pushed on every
+ * change; deviceTracker.ts) and runs one AndroidDeviceSession per phone. While that stream is down (no server
+ * yet, a server restart, an old server) it polls `adb devices -l` every 2 s as before (which also starts the
+ * server), and tries the stream again; while it is live a check runs only every 15 s (no adb process).
+ * Degrades to "unavailable" when adb is missing.
  *
  * One phone, one device: a phone seen over USB and Wi-Fi at once (wireless debugging on, cable in) has two
  * adb serials. Rows are grouped by the phone's hardware serial (`ro.serialno`, asked once per Wi-Fi serial),
@@ -22,6 +25,7 @@ import { Poller } from '../shared/timing';
 import { defaultResolveEnv, listAdbCandidates, resolveAdb, type ResolvedTool, type ResolveEnv } from '../tools';
 import { Adb } from './adb';
 import { adbBinaryInfo, adbServerPort, queryAdbServerVersion, type AdbBinaryInfo } from './adbServer';
+import { AdbDeviceTracker } from './deviceTracker';
 import { createDropboxCursor, type DropboxCursor } from './dropbox';
 import {
   connectionForSerial,
@@ -36,6 +40,8 @@ import {
 import { AndroidDeviceSession } from './session';
 
 const POLL_MS = 2000;
+/** While the device stream is live: the server's version is checked this often (a socket call, no process). */
+const TRACK_SAFETY_MS = 15_000;
 const ADB_FIX = 'brew install --cask android-platform-tools';
 const ADB_DOCS = 'https://developer.android.com/tools/releases/platform-tools';
 /** Wi-Fi serial → device key memory (each wireless debugging start brings a new ip:port). */
@@ -49,6 +55,8 @@ export const DEVICE_ADB_CONFLICT_CODE = 'device.adbConflict';
 export interface AndroidDriverOptions {
   /** Tool lookup environment (tests). */
   resolveEnv?: ResolveEnv;
+  /** Tests: shorter retry delays of the device stream. */
+  trackRetryMs?: { initial: number; max: number };
 }
 
 interface Candidate {
@@ -88,7 +96,7 @@ export class AndroidDriver implements DeviceDriver {
   /** DeviceApp ids published, per device key — apps uninstalled while the phone was unplugged go at the replug. */
   private readonly publishedApps = new Map<string, Set<string>>();
   /** Settings Dürbün changed, per device key — the old values can be put back after a replug too. */
-  private readonly settingOverrides = new Map<string, Map<DeviceActionId, DeviceSettingOverride>>();
+  private readonly settingOverrides = new Map<string, Map<string, DeviceSettingOverride>>();
   /** adb serial → device key, for serials whose phone had to be asked (Wi-Fi). */
   private readonly keyOfSerial = new Map<string, string>();
   private readonly resolving = new Set<string>();
@@ -102,6 +110,10 @@ export class AndroidDriver implements DeviceDriver {
   private adopted?: { server: number; path: string; own: string };
   private candidatesCache?: { at: number; list: Candidate[] };
   private conflictTask?: Promise<void>;
+  /** The adb server's pushed device list (null before start). */
+  private tracker: AdbDeviceTracker | null = null;
+  /** A new list arrived while a poll ran: apply it once more. */
+  private trackDirty = false;
 
   constructor(private readonly options: AndroidDriverOptions = {}) {}
 
@@ -117,8 +129,38 @@ export class AndroidDriver implements DeviceDriver {
     this.adbPathSetting = ctx.settings().adbPath;
     await this.initAdb(ctx.settings());
     this.unsubSettings = ctx.onSettings((s) => void this.onSettings(s));
+    this.tracker = new AdbDeviceTracker({
+      port: () => adbServerPort(this.serverEnv()),
+      onList: () => {
+        this.trackDirty = true;
+        this.poller?.trigger();
+      },
+      onDown: (reason) => {
+        this.logger.debug(`adb device stream down (${reason}); polling adb devices`);
+        this.poller?.setInterval(POLL_MS);
+        this.poller?.trigger();
+      },
+      ...(this.options.trackRetryMs ? { retryMs: this.options.trackRetryMs } : {}),
+    });
     this.poller = new Poller(() => this.poll(), POLL_MS, this.logger, 'adb devices');
     this.poller.start();
+  }
+
+  /** The Mac woke from sleep: read the device list again now and re-check every phone's streams and forwards. */
+  async resume(): Promise<void> {
+    if (!this.running) return;
+    try {
+      this.tracker?.ensure(true);
+      this.poller?.trigger();
+      await Promise.all([...this.sessions.values()].map((s) => s.afterWake()));
+    } catch (e) {
+      this.logger.debug(`android resume failed: ${(e as Error).message}`);
+    }
+  }
+
+  /** Whether the device list comes from the adb server's stream right now (no polling). */
+  get tracking(): boolean {
+    return !!this.tracker?.live;
   }
 
   async stop(): Promise<void> {
@@ -126,6 +168,8 @@ export class AndroidDriver implements DeviceDriver {
     this.running = false;
     this.unsubSettings?.();
     this.unsubSettings = undefined;
+    this.tracker?.stop();
+    this.tracker = null;
     await this.poller?.stop();
     this.poller = undefined;
     await this.conflictTask;
@@ -420,6 +464,19 @@ export class AndroidDriver implements DeviceDriver {
     }
     await this.conflictTask;
     if (!(await this.serverMatches()) || !this.running) return;
+    const tracker = this.tracker;
+    if (tracker?.live) {
+      // Pushed by the server: nothing to run.
+      this.poller?.setInterval(TRACK_SAFETY_MS);
+      this.pollFailures = 0;
+      this.pollProblem = undefined;
+      do {
+        this.trackDirty = false;
+        await this.applyRows(parseAdbDevices(tracker.list ?? ''));
+      } while (this.trackDirty && this.running && tracker.live && !this.conflict);
+      return;
+    }
+    this.poller?.setInterval(POLL_MS);
     const adb = this.adb;
     const r = await adb.devices();
     if (!this.running) return;
@@ -439,6 +496,8 @@ export class AndroidDriver implements DeviceDriver {
     this.pollFailures = 0;
     this.pollProblem = undefined;
     await this.applyRows(parseAdbDevices(r.stdout));
+    // A server runs now (`adb devices` starts one): follow its pushed list instead of polling.
+    if (this.running && !this.conflict) tracker?.ensure();
   }
 
   /** Group the rows by phone, start / move / update sessions, drop the phones that are gone. */

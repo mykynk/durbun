@@ -1,5 +1,8 @@
 /**
- * iOS simulator driver: polls `xcrun simctl list devices booted -j` every 3 s; per booted simulator
+ * iOS simulator driver: polls `xcrun simctl list devices booted -j` every 3 s while a simulator runs. With none
+ * booted it only looks at the Mac's process names (one `ps`, no simctl call: simctl keeps CoreSimulatorService
+ * busy): a simulator's launchd (`launchd_sim`, one per booted simulator) → list now; Simulator.app open → look
+ * again in 3 s; neither → in 10 s. `recheck()` lists at once. Per booted simulator it
  * streams `log stream --style ndjson` (restarted when the scope/level settings change) and offers
  * simctl actions + host-ps metrics. SPEC §10: DeviceApps (simctl listapps + host ps) and
  * crash reports (~/Library/Logs/DiagnosticReports, matched to the simulator's UDID, copied to
@@ -18,7 +21,7 @@ import type {
 } from '@durbun/protocol';
 import type { DeviceDriver, DeviceLogInput, DriverContext, Logger, PortForward } from '../../types';
 import { silentLogger } from '../../util/logger';
-import { run, StreamProcess, type StreamExitInfo } from '../exec';
+import { run, StreamProcess, type RunOptions, type RunResult, type StreamExitInfo } from '../exec';
 import { LogBatcher } from '../shared/batcher';
 import { fail } from '../shared/files';
 import { FlutterErrorGrouper } from '../shared/flutter';
@@ -39,6 +42,8 @@ import { parseBootedDevices, simctl, XCRUN, type BootedSimulator } from './simct
 import { latestVmAnnouncements, parseSimLogLine, SIM_VM_HISTORY, simLogStreamArgs, simVmHistoryArgs } from './simlog';
 
 const POLL_MS = 3000;
+/** Nothing booted: how often to look for a booted simulator's launchd. */
+const IDLE_POLL_MS = 10_000;
 const VIA = 'simctl log stream';
 /** Longest a crash report waits for the first app listing (host apps of app extensions). */
 const APPS_WAIT_MS = 10_000;
@@ -54,6 +59,8 @@ export interface SimDeps {
   crashIndex: IosCrashIndex;
   appSource: (udid: string) => AppSource;
   timing: IosSimTiming;
+  /** Tests: a fake simctl for the actions. */
+  simctl?: SimctlRunner;
 }
 
 /** Polling intervals of the phase-3 watchers (tests shorten them). */
@@ -64,7 +71,36 @@ export interface IosSimTiming {
 
 export const DEFAULT_IOS_SIM_TIMING: IosSimTiming = { appsEveryMs: 3 * 60_000, processesEveryMs: 5000 };
 
+export type SimctlRunner = (args: string[], opts?: RunOptions) => Promise<RunResult<string>>;
+
+/**
+ * Simulator processes on the Mac: 'booted' (a simulator's launchd runs), 'app' (Simulator.app is open, a
+ * simulator may boot any moment), 'none', or undefined when it cannot be told (then simctl is asked).
+ */
+export type BootedProbe = () => Promise<'booted' | 'app' | 'none' | undefined>;
+
+/** Process names (`ps -Aco comm=`) → what runs. */
+export function simulatorProcesses(psOutput: string): 'booted' | 'app' | 'none' {
+  const names = new Set(psOutput.split('\n').map((l) => l.trim()));
+  if (names.has('launchd_sim')) return 'booted';
+  return names.has('Simulator') ? 'app' : 'none';
+}
+
+/** One `ps` call (no simctl, no CoreSimulatorService). */
+export const simulatorProcessProbe: BootedProbe = async () => {
+  const r = await run('/bin/ps', ['-Aco', 'comm='], { timeoutMs: 5000 });
+  return r.ok && r.stdout.trim() ? simulatorProcesses(r.stdout) : undefined;
+};
+
 export interface IosSimDriverOptions {
+  /** Tests: a fake `xcrun simctl` (device list, booted checks and actions). */
+  simctl?: SimctlRunner;
+  /** Tests: a fake "is any simulator booted" probe (default: pgrep launchd_sim). */
+  bootedProbe?: BootedProbe;
+  /** Tests: a fake Xcode probe. */
+  xcodeTools?: (force?: boolean) => Promise<XcodeTools>;
+  /** Tests: shorter intervals. */
+  pollMs?: { active: number; idle: number };
   /** Folders with macOS crash reports (default ~/Library/Logs/DiagnosticReports + Retired). */
   diagnosticReportDirs?: string[];
   /** Tests: fake app listing / process source per simulator. */
@@ -339,10 +375,17 @@ export class SimulatorSession {
         ctx: this.deps.ctx,
         restartLogs: () => this.restartLogs(),
         recorder: this.recorder,
+        ...(this.deps.simctl ? { simctl: this.deps.simctl } : {}),
       },
       action,
       params,
     );
+  }
+
+  /** The Mac woke from sleep: start `log stream` again when it ended (or waits in a backoff). */
+  afterWake(): void {
+    if (this.disposed || !this.stream?.active || this.stream.running) return;
+    this.startStream();
   }
 
   watchMetrics(target: { pid?: number; processName?: string }, enabled: boolean): void {
@@ -401,6 +444,14 @@ export class IosSimDriver implements DeviceDriver {
   private unsubLogs?: () => void;
   private readonly timing: IosSimTiming;
   private readonly appSource: (udid: string) => AppSource;
+  private readonly simctl: SimctlRunner;
+  private readonly probeBooted: BootedProbe;
+  private readonly probeXcode: (force?: boolean) => Promise<XcodeTools>;
+  private readonly intervals: { active: number; idle: number };
+  /** List with simctl on the next poll even when the probe says nothing is booted. */
+  private listNow = true;
+  /** simctl list calls so far (tests). */
+  listCalls = 0;
 
   constructor(opts: IosSimDriverOptions = {}) {
     // Delegates to the driver logger, which only exists after start().
@@ -418,6 +469,27 @@ export class IosSimDriver implements DeviceDriver {
     });
     this.timing = { ...DEFAULT_IOS_SIM_TIMING, ...opts.timing };
     this.appSource = opts.appSource ?? simAppSource;
+    this.simctl = opts.simctl ?? simctl;
+    this.probeBooted = opts.bootedProbe ?? simulatorProcessProbe;
+    this.probeXcode = opts.xcodeTools ?? probeXcodeTools;
+    this.intervals = opts.pollMs ?? { active: POLL_MS, idle: IDLE_POLL_MS };
+  }
+
+  /** List simulators now (a simulator may have booted): no waiting for the next idle check. */
+  recheck(): void {
+    this.listNow = true;
+    this.poller?.trigger();
+  }
+
+  /** The Mac woke from sleep: list simulators now and restart log streams that ended. Never throws. */
+  resume(): void {
+    if (!this.running) return;
+    try {
+      this.recheck();
+      for (const s of this.sessions.values()) s.afterWake();
+    } catch (e) {
+      this.logger.debug(`ios-sim resume failed: ${(e as Error).message}`);
+    }
   }
 
   async start(ctx: DriverContext): Promise<void> {
@@ -426,13 +498,14 @@ export class IosSimDriver implements DeviceDriver {
     this.logger = ctx.logger.child('ios-sim');
     this.running = true;
     this.logKey = logSettingsKey(ctx.settings());
-    this.xcode = await probeXcodeTools();
+    this.xcode = await this.probeXcode();
     if (!this.xcode.simctl) this.logger.info(`simctl unavailable: ${this.xcode.detail ?? 'unknown reason'}`);
     const crashIndex = new IosCrashIndex({ owns: (id) => this.owns(id), getApps: () => ctx.getApps() });
     this.crashIndex = crashIndex;
     this.unsubLogs = ctx.onLogs((entries) => crashIndex.add(entries));
     this.unsubSettings = ctx.onSettings((s) => void this.onSettings(s));
-    this.poller = new Poller(() => this.poll(), POLL_MS, this.logger, 'simctl list');
+    this.listNow = true;
+    this.poller = new Poller(() => this.poll(), this.intervals.active, this.logger, 'simctl list');
     this.poller.start();
   }
 
@@ -468,7 +541,7 @@ export class IosSimDriver implements DeviceDriver {
   }
 
   async checks(): Promise<ToolCheck[]> {
-    const x = await probeXcodeTools(true);
+    const x = await this.probeXcode(true);
     if (!x.simctl) {
       return [
         {
@@ -530,7 +603,7 @@ export class IosSimDriver implements DeviceDriver {
   }
 
   private async checkBooted(udid: string): Promise<boolean> {
-    const r = await simctl(['list', 'devices', 'booted', '-j'], { timeoutMs: 15_000 });
+    const r = await this.simctl(['list', 'devices', 'booted', '-j'], { timeoutMs: 15_000 });
     if (!r.ok) return this.booted.has(udid);
     const booted = new Set(parseBootedDevices(r.stdout).map((s) => s.udid));
     if (!booted.has(udid)) {
@@ -545,10 +618,23 @@ export class IosSimDriver implements DeviceDriver {
     if (!this.running || !this.ctx) return;
     this.polls += 1;
     if (!this.xcode?.simctl) {
-      if (this.polls % 20 === 0) this.xcode = await probeXcodeTools(true);
+      if (this.polls % 20 === 0) this.xcode = await this.probeXcode(true);
       if (!this.xcode?.simctl) return;
     }
-    const r = await simctl(['list', 'devices', 'booted', '-j'], { timeoutMs: 20_000 });
+    // Nothing booted: a cheap look for a simulator's launchd first; simctl only when one runs.
+    let probed: Awaited<ReturnType<BootedProbe>>;
+    if (this.sessions.size === 0 && !this.listNow) {
+      probed = await this.probeBooted().catch(() => undefined);
+      if (!this.running) return;
+      if (probed === 'none' || probed === 'app') {
+        // Simulator.app open: a simulator may boot any moment, keep looking often (still without simctl).
+        this.poller?.setInterval(probed === 'app' ? this.intervals.active : this.intervals.idle);
+        return;
+      }
+    }
+    this.listNow = false;
+    this.listCalls += 1;
+    const r = await this.simctl(['list', 'devices', 'booted', '-j'], { timeoutMs: 20_000 });
     if (!this.running) return;
     if (!r.ok) {
       this.pollProblem = `simctl list failed: ${r.error ?? r.stderr.trim().split('\n')[0] ?? `exit ${r.code}`}`;
@@ -556,6 +642,8 @@ export class IosSimDriver implements DeviceDriver {
     }
     this.pollProblem = undefined;
     const sims = parseBootedDevices(r.stdout);
+    // A simulator still booting (launchd_sim runs, simctl does not list it yet) is checked again soon.
+    this.poller?.setInterval(sims.length > 0 || probed === 'booted' || probed === undefined ? this.intervals.active : this.intervals.idle);
     this.booted = new Set(sims.map((s) => s.udid));
     for (const sim of sims) {
       const existing = this.sessions.get(sim.udid);
@@ -573,6 +661,7 @@ export class IosSimDriver implements DeviceDriver {
           crashIndex: this.crashIndex!,
           appSource: this.appSource,
           timing: this.timing,
+          simctl: this.simctl,
         },
         sim,
       );

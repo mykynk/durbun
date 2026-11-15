@@ -12,11 +12,18 @@ import type { LogEntry } from '@durbun/protocol';
 import { createPlatform } from '../../src/platform';
 import { DROPBOX_TIMING } from '../../src/platform/android/dropbox';
 import { liveChildCount } from '../../src/platform/exec';
-import { createCtx, waitFor, type FakeCtx } from './helpers';
+import { createCtx, waitFor, type FakeCtx, isolateAdbServer } from './helpers';
 
 const SERIAL = '1A2B3C4D5E6F';
 const ID = `android:${SERIAL}`;
 const FAKE = fileURLToPath(new URL('./android-fixtures/fake-adb.cjs', import.meta.url));
+
+// Never the adb server of this Mac: its device list must not reach these tests (fake adb only).
+let unisolate: () => void = () => undefined;
+beforeAll(async () => {
+  unisolate = await isolateAdbServer();
+});
+afterAll(() => unisolate());
 
 describe('AndroidDriver with a fake adb (DeviceApps, dropbox, frame stats)', () => {
   let dir: string;

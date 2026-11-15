@@ -202,3 +202,21 @@ export function fixture(name: string): string {
 export function fixturePath(name: string): string {
   return path.join(FIXTURES, name);
 }
+
+/**
+ * Point the driver's adb server socket (version probe, device stream) at a local port nothing listens on, so a
+ * test with a fake `adb` never talks to an adb server running on this Mac. Returns the undo.
+ */
+export async function isolateAdbServer(): Promise<() => void> {
+  const { ADB_SERVER_PROBE } = await import('../../src/platform/android/adbServer');
+  const net = await import('node:net');
+  const saved = ADB_SERVER_PROBE.port;
+  const server = net.createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as { port: number }).port;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  ADB_SERVER_PROBE.port = port;
+  return () => {
+    ADB_SERVER_PROBE.port = saved;
+  };
+}

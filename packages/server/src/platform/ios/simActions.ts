@@ -19,6 +19,7 @@ import {
 } from '../shared/files';
 import { sigintRecording, type RecordingProcess, type ScreenRecorder } from '../shared/screenRecord';
 import { tailLines } from '../shared/text';
+import { appBundleId } from './bundleInfo';
 import { contentSizeForScale, CONTENT_SIZES, parseListApps, simctl, XCRUN } from './simctl';
 import type { RunOptions, RunResult } from '../exec';
 
@@ -40,6 +41,25 @@ export const SIM_ACTIONS: DeviceActionId[] = [
   'logs-restart',
   'screen-record',
   'screen-record-stop',
+  'app-permission',
+  'keychain-reset',
+];
+
+/** Services `simctl privacy` grants, revokes and resets. */
+export const SIM_PRIVACY_SERVICES: readonly string[] = [
+  'all',
+  'calendar',
+  'contacts-limited',
+  'contacts',
+  'location',
+  'location-always',
+  'photos-add',
+  'photos',
+  'media-library',
+  'microphone',
+  'motion',
+  'reminders',
+  'siri',
 ];
 
 export interface SimActionTarget {
@@ -151,7 +171,33 @@ export async function runSimAction(
     }
 
     case 'app-install':
-      return installApp(t, str(params, 'file'));
+      return installApp(t, str(params, 'file'), params.replace === true);
+
+    case 'app-permission': {
+      const appId = needApp();
+      if (typeof appId !== 'string') return appId;
+      const service = str(params, 'permission');
+      if (!service || !SIM_PRIVACY_SERVICES.includes(service)) {
+        return fail(`permission must be one of: ${SIM_PRIVACY_SERVICES.join(', ')}`, 'action.invalidParams');
+      }
+      if (params.restore === true) {
+        // simctl cannot read what was set: "restore" asks the user again, as after a fresh install.
+        const r = await simOf(t)(['privacy', udid, 'reset', service, appId]);
+        if (!r.ok) return fail(`Could not reset ${service} for ${appId}: ${simError(r)}`);
+        return done(`${appId} will ask for ${service} again`, 'action.permissionReset');
+      }
+      const grant = bool(params, 'grant');
+      if (grant === undefined) return fail('grant (boolean) is required', 'action.invalidParams');
+      const r = await simOf(t)(['privacy', udid, grant ? 'grant' : 'revoke', service, appId]);
+      if (!r.ok) return fail(`Could not change ${service} for ${appId}: ${simError(r)}`);
+      return done(grant ? `${service} granted to ${appId}` : `${service} revoked from ${appId} (iOS ends a running app when a permission is revoked)`);
+    }
+
+    case 'keychain-reset': {
+      const r = await simOf(t)(['keychain', udid, 'reset']);
+      if (!r.ok) return fail(`Could not reset the keychain: ${simError(r)}`);
+      return done('Every keychain item of the simulator was deleted');
+    }
 
     case 'appearance': {
       const mode = str(params, 'mode');
@@ -294,7 +340,7 @@ async function findAppBundle(root: string, depth = 3): Promise<string | undefine
   return undefined;
 }
 
-async function installApp(t: SimActionTarget, file: string | undefined): Promise<DeviceActionResult> {
+async function installApp(t: SimActionTarget, file: string | undefined, replace = false): Promise<DeviceActionResult> {
   if (!file || !path.isAbsolute(file)) return fail('An absolute .app / .zip path is required', 'action.invalidParams');
   const st = await fs.promises.stat(file).catch(() => undefined);
   if (!st) return fail(`File not found: ${file}`, 'action.fileNotFound');
@@ -312,8 +358,23 @@ async function installApp(t: SimActionTarget, file: string | undefined): Promise
     } else if (!st.isDirectory() || !file.endsWith('.app')) {
       return fail('Install a .app folder or a .zip/.ipa containing one', 'action.unsupportedFile');
     }
+    let replaced: string | undefined;
+    if (replace) {
+      const bundleId = await appBundleId(appPath);
+      if (!bundleId) {
+        return fail(`The bundle id of ${path.basename(appPath)} could not be read, so Dürbün cannot tell which app to uninstall`, 'action.install.packageUnknown');
+      }
+      // simctl reports success for an app that is not installed: nothing to check.
+      const u = await simOf(t)(['uninstall', t.udid, bundleId], { timeoutMs: 60_000 });
+      if (!u.ok) return fail(`Could not uninstall ${bundleId} (nothing was changed): ${simError(u)}`, 'action.install.replaceUninstallFailed', { packageId: bundleId });
+      replaced = bundleId;
+    }
     const r = await simOf(t)(['install', t.udid, appPath], { timeoutMs: 5 * 60_000 });
-    if (!r.ok) return fail(`Install failed: ${simError(r)}`, 'action.installFailed');
+    if (!r.ok) {
+      if (replaced) return fail(`${replaced} was uninstalled, but installing failed: ${simError(r)}`, 'action.install.replaceInstallFailed', { packageId: replaced });
+      return fail(`Install failed: ${simError(r)}`, 'action.installFailed');
+    }
+    if (replaced) return done(`Uninstalled ${replaced} and installed ${path.basename(appPath)}`, 'action.install.replaced', { packageId: replaced });
     return done(`Installed ${path.basename(appPath)}`);
   } finally {
     if (tmp) await fs.promises.rm(tmp, { recursive: true, force: true });

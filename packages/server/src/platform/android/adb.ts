@@ -53,6 +53,11 @@ export class Adb {
     return spawnTracked(this.tool.path, ['-s', serial, 'shell', command], this.tool.env, { stdout: true });
   }
 
+  /** Long-running `adb <args>` (stdout + stderr piped), e.g. `bugreport`; the caller owns its lifetime. */
+  spawn(args: string[]): ChildProcess {
+    return spawnTracked(this.tool.path, args, this.tool.env, { stdout: true });
+  }
+
   async version(): Promise<string | undefined> {
     const r = await this.run(['version'], { timeoutMs: 10_000 });
     if (!r.ok) return undefined;

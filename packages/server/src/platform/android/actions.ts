@@ -1,7 +1,16 @@
 /** Device actions for Android devices/emulators (SPEC §5.5 "Actions"). */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { DeviceActionId, DeviceActionResult, DeviceSettingOverride, InstalledApp, LogBufferSizeData } from '@durbun/protocol';
+import type {
+  ConnectionType,
+  DeviceActionId,
+  DeviceActionResult,
+  DeviceUnavailableAction,
+  DeviceUser,
+  InstalledApp,
+  InstallRefusalData,
+  LogBufferSizeData,
+} from '@durbun/protocol';
 import type { DriverContext } from '../../types';
 import { failureText, killProcess, run } from '../exec';
 import { bool, done, ensureDir, fail, isPng, num, saveScreenshot, str, tempFileName, validAppId } from '../shared/files';
@@ -9,8 +18,14 @@ import type { RecordingProcess, ScreenRecorder } from '../shared/screenRecord';
 import { shellQuote } from '../shared/text';
 import { sleep } from '../shared/timing';
 import type { Adb } from './adb';
+import { apkPackageId } from './apkManifest';
+import type { BugReporter } from './bugReport';
+import { changeSetting, type SettingOverrides } from './deviceSettings';
 import { androidPackageKind, chooseSplits, installFailure, listFiles, parseDeviceSpec } from './install';
 import { parseCurrentScreenSize, parsePackageDump, parsePackageList } from './parsers';
+import { userArgs, userFlag, userParam } from './users';
+
+export { parseNightMode, type SettingOverrides } from './deviceSettings';
 
 export interface AndroidActionTarget {
   adb: Adb;
@@ -28,40 +43,73 @@ export interface AndroidActionTarget {
    * first change is read and kept, and `{ restore: true }` puts it back.
    */
   overrides?: SettingOverrides;
+  /** Users / profiles of the phone (more than one: `userId` params are checked against them). */
+  users?: readonly DeviceUser[];
+  /** The full device report runner of this phone. */
+  bugReports?: BugReporter;
 }
 
-export interface SettingOverrides {
-  get(action: DeviceActionId): DeviceSettingOverride | undefined;
-  set(override: DeviceSettingOverride): void;
-  delete(action: DeviceActionId): void;
+export interface AndroidActionState {
+  online: boolean;
+  isEmulator: boolean;
+  apiLevel?: number;
+  /** How adb reaches the phone: Wi-Fi or airplane mode switched off over Wi-Fi would cut that connection. */
+  connection?: ConnectionType;
 }
 
-const ANIMATION_KEYS = ['window_animation_scale', 'transition_animation_scale', 'animator_duration_scale'] as const;
-/** `settings get` of a key nobody set prints "null": the platform default applies. */
-const DEFAULT_VALUE = 'default';
+/** Android version names for the API levels actions start at (reason params). */
+const ANDROID_VERSION: Record<number, string> = { 19: '4.4', 23: '6', 24: '7', 29: '10', 30: '11', 33: '13' };
 
-/** One `settings get` line → value ("default" for an unset key), undefined when unreadable. */
-function settingValue(line: string | undefined): string | undefined {
-  const v = line?.trim();
-  if (!v) return undefined;
-  if (v === 'null') return DEFAULT_VALUE;
-  return /^-?\d+(\.\d+)?$/.test(v) ? String(Number(v)) : undefined;
+/** Actions that work for an Android device in its current state, and those that do not with why. */
+export function androidActionAvailability(opts: AndroidActionState): { actions: DeviceActionId[]; unavailable: DeviceUnavailableAction[] } {
+  const actions: DeviceActionId[] = [];
+  const unavailable: DeviceUnavailableAction[] = [];
+  if (!opts.online) return { actions, unavailable };
+  const api = opts.apiLevel;
+  const fromApi = (action: DeviceActionId, minApi: number) => {
+    if (api === undefined || api >= minApi) actions.push(action);
+    else unavailable.push({ action, code: 'action.apiTooLow', params: { apiLevel: api, minApi, minVersion: ANDROID_VERSION[minApi] ?? String(minApi) } });
+  };
+  const notOverWifi = (action: DeviceActionId, minApi = 0) => {
+    if (opts.connection === 'wifi') unavailable.push({ action, code: 'action.wouldDisconnect', params: { connection: 'wifi' } });
+    else fromApi(action, minApi);
+  };
+  actions.push(
+    'screenshot',
+    'open-url',
+    'list-apps',
+    'app-launch',
+    'app-stop',
+    'app-restart',
+    'app-clear-data',
+    'app-uninstall',
+    'app-install',
+    'logs-clear-buffer',
+    'logs-restart',
+  );
+  // System-wide dark theme exists since Android 10 (API 29).
+  fromApi('appearance', 29);
+  actions.push('font-scale', 'animations', 'input-text', 'key-event');
+  if (opts.isEmulator) actions.push('location');
+  else unavailable.push({ action: 'location', code: 'action.emulatorOnly' });
+  fromApi('screen-record', 19);
+  fromApi('screen-record-stop', 19);
+  // Runtime permissions exist since Android 6; per-app languages since Android 13.
+  fromApi('app-permission', 23);
+  actions.push('app-settings');
+  fromApi('app-locale', 33);
+  notOverWifi('airplane-mode', 30);
+  notOverWifi('wifi');
+  actions.push('mobile-data', 'rotation', 'dont-keep-activities');
+  // `adb bugreport <file>.zip` (bugreportz) since Android 7.
+  fromApi('bug-report', 24);
+  fromApi('bug-report-cancel', 24);
+  return { actions, unavailable };
 }
 
-/** "1,1,1" → "1"; differing scales stay a list (window,transition,animator). */
-function joinScales(values: string[]): string {
-  return values.every((v) => v === values[0]) ? values[0]! : values.join(',');
-}
-
-/** `cmd uimode night` → "yes" | "no" | "auto" (other modes, such as a custom schedule, cannot be set back). */
-export function parseNightMode(text: string): string | undefined {
-  const v = /Night mode:\s*(\w+)/i.exec(text)?.[1]?.toLowerCase();
-  return v === 'yes' || v === 'no' || v === 'auto' ? v : undefined;
-}
-
-/** Shell command that sets a setting to `value` (unset keys are deleted, so the platform default applies again). */
-function putSetting(namespace: 'global' | 'system', key: string, value: string): string {
-  return value === DEFAULT_VALUE ? `settings delete ${namespace} ${key}` : `settings put ${namespace} ${key} ${value}`;
+/** Actions that work for an Android device in its current state. */
+export function androidActionsFor(opts: AndroidActionState): DeviceActionId[] {
+  return androidActionAvailability(opts).actions;
 }
 
 export const ANDROID_KEY_CODES: Record<string, number> = {
@@ -75,31 +123,6 @@ export const ANDROID_KEY_CODES: Record<string, number> = {
   delete: 67,
   menu: 82,
 };
-
-/** Actions that work for an Android device in its current state. */
-export function androidActionsFor(opts: { online: boolean; isEmulator: boolean; apiLevel?: number }): DeviceActionId[] {
-  if (!opts.online) return [];
-  const api = opts.apiLevel;
-  const actions: DeviceActionId[] = [
-    'screenshot',
-    'open-url',
-    'list-apps',
-    'app-launch',
-    'app-stop',
-    'app-restart',
-    'app-clear-data',
-    'app-uninstall',
-    'app-install',
-    'logs-clear-buffer',
-    'logs-restart',
-  ];
-  // System-wide dark theme exists since Android 10 (API 29).
-  if (api === undefined || api >= 29) actions.push('appearance');
-  actions.push('font-scale', 'animations', 'input-text', 'key-event');
-  if (opts.isEmulator) actions.push('location');
-  if (api === undefined || api >= 19) actions.push('screen-record', 'screen-record-stop');
-  return actions;
-}
 
 function textOf(r: { stdout: string; stderr: string }): string {
   return `${r.stdout}\n${r.stderr}`.trim();
@@ -122,6 +145,10 @@ export async function runAndroidAction(
     if (!validAppId(appId)) return fail('A valid package name (appId) is required', 'action.invalidParams');
     return appId;
   };
+  // Phones with a work profile / second user: the app of that user (`--user`); default: the phone's default.
+  const user = userParam(params, t.users);
+  if (user === 'invalid') return fail('userId is not a user of this phone', 'action.invalidParams');
+  const u = userFlag(user);
 
   switch (action) {
     case 'screenshot': {
@@ -151,8 +178,8 @@ export async function runAndroidAction(
       const dumpCmd =
         "dumpsys package packages | grep -E '^ +Package \\[|^ +versionName=|^ +(pkg)?[Ff]lags=\\['";
       const [third, all, dump] = await Promise.all([
-        shell('pm list packages -3'),
-        includeSystem ? shell('pm list packages') : Promise.resolve(undefined),
+        shell(`pm list packages -3${u}`),
+        includeSystem ? shell(`pm list packages${u}`) : Promise.resolve(undefined),
         shell(dumpCmd, 30_000),
       ]);
       if (!third.ok) return fail(`Could not list packages: ${failureText(third)}`);
@@ -175,14 +202,14 @@ export async function runAndroidAction(
     case 'app-launch': {
       const appId = needApp();
       if (typeof appId !== 'string') return appId;
-      return launch(t, appId);
+      return launch(t, appId, undefined, user);
     }
 
     case 'app-stop': {
       const appId = needApp();
       if (typeof appId !== 'string') return appId;
       if (params.background === true) return backgroundKill(t, appId);
-      const r = await shell(`am force-stop ${shellQuote(appId)}`);
+      const r = await shell(`am force-stop${u} ${shellQuote(appId)}`);
       if (!r.ok) return fail(`Could not stop ${appId}: ${failureText(r)}`);
       return done(`Stopped ${appId}`);
     }
@@ -190,15 +217,15 @@ export async function runAndroidAction(
     case 'app-restart': {
       const appId = needApp();
       if (typeof appId !== 'string') return appId;
-      const r = await shell(`am force-stop ${shellQuote(appId)}`);
+      const r = await shell(`am force-stop${u} ${shellQuote(appId)}`);
       if (!r.ok) return fail(`Could not stop ${appId}: ${failureText(r)}`);
-      return launch(t, appId, `Restarted ${appId}`);
+      return launch(t, appId, `Restarted ${appId}`, user);
     }
 
     case 'app-clear-data': {
       const appId = needApp();
       if (typeof appId !== 'string') return appId;
-      const r = await shell(`pm clear ${shellQuote(appId)}`, 60_000);
+      const r = await shell(`pm clear${u} ${shellQuote(appId)}`, 60_000);
       if (!r.ok || !/Success/.test(r.stdout)) {
         return fail(`Could not clear data of ${appId}: ${failureText(r)}`);
       }
@@ -208,12 +235,8 @@ export async function runAndroidAction(
     case 'app-uninstall': {
       const appId = needApp();
       if (typeof appId !== 'string') return appId;
-      const r = await adb.run(['-s', serial, 'uninstall', appId], { timeoutMs: 120_000 });
-      const out = textOf(r);
-      if (!/^Success/m.test(out)) {
-        const reason = /Failure \[([^\]]+)\]/.exec(out)?.[1] ?? failureText(r);
-        return fail(`Could not uninstall ${appId}: ${reason}`, 'action.uninstallFailed');
-      }
+      const r = await uninstall(t, appId, user);
+      if (!r.ok) return fail(`Could not uninstall ${appId}: ${r.reason}`, 'action.uninstallFailed');
       return done(`Uninstalled ${appId}`);
     }
 
@@ -224,9 +247,27 @@ export async function runAndroidAction(
       if (!st?.isFile()) return fail(`File not found: ${file}`, 'action.fileNotFound');
       const kind = androidPackageKind(file);
       if (!kind) return fail('Only .apk, .apks and .xapk files can be installed on Android', 'action.unsupportedFile');
-      if (kind !== 'apk') return installArchive(t, file, kind);
-      return installApks(t, [file], path.basename(file));
+      const opts: InstallOptions = { replace: params.replace === true, user };
+      if (kind !== 'apk') return installArchive(t, file, kind, opts);
+      return installApks(t, [file], path.basename(file), { ...opts, packageId: () => apkPackageId(file) });
     }
+
+    case 'app-settings': {
+      const appId = needApp();
+      if (typeof appId !== 'string') return appId;
+      const r = await shell(`am start${u} -a android.settings.APPLICATION_DETAILS_SETTINGS -d ${shellQuote(`package:${appId}`)}`);
+      const out = textOf(r);
+      if (!r.ok || /^Error:/m.test(out)) return fail(`Could not open the settings of ${appId}: ${/^Error:.*$/m.exec(out)?.[0] ?? failureText(r)}`);
+      return done(`Opened the settings of ${appId} on the phone`);
+    }
+
+    case 'bug-report':
+      if (!t.bugReports) return fail('Device reports are not available for this device', 'action.unsupported');
+      return t.bugReports.collect();
+
+    case 'bug-report-cancel':
+      if (!t.bugReports) return fail('Device reports are not available for this device', 'action.unsupported');
+      return t.bugReports.cancel();
 
     case 'logs-clear-buffer': {
       const r = await adb.run(['-s', serial, 'logcat', '-c'], { timeoutMs: 15_000 });
@@ -263,6 +304,13 @@ export async function runAndroidAction(
     case 'appearance':
     case 'font-scale':
     case 'animations':
+    case 'airplane-mode':
+    case 'wifi':
+    case 'mobile-data':
+    case 'rotation':
+    case 'dont-keep-activities':
+    case 'app-permission':
+    case 'app-locale':
       return changeSetting(t, action, params);
 
     case 'input-text': {
@@ -317,109 +365,6 @@ export async function runAndroidAction(
   }
 }
 
-interface SettingIo {
-  read(): Promise<string | undefined>;
-  write(value: string): Promise<DeviceActionResult | undefined>;
-  label: string;
-}
-
-function settingIo(t: AndroidActionTarget, action: 'appearance' | 'font-scale' | 'animations'): SettingIo {
-  const shell = (cmd: string) => t.adb.shell(t.serial, cmd);
-  switch (action) {
-    case 'appearance':
-      return {
-        label: 'Dark mode',
-        read: async () => {
-          const r = await shell('cmd uimode night');
-          return r.ok ? parseNightMode(textOf(r)) : undefined;
-        },
-        write: async (value) => {
-          const r = await shell(`cmd uimode night ${value}`);
-          return !r.ok || /Error|Unknown command/i.test(r.stderr) ? fail(`Could not switch appearance: ${failureText(r)}`) : undefined;
-        },
-      };
-    case 'font-scale':
-      return {
-        label: 'Font scale',
-        read: async () => {
-          const r = await shell('settings get system font_scale');
-          return r.ok ? settingValue(r.stdout.split('\n')[0]) : undefined;
-        },
-        write: async (value) => {
-          const r = await shell(putSetting('system', 'font_scale', value));
-          return r.ok ? undefined : fail(`Could not set the font scale: ${failureText(r)}`);
-        },
-      };
-    case 'animations':
-      return {
-        label: 'Animation scales',
-        read: async () => {
-          const r = await shell(ANIMATION_KEYS.map((k) => `settings get global ${k}`).join('; '));
-          if (!r.ok) return undefined;
-          const values = r.stdout.split('\n').filter((l) => l.trim()).map(settingValue);
-          return values.length === 3 && values.every((v): v is string => v !== undefined) ? joinScales(values) : undefined;
-        },
-        write: async (value) => {
-          const parts = value.split(',');
-          const r = await shell(ANIMATION_KEYS.map((k, i) => putSetting('global', k, parts[parts.length === 3 ? i : 0]!)).join('; '));
-          return r.ok ? undefined : fail(`Could not change animation scales: ${failureText(r)}`);
-        },
-      };
-  }
-}
-
-/** Two setting values mean the same ("1.0" and "1"). */
-const sameValue = (a: string, b: string) => a === b || (Number.isFinite(Number(a)) && Number(a) === Number(b) && a !== DEFAULT_VALUE && b !== DEFAULT_VALUE);
-
-/**
- * Dark mode, font scale and animation scales: before Dürbün's first change the current value is read and kept
- * (`target.overrides`), so `{ restore: true }` can put it back later; a change back to that value forgets it.
- */
-async function changeSetting(
-  t: AndroidActionTarget,
-  action: 'appearance' | 'font-scale' | 'animations',
-  params: Record<string, unknown>,
-): Promise<DeviceActionResult> {
-  const io = settingIo(t, action);
-  const overrides = t.overrides;
-  if (params.restore === true) {
-    const o = overrides?.get(action);
-    if (!o) return done(`${io.label}: Dürbün has not changed it, nothing to restore`, 'action.nothingToRestore');
-    const failed = await io.write(o.previous);
-    if (failed) return failed;
-    overrides!.delete(action);
-    return done(`${io.label} restored to ${o.previous}`, 'action.settingRestored', { previous: o.current, current: o.previous });
-  }
-  let value: string;
-  let message: string;
-  if (action === 'appearance') {
-    const mode = str(params, 'mode');
-    if (mode !== 'dark' && mode !== 'light') return fail('mode must be "dark" or "light"', 'action.invalidParams');
-    value = mode === 'dark' ? 'yes' : 'no';
-    message = mode === 'dark' ? 'Dark mode on' : 'Light mode on';
-  } else if (action === 'font-scale') {
-    const scale = num(params, 'scale');
-    if (scale === undefined || scale < 0.5 || scale > 2.0) return fail('scale must be a number between 0.5 and 2.0', 'action.invalidParams');
-    value = String(Math.round(scale * 100) / 100);
-    message = `Font scale set to ${value}`;
-  } else {
-    const enabled = bool(params, 'enabled');
-    if (enabled === undefined) return fail('enabled (boolean) is required', 'action.invalidParams');
-    value = enabled ? '1' : '0';
-    message = enabled ? 'Animations enabled' : 'Animations disabled';
-  }
-  const kept = overrides?.get(action);
-  const previous = overrides && !kept ? await io.read() : undefined;
-  const failed = await io.write(value);
-  if (failed) return failed;
-  if (overrides) {
-    const before = kept?.previous ?? previous;
-    if (before !== undefined && sameValue(before, value)) overrides.delete(action);
-    else if (before !== undefined) overrides.set({ action, previous: before, current: value, since: kept?.since ?? Date.now() });
-  }
-  return done(message);
-}
-
 /**
  * The system ending an app in the background (what happens under memory pressure), unlike a force stop: Home,
  * then `am kill`, which only ends processes the system may kill (background ones). Reopened from Recents, the
@@ -443,18 +388,93 @@ async function backgroundKill(t: AndroidActionTarget, appId: string): Promise<De
 /** Time for the app to move to the background after Home (its activity stops). */
 export const BACKGROUND_SETTLE_MS = 1000;
 
-/** `adb install` (one APK) or `adb install-multiple` (split APKs of one app); refusals get their own code. */
-async function installApks(t: AndroidActionTarget, files: string[], label: string): Promise<DeviceActionResult> {
-  const args = files.length === 1 ? ['install', '-r', '-t', '-d', files[0]!] : ['install-multiple', '-r', '-t', '-d', ...files];
+interface InstallOptions {
+  /** Uninstall the installed copy first (its data goes), after a refusal over it. */
+  replace: boolean;
+  /** `--user` for installs into one user / profile. */
+  user?: number;
+  /** The package name of what is installed (read from the file); undefined when it cannot be read. */
+  packageId?: () => Promise<string | undefined>;
+}
+
+/** Refusals about the copy already on the phone: uninstalling it first lets the install go through. */
+const REPLACEABLE = new Set(['action.install.signatureMismatch', 'action.install.downgrade']);
+
+/** `adb uninstall [--user N] <pkg>`: ok, or the reason. */
+async function uninstall(t: AndroidActionTarget, appId: string, user: number | undefined): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const r = await t.adb.run(['-s', t.serial, 'uninstall', ...userArgs(user), appId], { timeoutMs: 120_000 });
+  const out = textOf(r);
+  if (/^Success/m.test(out)) return { ok: true };
+  return { ok: false, reason: /Failure \[([^\]]+)\]/.exec(out)?.[1] ?? failureText(r) };
+}
+
+/** `pm path`: is the package installed (for that user)? undefined when the answer was not understood. */
+async function isInstalled(t: AndroidActionTarget, appId: string, user: number | undefined): Promise<boolean | undefined> {
+  const r = await t.adb.shell(t.serial, `pm path${userFlag(user)} ${shellQuote(appId)}`, { timeoutMs: 20_000 });
+  if (/^package:/m.test(r.stdout)) return true;
+  // `pm path` of an unknown package prints nothing and exits 1.
+  if (!r.stdout.trim() && !/Exception|Error/i.test(r.stderr)) return false;
+  return undefined;
+}
+
+/**
+ * `adb install` (one APK) or `adb install-multiple` (split APKs of one app); refusals get their own code. A
+ * refusal over the installed copy says which package it is (data: InstallRefusalData); with `replace` that
+ * copy is uninstalled first.
+ */
+async function installApks(t: AndroidActionTarget, files: string[], label: string, opts: InstallOptions): Promise<DeviceActionResult> {
+  let replaced: string | undefined;
+  if (opts.replace) {
+    const pkg = await opts.packageId?.();
+    if (!pkg) {
+      return fail(
+        `The package name of ${label} could not be read from the file, so Dürbün cannot tell which app to uninstall; uninstall it on the phone, then install again`,
+        'action.install.packageUnknown',
+      );
+    }
+    if ((await isInstalled(t, pkg, opts.user)) !== false) {
+      const u = await uninstall(t, pkg, opts.user);
+      if (!u.ok && (await isInstalled(t, pkg, opts.user)) !== false) {
+        return fail(`Could not uninstall ${pkg} (nothing was changed): ${u.reason}`, 'action.install.replaceUninstallFailed', { packageId: pkg });
+      }
+      replaced = pkg;
+    }
+  }
+  const flags = ['-r', '-t', '-d', ...userArgs(opts.user)];
+  const args = files.length === 1 ? ['install', ...flags, files[0]!] : ['install-multiple', ...flags, ...files];
   const r = await t.adb.run(['-s', t.serial, ...args], { timeoutMs: 10 * 60_000 });
   const out = textOf(r);
-  if (/^Success/m.test(out)) return done(`Installed ${label}`);
+  if (/^Success/m.test(out)) {
+    return replaced ? done(`Uninstalled ${replaced} and installed ${label}`, 'action.install.replaced', { packageId: replaced }) : done(`Installed ${label}`);
+  }
   const { reason, code } = installFailure(out);
+  if (replaced) {
+    return fail(
+      `${replaced} was uninstalled, but installing ${label} failed: ${reason ?? failureText(r)}`,
+      'action.install.replaceInstallFailed',
+      { packageId: replaced, code },
+    );
+  }
+  if (REPLACEABLE.has(code)) {
+    const packageId = (await opts.packageId?.()) ?? packageFromRefusal(reason);
+    const data: InstallRefusalData = { ...(packageId ? { packageId } : {}), replaceable: !!packageId };
+    const which = packageId ?? 'the app (its package name could not be read from the file)';
+    return fail(`Install failed: ${reason ?? failureText(r)}. Uninstalling ${which} first lets it install; that deletes its data.`, code, data);
+  }
   return fail(`Install failed: ${reason ?? failureText(r)}`, code);
 }
 
+/**
+ * The package a refusal names, when it does: "INSTALL_FAILED_UPDATE_INCOMPATIBLE: Package com.x signatures do
+ * not match the previously installed version" / "Existing package com.x signatures do not match newer version".
+ */
+export function packageFromRefusal(reason: string | undefined): string | undefined {
+  const m = /(?:Existing package|Package) ([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+) signatures/.exec(reason ?? '');
+  return m?.[1];
+}
+
 /** .apks / .xapk: unpack, pick the splits that fit the phone, install them together (OBB data of an .xapk after). */
-async function installArchive(t: AndroidActionTarget, file: string, kind: 'apks' | 'xapk'): Promise<DeviceActionResult> {
+async function installArchive(t: AndroidActionTarget, file: string, kind: 'apks' | 'xapk', opts: InstallOptions): Promise<DeviceActionResult> {
   const { adb, serial } = t;
   await ensureDir(t.ctx.tempDir);
   const dir = await fs.promises.mkdtemp(path.join(t.ctx.tempDir, 'install-'));
@@ -475,11 +495,12 @@ async function installArchive(t: AndroidActionTarget, file: string, kind: 'apks'
       }
       return fail(`${path.basename(file)} has no APK to install`, 'action.unsupportedFile');
     }
-    const installed = await installApks(
-      t,
-      choice.apks.map((a) => path.join(dir, ...a.split('/'))),
-      `${path.basename(file)} (${choice.apks.length} APK${choice.apks.length === 1 ? '' : 's'})`,
-    );
+    const apks = choice.apks.map((a) => path.join(dir, ...a.split('/')));
+    const installed = await installApks(t, apks, `${path.basename(file)} (${choice.apks.length} APK${choice.apks.length === 1 ? '' : 's'})`, {
+      ...opts,
+      // The base / master APK comes first and carries the manifest with the package name.
+      packageId: () => apkPackageId(apks[0]!),
+    });
     if (!installed.ok || !choice.obb.length) return installed;
     for (const obb of choice.obb) {
       const remote = `/sdcard/${obb}`;
@@ -487,13 +508,18 @@ async function installArchive(t: AndroidActionTarget, file: string, kind: 'apks'
       const push = await adb.run(['-s', serial, 'push', path.join(dir, ...obb.split('/')), remote], { timeoutMs: 15 * 60_000 });
       if (!push.ok) return fail(`The app was installed, but its data file ${path.posix.basename(obb)} could not be copied: ${failureText(push)}`, 'action.install.obbFailed');
     }
-    return done(`${installed.message ?? 'Installed'} with ${choice.obb.length} OBB data file${choice.obb.length === 1 ? '' : 's'}`);
+    return done(`${installed.message ?? 'Installed'} with ${choice.obb.length} OBB data file${choice.obb.length === 1 ? '' : 's'}`, installed.code, installed.data);
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-async function launch(t: AndroidActionTarget, appId: string, okMessage?: string): Promise<DeviceActionResult> {
+/**
+ * Start the app's launcher activity: `monkey` for the default user; for another user / profile `monkey` has
+ * no `--user`, so the activity is resolved (`cmd package resolve-activity --brief`) and started with `am start`.
+ */
+async function launch(t: AndroidActionTarget, appId: string, okMessage?: string, user?: number): Promise<DeviceActionResult> {
+  if (user !== undefined) return launchForUser(t, appId, user, okMessage);
   const r = await t.adb.shell(
     t.serial,
     `monkey -p ${shellQuote(appId)} -c android.intent.category.LAUNCHER 1`,
@@ -507,6 +533,29 @@ async function launch(t: AndroidActionTarget, appId: string, okMessage?: string)
     return fail(`Could not launch ${appId}: ${reason}`, 'action.launchFailed');
   }
   return done(okMessage ?? `Launched ${appId}`);
+}
+
+async function launchForUser(t: AndroidActionTarget, appId: string, user: number, okMessage?: string): Promise<DeviceActionResult> {
+  const q = shellQuote(appId);
+  const resolved = await t.adb.shell(
+    t.serial,
+    `cmd package resolve-activity --brief --user ${user} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${q}`,
+    { timeoutMs: 20_000 },
+  );
+  const component = parseResolvedComponent(resolved.stdout, appId);
+  if (!component) return fail(`Could not launch ${appId}: it has no launcher activity or is not installed for user ${user}`, 'action.launchFailed');
+  const r = await t.adb.shell(t.serial, `am start --user ${user} -n ${shellQuote(component)}`, { timeoutMs: 30_000 });
+  const out = textOf(r);
+  if (!r.ok || /^Error/m.test(out)) return fail(`Could not launch ${appId}: ${/^Error.*$/m.exec(out)?.[0] ?? failureText(r)}`, 'action.launchFailed');
+  return done(okMessage ?? `Launched ${appId}`);
+}
+
+/** Last line of `resolve-activity --brief`: "com.x/.MainActivity" (only a component of that package). */
+export function parseResolvedComponent(text: string, appId: string): string | undefined {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (!last || !last.startsWith(`${appId}/`)) return undefined;
+  return /^[A-Za-z0-9_.]+\/[A-Za-z0-9_.$]+$/.test(last) ? last : undefined;
 }
 
 /** `screenrecord` stops by itself at 180 s, its largest `--time-limit`. */

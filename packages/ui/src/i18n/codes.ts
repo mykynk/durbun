@@ -14,6 +14,10 @@ import { FLOW_CODES, FLOW_PREPARE } from './flowCodes';
  *   device.disconnected                     { device, deviceId, state, detail }
  *   app.connected / app.reconnected         { app, bundleId, version, sdk, transport, device }
  *   app.disconnected                        same + { failedRequests }
+ *   app.messageTooLarge|Invalid|Unknown     { app, bundleId, type, count, bytes?, limit? }   (bytes 0 = size unknown)
+ *   app.sdkNewer / app.sdkOlder             { app, bundleId, sdk, sdkVersion, protocol, serverProtocol, minProtocol }
+ *   app.clockBehind / app.clockAhead        { app, bundleId, device, seconds, offsetMs, accuracyMs }
+ *   app.deviceFound                         { app, bundleId, device, deviceId, from }
  *   process.started / process.died          { process, pid }
  *   marker                                  { label ('' when none), n }
  *   logs.streamStarted|Stopped|Error        { via, detail? }
@@ -44,6 +48,14 @@ export const SERVER_CODES = {
     'app.connected',
     'app.reconnected',
     'app.disconnected',
+    'app.messageTooLarge',
+    'app.messageInvalid',
+    'app.messageUnknown',
+    'app.sdkNewer',
+    'app.sdkOlder',
+    'app.clockBehind',
+    'app.clockAhead',
+    'app.deviceFound',
     'process.started',
     'process.died',
     'marker',
@@ -183,6 +195,10 @@ export const SERVER_CODES = {
     'action.settingRestored',
     'action.nothingToRestore',
     'action.backgroundKilled',
+    'action.permissionReset',
+    'action.install.replaced',
+    'action.bugReport.saved',
+    'action.bugReport.cancelled',
   ],
   /** `DeviceActionResult.code` of failed device actions. */
   actionErrors: [
@@ -218,6 +234,19 @@ export const SERVER_CODES = {
     'action.install.obbFailed',
     'action.appNotRunning',
     'action.backgroundKillRefused',
+    'action.apiTooLow',
+    'action.emulatorOnly',
+    'action.toolTooOld',
+    'action.wouldDisconnect',
+    'action.permissionUnknown',
+    'action.permissionNotRequested',
+    'action.permissionNotChangeable',
+    'action.install.packageUnknown',
+    'action.install.replaceUninstallFailed',
+    'action.install.replaceInstallFailed',
+    'action.bugReport.busy',
+    'action.bugReport.notRunning',
+    'action.bugReport.failed',
   ],
   /** `DeviceInfo.readers.<id>.code`: why an SDK-less reader (crash records, frame stats) does not work. */
   readers: [
@@ -291,6 +320,43 @@ registerMessages('code', {
     'app.connected': ['{app} {version} bağlandı ({via})', '{app} bağlandı ({via})', '{app} {version} bağlandı', '{app} bağlandı', '{name} {version} bağlandı', '{name} bağlandı', 'Uygulama bağlandı'],
     'app.reconnected': ['{app} yeniden bağlandı ({via})', '{app} yeniden bağlandı', '{name} yeniden bağlandı', 'Uygulama yeniden bağlandı'],
     'app.disconnected': ['{app} bağlantısı kesildi · {failed}', '{app} bağlantısı kesildi', '{name} bağlantısı kesildi', 'Uygulamanın bağlantısı kesildi'],
+    'app.messageTooLarge': [
+      '{app} uygulamasından gelen {size} boyutundaki “{type}” mesajı {limitSize} sınırını aştığı için alınamadı (son nottan beri {dropped, number} mesaj)',
+      '{app} uygulamasından gelen {size} boyutundaki “{type}” mesajı {limitSize} sınırını aştığı için alınamadı',
+      '{app} uygulamasından gelen bir mesaj {limitSize} sınırını aştığı için alınamadı (son nottan beri {dropped, number} mesaj)',
+      '{app} uygulamasından gelen bir mesaj {limitSize} sınırını aştığı için alınamadı',
+      'Uygulamadan gelen bir mesaj boyut sınırını aştığı için alınamadı',
+    ],
+    'app.messageInvalid': [
+      '{app} uygulamasından gelen “{type}” mesajı okunamadığı için atlandı: gerekli alanlar eksik ya da türleri yanlış (son nottan beri {dropped, number} mesaj)',
+      '{app} uygulamasından gelen “{type}” mesajı okunamadığı için atlandı: gerekli alanlar eksik ya da türleri yanlış',
+      'Uygulamadan gelen bir mesaj okunamadığı için atlandı',
+    ],
+    'app.messageUnknown': [
+      'Bu Dürbün, {app} uygulamasının gönderdiği “{type}” mesajlarını tanımıyor ve atlıyor: uygulamadaki SDK daha yeni. Dürbün’ü güncelleyin (son nottan beri {dropped, number} mesaj)',
+      'Bu Dürbün, {app} uygulamasının gönderdiği “{type}” mesajlarını tanımıyor ve atlıyor: uygulamadaki SDK daha yeni. Dürbün’ü güncelleyin',
+      'Bu Dürbün, uygulamanın gönderdiği bazı mesajları tanımıyor: Dürbün’ü güncelleyin',
+    ],
+    'app.sdkNewer': [
+      '{app}, {sdk} {sdkVersion} kullanıyor (protokol {protocol}); bu Dürbün en çok protokol {serverProtocol} anlıyor, bazı veriler eksik kalabilir. Dürbün’ü güncelleyin',
+      'Uygulamadaki SDK bu Dürbün’den yeni; bazı veriler eksik kalabilir. Dürbün’ü güncelleyin',
+    ],
+    'app.sdkOlder': [
+      '{app}, {sdk} {sdkVersion} kullanıyor (protokol {protocol}); bu Dürbün protokol {minProtocol} ve sonrasını destekliyor, bazı veriler eksik kalabilir. Uygulamadaki Dürbün SDK’sını güncelleyin',
+      'Uygulamadaki Dürbün SDK’sı bu Dürbün için eski; bazı veriler eksik kalabilir. SDK’yı güncelleyin',
+    ],
+    'app.clockBehind': [
+      '{device} saati Mac’ten yaklaşık {seconds, number} sn geride ({app} bağlıyken ölçüldü). Log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor',
+      'Cihazın saati Mac’ten geride; log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor',
+    ],
+    'app.clockAhead': [
+      '{device} saati Mac’ten yaklaşık {seconds, number} sn ileride ({app} bağlıyken ölçüldü). Log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor',
+      'Cihazın saati Mac’ten ileride; log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor',
+    ],
+    'app.deviceFound': [
+      '{app} ağ üzerinden bağlanmıştı; {device} cihazında çalıştığı görüldüğü için oturumu artık bu cihazda gösteriliyor',
+      'Ağ üzerinden bağlanan uygulamanın oturumu artık çalıştığı cihazda gösteriliyor',
+    ],
     'process.started': ['{process} başladı · pid {pid}', '{process} başladı', '{name} başladı · pid {pid}', '{name} başladı', 'Süreç başladı'],
     'process.died': ['{process} sonlandı · pid {pid}', '{process} sonlandı', '{name} sonlandı · pid {pid}', '{name} sonlandı', 'Süreç sonlandı'],
     marker: ['{label}', 'İşaret {n}', 'İşaret'],
@@ -512,6 +578,33 @@ registerMessages('code', {
     'action.appNotRunning': 'Uygulama şu an çalışmıyor; önce açın.',
     'action.backgroundKillRefused':
       'Sistem uygulamayı arka planda sonlandırmadı; bir ön plan hizmeti ya da açık bir pencere onu canlı tutuyor.',
+    'action.apiTooLow': [
+      'Bu işlem Android {minVersion} (API {minApi}) ve sonrasında çalışır; bu cihaz API {apiLevel} kullanıyor',
+      'Bu işlem bu cihazın Android sürümünde çalışmaz',
+    ],
+    'action.emulatorOnly': 'Bu işlem yalnızca emülatörde çalışır',
+    'action.toolTooOld': ['Bu işlem için {detail} gerekir', 'Bu işlem için aracın daha yeni bir sürümü gerekir'],
+    'action.wouldDisconnect': 'Cihaz bu Mac’e Wi-Fi üzerinden bağlı; bu işlem bağlantıyı keser. Önce cihazı USB ile bağlayın.',
+    'action.permissionUnknown': 'Android bu izin adını tanımıyor. Tam adını yazın (örneğin android.permission.CAMERA).',
+    'action.permissionNotRequested': 'Uygulama bu izni istemiyor; izin yalnızca uygulamanın istediği izinler arasından verilebilir.',
+    'action.permissionNotChangeable': 'Bu izin dışarıdan verilip geri alınamaz; yalnızca çalışma anında sorulan izinler değiştirilebilir.',
+    'action.permissionReset': 'İzin sıfırlandı; uygulama bir dahaki sefere yeniden soracak',
+    'action.install.packageUnknown':
+      'Dosyadan uygulamanın kimliği okunamadı, bu yüzden hangi uygulamanın kaldırılacağı bilinmiyor. Uygulamayı telefondan kaldırıp tekrar kurun.',
+    'action.install.replaceUninstallFailed': [
+      '{packageId} kaldırılamadı; telefonda hiçbir şey değişmedi.',
+      'Telefondaki uygulama kaldırılamadı; telefonda hiçbir şey değişmedi.',
+    ],
+    'action.install.replaceInstallFailed': [
+      '{packageId} kaldırıldı ama yeni sürüm kurulamadı; uygulama şu an telefonda yok. Hatayı giderip tekrar kurun.',
+      'Eski sürüm kaldırıldı ama yeni sürüm kurulamadı; uygulama şu an telefonda yok. Hatayı giderip tekrar kurun.',
+    ],
+    'action.install.replaced': ['{packageId} kaldırıldı ve yeniden kuruldu', 'Uygulama kaldırıldı ve yeniden kuruldu'],
+    'action.bugReport.busy': 'Bu telefonda zaten bir cihaz raporu hazırlanıyor',
+    'action.bugReport.notRunning': 'Hazırlanan bir cihaz raporu yok',
+    'action.bugReport.failed': 'Cihaz raporu hazırlanamadı',
+    'action.bugReport.saved': 'Cihaz raporu kaydedildi',
+    'action.bugReport.cancelled': 'Cihaz raporu iptal edildi',
     'action.unsupported': 'Bu cihaz bu işlemi desteklemiyor',
     'action.deviceOffline': 'Cihaz çevrimdışı ya da kapalı',
     'action.deviceNotFound': 'Cihaz bulunamadı',
@@ -672,6 +765,43 @@ registerMessages('code', {
     'app.connected': ['{app} {version} connected ({via})', '{app} connected ({via})', '{app} {version} connected', '{app} connected', '{name} {version} connected', '{name} connected', 'App connected'],
     'app.reconnected': ['{app} reconnected ({via})', '{app} reconnected', '{name} reconnected', 'App reconnected'],
     'app.disconnected': ['{app} disconnected · {failed}', '{app} disconnected', '{name} disconnected', 'App disconnected'],
+    'app.messageTooLarge': [
+      'Dürbün dropped a {size} “{type}” message from {app}: it is over the {limitSize} limit ({dropped, number} messages since the last note)',
+      'Dürbün dropped a {size} “{type}” message from {app}: it is over the {limitSize} limit',
+      'Dürbün dropped a message from {app}: it is over the {limitSize} limit ({dropped, number} messages since the last note)',
+      'Dürbün dropped a message from {app}: it is over the {limitSize} limit',
+      'Dürbün dropped a message from the app: it is over the size limit',
+    ],
+    'app.messageInvalid': [
+      'Dürbün dropped an unreadable “{type}” message from {app}: required fields are missing or have the wrong type ({dropped, number} messages since the last note)',
+      'Dürbün dropped an unreadable “{type}” message from {app}: required fields are missing or have the wrong type',
+      'Dürbün dropped an unreadable message from the app',
+    ],
+    'app.messageUnknown': [
+      'This Dürbün does not know the “{type}” messages {app} sends and skips them: the app’s SDK is newer. Update Dürbün ({dropped, number} messages since the last note)',
+      'This Dürbün does not know the “{type}” messages {app} sends and skips them: the app’s SDK is newer. Update Dürbün',
+      'This Dürbün does not know some messages the app sends: update Dürbün',
+    ],
+    'app.sdkNewer': [
+      '{app} uses {sdk} {sdkVersion} (protocol {protocol}); this Dürbün understands up to protocol {serverProtocol}, so some data may be missing. Update Dürbün',
+      'The app’s SDK is newer than this Dürbün; some data may be missing. Update Dürbün',
+    ],
+    'app.sdkOlder': [
+      '{app} uses {sdk} {sdkVersion} (protocol {protocol}); this Dürbün supports protocol {minProtocol} and later, so some data may be missing. Update the Dürbün SDK in the app',
+      'The app’s Dürbün SDK is too old for this Dürbün; some data may be missing. Update the SDK',
+    ],
+    'app.clockBehind': [
+      'The clock of {device} is about {seconds, number} s behind the Mac (measured while {app} was connected). Log times are shown as the device reports them',
+      'The device clock is behind the Mac; log times are shown as the device reports them',
+    ],
+    'app.clockAhead': [
+      'The clock of {device} is about {seconds, number} s ahead of the Mac (measured while {app} was connected). Log times are shown as the device reports them',
+      'The device clock is ahead of the Mac; log times are shown as the device reports them',
+    ],
+    'app.deviceFound': [
+      '{app} connected over the network and runs on {device}: its session now shows under this device',
+      'An app connected over the network now shows under the device it runs on',
+    ],
     'process.started': ['{process} started · pid {pid}', '{process} started', '{name} started · pid {pid}', '{name} started', 'Process started'],
     'process.died': ['{process} died · pid {pid}', '{process} died', '{name} died · pid {pid}', '{name} died', 'Process died'],
     marker: ['{label}', 'Marker {n}', 'Marker'],
@@ -892,6 +1022,33 @@ registerMessages('code', {
     'action.install.obbFailed': ['The app was installed, but its data file (OBB) could not be copied: {detail}', 'The app was installed, but its data file (OBB) could not be copied.'],
     'action.appNotRunning': 'The app is not running; open it first.',
     'action.backgroundKillRefused': 'The system did not end the app in the background; a foreground service or an open window keeps it alive.',
+    'action.apiTooLow': [
+      'This action works on Android {minVersion} (API {minApi}) and later; this device runs API {apiLevel}',
+      'This action does not work on this device’s Android version',
+    ],
+    'action.emulatorOnly': 'This action works on emulators only',
+    'action.toolTooOld': ['This action needs {detail}', 'This action needs a newer version of the tool'],
+    'action.wouldDisconnect': 'The device is connected to this Mac over Wi-Fi; this action would cut the connection. Connect it with USB first.',
+    'action.permissionUnknown': 'Android does not know this permission name. Write the full name (android.permission.CAMERA, for example).',
+    'action.permissionNotRequested': 'The app does not ask for this permission; only permissions the app asks for can be granted.',
+    'action.permissionNotChangeable': 'This permission cannot be granted or revoked from outside; only permissions asked at run time can be changed.',
+    'action.permissionReset': 'Permission reset; the app will ask again next time',
+    'action.install.packageUnknown':
+      'The app’s id could not be read from the file, so it is not known which app to uninstall. Uninstall it on the phone, then install again.',
+    'action.install.replaceUninstallFailed': [
+      'Could not uninstall {packageId}; nothing was changed on the phone.',
+      'Could not uninstall the app on the phone; nothing was changed on the phone.',
+    ],
+    'action.install.replaceInstallFailed': [
+      '{packageId} was uninstalled, but the new build could not be installed; the app is not on the phone now. Fix the error and install again.',
+      'The old build was uninstalled, but the new build could not be installed; the app is not on the phone now. Fix the error and install again.',
+    ],
+    'action.install.replaced': ['Uninstalled {packageId} and installed it again', 'The app was uninstalled and installed again'],
+    'action.bugReport.busy': 'A device report is already being collected on this phone',
+    'action.bugReport.notRunning': 'No device report is being collected',
+    'action.bugReport.failed': 'The device report could not be collected',
+    'action.bugReport.saved': 'Device report saved',
+    'action.bugReport.cancelled': 'Device report cancelled',
     'action.unsupported': 'This device does not support this action',
     'action.deviceOffline': 'The device is offline or not booted',
     'action.deviceNotFound': 'Device not found',
@@ -1057,6 +1214,19 @@ function num(v: unknown): number | undefined {
   return undefined;
 }
 
+/** "17.2 MB" / "17,2 MB"; '' when the size is unknown (0 or absent). */
+function megabytes(bytes: number | undefined, lang: Lang): string {
+  if (!bytes || bytes <= 0) return '';
+  const mb = Math.round((bytes / (1024 * 1024)) * 10) / 10;
+  return `${lang === 'tr' ? String(mb).replace('.', ',') : mb} MB`;
+}
+
+/** Messages dropped since the previous line of the same kind; '' (no clause) when only this one. */
+function droppedSince(p: Params): number | string {
+  const n = num(p.count) ?? 1;
+  return n > 1 ? n : '';
+}
+
 function part(lang: Lang, key: string, params?: TParams): string {
   return translateOr(lang, `code.part.${key}`, params, '');
 }
@@ -1177,6 +1347,9 @@ const PREPARE: Record<string, Preparer> = {
     const n = num(p.failedRequests) ?? 0;
     return { params: { ...p, failed: n > 0 ? part(lang, 'failedRequests', { count: n }) : '' } };
   },
+  'app.messageTooLarge': (p, lang) => ({ params: { ...p, size: megabytes(num(p.bytes), lang), limitSize: megabytes(num(p.limit), lang), dropped: droppedSince(p) } }),
+  'app.messageInvalid': (p) => ({ params: { ...p, dropped: droppedSince(p) } }),
+  'app.messageUnknown': (p) => ({ params: { ...p, dropped: droppedSince(p) } }),
   'logs.connectionLost': (p, lang) => connectionGap(p, lang, 'lost', /log lines are missing/),
   'logs.connectionRestored': (p, lang) => connectionGap(p, lang, 'restored', /log lines from that moment are missing/),
   'logs.scopeNotApplied': (p, lang) => {

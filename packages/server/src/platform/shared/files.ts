@@ -56,9 +56,9 @@ export function screenshotResult(ctx: DriverContext, name: string, file: string,
   };
 }
 
-/** Result for an action that failed (English message + i18n code). */
-export function fail(message: string, code = 'action.failed'): DeviceActionResult {
-  return { ok: false, message, code, error: message };
+/** Result for an action that failed (English message + i18n code; `data` for what the UI can offer next). */
+export function fail(message: string, code = 'action.failed', data?: unknown): DeviceActionResult {
+  return data === undefined ? { ok: false, message, code, error: message } : { ok: false, message, code, error: message, data };
 }
 
 export function done(message: string, code = 'action.done', data?: unknown): DeviceActionResult {

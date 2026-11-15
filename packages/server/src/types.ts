@@ -106,6 +106,19 @@ export interface HubSink {
   removeDeviceApps(deviceId: string, ids?: string[]): void;
 }
 
+/** What the SDK layer could read from the start of an oversized network message (Hub.netTooLarge). */
+export interface NetTooLargeInput {
+  /** SDK request id. */
+  id: string;
+  part: 'request' | 'response';
+  bytes: number;
+  limit: number;
+  ts?: number;
+  method?: string;
+  url?: string;
+  status?: number;
+}
+
 export interface HubChange {
   logs: LogEntry[];
   network: NetworkEntry[];
@@ -143,6 +156,12 @@ export interface Hub extends HubSink {
   netRequest(appId: string, msg: SdkNetRequest): void;
   netResponse(appId: string, msg: SdkNetResponse): void;
   netError(appId: string, msg: SdkNetError): void;
+  /**
+   * A `net.request` / `net.response` / `net.error` of this app was larger than the frame limit and dropped
+   * unread: the entry shows what could be read from the start of the message (NetworkEntry.tooLarge); a
+   * dropped response or error ends the request as failed instead of leaving it pending.
+   */
+  netTooLarge?(appId: string, input: NetTooLargeInput): void;
   pushAppMetrics(appId: string, sample: Omit<MetricSample, 'deviceId' | 'appId'>): void;
   /** A request performed by the desktop itself (replay) on the virtual 'desktop' device. */
   recordDesktopRequest(detail: NetworkDetail): NetworkEntry;
@@ -282,6 +301,8 @@ export interface DeviceDriver {
   runAction(deviceId: string, action: DeviceActionId, params: Record<string, unknown>): Promise<DeviceActionResult>;
   /** Start/stop periodic CPU/memory polling for a process (adb top / host ps). */
   watchMetrics?(deviceId: string, target: { pid?: number; processName?: string }, enabled: boolean): void;
+  /** The Mac woke from sleep: check that streams and forwards still work and restart what died. */
+  resume?(): void | Promise<void>;
 }
 
 export interface PortForward {

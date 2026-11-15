@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPlatform } from '../../src/platform';
 import type { AndroidDriver } from '../../src/platform/android/driver';
 import { liveChildCount } from '../../src/platform/exec';
-import { createCtx, fixturePath, waitFor, type FakeCtx } from './helpers';
+import { createCtx, fixturePath, waitFor, type FakeCtx, isolateAdbServer } from './helpers';
 
 const SERIAL = 'R58M123ABC';
 const ID = `android:${SERIAL}`;
@@ -83,6 +83,13 @@ process.exit(0);
   fs.chmodSync(adb, 0o755);
   return { adb, state };
 }
+
+// Never the adb server of this Mac: its device list must not reach these tests (fake adb only).
+let unisolate: () => void = () => undefined;
+beforeAll(async () => {
+  unisolate = await isolateAdbServer();
+});
+afterAll(() => unisolate());
 
 describe('AndroidDriver with a fake adb', () => {
   let dir: string;
@@ -177,7 +184,9 @@ describe('AndroidDriver with a fake adb', () => {
     expect(shot.ok).toBe(true);
     expect((shot.data as { width: number }).width).toBe(1);
     const bad = await driver.runAction(ID, 'location', { lat: 1, lon: 2 });
-    expect(bad).toMatchObject({ ok: false, code: 'action.unsupported' });
+    // Not on a physical phone, and the reply says why (the same reason DeviceInfo.unavailableActions lists).
+    expect(bad).toMatchObject({ ok: false, code: 'action.emulatorOnly' });
+    expect(driver.status().available).toBe(true);
     const missing = await driver.runAction('android:nope', 'screenshot', {});
     expect(missing.code).toBe('action.deviceNotFound');
     const fwd = await platform.services.forwardToDevice(ID, 8181);

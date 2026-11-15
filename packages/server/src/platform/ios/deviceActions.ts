@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { DeviceActionId, DeviceActionResult } from '@durbun/protocol';
+import type { DeviceActionId, DeviceActionResult, DeviceUnavailableAction, InstallRefusalData } from '@durbun/protocol';
 import type { DriverContext } from '../../types';
 import { failureText, run } from '../exec';
 import { bool, done, ensureDir, fail, isPng, num, screenshotResult, str, tempFileName, validAppId } from '../shared/files';
@@ -18,6 +18,8 @@ import {
   type DevicectlCaps,
   type DevicectlRunner,
 } from './devicectl';
+import { appBundleId, iosInstallRefusalCode } from './bundleInfo';
+import { beforeDevicectl, DEVICECTL_MIN_IOS } from './readerStates';
 import { XCRUN } from './simctl';
 
 export interface IosDeviceActionTarget {
@@ -36,22 +38,75 @@ export interface IosDeviceActionTarget {
   recorder: ScreenRecorder;
 }
 
-/** Actions that work for a trusted physical device with the given tooling. */
-export function iosDeviceActions(opts: {
+export interface IosDeviceActionState {
   trusted: boolean;
   caps: DevicectlCaps;
   screenshotTool: boolean;
   syslog: boolean;
-}): DeviceActionId[] {
-  if (!opts.trusted) return [];
-  const a: DeviceActionId[] = [];
-  if (opts.caps.available) {
-    a.push('list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-install', 'app-uninstall', 'open-url');
+  /** `devicectl list devices` reports Developer Mode off. */
+  developerModeOff?: boolean;
+  /** The iPhone's iOS version (devicectl works from iOS DEVICECTL_MIN_IOS on). */
+  osVersion?: string;
+}
+
+/** Actions that need Developer Mode (developer disk image services). */
+export const DEVELOPER_MODE_ACTIONS: ReadonlySet<DeviceActionId> = new Set<DeviceActionId>([
+  'app-launch',
+  'app-stop',
+  'app-restart',
+  'app-install',
+  'open-url',
+  'screenshot',
+  'screen-record',
+  'screen-record-stop',
+]);
+
+const DEVICECTL_TOOL = { tool: 'devicectl', detail: 'Xcode 15 or newer (xcrun devicectl)' };
+
+/**
+ * Actions that work for a trusted physical device with the given tooling, and those that do not with why
+ * (a tool missing on the Mac, an iOS too old for devicectl, Developer Mode off). An untrusted device lists
+ * neither (its state says why).
+ */
+export function iosDeviceActionAvailability(o: IosDeviceActionState): { actions: DeviceActionId[]; unavailable: DeviceUnavailableAction[] } {
+  const actions: DeviceActionId[] = [];
+  const unavailable: DeviceUnavailableAction[] = [];
+  if (!o.trusted) return { actions, unavailable };
+  const tooOld = beforeDevicectl(o.osVersion);
+  const osParams = { osVersion: o.osVersion ?? '', minVersion: String(DEVICECTL_MIN_IOS) };
+  const add = (action: DeviceActionId, missing?: DeviceUnavailableAction | false, viaDevicectl = true) => {
+    if (missing) unavailable.push(missing);
+    else if (viaDevicectl && tooOld) unavailable.push({ action, code: 'action.osTooOld', params: osParams });
+    else if (o.developerModeOff && DEVELOPER_MODE_ACTIONS.has(action)) unavailable.push({ action, code: 'action.developerModeOff' });
+    else actions.push(action);
+  };
+  const noDevicectl = (action: DeviceActionId): DeviceUnavailableAction | false =>
+    !o.caps.available && { action, code: 'action.toolMissing', params: DEVICECTL_TOOL };
+  for (const action of ['list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-install', 'app-uninstall', 'open-url'] as const) {
+    add(action, noDevicectl(action));
   }
-  if (opts.caps.screenshot || opts.screenshotTool) a.push('screenshot');
-  if (opts.caps.screenRecord) a.push('screen-record', 'screen-record-stop');
-  if (opts.syslog) a.push('logs-restart');
-  return a;
+  // idevicescreenshot works without devicectl (and on iOS before 17); devicectl's capture is the other way.
+  const shotMissing: DeviceUnavailableAction | false = !o.caps.screenshot &&
+    !o.screenshotTool && {
+      action: 'screenshot',
+      code: 'action.toolMissing',
+      params: { tool: 'idevicescreenshot', detail: 'idevicescreenshot (brew install libimobiledevice) or Xcode 15 or newer' },
+    };
+  add('screenshot', shotMissing, !o.screenshotTool);
+  for (const action of ['screen-record', 'screen-record-stop'] as const) {
+    const missing: DeviceUnavailableAction | false = !o.caps.available
+      ? { action, code: 'action.toolMissing', params: DEVICECTL_TOOL }
+      : !o.caps.screenRecord && { action, code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)' } };
+    add(action, missing);
+  }
+  if (o.syslog) actions.push('logs-restart');
+  else unavailable.push({ action: 'logs-restart', code: 'logs.idevicesyslogMissing', params: { tool: 'idevicesyslog' } });
+  return { actions, unavailable };
+}
+
+/** Actions that work for a trusted physical device with the given tooling. */
+export function iosDeviceActions(o: IosDeviceActionState): DeviceActionId[] {
+  return iosDeviceActionAvailability(o).actions;
 }
 
 const SAFARI = 'com.apple.mobilesafari';
@@ -118,7 +173,7 @@ export async function runIosDeviceAction(
     case 'app-install': {
       const missing = needDevicectl();
       if (missing) return missing;
-      return installApp(t, str(params, 'file'));
+      return installApp(t, str(params, 'file'), params.replace === true);
     }
 
     case 'open-url': {
@@ -198,7 +253,7 @@ async function stopApp(t: IosDeviceActionTarget, appId: string): Promise<DeviceA
   return done(`Stopped ${appId}`);
 }
 
-async function installApp(t: IosDeviceActionTarget, file: string | undefined): Promise<DeviceActionResult> {
+async function installApp(t: IosDeviceActionTarget, file: string | undefined, replace = false): Promise<DeviceActionResult> {
   const devicectl = t.devicectl ?? xcrunDevicectl;
   if (!file || !path.isAbsolute(file)) return fail('An absolute .app / .ipa path is required', 'action.invalidParams');
   const st = await fs.promises.stat(file).catch(() => undefined);
@@ -219,8 +274,35 @@ async function installApp(t: IosDeviceActionTarget, file: string | undefined): P
     } else if (!file.endsWith('.app')) {
       return fail('Install a .app folder or an .ipa', 'action.unsupportedFile');
     }
+    let replaced: string | undefined;
+    if (replace) {
+      const bundleId = await appBundleId(appPath);
+      if (!bundleId) {
+        return fail(
+          `The bundle id of ${path.basename(appPath)} could not be read, so Dürbün cannot tell which app to uninstall; delete it on the iPhone, then install again`,
+          'action.install.packageUnknown',
+        );
+      }
+      const u = await devicectl(['device', 'uninstall', 'app', '--device', t.udid, bundleId], 120_000);
+      if (!u.ok && !/not installed|could not be found|no such app|not found/i.test(u.error ?? '')) {
+        return fail(`Could not uninstall ${bundleId} (nothing was changed): ${u.error}`, 'action.install.replaceUninstallFailed', { packageId: bundleId });
+      }
+      replaced = bundleId;
+    }
     const r = await devicectl(['device', 'install', 'app', '--device', t.udid, appPath], 10 * 60_000);
-    if (!r.ok) return fail(`Install failed: ${r.error}`, 'action.installFailed');
+    if (!r.ok) {
+      if (replaced) {
+        return fail(`${replaced} was uninstalled, but installing ${path.basename(appPath)} failed: ${r.error}`, 'action.install.replaceInstallFailed', { packageId: replaced });
+      }
+      const code = iosInstallRefusalCode(r.error ?? '');
+      if (code) {
+        const packageId = await appBundleId(appPath);
+        const data: InstallRefusalData = { ...(packageId ? { packageId } : {}), replaceable: !!packageId };
+        return fail(`Install failed: ${r.error}. Deleting the installed copy first lets it install; that deletes its data.`, code, data);
+      }
+      return fail(`Install failed: ${r.error}`, 'action.installFailed');
+    }
+    if (replaced) return done(`Uninstalled ${replaced} and installed ${path.basename(appPath)}`, 'action.install.replaced', { packageId: replaced });
     return done(`Installed ${path.basename(appPath)}`);
   } finally {
     if (tmp) await fs.promises.rm(tmp, { recursive: true, force: true });

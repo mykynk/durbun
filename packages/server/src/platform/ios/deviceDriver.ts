@@ -49,7 +49,7 @@ import { IosAppTracker } from './appTracker';
 import { IosCrashIndex } from './crashDedupe';
 import { crashReportEntry, jetsamEntries, type IpsReport, type JetsamReport } from './crashReport';
 import { devicectl, parseDevicectlDevices, probeDevicectlCaps, type DevicectlCaps, type DevicectlRunner } from './devicectl';
-import { iosDeviceActions, runIosDeviceAction } from './deviceActions';
+import { iosDeviceActionAvailability, runIosDeviceAction } from './deviceActions';
 import { devicectlAppSource } from './deviceApps';
 import { crashCopyDir, crashReportUrl, DeviceCrashWatcher, devicectlCrashSource, fallbackCrashSource } from './deviceCrashes';
 import { IosDeviceLogFilter, iosDeviceLogScope, type IosDeviceLogScope } from './deviceLogScope';
@@ -104,7 +104,20 @@ export const DEVELOPER_MODE_OFF = {
 /** Device actions that fail while Developer Mode is off. */
 const DEVELOPER_MODE_ACTIONS = new Set<DeviceActionId>(['app-launch', 'app-stop', 'app-restart', 'app-install', 'open-url', 'screenshot', 'screen-record']);
 /** Failures that are about the input, not the device (Developer Mode does not explain them). */
-const INPUT_FAILURES = new Set(['action.invalidParams', 'action.fileNotFound', 'action.unsupportedFile', 'action.appNotFound', 'action.toolMissing', 'action.recording.busy', 'action.recording.notRunning', 'action.stopNotAllowed']);
+const INPUT_FAILURES = new Set([
+  'action.invalidParams',
+  'action.fileNotFound',
+  'action.unsupportedFile',
+  'action.appNotFound',
+  'action.toolMissing',
+  'action.recording.busy',
+  'action.recording.notRunning',
+  'action.stopNotAllowed',
+  'action.install.signatureMismatch',
+  'action.install.packageUnknown',
+  'action.install.replaceUninstallFailed',
+  'action.install.replaceInstallFailed',
+]);
 
 const SYSLOG_MISSING = {
   code: 'logs.idevicesyslogMissing',
@@ -468,12 +481,24 @@ class IosDeviceSession {
   }
 
   private actions(): DeviceActionId[] {
-    return iosDeviceActions({
+    return this.availability().actions;
+  }
+
+  private availability(): ReturnType<typeof iosDeviceActionAvailability> {
+    return iosDeviceActionAvailability({
       trusted: this.trusted,
       caps: this.shared.caps(),
       screenshotTool: !!this.shared.screenshotTool(),
       syslog: !!this.shared.syslogTool(),
+      developerModeOff: this.developerMode === 'disabled',
+      osVersion: this.info.osVersion,
     });
+  }
+
+  /** `actions` and `unavailableActions` together (an untrusted device lists neither). */
+  private availabilityPatch(): Pick<DeviceInfo, 'actions' | 'unavailableActions'> {
+    const { actions, unavailable } = this.availability();
+    return { actions, unavailableActions: unavailable.length ? unavailable : undefined };
   }
 
   async start(): Promise<void> {
@@ -502,7 +527,7 @@ class IosDeviceSession {
         : this.trusted
           ? { status: 'starting', via: VIA }
           : { status: 'unavailable', via: VIA, ...UNTRUSTED },
-      actions: this.actions(),
+      ...this.availabilityPatch(),
     };
     this.logsStatus = this.info.logs.status;
     this.parser.setDeviceName(this.info.name);
@@ -651,6 +676,10 @@ class IosDeviceSession {
       this.parser.setDeviceName(d.name);
     }
     if (Object.keys(patch).length) this.patch(patch);
+    if (patch.osVersion && this.trusted) {
+      const next = this.availabilityPatch();
+      if (!sameAvailability(next, this.info)) this.patch(next);
+    }
   }
 
   /**
@@ -663,6 +692,9 @@ class IosDeviceSession {
     const shown = this.info.stateCode === DEVELOPER_MODE_OFF.code;
     if (off && !shown && !this.info.stateCode) this.patch({ stateCode: DEVELOPER_MODE_OFF.code, stateDetail: DEVELOPER_MODE_OFF.detail });
     else if (!off && shown) this.patch({ stateCode: undefined, stateDetail: undefined });
+    // Developer Mode and the iOS version decide which actions are offered.
+    const next = this.availabilityPatch();
+    if (!sameAvailability(next, this.info)) this.patch(next);
   }
 
   /** Untrusted: poll the pair record (the Listen 'Paired' event also triggers onPaired). */
@@ -687,7 +719,7 @@ class IosDeviceSession {
       state: 'online',
       stateCode: undefined,
       stateDetail: undefined,
-      actions: this.actions(),
+      ...this.availabilityPatch(),
       logs: syslogTool ? { status: 'starting', via: VIA } : { status: 'unavailable', via: VIA, ...SYSLOG_MISSING },
     });
     this.logsStatus = syslogTool ? 'starting' : 'unavailable';
@@ -802,6 +834,7 @@ class IosDeviceSession {
         stateCode: UNTRUSTED.code,
         stateDetail: UNTRUSTED.detail,
         actions: [],
+        unavailableActions: undefined,
         logs: { status: 'unavailable', via: VIA, ...UNTRUSTED },
       });
       this.logsStatus = 'unavailable';
@@ -842,7 +875,7 @@ class IosDeviceSession {
     if (!this.shared.syslogTool()) {
       await this.syslog?.stop();
       this.setLogs({ status: 'unavailable', via: VIA, ...SYSLOG_MISSING });
-      this.patch({ actions: this.actions() });
+      this.patch(this.availabilityPatch());
       return;
     }
     this.shared.ctx.hub.pushSystemLog(this.id, {
@@ -860,7 +893,7 @@ class IosDeviceSession {
     // Restarted on purpose: a stall episode is over, silence is measured from the new start.
     this.watchdog.reset();
     this.setLogs({ status: 'starting', via: VIA });
-    this.patch({ actions: this.actions() });
+    this.patch(this.availabilityPatch());
     this.startSyslog();
   }
 
@@ -923,8 +956,11 @@ class IosDeviceSession {
 
   async runAction(action: DeviceActionId, params: Record<string, unknown>): Promise<DeviceActionResult> {
     if (!this.trusted) return fail(`${this.info.name} does not trust this computer yet`, 'device.untrusted');
-    if (!this.actions().includes(action)) {
-      return fail(`"${action}" is not available for ${this.info.name}`, 'action.unsupported');
+    const { actions, unavailable } = this.availability();
+    if (!actions.includes(action)) {
+      const why = unavailable.find((u) => u.action === action);
+      if (why?.code === 'action.developerModeOff') return fail(DEVELOPER_MODE_OFF.detail, why.code);
+      return fail(`"${action}" is not available for ${this.info.name}`, why?.code ?? 'action.unsupported', why?.params);
     }
     const result = await runIosDeviceAction(
       {
@@ -961,6 +997,21 @@ class IosDeviceSession {
     return result;
   }
 
+  /**
+   * The Mac woke from sleep: start idevicesyslog again when it ended (or waits in a backoff), list the apps
+   * again, reopen the SDK tunnels. Never throws.
+   */
+  afterWake(): void {
+    if (this.disposed || !this.started || !this.trusted || !this.hasMux) return;
+    try {
+      if (this.shared.syslogTool() && !this.syslog?.running) this.startSyslog();
+      this.apps?.relistNow();
+      this.tryTunnels();
+    } catch (e) {
+      this.shared.logger.debug(`iOS device ${this.udid}: wake check failed: ${(e as Error).message}`);
+    }
+  }
+
   async dispose(reason: 'disconnected' | 'stopped'): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
@@ -983,6 +1034,10 @@ class IosDeviceSession {
     }
     await watchers;
   }
+}
+
+function sameAvailability(a: Pick<DeviceInfo, 'actions' | 'unavailableActions'>, b: Pick<DeviceInfo, 'actions' | 'unavailableActions'>): boolean {
+  return JSON.stringify([a.actions, a.unavailableActions ?? []]) === JSON.stringify([b.actions, b.unavailableActions ?? []]);
 }
 
 function isPairingError(stderr: string): boolean {
@@ -1240,6 +1295,24 @@ export class IosDeviceDriver implements DeviceDriver {
 
   owns(deviceId: string): boolean {
     return deviceId.startsWith('ios:');
+  }
+
+  /**
+   * The Mac woke from sleep: reconnect to usbmuxd at once when that connection is gone (no backoff wait), and
+   * let every iPhone restart what ended (idevicesyslog, app listing, SDK tunnels). Never throws.
+   */
+  async resume(): Promise<void> {
+    if (!this.running) return;
+    try {
+      if (!this.listener) {
+        clearTimeout(this.retryTimer);
+        this.listenBackoff.reset();
+        await this.connectListen();
+      }
+      for (const s of this.sessions.values()) s.afterWake();
+    } catch (e) {
+      this.logger.debug(`ios-device resume failed: ${(e as Error).message}`);
+    }
   }
 
   async runAction(deviceId: string, action: DeviceActionId, params: Record<string, unknown>): Promise<DeviceActionResult> {

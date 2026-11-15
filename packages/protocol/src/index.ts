@@ -148,14 +148,65 @@ export interface DeviceInfo {
    * changed (or an older server).
    */
   settingOverrides?: DeviceSettingOverride[];
+  /**
+   * Actions this platform has that this device cannot do right now, each with why (Developer Mode off, a
+   * tool missing on the Mac, the OS too old, emulators only, a Wi-Fi connection the action would cut).
+   * Never lists an action that is in `actions`. Absent: nothing missing for a known reason (or an older
+   * server); an offline / untrusted device lists nothing here (its `stateCode` says why).
+   */
+  unavailableActions?: DeviceUnavailableAction[];
+  /**
+   * Android users and profiles on the phone (`pm list users`), set only when there is more than one (a work
+   * profile, Secure Folder, a second user). App actions take an optional `userId` for one of them.
+   */
+  users?: DeviceUser[];
+  /** The full device report (`bug-report`) being collected (absent = none). */
+  bugReport?: DeviceBugReport;
   firstSeen: number;
   lastSeen: number;
 }
 
+/**
+ * An action missing from `DeviceInfo.actions` and why. Codes: 'action.developerModeOff', 'action.osTooOld'
+ * {osVersion, minVersion}, 'action.apiTooLow' {apiLevel, minApi, minVersion}, 'action.emulatorOnly',
+ * 'action.toolMissing' {tool, detail}, 'action.toolTooOld' {tool, detail}, 'logs.idevicesyslogMissing',
+ * 'action.wouldDisconnect' {connection}.
+ */
+export interface DeviceUnavailableAction {
+  action: DeviceActionId;
+  code: string;
+  params?: Record<string, string | number>;
+}
+
+/** One Android user or profile (`DeviceInfo.users`). */
+export interface DeviceUser {
+  /** The id `--user` takes (0 = the main user). */
+  id: number;
+  /** As the phone names it ("Owner", "Work profile", "Secure Folder"). */
+  name: string;
+  /** 'work' = managed (work) profile; 'profile' = another profile of the main user (clone, private space). */
+  kind: 'main' | 'work' | 'profile' | 'secondary';
+  running?: boolean;
+  /** The user in the foreground now (`am get-current-user`). */
+  current?: boolean;
+}
+
+/** A running `bug-report` (Android `adb bugreport`, usually 1–3 minutes). */
+export interface DeviceBugReport {
+  /** Server clock (ms) when it started. */
+  startedAt: number;
+  /** 0–100 as the phone reports it, once it does. */
+  progress?: number;
+}
+
 /** One device setting Dürbün changed, as `DeviceInfo.settingOverrides` lists it. */
 export interface DeviceSettingOverride {
-  /** The action that changed it ('animations', 'font-scale', 'appearance'). */
+  /** The action that changed it ('animations', 'font-scale', 'appearance', 'rotation', 'app-permission'…). */
   action: DeviceActionId;
+  /** Per-app settings ('app-permission', 'app-locale'): the app it belongs to. */
+  appId?: string;
+  /** 'app-permission': the permission. */
+  key?: string;
   /** The value before Dürbün's first change, as the device reported it ("1", "1.15", "no"…; "default" when unset). */
   previous: string;
   /** The value Dürbün set last. */
@@ -321,6 +372,21 @@ export interface AppSession {
   capabilities: SdkCapability[];
   actions: AppActionDescriptor[];
   stats: { logs: number; requests: number; errors: number };
+  /** Wire protocol version the SDK announced in its hello; absent when it sent none (unknown). */
+  sdkProtocol?: number;
+  /**
+   * Set when the SDK speaks a protocol this server does not fully understand: 'sdk-newer' (update
+   * Dürbün) or 'sdk-older' (update the SDK in the app). Absent when compatible or unknown.
+   */
+  protocolMismatch?: 'sdk-newer' | 'sdk-older';
+  /**
+   * Estimated difference between the Mac clock and the device clock, in ms (Mac minus device: positive
+   * means the device clock is behind). Measured from keepalive round trips, so it is approximate:
+   * `clockOffsetAccuracyMs` is the uncertainty (half the round trip of the best sample). Log times are
+   * never corrected with it. Absent until measured (and for in-process sessions).
+   */
+  clockOffsetMs?: number;
+  clockOffsetAccuracyMs?: number;
 }
 
 /* ────────────────────────────── Logs ────────────────────────────── */
@@ -423,6 +489,12 @@ export interface NetworkEntry {
   mocked?: boolean;
   mockRuleId?: string;
   graphql?: { operationName?: string; operationType?: 'query' | 'mutation' | 'subscription' };
+  /**
+   * The app sent this part of the exchange in a message larger than Dürbün accepts (MAX_FRAME_BYTES), so
+   * it was not received: 'response' ends the entry as failed instead of leaving it pending; 'request'
+   * keeps what could be read (method, URL) without headers or body.
+   */
+  tooLarge?: { part: 'request' | 'response'; bytes: number; limit: number };
 }
 
 export interface NetworkDetail extends NetworkEntry {
@@ -553,6 +625,37 @@ export function findMockRule(rules: MockRule[], method: string, url: string, app
  *      `DeviceInfo.recording` is set.
  *  screen-record-stop {}                  → data: ScreenRecordData (the same file the `screen-record` reply gets)
  *      `action.recording.notRunning` when the device is not recording.
+ *  app-install also takes `replace: true`: after a refusal over the installed copy (`action.install.signatureMismatch`,
+ *      `action.install.downgrade`; their data: InstallRefusalData) it uninstalls that app first, which deletes its
+ *      data (the UI asks), then installs: `action.install.replaced` {packageId}; `action.install.packageUnknown`
+ *      (the file's app id could not be read), `action.install.replaceUninstallFailed` {packageId, detail} (nothing
+ *      changed), `action.install.replaceInstallFailed` {packageId, detail} (the old app is gone, the new one failed).
+ *  Android phones with several users (DeviceInfo.users): list-apps, app-launch, app-stop, app-restart, app-clear-data,
+ *      app-uninstall, app-install, app-permission, app-locale, app-settings take `userId?: number` (default: the
+ *      phone's default); an id the phone does not have is `action.invalidParams`.
+ *  Settings with `{ restore: true }` (the value from before Dürbün's first change, DeviceInfo.settingOverrides;
+ *  `action.settingRestored` / `action.nothingToRestore`): appearance, font-scale, animations, airplane-mode, wifi,
+ *  mobile-data, rotation, dont-keep-activities (Android), app-permission and app-locale (with their appId /
+ *  permission).
+ *  app-permission { appId*, permission*, grant*: boolean }
+ *      Android 6+: a runtime permission ("android.permission.CAMERA"; revoking one ends the app);
+ *      `action.permissionUnknown`, `action.permissionNotRequested`, `action.permissionNotChangeable`.
+ *      iOS simulator: a privacy service (all, calendar, contacts, contacts-limited, location, location-always,
+ *      photos, photos-add, media-library, microphone, motion, reminders, siri); `restore: true` there means "ask
+ *      again" (simctl privacy reset: the simulator cannot say what was set before), `action.permissionReset`.
+ *  app-settings { appId* }                (Android) opens the app's page in the system settings
+ *  app-locale { appId*, locale*: BCP 47 tag ('tr-TR') | 'system' }   (Android 13+) the app's own language
+ *  airplane-mode { enabled*: boolean }    (Android 11+; not over a Wi-Fi adb connection: `action.wouldDisconnect`)
+ *  wifi { enabled*: boolean }             (Android; not over a Wi-Fi adb connection)
+ *  mobile-data { enabled*: boolean }      (Android)
+ *  rotation { orientation*: 'auto' | 'portrait' | 'landscape' | 'reverse-portrait' | 'reverse-landscape' }  (Android)
+ *  dont-keep-activities { enabled*: boolean }   (Android "Don't keep activities": every activity ends when left)
+ *  keychain-reset {}                      (iOS simulator) deletes every keychain item of the simulator
+ *  bug-report {}                          → data: BugReportData (Android 7+, `adb bugreport`: 1–3 minutes, 10–50 MB)
+ *      Replies once the file is ready; while it runs `DeviceInfo.bugReport` shows its progress. One per device
+ *      (`action.bugReport.busy`).
+ *  bug-report-cancel {}                   stops it (`action.bugReport.cancelled` on the `bug-report` reply;
+ *      `action.bugReport.notRunning` when none runs).
  */
 export type DeviceActionId =
   | 'screenshot'
@@ -584,7 +687,36 @@ export type DeviceActionId =
   | 'location'
   | 'status-bar'
   | 'screen-record'
-  | 'screen-record-stop';
+  | 'screen-record-stop'
+  | 'app-permission'
+  | 'app-settings'
+  | 'app-locale'
+  | 'airplane-mode'
+  | 'wifi'
+  | 'mobile-data'
+  | 'rotation'
+  | 'dont-keep-activities'
+  | 'keychain-reset'
+  | 'bug-report'
+  | 'bug-report-cancel';
+
+/** Reply data of a refused `app-install` the installed copy is in the way of (see `replace: true`). */
+export interface InstallRefusalData {
+  /** Package / bundle id of the file (read from the file itself); absent when it could not be read. */
+  packageId?: string;
+  /** "Uninstall and install" can work: the id is known and the refusal is about the installed copy. */
+  replaceable: boolean;
+}
+
+/** Reply data of `bug-report`. */
+export interface BugReportData {
+  /** Same-origin URL of the .zip. */
+  url: string;
+  /** Server-side path. */
+  file: string;
+  bytes: number;
+  durationSec: number;
+}
 
 /** Reply data of `screen-record` / `screen-record-stop`. */
 /** Reply data of Android `logs-restart` with `bufferSize`: ring buffer size per log buffer (bytes) before and after. */

@@ -73,6 +73,16 @@ const SYSTEM_SAMPLES: [code: string, params: Record<string, string | number>][] 
   ['device.transportChanged', { device: 'Galaxy A73', connection: 'Wi-Fi', previous: 'USB' }],
   // Lines read from the phone's log buffer at connect, from before it was plugged in.
   ['logs.history', { lines: 214, minutes: 38 }],
+  ['app.messageTooLarge', { app: 'Pati', bundleId: 'com.mykynk.pati', type: 'net.response', count: 1, bytes: 18_350_080, limit: 16_777_216 }],
+  ['app.messageTooLarge', { app: 'Kasa', bundleId: 'com.example.kasa', type: '?', count: 3, bytes: 0, limit: 16_777_216 }],
+  ['app.messageInvalid', { app: 'Pati', bundleId: 'com.mykynk.pati', type: 'net.request', count: 1 }],
+  ['app.messageInvalid', { app: 'Pati', bundleId: 'com.mykynk.pati', type: 'log', count: 12 }],
+  ['app.messageUnknown', { app: 'Mahalle', bundleId: 'com.mykynk.mahalle', type: 'trace.span', count: 1 }],
+  ['app.sdkNewer', { app: 'Pati', bundleId: 'com.mykynk.pati', sdk: 'durbun', sdkVersion: '0.9.0', protocol: 2, serverProtocol: 1, minProtocol: 1 }],
+  ['app.sdkOlder', { app: 'Kasa', bundleId: 'com.example.kasa', sdk: '@durbun/react-native', sdkVersion: '0.0.9', protocol: 0, serverProtocol: 1, minProtocol: 1 }],
+  ['app.clockBehind', { app: 'Pati', bundleId: 'com.mykynk.pati', device: 'Galaxy A73', seconds: 64, offsetMs: 64_210, accuracyMs: 18 }],
+  ['app.clockAhead', { app: 'Mahalle', bundleId: 'com.mykynk.mahalle', device: 'Yusuf’un iPhone’u', seconds: 9, offsetMs: -9_120, accuracyMs: 40 }],
+  ['app.deviceFound', { app: 'Kasa', bundleId: 'com.example.kasa', device: 'Yusuf’un iPhone’u', deviceId: 'ios:00008120-001A', from: 'net:ios-unknown-iphone-at-192-168-1-42' }],
 ];
 
 const NOTICE_SAMPLES: [code: string, params: Record<string, string | number> | undefined][] = [

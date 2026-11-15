@@ -117,6 +117,9 @@ export function actionTimeoutMs(action: string, params: Record<string, unknown>)
     return (Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 600) : 600) * 1000 + 2 * 60_000;
   }
   if (action === 'screen-record-stop') return 3 * 60_000;
+  // A device report replies when it is written and copied (the driver's own limit is 15 min).
+  if (action === 'bug-report') return 17 * 60_000;
+  if (action === 'bug-report-cancel') return 2 * 60_000;
   return DEFAULT_ACTION_TIMEOUT_MS;
 }
 
