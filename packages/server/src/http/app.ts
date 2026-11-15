@@ -367,10 +367,13 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
       if (enabled && !demoActive) {
         await withTimeout(Promise.resolve().then(() => demo.start(deps.demoContext!)), DEMO_TIMEOUT_MS, 'Starting demo mode', 'demo.timeout');
         demoActive = true;
+        // Example flows against the demo app (a failure here never stops the demo).
+        await flowsModule.addDemoFlows().catch((err: unknown) => logger.warn(`demo flows: ${errorMessage(err)}`));
         logger.info('demo mode on');
       } else if (!enabled && demoActive) {
         demoActive = false;
         await withTimeout(Promise.resolve().then(() => demo.stop()), DEMO_TIMEOUT_MS, 'Stopping demo mode', 'demo.timeout');
+        await flowsModule.removeDemoFlows().catch((err: unknown) => logger.warn(`demo flows: ${errorMessage(err)}`));
         logger.info('demo mode off');
       }
       refreshDrivers();

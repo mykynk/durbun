@@ -26,6 +26,7 @@ import type { Hub, Logger } from '../types';
 import { FlowRunError, MAX_AUTOMATIC_RUNS, type FlowEngine } from './engine';
 import type { FlowStore } from './store';
 import { shortText } from './util';
+import { compileUserRegex, type UserRegex } from './regex';
 
 export const DEFAULT_THROTTLE_MS = 30_000;
 /** Automatic runs in a row, each right after the previous one, that switch the flow's automation off. */
@@ -56,12 +57,13 @@ function crashPackage(e: LogEntry): string | undefined {
 }
 
 /** Compiled trigger patterns (a log storm must not compile the same regex per line); undefined = invalid. */
-const regexCache = new Map<string, RegExp | undefined>();
-function triggerRegex(text: string): RegExp | undefined {
+const regexCache = new Map<string, UserRegex | undefined>();
+function triggerRegex(text: string): UserRegex | undefined {
   if (regexCache.has(text)) return regexCache.get(text);
-  let re: RegExp | undefined;
+  let re: UserRegex | undefined;
   try {
-    re = new RegExp(text);
+    // A pattern that can backtrack exponentially runs with a time limit (regex.ts): log storms reach it per line.
+    re = compileUserRegex(text);
   } catch {
     re = undefined;
   }

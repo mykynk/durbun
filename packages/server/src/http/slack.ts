@@ -178,11 +178,28 @@ export class SlackStore {
       throw new HttpError(502, `Could not reach Slack: ${why}`, 'slack.unreachable');
     }
     const answer = (await res.text().catch(() => '')).trim().slice(0, MAX_ANSWER_CHARS);
+    if (res.status === 429) {
+      // Slack allows about one message a second per webhook; Retry-After says how long to wait (half a minute
+      // when it is missing). The UI shows the "30 s" after the colon.
+      const seconds = retryAfterSeconds(res.headers.get('retry-after')) ?? 30;
+      this.logger.warn(`Slack is rate limiting messages (retry after ${seconds} s)`);
+      throw new HttpError(429, `Slack is limiting messages: ${seconds} s`, 'slack.rateLimited');
+    }
     if (!res.ok) {
       this.logger.warn(`Slack refused a message: HTTP ${res.status} ${answer}`);
       throw new HttpError(502, `Slack refused the message: ${answer || `HTTP ${res.status}`}`, 'slack.rejected');
     }
   }
+}
+
+/** Retry-After as whole seconds (delta seconds or an HTTP date); undefined when missing or unreadable. */
+export function retryAfterSeconds(raw: string | null, now = Date.now()): number | undefined {
+  const v = raw?.trim();
+  if (!v) return undefined;
+  if (/^\d+$/.test(v)) return Math.min(Number(v), 3600) || 1;
+  const at = Date.parse(v);
+  if (Number.isNaN(at)) return undefined;
+  return Math.min(Math.max(1, Math.ceil((at - now) / 1000)), 3600);
 }
 
 /** "getaddrinfo ENOTFOUND hooks.slack.com" rather than fetch's bare "fetch failed". */

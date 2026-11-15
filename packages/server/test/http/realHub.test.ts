@@ -272,3 +272,57 @@ describe('export → import and HAR over the real hub', () => {
     expect(bad.status).toBe(400);
   });
 });
+
+describe('GET /api/summary (menu-bar line)', () => {
+  it('counts devices and app sessions connected right now; the desktop device, recordings and ended sessions never count', async () => {
+    const s = await start();
+    const summary = async () => (await (await fetch(`${s.base}/api/summary`)).json()) as { devices: number; apps: number };
+    expect(await summary()).toEqual({ devices: 1, apps: 1 });
+    s.hub.upsertDevice({ id: 'desktop', platform: 'other', kind: 'virtual', name: 'Dürbün', connection: 'local', state: 'online', logs: { status: 'unavailable' }, actions: [], firstSeen: 1, lastSeen: 1 });
+    s.hub.upsertDevice({ id: 'android:R5CT1234', platform: 'android', kind: 'physical', name: 'Pixel 7', connection: 'usb', state: 'unauthorized', logs: { status: 'unavailable' }, actions: [], firstSeen: 1, lastSeen: 1 });
+    expect(await summary()).toEqual({ devices: 2, apps: 1 });
+    const file = s.hub.exportSession();
+    s.hub.importSession(file, 'recording');
+    expect(await summary()).toEqual({ devices: 2, apps: 1 });
+    s.hub.markAppDisconnected(s.appId);
+    s.hub.markDeviceDisconnected('android:R5CT1234');
+    expect(await summary()).toEqual({ devices: 1, apps: 0 });
+    expect((await fetch(`${s.base}/api/summary`, { method: 'POST' })).status).toBe(405);
+  });
+});
+
+describe('POST /api/import says what fit', () => {
+  it('counts imported, dropped (did not fit) and evicted (live data pushed out) lines and requests', async () => {
+    // The file: a session of another Dürbün with 30 lines and 6 requests.
+    const source = createHub({ settings: { ...DEFAULT_SETTINGS }, logger: silentLogger });
+    source.upsertDevice({ id: 'android:SRC', platform: 'android', kind: 'physical', name: 'Pixel', connection: 'usb', state: 'online', logs: { status: 'streaming' }, actions: [], firstSeen: 1, lastSeen: 1 });
+    source.pushDeviceLogs('android:SRC', Array.from({ length: 30 }, (_, i) => ({ ts: 1_000 + i, level: 'info' as const, tag: 't', message: `file line ${i}`, pid: 1 })));
+    const srcApp = source.registerApp({ sessionKey: 'k', deviceId: 'android:SRC', sdk: { name: 'durbun-flutter', version: '0.1.0', platform: 'flutter' }, app: { id: 'com.example.shop', name: 'Shop' }, transport: 'tcp', connected: true, connectedAt: 1, capabilities: ['network'], actions: [] });
+    for (let i = 0; i < 6; i++) source.netRequest(srcApp.id, { type: 'net.request', id: `r${i}`, ts: 2_000 + i, method: 'GET', url: `https://api.example.com/${i}`, headers: [], source: 'dart:io' });
+    const file = JSON.parse(JSON.stringify(source.exportSession())) as SessionExport;
+    source.dispose();
+
+    // This Dürbün keeps 20 lines and 4 requests; 12 lines and 2 requests are live.
+    hub = createHub({ settings: { ...DEFAULT_SETTINGS, maxLogEntries: 20, maxNetworkEntries: 4 }, logger: silentLogger });
+    t = await startTestApp({ hub });
+    hub.upsertDevice({ id: 'android:LIVE', platform: 'android', kind: 'physical', name: 'Galaxy', connection: 'usb', state: 'online', logs: { status: 'streaming' }, actions: [], firstSeen: 1, lastSeen: 1 });
+    const live = hub.registerApp({ sessionKey: 'l', deviceId: 'android:LIVE', sdk: { name: 'durbun-flutter', version: '0.1.0', platform: 'flutter' }, app: { id: 'com.example.live', name: 'Live' }, transport: 'tcp', connected: true, connectedAt: 1, capabilities: ['network'], actions: [] });
+    for (let i = 0; i < 2; i++) hub.netRequest(live.id, { type: 'net.request', id: `l${i}`, ts: 3_000 + i, method: 'GET', url: `https://live.example.com/${i}`, headers: [], source: 'dart:io' });
+    hub.pushDeviceLogs('android:LIVE', Array.from({ length: 12 - hub.getLogs().length }, (_, i) => ({ ts: 4_000 + i, level: 'info' as const, tag: 't', message: `live ${i}`, pid: 2 })));
+    expect(hub.getLogs()).toHaveLength(12);
+
+    const res = await fetch(`${t.base}/api/import?name=big.durbun.json`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(file) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { deviceIds: string[]; imported: { logs: number; requests: number }; dropped: { logs: number; requests: number }; evicted: { logs: number; requests: number } };
+    expect(body.deviceIds).toHaveLength(1);
+    // Everything that is in Dürbün now: 20 lines, 4 requests.
+    expect(body.imported.logs + (12 - body.evicted.logs)).toBe(20);
+    expect(body.imported.logs + body.dropped.logs).toBe(file.logs.length);
+    expect(body.evicted.logs).toBe(12);
+    expect(body.dropped.logs).toBe(file.logs.length - 20);
+    expect(body.imported.requests + (2 - body.evicted.requests)).toBe(4);
+    expect(body.imported.requests + body.dropped.requests).toBe(6);
+    expect(body.evicted.requests).toBe(2);
+    expect(body.dropped.requests).toBe(2);
+  });
+});

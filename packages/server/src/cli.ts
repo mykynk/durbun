@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PORTS } from '@durbun/protocol';
 import { defaultDataDir, expandHome, tildify } from './config';
 import { errorMessage } from './http/util';
+import { DATA_DIR_IN_USE_CODE } from './dataDirLock';
 import { installShutdownHandlers, probeServer, ServerStartError, startServer, type StartedServer } from './server';
 import type { StartServerOptions } from './types';
 import { createLogger, setLogLevel } from './util/logger';
@@ -363,7 +364,7 @@ async function openExisting(
   c: Paint,
   open: (url: string) => Promise<string | undefined>,
 ): Promise<void> {
-  const url = `http://localhost:${port}`;
+  const url = `http://127.0.0.1:${port}`;
   io.out(`${c.violet('◉◉')} Dürbün zaten çalışıyor ${c.dim(`· already running (v${version})`)} → ${c.cyan(url)}`);
   if (!shouldOpen) return;
   const how = await open(url);
@@ -453,6 +454,19 @@ export async function main(
         return 0;
       }
       io.err(portBusyMessage(o.port, c));
+      return 1;
+    }
+    if (err instanceof ServerStartError && err.code === DATA_DIR_IN_USE_CODE) {
+      // Another Dürbün already works on this data folder: open that one, or say how to run a separate one.
+      const other = err.port ? await probeDurbun(err.port) : undefined;
+      io.err(
+        `${c.yellow('!')} Bu veri klasörünü başka bir Dürbün kullanıyor${err.port ? ` (port ${err.port})` : ''} ${c.dim(`· this data folder is in use by another Dürbün`)}`,
+      );
+      if (other && err.port) {
+        await openExisting(err.port, other.version, o.open, io, c, open);
+        return 0;
+      }
+      io.err(`  Ayrı bir kopya için · for a separate copy: ${c.cyan('durbun --data-dir <dir>')}`);
       return 1;
     }
     io.err(`${c.red('✖')} Dürbün başlatılamadı ${c.dim('· could not start')}: ${errorMessage(err)}`);

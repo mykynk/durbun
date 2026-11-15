@@ -5,6 +5,7 @@
  */
 import { FLOW_NODE_SPECS, flowNodePorts, flowNodeSpec, type FlowNodeSpec, type FlowParamSpec } from './catalog';
 import { FLOW_CONDITION_OPS, isStatusSpec, UNARY_OPS } from './expr';
+import { unsafeRegexReason } from './regexSafety';
 import { collectTemplateRoots, parsePath, renameTemplateRoot, RESERVED_ROOTS, templateSyntaxError } from './template';
 import {
   FLOW_FORMAT,
@@ -163,6 +164,17 @@ function regexCheck(c: Ctx, pattern: string, path: string, nodeId: string | unde
     new RegExp(pattern);
   } catch (err) {
     c.err('flow.regex.invalid', `Invalid regular expression "${pattern}": ${(err as Error).message}`, path, nodeId, { pattern, param });
+    return;
+  }
+  const reason = unsafeRegexReason(pattern);
+  if (reason) {
+    c.warn(
+      'flow.regex.unsafe',
+      `The regular expression "${pattern}" can take very long on some texts (${reason}); write it without a repeat inside a repeat`,
+      path,
+      nodeId,
+      { pattern, param },
+    );
   }
 }
 

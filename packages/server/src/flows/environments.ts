@@ -3,15 +3,18 @@
  * `<dataDir>/environments.json`, mode 0600 (it holds tokens and passwords). Secret values stay on this Mac:
  * AI packs and shared packages carry the keys only; an encrypted backup carries the values.
  */
+import { X509Certificate } from 'node:crypto';
 import path from 'node:path';
 import {
   FLOW_ENVIRONMENTS_FORMAT,
   VAR_NAME_RE,
   type FlowEnvironment,
   type FlowEnvironments,
+  type FlowEnvironmentTls,
   type FlowEnvVar,
 } from '@durbun/protocol';
 import { isPlainObject } from '../config';
+import { pemCertificates } from '../http/tlsFetch';
 import type { Logger } from '../types';
 import { FlowStoreError } from './store';
 import { Queue, readJsonFile, slugId, writeJsonFile } from './util';
@@ -24,6 +27,35 @@ const MAX_VALUE_CHARS = 100_000;
 export function emptyEnvironments(): FlowEnvironments {
   return { format: FLOW_ENVIRONMENTS_FORMAT, version: 1, environments: [] };
 }
+
+/** Most trusted certificates one environment may add (an internal CA chain is a handful). */
+const MAX_CA_CERTS = 20;
+export const MAX_CA_CHARS = 64 * 1024;
+
+/**
+ * An environment's certificate setting: the certificates of `ca` that parse (a pasted key or any other text is
+ * dropped, so no private key is ever stored), `skipVerify` only when exactly true. Nothing set = undefined.
+ */
+function normalizeTls(raw: unknown, envName: string, problems: string[]): FlowEnvironmentTls | undefined {
+  if (!isPlainObject(raw)) return undefined;
+  const out: FlowEnvironmentTls = {};
+  if (typeof raw.ca === 'string' && raw.ca.trim()) {
+    const certs = pemCertificates(raw.ca.slice(0, MAX_CA_CHARS)).filter((pem) => {
+      try {
+        new X509Certificate(pem);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (certs.length) out.ca = certs.slice(0, MAX_CA_CERTS).join('\n') + '\n';
+    else problems.push(`${envName}: ${CA_PROBLEM}`);
+  }
+  if (raw.skipVerify === true) out.skipVerify = true;
+  return out.ca || out.skipVerify ? out : undefined;
+}
+
+const CA_PROBLEM = 'the trusted certificate text holds no PEM certificate (-----BEGIN CERTIFICATE-----)';
 
 /** Validate a whole environments document (from the UI, a package or the file). */
 export function normalizeEnvironments(raw: unknown): { value: FlowEnvironments; problems: string[] } {
@@ -58,7 +90,10 @@ export function normalizeEnvironments(raw: unknown): { value: FlowEnvironments; 
       if (v.secret === true) out.secret = true;
       vars.push(out);
     }
-    value.environments.push({ id, name, vars });
+    const env: FlowEnvironment = { id, name, vars };
+    const tls = normalizeTls(item.tls, name, problems);
+    if (tls) env.tls = tls;
+    value.environments.push(env);
   }
   if (typeof raw.activeId === 'string' && ids.has(raw.activeId)) value.activeId = raw.activeId;
   else if (value.environments.length > 0 && raw.activeId !== null) value.activeId = value.environments[0]!.id;
@@ -109,6 +144,9 @@ export class EnvironmentStore {
   async put(raw: unknown): Promise<{ value: FlowEnvironments; problems: string[] }> {
     if (!isPlainObject(raw)) throw new FlowStoreError('Expected an environments object', 'env.invalid');
     const result = normalizeEnvironments(raw);
+    // A certificate that does not parse would silently leave the HTTPS steps failing: refuse the save instead.
+    const badCa = result.problems.find((p) => p.endsWith(CA_PROBLEM));
+    if (badCa) throw new FlowStoreError(badCa, 'env.tls.invalidCa');
     this.data = result.value;
     await this.queue.run(() => writeJsonFile(this.file, this.data, 0o600));
     for (const l of this.listeners) l();

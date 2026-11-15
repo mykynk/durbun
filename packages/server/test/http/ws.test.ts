@@ -470,6 +470,24 @@ describe('WS /ui commands', () => {
     expect(t.sdk.mocks).toEqual(saved);
   });
 
+  it('mocks.set never brings back a flow run temporary rule the run already removed', async () => {
+    t = await startTestApp();
+    const a = await open();
+    await a.synced();
+    const user = { id: 'r1', enabled: true, method: '*', url: '*/v1/login', match: 'glob', action: { type: 'respond', status: 401 }, createdAt: 5 };
+    const temp = { id: 'flow-run7-1', enabled: true, method: '*', url: '*/v1/cart', match: 'glob', action: { type: 'respond', status: 500 }, createdAt: 6 };
+    // The run's rule is active: a window that sends the list back keeps it.
+    t.config.setMocks([user, temp]);
+    const kept = await a.command({ name: 'mocks.set', rules: [user, temp] });
+    expect((kept.data as MockRule[]).map((r) => r.id)).toEqual(['r1', 'flow-run7-1']);
+    // The run ended and removed it; a stale list from another window must not resurrect it.
+    t.config.setMocks([user]);
+    const stale = await a.command({ name: 'mocks.set', rules: [user, temp] });
+    expect(stale.ok).toBe(true);
+    expect((stale.data as MockRule[]).map((r) => r.id)).toEqual(['r1']);
+    expect(t.sdk.mocks.map((r) => r.id)).toEqual(['r1']);
+  });
+
   it('settings.update clamps, persists, propagates and broadcasts', async () => {
     t = await startTestApp();
     const a = await open();

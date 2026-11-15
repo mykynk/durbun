@@ -631,8 +631,9 @@ export function createHub(opts: CreateHubOptions): Hub {
   }
 
   /** Session export of one app on one device (SPEC §10.2 / §10.5 device-app scope, hub/appScope.ts). */
-  function exportDeviceApp(deviceId: string, bundleId: string): SessionExport {
-    const scope = appScope({ deviceId, bundleId, apps: apps.values(), deviceApps: deviceApps.values(deviceId), processes: processes.get(deviceId)?.values() ?? [] });
+  /** One app on a device (every session), or one session of it (`exact`): what that scope shows, nothing more. */
+  function exportDeviceApp(deviceId: string, bundleId: string, exact?: string): SessionExport {
+    const scope = appScope({ deviceId, bundleId, apps: apps.values(), deviceApps: deviceApps.values(deviceId), processes: processes.get(deviceId)?.values() ?? [], exact });
     const networkList: NetworkDetail[] = [];
     for (const e of network.values()) {
       if (!scope.network(e)) continue;
@@ -953,6 +954,9 @@ export function createHub(opts: CreateHubOptions): Hub {
       const appId = scope.appId || undefined;
       // One app of a device, with or without a session (an SDK-less store build): what its scope shows.
       if (deviceId && !appId && scope.bundleId) return exportDeviceApp(deviceId, scope.bundleId);
+      // One session: the same rule, so the file also holds the device's connect / log-stream lines its scope shows.
+      const session = appId ? apps.get(appId) : undefined;
+      if (session && (!deviceId || deviceId === session.deviceId)) return exportDeviceApp(session.deviceId, session.app.id, session.id);
       const unscoped = !deviceId && !appId;
       const inScope = (e: { deviceId: string; appId?: string }) =>
         (!deviceId || e.deviceId === deviceId) && (!appId || e.appId === appId);

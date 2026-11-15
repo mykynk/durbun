@@ -199,6 +199,7 @@ export async function prepareRun(
   const policy = flow.settings?.onUnsupported ?? 'skip';
   let deviceSkipped = 0;
   let worksWithoutDevice = 0;
+  let httpSteps = 0;
   const visit = (doc: FlowDoc, from: string[], depth: number, seen: Set<string>) => {
     const sub = depth > 0;
     for (const node of reachable(doc, from)) {
@@ -235,6 +236,7 @@ export async function prepareRun(
         }
       }
       if (node.type === 'http.request') {
+        httpSteps++;
         const url = knownStepUrl(node.params?.url, envValues, inputs);
         if (url && isThisMacHostname(url.hostname)) {
           const port = effectivePort(url);
@@ -302,6 +304,21 @@ export async function prepareRun(
         });
       }
       if (empty.length) issues.push({ level: 'warn', code: 'preflight.env.empty', message: `${empty.join(', ')} is empty in ${environment.name}`, params: { env: environment.name, keys: empty.join(', ') } });
+    }
+  }
+
+  // The environment's certificate setting, said before every run that sends HTTP requests (and kept in its history).
+  const tls = environment?.tls;
+  if (tls && httpSteps > 0 && environment) {
+    if (tls.skipVerify) {
+      issues.push({
+        level: 'warn',
+        code: 'preflight.env.insecureTls',
+        message: `${environment.name} does not verify server certificates: HTTP steps accept any server, also one pretending to be yours`,
+        params: { env: environment.name },
+      });
+    } else if (tls.ca) {
+      issues.push({ level: 'info', code: 'preflight.env.customCa', message: `${environment.name} trusts its own certificates for HTTPS steps`, params: { env: environment.name } });
     }
   }
 

@@ -1,7 +1,7 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { MAX_SLACK_TEXT_CHARS, SLACK_FILE_NAME, SlackStore, slackHint, validateWebhookUrl } from '../../src/http/slack';
+import { MAX_SLACK_TEXT_CHARS, retryAfterSeconds, SLACK_FILE_NAME, SlackStore, slackHint, validateWebhookUrl } from '../../src/http/slack';
 import { silentLogger } from '../../src/util/logger';
 import { makeTempDir, startTestApp, type TestApp } from './fakes';
 
@@ -96,6 +96,11 @@ describe('SlackStore', () => {
     await refused.update({ webhookUrl: HOOK });
     await expect(refused.send({ text: 'x' })).rejects.toMatchObject({ status: 502, code: 'slack.rejected', message: 'Slack refused the message: invalid_token' });
 
+    const limited = SlackStore.inDataDir(dir, silentLogger, fakeSlack(() => new Response('rate_limited', { status: 429, headers: { 'Retry-After': '30' } })).fetch);
+    await expect(limited.send({ text: 'x' })).rejects.toMatchObject({ status: 429, code: 'slack.rateLimited', message: 'Slack is limiting messages: 30 s' });
+    const limitedNoHint = SlackStore.inDataDir(dir, silentLogger, fakeSlack(() => new Response('', { status: 429 })).fetch);
+    await expect(limitedNoHint.send({ text: 'x' })).rejects.toMatchObject({ status: 429, code: 'slack.rateLimited', message: 'Slack is limiting messages: 30 s' });
+
     const offline = SlackStore.inDataDir(
       dir,
       silentLogger,
@@ -137,5 +142,16 @@ describe('REST /api/slack', () => {
     expect((await fetch(`${t.base}/api/slack/send`)).status).toBe(405);
     await fetch(`${t.base}/api/slack`, { method: 'PUT', headers: json, body: JSON.stringify({ webhookUrl: null }) });
     expect(await (await fetch(`${t.base}/api/slack`)).json()).toEqual({ configured: false, sender: 'Ayşe' });
+  });
+});
+
+describe('retryAfterSeconds', () => {
+  it('reads delta seconds and HTTP dates, capped at an hour', () => {
+    expect(retryAfterSeconds('30')).toBe(30);
+    expect(retryAfterSeconds('0')).toBe(1);
+    expect(retryAfterSeconds('999999')).toBe(3600);
+    expect(retryAfterSeconds(new Date(1_000_000 + 12_500).toUTCString(), 1_000_000)).toBe(12);
+    expect(retryAfterSeconds(null)).toBeUndefined();
+    expect(retryAfterSeconds('soon')).toBeUndefined();
   });
 });

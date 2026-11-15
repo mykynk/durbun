@@ -6,3 +6,4 @@ export * from './validate';
 export * from './layout';
 export * from './schema';
 export * from './fromRequests';
+export * from './regexSafety';

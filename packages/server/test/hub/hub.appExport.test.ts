@@ -115,4 +115,21 @@ describe('device-app export', () => {
     expect(hub.exportSession({ deviceId: PIXEL, appId: patiAppId, bundleId: KUMBARA })).toMatchObject({ apps: [{ id: patiAppId }] });
     expect(appScope({ deviceId: PIXEL, bundleId: KUMBARA, apps: [], deviceApps: [], processes: [] }).pids.size).toBe(0);
   });
+
+  it('one session (appId) follows the same rule: its lines plus the device lines its scope shows', () => {
+    const { hub, patiAppId } = setup();
+    const bySession = hub.exportSession({ deviceId: PIXEL, appId: patiAppId });
+    const byBundle = hub.exportSession({ deviceId: PIXEL, bundleId: PATI });
+    const codes = (logs: LogEntry[]) => logs.filter((l) => l.source === 'system' && !l.appId).map((l) => l.code);
+    expect(codes(bySession.logs)).toEqual(codes(byBundle.logs));
+    expect(codes(bySession.logs)).toContain('device.connected');
+    expect(texts(bySession.logs)).toEqual(['Pati stdout', 'Pati SDK line', 'GET https://api.pati.app/v1/pets']);
+    expect(bySession.logs.length).toBe(byBundle.logs.length);
+    expect(bySession.apps.map((a) => a.id)).toEqual([patiAppId]);
+    expect(bySession.network.map((n) => n.url)).toEqual(['https://api.pati.app/v1/pets']);
+    expect(bySession.deviceApps?.map((a) => a.id)).toEqual([PATI]);
+    // without deviceId the session names its device; another device's id keeps the old filter (nothing of it)
+    expect(hub.exportSession({ appId: patiAppId }).logs.length).toBe(bySession.logs.length);
+    expect(hub.exportSession({ deviceId: IPHONE, appId: patiAppId }).logs.every((l) => l.kind === 'marker' || l.deviceId === IPHONE)).toBe(true);
+  });
 });

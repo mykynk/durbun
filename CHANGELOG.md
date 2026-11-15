@@ -51,6 +51,8 @@ All notable changes to Dürbün are listed here. The format follows
 - React Native: Expo Go apps show under their own bundle id, name and version instead of "main" or "Expo Go".
 - A React Native app connected over Wi-Fi attaches to the plugged-in phone that runs it, and several iPhones
   no longer collapse into one row.
+- An app's session export holds the same lines as the app's view shows, device lines included.
+- Slack: when Slack limits the rate, the message says how long to wait.
 - iOS SDK: URLSessions that differ only in their additional headers (a new token after each login) share one
   capture slot, so long-running apps no longer stop showing requests of new sessions. When the limit of
   different session configurations is reached, a warning line says so on the Mac.
@@ -75,6 +77,13 @@ All notable changes to Dürbün are listed here. The format follows
 - `npm run release:check` runs every check a release needs and stops at the first problem; `app:release`
   writes the update feed files and clears old build files.
 - Mac app: the diagnostic log is capped while Dürbün runs, and old crash dumps are removed at startup.
+- One Dürbün per data folder. A second one started on the same folder (the Mac app and the CLI, or two CLIs)
+  opens the running one instead of both rewriting each other's settings, mock rules and flows;
+  `--data-dir` gives a separate copy.
+- The CLI opens `http://127.0.0.1:<port>` instead of `localhost`, where another program could answer on
+  IPv6. A browser keeps interface preferences per address, so they start fresh at the new one.
+- Flows: a regular expression that can take very long on some inputs is marked in the editor, and every
+  match has a time limit.
 
 ### Added
 
@@ -104,6 +113,12 @@ All notable changes to Dürbün are listed here. The format follows
 - Android: how long a screen took to open (`Displayed … +350ms`) is shown on its log line.
 - Apps the system closed for memory have their own badge and crash banner, and `is:oom` finds them.
 - System check gives the command that fixes a simulator problem.
+- Flows: an environment can trust extra certificates (an internal CA) or turn certificate checks off for a
+  self-signed test server. The check before a run and the run history say when checks were off.
+- Network: a request the Mac could not resend because of the server's certificate can be sent once without
+  the check.
+- Importing a recording says how much of it fit when the file is larger than the log limit.
+- Demo mode comes with two example flows.
 - Mac app: `.durbun` packages and backups and `.durbun.json` recordings open from Finder (double click, Open
   With, the Dock icon), also when Dürbün is not running; **File → Open…** (⌘O).
 - Mac app: **Help → Copy Diagnostic Info**; **Report an Issue…** fills in the version and environment and

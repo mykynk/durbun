@@ -5,8 +5,11 @@
  * stand-ins that report the reason through driver status and the doctor. Only a failing hub (nothing can
  * work without the store) or an unusable HTTP port aborts the start.
  */
+import { promises as fsp } from 'node:fs';
+import path from 'node:path';
 import type { DeviceActionResult, DriverStatus, ToolCheck } from '@durbun/protocol';
-import { loadConfig } from './config';
+import { defaultDataDir, expandHome, loadConfig } from './config';
+import { acquireDataDirLock, DATA_DIR_IN_USE_CODE, DataDirInUseError, type DataDirLock } from './dataDirLock';
 import { createDemoDriver } from './demo/index';
 import { createHttpApp, resolveUiDir, type HttpApp, type HttpAppDeps } from './http/index';
 import { errorMessage } from './http/util';
@@ -187,7 +190,7 @@ async function settle(name: string, fn: () => Promise<unknown>, logger: Logger, 
  * embedding hosts such as the Mac app (SPEC §10.7):
  *
  *   const server = await startServer({ httpPort: 9750, sdkPort: 9751, demo: false, dataDir, uiDir, verbose: false });
- *   window.loadURL(server.url);            // http://localhost:<bound port>
+ *   window.loadURL(server.url);            // http://127.0.0.1:<bound port>
  *   app.on('before-quit', () => server.stop());
  *
  * It never calls process.exit, never reads stdin and installs no signal / uncaughtException handlers
@@ -217,6 +220,33 @@ export async function probeServer(port: number, timeoutMs = 1_500): Promise<{ ve
 }
 
 export async function startServerWith(opts: StartServerOptions, factories: ServerFactories, extras: StartServerExtras = {}): Promise<StartedServer> {
+  const lock = await lockDataDir(opts.dataDir);
+  try {
+    return await startLocked(opts, factories, extras, lock);
+  } catch (err) {
+    await lock.release();
+    throw err;
+  }
+}
+
+/** One server per data folder (see dataDirLock.ts); the lock is taken before the config files are read. */
+async function lockDataDir(dataDirInput: string): Promise<DataDirLock> {
+  const dir = path.resolve(expandHome(dataDirInput || defaultDataDir()));
+  try {
+    await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
+  } catch {
+    // Not creatable: loadConfig falls back to a temp folder and says so; that run goes unlocked.
+    return { file: '', setPort: async () => {}, release: async () => {} };
+  }
+  try {
+    return await acquireDataDirLock(dir, { probe: async (port) => !!(await probeServer(port)) });
+  } catch (err) {
+    if (err instanceof DataDirInUseError) throw new ServerStartError(err.message, DATA_DIR_IN_USE_CODE, err.holder.port);
+    throw err;
+  }
+}
+
+async function startLocked(opts: StartServerOptions, factories: ServerFactories, extras: StartServerExtras, lock: DataDirLock): Promise<StartedServer> {
   // No line may carry a secret (Dart VM service tokens), whatever logger the embedder passed.
   const logger = redactingLogger(extras.logger ?? createLogger('durbun'));
   if (opts.verbose) setLogLevel('debug');
@@ -331,6 +361,7 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
   try {
     ports.http = await app.listen(opts.httpPort, lan ? '0.0.0.0' : '127.0.0.1');
     if (app.devicePort !== undefined) ports.device = app.devicePort;
+    await lock.setPort(ports.http);
   } catch (err) {
     await app.close().catch(() => {});
     await settle('sdk.close', () => sdk.close(), logger, 2_000);
@@ -383,11 +414,13 @@ export async function startServerWith(opts: StartServerOptions, factories: Serve
       logger.warn(`hub.dispose: ${errorMessage(err)}`);
     }
     await config.flush();
+    await lock.release();
     logger.debug('stopped');
   };
 
   return {
-    url: `http://localhost:${ports.http}`,
+    // Never "localhost": browsers try ::1 first, where another program may listen; the server binds IPv4.
+    url: `http://127.0.0.1:${ports.http}`,
     get info() {
       return app.info();
     },

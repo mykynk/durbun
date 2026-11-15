@@ -163,7 +163,7 @@ describe('main', () => {
       const out = io();
       expect(await main(['--port', String(port), '--sdk-port', String(port === 9751 ? 9752 : 9751), '--no-open'], out)).toBe(0);
       expect(out.lines[0]).toContain('Dürbün zaten çalışıyor');
-      expect(out.lines[0]).toContain(`http://localhost:${port}`);
+      expect(out.lines[0]).toContain(`http://127.0.0.1:${port}`);
     } finally {
       await new Promise<void>((r) => fake.close(() => r()));
     }

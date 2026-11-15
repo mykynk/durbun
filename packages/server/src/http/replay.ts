@@ -6,6 +6,7 @@
 import { isTextContentType, type Header, type NetworkDetail, type NetworkEntry, type ReplayOverrides, type WireBody } from '@durbun/protocol';
 import type { Hub } from '../types';
 import { headerValue } from './har';
+import { createTlsFetch, fetchErrorCode, isTlsCertError, type TlsSettings } from './tlsFetch';
 import { assertNotOwnServer, DESKTOP_REQUEST_HEADER, DESKTOP_REQUEST_HEADER_VALUE, isThisMacHostname, OwnServerRequestError, type OwnTargetGuard } from './ownTargets';
 
 export const REPLAY_TIMEOUT_MS = 30_000;
@@ -186,6 +187,8 @@ export interface ReplayOptions {
   fetchImpl?: typeof fetch;
   /** Refuses requests to Dürbün's own ports on this Mac (ownTargets.ts). */
   guard?: OwnTargetGuard;
+  /** Certificate settings for HTTPS targets (default: the normal checks). */
+  tls?: TlsSettings;
 }
 
 /** A request the Mac sends itself (replay, flows). */
@@ -220,6 +223,8 @@ export interface DesktopSendOptions {
    * (OwnServerRequestError, nothing recorded).
    */
   guard?: OwnTargetGuard;
+  /** Certificate settings for HTTPS targets: extra trusted CAs, or no verification (default: the normal checks). */
+  tls?: TlsSettings;
 }
 
 export interface DesktopResponse {
@@ -232,6 +237,8 @@ export interface DesktopResponse {
   size: number;
   /** URL of the response, after redirects (the request URL when there was none or it failed). */
   finalUrl: string;
+  /** Error code of a failed request (ECONNREFUSED, DEPTH_ZERO_SELF_SIGNED_CERT…). */
+  errorCode?: string;
 }
 
 /** A copy of a detail with every text the user typed or the server sent passed through `redact`. */
@@ -316,7 +323,7 @@ export async function sendDesktopRequest(opts: DesktopSendOptions, input: Deskto
   // The recorded copy shows what the user sent: the marker is added per hop (fetchFollowing), never recorded.
   const req: DesktopRequest = { ...input, headers: withoutMarker(input.headers) };
   const timeoutMs = opts.timeoutMs ?? REPLAY_TIMEOUT_MS;
-  const doFetch = opts.fetchImpl ?? fetch;
+  const doFetch = opts.tls && (opts.tls.ca || opts.tls.skipVerify) ? createTlsFetch(opts.tls, opts.fetchImpl ?? fetch) : (opts.fetchImpl ?? fetch);
   const { host, path } = splitUrl(req.url);
   const requestContentType = headerValue(req.headers, 'content-type');
   const recordCap = Math.max(opts.maxBodyBytes, 0);
@@ -345,6 +352,7 @@ export async function sendDesktopRequest(opts: DesktopSendOptions, input: Deskto
   let body: Buffer = Buffer.alloc(0);
   let size = 0;
   let finalUrl = req.url;
+  let errorCode: string | undefined;
   const t0 = performance.now();
   try {
     const timeout = AbortSignal.timeout(timeoutMs);
@@ -378,13 +386,16 @@ export async function sendDesktopRequest(opts: DesktopSendOptions, input: Deskto
     if (err instanceof OwnServerRequestError) throw err;
     const tEnd = performance.now();
     detail.state = 'failed';
+    errorCode = fetchErrorCode(err);
     detail.error = opts.signal?.aborted ? 'Cancelled' : describeFetchError(err, timeoutMs);
     if (opts.signal?.aborted) detail.state = 'cancelled';
     detail.endTs = detail.startTs + (tEnd - t0);
     detail.duration = Math.round((tEnd - t0) * 1000) / 1000;
   }
   const entry = opts.record === false ? undefined : opts.hub.recordDesktopRequest(opts.redact ? redactDetail(detail, opts.redact) : detail);
-  return entry ? { detail, entry, body, size, finalUrl } : { detail, body, size, finalUrl };
+  const out: DesktopResponse = entry ? { detail, entry, body, size, finalUrl } : { detail, body, size, finalUrl };
+  if (errorCode) out.errorCode = errorCode;
+  return out;
 }
 
 export async function replayRequest(
@@ -395,9 +406,17 @@ export async function replayRequest(
   const original = opts.hub.getNetworkDetail(id);
   if (!original) throw new ReplayError(`Request ${id} is no longer available`, 'net.unknown');
   const prepared = prepareReplay(original, overrides);
+  // Only on request, per resend: a test server with a self-signed certificate.
+  const skipVerify = overrides?.skipTlsVerify === true && prepared.url.startsWith('https:');
+  const tls: TlsSettings | undefined = skipVerify ? { ...opts.tls, skipVerify: true } : opts.tls;
   const res = await sendDesktopRequest(
-    { hub: opts.hub, maxBodyBytes: opts.maxBodyBytes, timeoutMs: opts.timeoutMs, fetchImpl: opts.fetchImpl, guard: opts.guard, source: 'replay', idPrefix: 'replay' },
+    { hub: opts.hub, maxBodyBytes: opts.maxBodyBytes, timeoutMs: opts.timeoutMs, fetchImpl: opts.fetchImpl, guard: opts.guard, tls, source: 'replay', idPrefix: 'replay' },
     { method: prepared.method, url: prepared.url, headers: prepared.headers, body: prepared.body },
   );
-  return { entry: res.entry!, warnings: prepared.warnings };
+  const warnings = [...prepared.warnings];
+  if (skipVerify) warnings.push({ code: 'replay.tlsUnverified', message: 'Sent without verifying the server certificate' });
+  else if (isTlsCertError(res.errorCode)) {
+    warnings.push({ code: 'replay.tlsRejected', message: `The server certificate was not accepted (${res.errorCode}); resend without verifying only to a test server you trust` });
+  }
+  return { entry: res.entry!, warnings };
 }

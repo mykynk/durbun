@@ -8,7 +8,7 @@ import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { moduleDir } from '../../src/http/static';
-import { probeServer, startServer, startServerWith, type ServerFactories, type StartedServer, type StartServerExtras } from '../../src/server';
+import { probeServer, ServerStartError, startServer, startServerWith, type ServerFactories, type StartedServer, type StartServerExtras } from '../../src/server';
 import type { DriverContext, StartServerOptions } from '../../src/types';
 import { silentLogger } from '../../src/util/logger';
 import { FakeDriver, FakeHub, FakeSdk, FakeVm, makeTempDir } from './fakes';
@@ -69,7 +69,7 @@ describe('embedding the server (Mac app)', () => {
     const extras: StartServerExtras = { logger: silentLogger, moduleDir: dir, driverStartWaitMs: 300 };
     running = await startServerWith(options(), f.factories, extras);
     expect(listenerCounts()).toEqual(before);
-    expect(running.url).toMatch(/^http:\/\/localhost:\d+$/);
+    expect(running.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     const port = Number(new URL(running.url).port);
     expect(port).toBeGreaterThan(0); // httpPort 0 → a free port, reported in url
     expect(running.info.ports.http).toBe(port);
@@ -91,6 +91,18 @@ describe('embedding the server (Mac app)', () => {
     expect(await probeServer(port, 500)).toBeUndefined();
     expect(listenerCounts()).toEqual(before);
     expect(exit).not.toHaveBeenCalled();
+  });
+
+  it('a second server on the same data folder is refused with the holder port; after stop it starts', async () => {
+    const extras: StartServerExtras = { logger: silentLogger, moduleDir: dir, driverStartWaitMs: 50 };
+    running = await startServerWith(options(), factories().factories, extras);
+    const port = Number(new URL(running.url).port);
+    const err = await startServerWith(options({ sdkPort: 39_772 }), factories().factories, extras).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ServerStartError);
+    expect(err).toMatchObject({ code: 'server.dataDirInUse', port });
+    expect(await probeServer(port)).toBeDefined(); // the first one keeps running
+    await running.stop();
+    running = await startServerWith(options(), factories().factories, extras);
   });
 
   it('probeServer never rejects: closed port, invalid port, another HTTP server', async () => {

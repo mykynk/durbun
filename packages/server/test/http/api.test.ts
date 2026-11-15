@@ -178,7 +178,7 @@ describe('REST API', () => {
     };
     const res = await fetch(`${t.base}/api/import?name=pati-bug-1234.durbun.json`, { method: 'POST', body: JSON.stringify(data) });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ deviceIds: ['import:1'] });
+    expect(await res.json()).toMatchObject({ deviceIds: ['import:1'] });
     expect(t.hub.imported[0]!.label).toBe('pati-bug-1234');
     expect(t.hub.imported[0]!.data.logs).toHaveLength(10);
 

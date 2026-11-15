@@ -46,6 +46,7 @@ import {
   type WireBody,
 } from '@durbun/protocol';
 import { isPlainObject, type ConfigStore } from '../config';
+import { demoFlows, sameAsSeed } from '../demo/flows';
 import { BackupService, ownMocksWatcher } from '../backup/scheduler';
 import { PACKAGE_JSON_LIMIT_BYTES, PackageError, PackageService } from '../backup/package';
 import { UI_PREFS_LIMIT_BYTES, UiPrefsStore } from '../backup/uiPrefs';
@@ -91,6 +92,10 @@ export interface FlowsModule extends ApiModule {
   runningRuns(): FlowRun[];
   readonly engine: FlowEngine;
   readonly flows: FlowStore;
+  /** Demo mode on: add the example flows that are missing. */
+  addDemoFlows(): Promise<void>;
+  /** Demo mode off: remove the example flows the user did not change (nor is running). */
+  removeDemoFlows(): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -506,6 +511,23 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
     flows,
     summaries,
     runningRuns: () => engine.running().map((h) => engine.activeRun(h.id)!).filter(Boolean).map((r) => structuredClone(r)),
+    addDemoFlows: async () => {
+      await ready;
+      for (const seed of demoFlows()) {
+        if (flows.get(seed.id)) continue;
+        await flows.save(seed, { create: true }).catch((err: unknown) => logger.warn(`demo flow ${seed.id} not added: ${errorMessage(err)}`));
+      }
+      broadcastFlows();
+    },
+    removeDemoFlows: async () => {
+      await ready;
+      for (const seed of demoFlows()) {
+        const cur = flows.get(seed.id);
+        if (!cur || !sameAsSeed(cur, seed) || engine.runningCount(seed.id) > 0) continue;
+        await flows.remove(seed.id).catch((err: unknown) => logger.warn(`demo flow ${seed.id} not removed: ${errorMessage(err)}`));
+      }
+      broadcastFlows();
+    },
     dispose: async () => {
       if (broadcastTimer) clearTimeout(broadcastTimer);
       for (const u of unsubscribers) u();

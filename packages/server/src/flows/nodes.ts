@@ -17,6 +17,7 @@ import {
   type DeviceActionId,
   type FlowAssertion,
   type FlowConditionRule,
+  type FlowEnvironmentTls,
   type FlowEvidence,
   type FlowExtractRule,
   type FlowNode,
@@ -37,6 +38,8 @@ import {
 } from '@durbun/protocol';
 import { appScope } from '../hub/appScope';
 import { sendDesktopRequest } from '../http/replay';
+import { isTlsCertError } from '../http/tlsFetch';
+import { compileUserRegex, type UserRegex } from './regex';
 import { OwnServerRequestError } from '../http/ownTargets';
 import type { CommandReply } from '../http/commands';
 import type { Hub } from '../types';
@@ -115,6 +118,8 @@ export interface StepApi {
   summarySoFar(): string;
   /** The value with the run's secrets masked (what leaves the run: Slack, the Network tab copy). */
   mask<T>(value: T): T;
+  /** Certificate setting of the run's environment for HTTPS steps (absent = the normal checks). */
+  readonly tls?: FlowEnvironmentTls;
 }
 
 type Executor = (api: StepApi) => Promise<StepResult>;
@@ -288,22 +293,22 @@ function sinceChoice(api: StepApi, fallback: string): { at: number; logId: numbe
   return { at: api.since.previousAt, logId: api.since.previousLogId };
 }
 
-function compileRegex(pattern: string): RegExp {
+function compileRegex(pattern: string): UserRegex {
   try {
-    return new RegExp(pattern);
+    return compileUserRegex(pattern);
   } catch (err) {
     throw new StepError(`Invalid regular expression: ${(err as Error).message}`, 'flow.regex.invalid', { pattern });
   }
 }
 
 /** `match`: regex group 1, else the whole match (the line without a regex); `groups`: every capture group. */
-function matchText(text: string, pattern: string, re: RegExp | undefined): { match: string; groups: string[] } | undefined {
+function matchText(text: string, pattern: string, re: UserRegex | undefined): { match: string; groups: string[] } | undefined {
   if (!pattern) return { match: text, groups: [text] };
   if (re) {
     const m = re.exec(text);
     if (!m) return undefined;
     // groups[0] is the whole match, groups[1] the first group (a group that did not take part is '').
-    return { match: m[1] ?? m[0], groups: [...m].map((g) => g ?? '') };
+    return { match: m[1] ?? m[0] ?? '', groups: m.map((g) => g ?? '') };
   }
   const at = text.toLowerCase().indexOf(pattern.toLowerCase());
   return at >= 0 ? { match: text, groups: [text.slice(at, at + pattern.length)] } : undefined;
@@ -411,9 +416,9 @@ function extract(rule: FlowExtractRule, output: Record<string, unknown>): unknow
       value = rule.path ? getPath(output.body, parsePath(rule.path)) : output.body;
   }
   if (rule.regex && value !== undefined) {
-    let re: RegExp;
+    let re: UserRegex;
     try {
-      re = new RegExp(rule.regex);
+      re = compileUserRegex(rule.regex);
     } catch (err) {
       throw new StepError(`Invalid regular expression in ${rule.name}: ${(err as Error).message}`, 'flow.regex.invalid', { pattern: rule.regex });
     }
@@ -487,6 +492,7 @@ const httpRequest: Executor = async (api) => {
       // The Network tab copy can be exported or sent to Slack: it never carries the run's secrets.
       redact: (text) => api.mask(text),
       guard: { ownPorts: api.services.ownPorts ?? (() => []) },
+      tls: api.tls,
     },
     { method, url: url.toString(), headers, body },
   );
@@ -497,6 +503,16 @@ const httpRequest: Executor = async (api) => {
   if (api.signal.aborted) throw new AbortedError();
   const d = res.detail;
   const netId = res.entry?.id;
+  if (d.state !== 'complete' && isTlsCertError(res.errorCode)) {
+    // Say what to change: a test server's certificate is the environment's setting, not a network problem.
+    throw new StepError(
+      `${method} ${url}: the server certificate was not accepted (${res.errorCode})`,
+      'flow.http.tls',
+      { method, url: url.toString(), host: url.host, reason: res.errorCode ?? '' },
+      { error: d.error, url: url.toString(), method },
+      netId,
+    );
+  }
   if (d.state !== 'complete') {
     throw new StepError(`${method} ${url} failed: ${d.error ?? 'no response'}`, 'flow.http.failed', { method, url: url.toString(), error: d.error ?? '' }, { error: d.error, url: url.toString(), method }, netId);
   }
@@ -513,6 +529,8 @@ const httpRequest: Executor = async (api) => {
     method,
   };
   if (res.size > res.body.length) output.truncated = true;
+  // The run history shows that this answer came from a server whose certificate was not checked.
+  if (api.tls?.skipVerify && url.protocol === 'https:') output.tlsVerified = false;
   const params: Record<string, string | number> = { method, url: url.toString(), status: d.status ?? 0, duration: ms(d.duration ?? 0) };
   let summary = `${method} ${url} → ${d.status} · ${ms(d.duration ?? 0)}`;
   if (inferred) {

@@ -184,10 +184,22 @@ export interface FlowEnvVar {
   secret?: boolean;
 }
 
+/**
+ * How HTTP steps of runs in this environment check the server's certificate. No field = the Mac's normal checks
+ * (safe by default). For test servers with an internal CA or a self-signed certificate.
+ */
+export interface FlowEnvironmentTls {
+  /** Extra trusted certificates (PEM): the internal CA or the self-signed certificate. The built-in and system CAs stay trusted. */
+  ca?: string;
+  /** Do not verify the certificate at all. Every run in this environment warns in its preflight and history. */
+  skipVerify?: boolean;
+}
+
 export interface FlowEnvironment {
   id: string;
   name: string;
   vars: FlowEnvVar[];
+  tls?: FlowEnvironmentTls;
 }
 
 export interface FlowEnvironments {
@@ -301,7 +313,8 @@ export interface FlowRun {
   durationMs?: number;
   trigger: FlowRunTrigger;
   target?: FlowRunTarget;
-  environment?: { id: string; name: string };
+  /** `tls`: the environment's certificate setting at run time (absent = normal checks). */
+  environment?: { id: string; name: string; tls?: 'customCa' | 'unverified' };
   /** Input values used (secrets masked). */
   inputs?: Record<string, unknown>;
   steps: FlowRunStep[];

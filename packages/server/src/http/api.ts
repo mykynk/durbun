@@ -2,6 +2,7 @@
  * REST API (SPEC §5.4). Access control happens before this handler is called (security.ts).
  *
  *   GET  /api/health                              { ok, name: 'durbun', version }
+ *   GET  /api/summary                             { devices, apps } connected right now (menu-bar line)
  *   GET  /api/network/:id                         NetworkDetail
  *   GET  /api/network/:id/body/(request|response) raw bytes, original Content-Type (?download=1)
  *   POST /api/network/search                      { text, ids?, caseSensitive? } → { ids }
@@ -28,6 +29,7 @@ import type { Hub, Logger } from '../types';
 import { cleanHarDetails, cleanSessionExport, localRoots, maskParam } from './exportClean';
 import { bugReportZip, crashFileParts, parseBugReportRequest, sliceSessionExport, tempFileName } from './bugReport';
 import { buildHar, headerValue } from './har';
+import { DESKTOP_DEVICE_ID } from './replay';
 import { parseJsonBuffer } from './jsonParse';
 import type { SlackStore } from './slack';
 import { streamJson } from './jsonStream';
@@ -112,6 +114,60 @@ export function safeUploadName(name: string): string {
     s = s.slice(0, 120 - ext.length) + ext;
   }
   return s || 'upload.bin';
+}
+
+interface ImportBaseline {
+  lastLogId: number;
+  logs: number;
+  requestIds: Set<string>;
+}
+
+function importBaseline(hub: Pick<Hub, 'getLogs' | 'getNetwork'>): ImportBaseline {
+  const logs = hub.getLogs();
+  return { lastLogId: logs.at(-1)?.id ?? 0, logs: logs.length, requestIds: new Set(hub.getNetwork().map((e) => e.id)) };
+}
+
+/**
+ * What an import really loaded (the import shares the live limits): lines and requests of the file that are in
+ * Dürbün now, those that did not fit or were not valid, and live ones the import pushed out. The UI says so
+ * instead of a file silently losing its older half.
+ */
+export function importCounts(
+  hub: Pick<Hub, 'getLogs' | 'getNetwork'>,
+  before: ImportBaseline,
+  data: Pick<SessionExport, 'logs' | 'network'>,
+): { imported: { logs: number; requests: number }; dropped: { logs: number; requests: number }; evicted: { logs: number; requests: number } } {
+  let importedLogs = 0;
+  let liveLogs = 0;
+  for (const e of hub.getLogs()) {
+    if (e.id > before.lastLogId) importedLogs++;
+    else liveLogs++;
+  }
+  let importedRequests = 0;
+  let liveRequests = 0;
+  for (const e of hub.getNetwork()) {
+    if (before.requestIds.has(e.id)) liveRequests++;
+    else importedRequests++;
+  }
+  const fileLogs = Array.isArray(data.logs) ? data.logs.length : 0;
+  const fileRequests = Array.isArray(data.network) ? data.network.length : 0;
+  return {
+    imported: { logs: importedLogs, requests: importedRequests },
+    dropped: { logs: Math.max(0, fileLogs - importedLogs), requests: Math.max(0, fileRequests - importedRequests) },
+    evicted: { logs: Math.max(0, before.logs - liveLogs), requests: Math.max(0, before.requestIds.size - liveRequests) },
+  };
+}
+
+/**
+ * GET /api/summary (the Mac app's menu-bar line): devices and app sessions connected right now. A device counts
+ * while it is attached in any state but 'disconnected' (an unauthorized phone is plugged in too); the virtual
+ * desktop device and imported recordings never count.
+ */
+export function connectedSummary(hub: Pick<Hub, 'getDevices' | 'getApps'>): { devices: number; apps: number } {
+  const counted = (deviceId: string) => deviceId !== DESKTOP_DEVICE_ID && !deviceId.startsWith('import:');
+  const devices = hub.getDevices().filter((d) => d.state !== 'disconnected' && counted(d.id)).length;
+  const apps = hub.getApps().filter((a) => a.connected && counted(a.deviceId)).length;
+  return { devices, apps };
 }
 
 /** Light structural validation; the hub re-assigns ids and owns the details. */
@@ -393,13 +449,14 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
     const raw = await parseJsonBuffer(await readBody(req, importLimit));
     const data = validateSessionExport(raw);
     const label = importLabel(queryString(query, 'name'), data.exportedAt);
+    const before = importBaseline(deps.hub);
     let result: { deviceIds: string[] };
     try {
       result = deps.hub.importSession(data, label);
     } catch (err) {
       throw new HttpError(400, `Import failed: ${errorMessage(err)}`, 'import.failed');
     }
-    sendJson(res, 200, { deviceIds: result.deviceIds });
+    sendJson(res, 200, { deviceIds: result.deviceIds, ...importCounts(deps.hub, before, data) });
   }
 
   async function upload(req: IncomingMessage, res: ServerResponse, query: URLSearchParams): Promise<void> {
@@ -512,6 +569,11 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
       case 'health':
         requireMethod(req, 'GET', 'HEAD');
         sendJson(res, 200, { ok: true, name: 'durbun', version: deps.version });
+        return;
+      case 'summary':
+        if (segs.length !== 1) break;
+        requireMethod(req, 'GET', 'HEAD');
+        sendJson(res, 200, connectedSummary(deps.hub));
         return;
       case 'network': {
         if (second === 'search' && segs.length === 2 && method === 'POST') return search(req, res);

@@ -80,7 +80,7 @@ describe('startServer wiring', () => {
     const f = fakes();
     running = await startServerWith(options({ demo: true }), f.factories, extras());
     const port = portOf(running.url);
-    expect(running.url).toBe(`http://localhost:${port}`);
+    expect(running.url).toBe(`http://127.0.0.1:${port}`);
     expect(await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()).toMatchObject({ ok: true, name: 'durbun' });
 
     expect(f.sdk.listenCalls).toEqual([{ port: 39_761, host: '127.0.0.1' }]);

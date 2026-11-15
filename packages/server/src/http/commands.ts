@@ -18,6 +18,7 @@ import { isUploadedFile } from './api';
 import { replayRequest, ReplayError } from './replay';
 import { OwnServerRequestError } from './ownTargets';
 import { errorMessage } from './util';
+import { TEMP_MOCK_PREFIX } from '../flows/nodes';
 
 export interface CommandReply {
   ok: boolean;
@@ -45,7 +46,7 @@ export interface CommandClient {
 export interface CommandDeps {
   hub: Hub;
   sdk: Pick<SdkLayer, 'sendCommand'>;
-  config: Pick<ConfigStore, 'updateSettings' | 'setMocks' | 'settings'>;
+  config: Pick<ConfigStore, 'updateSettings' | 'setMocks' | 'settings' | 'mocks'>;
   logger: Logger;
   /** Every device driver that can own devices (platform drivers + demo). */
   drivers: () => DeviceDriver[];
@@ -288,6 +289,7 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
         overrides.body = o.body;
       }
       if (o.bodyEncoding === 'base64' || o.bodyEncoding === 'utf8') overrides.bodyEncoding = o.bodyEncoding;
+      if (o.skipTlsVerify === true) overrides.skipTlsVerify = true;
     }
     const result = await replayRequest(
       {
@@ -333,7 +335,7 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
         case 'app.action':
           return await appAction(cmd);
         case 'mocks.set':
-          return ok(deps.config.setMocks(cmd.rules));
+          return ok(deps.config.setMocks(withoutEndedFlowRules(cmd.rules, deps.config.mocks)));
         case 'settings.update':
           return await settingsUpdate(cmd, client);
         case 'vm.attach': {
@@ -392,4 +394,18 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
   }
 
   return { handle, clientClosed, findDriver };
+}
+
+/**
+ * A window that sends back a list it read during a flow run would bring the run's temporary rule back after the
+ * run removed it, and it would stay on until the next start. Temporary rules come only from runs: a client may
+ * keep the ones still active, never add one.
+ */
+export function withoutEndedFlowRules(raw: unknown, current: readonly { id: string }[]): unknown {
+  if (!Array.isArray(raw)) return raw;
+  const live = new Set(current.filter((r) => r.id.startsWith(TEMP_MOCK_PREFIX)).map((r) => r.id));
+  return raw.filter((r: unknown) => {
+    const id = isPlainObject(r) && typeof r.id === 'string' ? r.id : '';
+    return !id.startsWith(TEMP_MOCK_PREFIX) || live.has(id);
+  });
 }

@@ -241,15 +241,16 @@ REST:
 | `GET /api/network/:id/body/request` · `/response` | raw bytes, original `Content-Type`; `?download=1` adds `Content-Disposition` |
 | `POST /api/network/search` `{ text, ids?, caseSensitive? }` | `{ ids: string[] }` (searches URL, headers and bodies) |
 | `POST /api/har` `{ ids?: string[] }` | HAR 1.2 JSON (all when no ids) as download |
-| `GET /api/export?deviceId=&appId=` | `SessionExport` JSON download (`durbun-<date>.durbun.json`) |
-| `POST /api/import` (body = SessionExport JSON) | `{ deviceIds }` |
+| `GET /api/export?deviceId=&appId=` | `SessionExport` JSON download (`durbun-<date>.durbun.json`). `deviceId` + `bundleId` (every session of an app) and `appId` (one session) keep what that scope shows, by one rule (`hub/appScope.ts`, `exact` for a session): the app's lines plus the device's own `device.*` / `logs.*` lines |
+| `POST /api/import` (body = SessionExport JSON) | `{ deviceIds, imported, dropped, evicted }`, each `{ logs, requests }`: what of the file is in Dürbün now, what did not fit the live limits (or was invalid), and live lines / requests the import pushed out |
+| `GET /api/summary` | `{ devices, apps }` connected right now (the Mac app's menu-bar line): devices in any state but `disconnected`, connected app sessions; the desktop device and imported recordings never count |
 | `GET /api/doctor` | `ToolCheck[]` (all drivers' `checks()` + ports + node version) |
 | `POST /api/upload?name=<file>` (raw body, ≤ 2 GB streamed to tempDir) | `{ file }` server path to pass to `app-install` |
 | `GET /api/files/:name` | files saved in tempDir (screenshots, recordings) |
 | `GET /api/files/crash/:udid/:name` | copied iOS crash reports (phase 3): udid `/^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/`, name `/^[A-Za-z0-9_][A-Za-z0-9._-]{0,199}\.ips$/i` without `..`, realpath must stay inside `<tempDir>/crash/<udid>/`; always `Content-Disposition: attachment`, `text/plain`, `nosniff`; same /api access rules |
 | `GET /api/slack` | `{ configured, hint?, sender? }`: Send to Slack status; never the webhook URL (`hint` = host + last 4 characters) |
 | `PUT /api/slack` `{ webhookUrl?: string \| null, sender?: string \| null }` | same status; `https://` only (`slack.invalidUrl`); stored in `<dataDir>/slack.json` (0600), not in settings.json (which every UI receives) |
-| `POST /api/slack/send` `{ text }` (Slack mrkdwn, ≤ 40,000 chars, built by the UI) | `{ ok: true }`; posts `{ text, unfurl_links: false, unfurl_media: false }`, no redirects, 15 s timeout; `slack.notConfigured` 409, `slack.rejected` / `slack.unreachable` 502 |
+| `POST /api/slack/send` `{ text }` (Slack mrkdwn, ≤ 40,000 chars, built by the UI) | `{ ok: true }`; posts `{ text, unfurl_links: false, unfurl_media: false }`, no redirects, 15 s timeout; `slack.notConfigured` 409, `slack.rateLimited` 429 (message ends in `: <seconds> s` from Retry-After, 30 s when missing), `slack.rejected` / `slack.unreachable` 502 |
 
 The UI document, every static file, 304s and the "please build the UI" page carry a Content-Security-Policy:
 scripts only from the server (inline scripts are hashed at startup and re-hashed when index.html changes; no
@@ -407,6 +408,11 @@ others → ok).
 [--ui-dir PATH] [--verbose]`.
 - Prints a friendly banner (URL, what to do next). If the port is taken by another Dürbün
   (`/api/health`), just open the UI and exit; otherwise a clear error.
+- One server per data folder: `startServer` takes `<dataDir>/durbun.lock` (pid, port, start time) before it reads
+  any config file. While its holder lives (its port answers `/api/health` as Dürbün, or it is still starting,
+  < 2 min) a second start fails with `ServerStartError` code `server.dataDirInUse` and `port` = the holder's; the
+  CLI opens that Dürbün (or says to pass `--data-dir`). A dead pid, a reused pid (port silent) or an unreadable
+  lock is stale and taken over. The lock is removed on stop.
 - Opens the UI: on macOS prefer an **app window** (`open -na "<Browser>" --args --app=<url>`) using
   the first installed of Google Chrome, Brave Browser, Microsoft Edge, Arc, Chromium; else `open <url>`.
 - Config: `<dataDir>/settings.json` (ServerSettings), `<dataDir>/mocks.json` (MockRule[]); written
@@ -1081,7 +1087,8 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
   preflight when it cannot start.
 - The engine runs one step at a time along the edges, with sub-flows (no recursion), repeat over a count or a
   list, retries, per-step timeouts and cancellation. Mock rules a run adds (`flow-` ids) and recordings it starts
-  are removed / stopped when the run ends, whatever the outcome. HTTP steps go from the Mac (redirects followed
+  are removed / stopped when the run ends, whatever the outcome (a client's `mocks.set` keeps a `flow-` rule only
+  while the server still has it, so a stale list never brings one back). HTTP steps go from the Mac (redirects followed
   unless turned off); secrets are masked in run records.
 - Runs are kept in `<dataDir>/flow-runs` (newest 200, with their screenshots and recordings). The UI follows a
   run through WS `flowRun` (header + changed steps, merged by step id) and `flows` (summary list); a REST read
@@ -1091,6 +1098,20 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
   once per `throttleMs` (default 30 s) per trigger, never twice at once, with a cap on concurrent automatic runs.
 - Environments: `<dataDir>/environments.json` (`format: 'durbun-environments'`, mode 0600): named sets of
   `{key, value, secret?}` and the active one.
+- Certificates of HTTPS test servers, per environment: `tls?: { ca?, skipVerify? }`. No setting = Node's normal
+  checks. `ca` = extra trusted PEM certificates (an internal CA, a self-signed server's certificate) on top of
+  the default and system ones; only parsable certificate blocks are kept (never a pasted key); a text without
+  one is refused (`env.tls.invalidCa`). `skipVerify` turns verification off for that environment's HTTP steps.
+  A run with a setting says so: preflight `preflight.env.insecureTls` (warn) / `preflight.env.customCa` (info,
+  kept in the run), `FlowRun.environment.tls` = `'unverified' | 'customCa'`, and an unverified step's output has
+  `tlsVerified: false`. A refused certificate fails the step with `flow.http.tls` `{ method, url, host, reason }`.
+  A resend can skip verification once (`net.replay` `overrides.skipTlsVerify`, notice `replay.tlsUnverified`);
+  a resend refused for its certificate gets notice `replay.tlsRejected`.
+- User regular expressions (log triggers, `wait.log`, extract rules): a pattern that repeats a repeat
+  (`unsafeRegexReason`, e.g. `(a+)+$`) gets the validation warning `flow.regex.unsafe` and runs in a vm context
+  with a 50 ms limit per text (first 10,000 characters); running out of time counts as no match.
+- Demo mode adds two example flows against the demo Pati app (`demo-pati-start`, `demo-pati-list-error`, tag
+  `demo`) when they are missing, and removes them when it stops unless the user changed them.
 
 ### 11.4 Flows with the user's own AI
 - `POST /api/flows/ai-pack` builds a Markdown pack: the task, the format and schema, every node type with its

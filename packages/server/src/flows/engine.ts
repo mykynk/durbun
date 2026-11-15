@@ -310,9 +310,15 @@ export class FlowEngine {
       counts: { passed: 0, failed: 0, skipped: 0, total: 0 },
     };
     if (prepared.target.info.deviceId || prepared.target.info.appId) run.target = prepared.target.info;
-    if (prepared.environment) run.environment = { id: prepared.environment.id, name: prepared.environment.name };
+    if (prepared.environment) {
+      run.environment = { id: prepared.environment.id, name: prepared.environment.name };
+      // The run history keeps how this run checked certificates (the environment may change later).
+      const tls = prepared.environment.tls;
+      if (tls?.skipVerify) run.environment.tls = 'unverified';
+      else if (tls?.ca) run.environment.tls = 'customCa';
+    }
     if (Object.keys(prepared.inputs).length) run.inputs = maskSecrets(trimOutput(prepared.inputs) as Record<string, unknown>, prepared.secrets);
-    const notes = prepared.preflight.issues.filter((i) => i.level !== 'info' || i.code === 'preflight.device.auto');
+    const notes = prepared.preflight.issues.filter((i) => i.level !== 'info' || i.code === 'preflight.device.auto' || i.code === 'preflight.env.customCa');
     if (notes.length) run.preflight = notes;
 
     const ctx: RunCtx = {
@@ -1057,6 +1063,7 @@ export class FlowEngine {
       recordings: ctx.recordings,
       summarySoFar: () => engine.summaryLine(ctx),
       mask: (value) => maskSecrets(value, ctx.prepared.secrets),
+      tls: ctx.prepared.environment?.tls,
     };
   }
 
