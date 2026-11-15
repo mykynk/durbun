@@ -31,9 +31,13 @@ jobs:
       - run: npm ci
       - run: npm ci
         working-directory: apps/desktop
-      # Ad-hoc signed unless signing secrets are added (see apps/desktop/electron-builder.config.cjs).
+      # `app:release` stops without the Developer ID and notarization variables. This job has no signing
+      # secrets, so it asks for an ad-hoc build on purpose; add the secrets (see
+      # apps/desktop/electron-builder.config.cjs) and drop the variable to publish signed builds from here.
       - name: Build the DMG and ZIP (Apple silicon and Intel)
         run: npm run app:release
+        env:
+          DURBUN_ALLOW_UNSIGNED: "1"
       - name: Release notes from CHANGELOG.md
         run: |
           awk -v v="${GITHUB_REF_NAME#v}" '

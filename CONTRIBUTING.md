@@ -85,7 +85,10 @@ All parts share one version and are released together, by hand from a maintainer
    above.
 2. Merge to `main`, then tag and push: `git tag -a vX.Y.Z -m "Dürbün X.Y.Z"` and `git push origin vX.Y.Z`.
 3. Build the Mac app for Apple silicon and Intel with `npm run app:release`. Set the Developer ID and
-   notarization variables first (see `apps/desktop/electron-builder.config.cjs`), then write the checksums:
+   notarization variables first (see `apps/desktop/electron-builder.config.cjs`): without them the command
+   stops and lists what is missing (`DURBUN_ALLOW_UNSIGNED=1` makes an ad-hoc build that must not be
+   published). It verifies the signature, Gatekeeper and the stapled ticket of both apps, then prints the
+   commands that sign, notarize and staple each DMG. Run those, and write the checksums last:
    `shasum -a 256 *.dmg *.zip > SHA256SUMS.txt` in `apps/desktop/release`.
 4. Draft the GitHub release with the version's `CHANGELOG.md` section as notes, attach the DMG, ZIP and
    `SHA256SUMS.txt` files, review it and publish it:
