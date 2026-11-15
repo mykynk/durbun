@@ -9,7 +9,7 @@
  * WS /ui: hello → snapshot (3 devices, 3 apps + an older session, device apps, mocks, drivers) → ~2000
  * history logs → live batches (logs, network, metrics, device apps, occasional device/app changes). Every
  * command gets {ok: true} with plausible data. REST: /api/health, /api/doctor, /api/network/:id (+ bodies),
- * /api/network/search, /api/export, /api/import, /api/har, /api/upload, /api/files/crash/:udid/:name,
+ * /api/network/search, /api/export, /api/import, /api/har, /api/bug-report, /api/upload, /api/files/crash/:udid/:name,
  * /api/slack (+ /send: printed to stdout, never posted).
  * SPEC §10: apps without the SDK (`snapshot.deviceApps`: a Play build, a Firebase build, an APK
  * installed by hand, a TestFlight build next to an Xcode build — both "Runner" — on a USB iPhone), exact
@@ -949,8 +949,56 @@ const maskBody = (b) => (b && b.encoding === 'utf8' ? { ...b, data: maskText(b.d
 function maskDetail(d) {
   return { ...d, url: maskUrl(d.url), path: maskUrl(d.path ?? ''), requestHeaders: (d.requestHeaders ?? []).map(maskHeader), responseHeaders: d.responseHeaders?.map(maskHeader), requestBody: maskBody(d.requestBody), responseBody: maskBody(d.responseBody) };
 }
+/** A zip of [name, Buffer] pairs, stored without compression (POST /api/bug-report). */
+function storedZip(entries) {
+  const crc = (buf) => {
+    let c = 0xffffffff;
+    for (const b of buf) {
+      c ^= b;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, data] of entries) {
+    const n = Buffer.from(name, 'utf8');
+    const sum = crc(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6);
+    local.writeUInt32LE(sum, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(n.length, 26);
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x02014b50, 0);
+    entry.writeUInt16LE(20, 4);
+    entry.writeUInt16LE(20, 6);
+    entry.writeUInt16LE(0x0800, 8);
+    entry.writeUInt32LE(sum, 16);
+    entry.writeUInt32LE(data.length, 20);
+    entry.writeUInt32LE(data.length, 24);
+    entry.writeUInt16LE(n.length, 28);
+    entry.writeUInt32LE(offset, 42);
+    parts.push(local, n, data);
+    central.push(entry, n);
+    offset += 30 + n.length + data.length;
+  }
+  const dir = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(dir.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, dir, end]);
+}
+
 /** `mask` of GET /api/export: only "0" / "false" / "no" / "off" export raw. */
-const maskParam = (v) => !['0', 'false', 'no', 'off'].includes(String(v ?? '').toLowerCase());
+const maskParam =(v) => !['0', 'false', 'no', 'off'].includes(String(v ?? '').toLowerCase());
 function harOf(details) {
   const pairs = (list) => (list ?? []).map(([name, value]) => ({ name, value }));
   return details.map((d) => ({
@@ -1066,6 +1114,21 @@ const httpServer = http.createServer(async (req, res) => {
       const log = { version: '1.2', creator: { name: 'Dürbün', version: '0.2.0' }, entries: harOf(masked ? picked.map(maskDetail) : picked) };
       if (masked) log._durbun = { masked: true };
       return json(res, 200, { log }, { 'Content-Disposition': 'attachment; filename="durbun.har"' });
+    }
+    if (p === '/api/bug-report' && req.method === 'POST') {
+      // A stored (uncompressed) zip of the report and its lines; the mock keeps no files, so the screenshot and the
+      // crash report are named as skipped. The real archive is checked against the real server (serverContract).
+      const body = JSON.parse((await readBody(req)).toString() || '{}');
+      if (typeof body.report !== 'string' || !body.report.trim()) return json(res, 400, { error: 'report must be a non-empty string', code: 'bugReport.invalid' });
+      const files = [['report.md', body.report], ...(body.logs ? [['logs.txt', body.logs]] : [])];
+      const skipped = [...(body.screenshot ? ['screenshot'] : []), ...(body.crashReport ? ['crashReport'] : [])];
+      const zip = storedZip(files.map(([name, text]) => [name, Buffer.from(text, 'utf8')]));
+      res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${body.name || 'durbun-bug'}.zip"`,
+        ...(skipped.length ? { 'X-Durbun-Skipped': skipped.join(',') } : {}),
+      });
+      return res.end(zip);
     }
     if (p === '/api/slack') {
       if (req.method === 'PUT') {

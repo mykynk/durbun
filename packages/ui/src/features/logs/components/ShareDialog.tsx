@@ -1,12 +1,13 @@
 import { useMemo } from 'react';
-import { Copy, FileDown, Share2 } from 'lucide-react';
-import type { LogEntry } from '@durbun/protocol';
+import { Bug, Copy, FileDown, Share2 } from 'lucide-react';
+import type { AppSession, DeviceApp, DeviceInfo, LogEntry } from '@durbun/protocol';
 import { useDevice, useHub } from '../../../data';
 import { Button, CodeView, Dialog, SlackButton, copyText, downloadText, formatBytes, toast, useShortcut } from '../../../components';
 import { translate, useLanguage, useT, type Lang } from '../../../i18n';
 import { shareAppLabel, shareDeviceLabel, shareInstallLabel } from '../../network/share';
 import { deviceAppForEntry, sessionForEntry } from '../model/appOf';
 import { buildLogReport, type LogShareLabels } from '../model/shareReport';
+import { bugReport } from '../../report/store';
 import { displayText } from './DetailPanel';
 
 const KIND_KEYS: Partial<Record<string, string>> = { crash: 'logs.kind.crash', anr: 'logs.kind.anr', 'flutter-error': 'logs.kind.flutterError' };
@@ -27,7 +28,41 @@ export function logShareLabels(lang: Lang): LogShareLabels {
   };
 }
 
-/** "Share log line": the log report with a preview, Copy, Save and Send to Slack. */
+/**
+ * The share report of one line in [lang] (the log Share dialog, and the moment of a bug report). `text` gives the
+ * message (a bug report masks the URLs of network rows).
+ */
+export function logShareReport(
+  e: LogEntry,
+  context: { app?: AppSession; deviceApp?: DeviceApp; device?: DeviceInfo },
+  lang: Lang,
+  text: (e: LogEntry) => string = displayText,
+): string {
+  const { app, deviceApp, device } = context;
+  const kindKey = e.kind ? KIND_KEYS[e.kind] : undefined;
+  const process = [e.process, e.pid].filter((x) => x !== undefined && x !== '').join(' ');
+  return buildLogReport(
+    {
+      level: e.level,
+      tag: e.tag || undefined,
+      kind: kindKey ? translate(lang, kindKey) : undefined,
+      ts: e.ts,
+      app: shareAppLabel(app, deviceApp, shareInstallLabel(deviceApp, app, device)),
+      device: shareDeviceLabel(device),
+      process: process || undefined,
+      message: text(e),
+      // The app's own structured data; device and system lines carry Dürbün's internal fields there.
+      data: e.source === 'app' ? e.data : undefined,
+      error: e.error,
+    },
+    logShareLabels(lang),
+  );
+}
+
+/**
+ * "Share log line": the log report with a preview, Copy, Save and Send to Slack — one line, quickly. "Report a
+ * bug…" takes the same line with its context (the window around it, requests, a screenshot).
+ */
 export function ShareDialog({ entry: e, onClose }: { entry: LogEntry; onClose: () => void }) {
   const t = useT();
   const lang = useLanguage();
@@ -38,26 +73,7 @@ export function ShareDialog({ entry: e, onClose }: { entry: LogEntry; onClose: (
   const app = useMemo(() => sessionForEntry(e, apps), [e, apps]);
   const deviceApp = useMemo(() => deviceAppForEntry(e, deviceApps, app), [e, deviceApps, app]);
 
-  const report = useMemo(() => {
-    const kindKey = e.kind ? KIND_KEYS[e.kind] : undefined;
-    const process = [e.process, e.pid].filter((x) => x !== undefined && x !== '').join(' ');
-    return buildLogReport(
-      {
-        level: e.level,
-        tag: e.tag || undefined,
-        kind: kindKey ? translate(lang, kindKey) : undefined,
-        ts: e.ts,
-        app: shareAppLabel(app, deviceApp, shareInstallLabel(deviceApp, app, device)),
-        device: shareDeviceLabel(device),
-        process: process || undefined,
-        message: displayText(e),
-        // The app's own structured data; device and system lines carry Dürbün's internal fields there.
-        data: e.source === 'app' ? e.data : undefined,
-        error: e.error,
-      },
-      logShareLabels(lang),
-    );
-  }, [e, app, deviceApp, device, lang]);
+  const report = useMemo(() => logShareReport(e, { app, deviceApp, device }, lang), [e, app, deviceApp, device, lang]);
   const size = useMemo(() => new TextEncoder().encode(report).length, [report]);
 
   const copy = async () => {
@@ -80,6 +96,17 @@ export function ShareDialog({ entry: e, onClose }: { entry: LogEntry; onClose: (
       description={t('logs.share.description')}
       footer={
         <>
+          <Button
+            variant="ghost"
+            icon={Bug}
+            title={t('report.openHint')}
+            onClick={() => {
+              onClose();
+              bugReport.open({ kind: 'log', logId: e.id });
+            }}
+          >
+            {t('report.openEllipsis')}
+          </Button>
           <span className="muted text-sm grow tnum">{t('logs.share.size', { size: formatBytes(size) })}</span>
           <Button variant="ghost" icon={FileDown} onClick={() => downloadText(report, `durbun-log-${e.id}.md`, 'text/markdown;charset=utf-8')}>
             {t('logs.share.save')}

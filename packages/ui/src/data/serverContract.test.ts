@@ -37,6 +37,9 @@ import { networkStore } from './networkStore';
 import { isMaskedSessionFile, scopeExportCounts, scopeExportParams } from '../features/transfer/dataExport';
 import { flowsWithCalls, runsOfFlows } from '../features/transfer/runs';
 import { exportUrl } from './api';
+import { compileScope } from './scope';
+import { useHub } from './stores/hub';
+import { bugWindow, collectLogs, collectRequests, logsText } from '../features/report/model';
 
 let t: TestApp | undefined;
 let hub: Hub | undefined;
@@ -130,6 +133,47 @@ describe('real server: HAR', () => {
     const open = await har({ ids: [list[0]!.id], mask: false });
     expect(open.log._durbun?.masked).toBeUndefined();
     expect(JSON.stringify(open)).toContain('secret-value');
+  });
+});
+
+describe('real server: report a bug', () => {
+  it('(e) the zip holds what the dialog counted: the failed requests masked, the window’s recording, the lines', async () => {
+    const s = await start();
+    const now = Date.now();
+    hub!.netRequest(s.shop.id, { type: 'net.request', id: 'pay', ts: now, method: 'POST', url: 'https://api.example.com/pay?token=abc123', headers: [['Authorization', 'Bearer secret-value']], source: 'dart:io' });
+    hub!.netResponse(s.shop.id, { type: 'net.response', id: 'pay', ts: now + 10, status: 500, headers: [] });
+    await loadUi();
+    const scope = { kind: 'app' as const, appId: s.shop.id };
+    const compiled = compileScope(scope, useHub.getState());
+    const win = bugWindow(now, 60, 5);
+    const logs = collectLogs(logStore, compiled, win);
+    const requests = collectRequests(networkStore.list(), compiled, win);
+    expect(requests.failed).toHaveLength(1);
+    expect(logs.total).toBeGreaterThan(0);
+
+    const res = await fetch(`${t!.base}/api/bug-report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        report: '# Bug report\n',
+        logs: logsText(logs.lines, (e) => e.message, true),
+        requestIds: requests.failed.map((n) => n.id),
+        recording: { ...scopeExportParams(scope), fromTs: win.fromTs, toTs: win.toTs },
+        name: 'contract',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const { readBugReportZip } = await load<{ readBugReportZip(b: Buffer): { name: string; data: Buffer }[] }>('src/http/bugReport.ts');
+    const files = readBugReportZip(Buffer.from(await res.arrayBuffer()));
+    expect(files.map((f) => f.name)).toEqual(['report.md', 'logs.txt', 'requests.har', 'recording.durbun.json']);
+    const har = JSON.parse(files[2]!.data.toString()) as { log: { entries: unknown[] } };
+    expect(har.log.entries).toHaveLength(1);
+    expect(files[2]!.data.toString()).not.toContain('secret-value');
+    const rec = JSON.parse(files[3]!.data.toString()) as SessionExport;
+    expect(rec.masked).toBe(true);
+    expect(rec.network.map((n) => n.id).sort()).toEqual(requests.all.map((n) => n.id).sort());
+    // The dialog's lines are the recording's lines without request rows and markers.
+    expect(rec.logs.filter((e) => e.kind !== 'network' && e.kind !== 'marker').length).toBe(logs.total);
   });
 });
 

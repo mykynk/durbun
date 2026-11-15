@@ -599,6 +599,16 @@ export function explainSources(input: ExplainInput): ExplainResult {
   return { badge, rows, notes, context: ctx };
 }
 
+/** Whether a report can carry a fresh screenshot of the device, and why not ("Report a bug", SPEC §12). */
+export type ScreenshotAvailability = 'yes' | 'noDevice' | 'imported' | 'offline' | 'unsupported';
+
+export function screenshotAvailability(device: Pick<DeviceInfo, 'id' | 'state' | 'actions'> | undefined): ScreenshotAvailability {
+  if (!device || device.id === 'desktop' || device.id.startsWith('net:')) return 'noDevice';
+  if (device.id.startsWith('import:')) return 'imported';
+  if (device.state !== 'online') return 'offline';
+  return device.actions.includes('screenshot') ? 'yes' : 'unsupported';
+}
+
 /** Row for one capability (always present in a result). */
 export function explainRow(result: ExplainResult, capability: ExplainCapability): ExplainRow | undefined {
   return result.rows.find((r) => r.capability === capability);

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Archive, BookOpen, Bookmark, FileDown, FileUp, FlaskConical, Keyboard, Languages, LayoutGrid, Monitor, Moon, PanelLeft, PackageOpen, Plug, RefreshCw, Settings, Share2, Stethoscope, Sun, Trash } from 'lucide-react';
+import { Archive, BookOpen, Bookmark, Bug, FileDown, FileUp, FlaskConical, Keyboard, Languages, LayoutGrid, Monitor, Moon, PanelLeft, PackageOpen, Plug, RefreshCw, Settings, Share2, Stethoscope, Sun, Trash } from 'lucide-react';
 import { useT } from '../i18n';
 import { translate } from '../i18n/core';
 import { deviceDisplayName } from '../i18n/codes';
@@ -24,6 +24,7 @@ import { PlatformIcon, sdkLabel, type IconType } from '../components/Icons';
 import { TAB_ICONS } from './TopBar';
 import { deviceSubtitle } from './labels';
 import { transfer } from '../features/transfer/store';
+import { bugReport } from '../features/report/store';
 import { addMarker, clearEverything, exportHar, exportSession, pickAndImport, setDemo, setTheme, toggleLanguage, toggleSidebar } from './actions';
 
 const TAB_KEYWORDS: Record<TabId, string[]> = {
@@ -154,6 +155,15 @@ export function useGlobalCommands(): void {
     ...(tab === 'logs'
       ? []
       : [{ id: 'marker', title: t('shell.marker.add'), group: data, icon: Bookmark, shortcut: 'M', keywords: both('shell.marker.add'), run: () => void addMarker() } satisfies PaletteCommand]),
+    {
+      id: 'report.bug',
+      title: t('report.cmd.open'),
+      group: data,
+      icon: Bug,
+      keywords: ['bug', 'hata', 'report', 'rapor', 'crash', 'çökme', 'issue', 'jira', 'zip', 'screenshot', 'ekran görüntüsü', ...both('report.cmd.open')],
+      priority: 8,
+      run: () => bugReport.open(),
+    },
     { id: 'export.all', title: t('shell.io.exportAll'), group: data, icon: FileDown, keywords: ['save', ...both('shell.io.exportAll')], run: exportSession },
     { id: 'export.har', title: t('shell.io.exportHar'), group: data, icon: FileDown, keywords: ['har', ...both('shell.io.exportHar')], run: exportHar },
     { id: 'import', title: t('shell.io.import'), group: data, icon: FileUp, keywords: ['open', ...both('shell.io.import')], run: () => void pickAndImport() },

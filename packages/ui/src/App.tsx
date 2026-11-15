@@ -22,6 +22,7 @@ import { SdkGuideDialog } from './shell/SdkGuide';
 import { DataSourcesDialog } from './sources';
 import { DropImport } from './shell/DropImport';
 import { TransferHost } from './features/transfer/TransferHost';
+import { BugReportHost } from './features/report/BugReportHost';
 import { useGlobalCommands } from './shell/globalCommands';
 import { useCrashNotifications } from './shell/crashNotify';
 
@@ -77,6 +78,7 @@ export function App() {
         <DataSourcesDialog />
       </DialogBoundary>
       <TransferHost />
+      <BugReportHost />
       <DropImport />
       <ConfirmHost />
       <ContextMenuHost />

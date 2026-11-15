@@ -12,6 +12,7 @@ import type { FlowRun, FlowRunDelta, FlowSummary } from './flows/types';
 export * from './flows/index';
 export * from './package';
 export * from './secrets';
+export * from './bugReport';
 
 export const PROTOCOL_VERSION = 1;
 export const PRODUCT_NAME = 'Dürbün';

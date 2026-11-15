@@ -3,6 +3,7 @@ import type { LogEntry } from '@durbun/protocol';
 import { isCrashEntry, keptAfter, logStore, type LogStore } from '../data/logStore';
 import { isImportedDevice, useHub } from '../data/stores/hub';
 import { ui } from '../data/stores/ui';
+import { bugReport } from '../features/report/store';
 import { getPrefs } from '../data/stores/prefs';
 import { isLiveEntry, isQuietCrashRecord, mergeCrashes } from '../features/logs/live';
 import { deviceAppForEntry, sessionForEntry } from '../features/logs/model/appOf';
@@ -44,6 +45,12 @@ export function watchLiveCrashes(store: Pick<LogStore, 'entries' | 'kept' | 'gen
   });
 }
 
+/** A click on the notification: the crash line in Logs, with "Report a bug" open on it. */
+function openCrash(logId: number): void {
+  ui.focusLog(logId);
+  bugReport.open({ kind: 'log', logId });
+}
+
 /** Desktop notification for live crashes on any connected device, from app start (mounted once in App). */
 export function useCrashNotifications(): void {
   useEffect(() => {
@@ -61,7 +68,7 @@ export function useCrashNotifications(): void {
       void import('../features/logs/crashNotice')
         .then(({ crashNotice }) => {
           const { title, body } = crashNotice(e, appName, device ? deviceDisplayName(device) : undefined);
-          notifyDesktop(title, { body, tag: 'durbun-crash', onClick: () => ui.focusLog(e.id) });
+          notifyDesktop(title, { body, tag: 'durbun-crash', onClick: () => openCrash(e.id) });
         })
         .catch(() => {
           /* the chunk could not load (dev server restart): no notification is better than an error */

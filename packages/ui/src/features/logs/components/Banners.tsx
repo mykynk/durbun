@@ -1,5 +1,5 @@
 import { memo, type CSSProperties } from 'react';
-import { ArrowDown, Archive, Hourglass, Info, LocateFixed, OctagonX, Pause, Play, Settings2, TriangleAlert, Undo2, X } from 'lucide-react';
+import { ArrowDown, Archive, Bug, Hourglass, Info, LocateFixed, OctagonX, Pause, Play, Settings2, TriangleAlert, Undo2, X } from 'lucide-react';
 import type { LogEntry } from '@durbun/protocol';
 import { Button, IconButton, formatClock } from '../../../components';
 import { t, useT } from '../../../i18n';
@@ -24,11 +24,13 @@ export interface CrashBannerProps {
   /** Several devices in the list: which one crashed (the same app may run on more than one). */
   device?: (e: LogEntry) => DeviceMark | undefined;
   onGoto(e: LogEntry): void;
+  /** "Report a bug" anchored to the crash. */
+  onReport?(e: LogEntry): void;
   onDismiss(lastId: number): void;
 }
 
 /** Loud, dismissible banner for live crashes / ANRs / Flutter errors in scope (SPEC §1.1-7). */
-export const CrashBanner = memo(function CrashBanner({ crashes, appName, device, onGoto, onDismiss }: CrashBannerProps) {
+export const CrashBanner = memo(function CrashBanner({ crashes, appName, device, onGoto, onReport, onDismiss }: CrashBannerProps) {
   useT(); // re-render on language change (memoized)
   const latest = crashes[crashes.length - 1];
   if (!latest) return null;
@@ -56,6 +58,11 @@ export const CrashBanner = memo(function CrashBanner({ crashes, appName, device,
         <span className="lg-banner__time tnum">{formatClock(latest.ts, { ms: false })}</span>
         {more > 0 ? <span className="lg-banner__more">{t('logs.crash.more', { count: more })}</span> : null}
       </div>
+      {onReport ? (
+        <Button size="sm" variant="secondary" icon={Bug} title={t('report.openHint')} onClick={() => onReport(latest)}>
+          {t('report.open')}
+        </Button>
+      ) : null}
       <Button size="sm" variant="danger" icon={ArrowDown} onClick={() => onGoto(latest)}>
         {t('logs.crash.goto')}
       </Button>

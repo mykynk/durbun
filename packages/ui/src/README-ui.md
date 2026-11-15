@@ -185,6 +185,7 @@ Counters & rates (throttled hooks): `useScopedLogCounts(throttleMs = 250)`,
 | `useMocks(s => s.rules)` / `saveMocks(rules): Promise<MockRule[]>` | mock rules; `saveMocks` = `mocks.set` (optimistic, reverts on error) |
 | `useFlows(s => s.summaries \| s.runs)` | flow list (WS `flows`) and live runs by id (WS `flowRun` deltas merged by step id, `applyFlowRunDelta`); `rememberFlowRun(run)` stores a REST copy unless a newer live copy exists; `latestRunOf(runs, flowId)` |
 | `useTransfer` / `transfer` (`features/transfer/store.ts`) | package dialogs: `transfer.openExport('share' \| 'backup', flowIds?)`, `transfer.openImport(text?, fileName?)`, `transfer.close()`; session / HAR export dialog: `transfer.openDataExport('session' \| 'har', { ids?, label?, fileName? }?)` (scope + counts, "mask secret values" on by default; `ids` fixes the requests, e.g. the Network tab's visible rows). Never start an export download without it |
+| `useBugReport` / `bugReport` (`features/report/store.ts`) | "Report a bug" (SPEC §12): `bugReport.open({ kind: 'log', logId } \| { kind: 'request', netId } \| { kind: 'now' })` from every entry point (crash banner and notification, log and request detail panels and context menus, both Share dialogs, ⌘K, the top bar button); `bugReport.close()` keeps the note (`draft`), `bugReport.done()` clears it once the report left (saved, copied, sent). The dialog decides the scope from the anchor (`bugScope`), the window (`bugWindow`, ≤ 10 min), the lines and requests (`collectLogs` / `collectRequests`) and the Markdown (`buildBugReport`) in `features/report/model.ts`; never build a bug report elsewhere |
 | `useServerSettings(s => s.settings)` / `updateServerSettings(patch)` | `ServerSettings`; update = `settings.update` (optimistic) |
 | `usePrefs` | UI prefs, persisted to localStorage (`durbun.prefs.v1`) |
 | `useUi` / `ui` | active tab + global screens: `ui.setTab(id)`, `ui.openPalette()`, `ui.openSettings(section?)`, `ui.openDoctor()`, `ui.openSdkGuide(tab?)`, `ui.openShortcuts()`; cross-feature navigation: `ui.focusLog(logId)`, `ui.focusNetwork(netId)`, `ui.focusMock(ruleId)`, `ui.newMockFromDraft(draft)`, `ui.newFlowFromRequests(ids)`, `ui.importFlows(text)` set `useUi(s => s.focus)` (`UiFocus` with a `seq`) and switch tabs — the target view handles it in an effect keyed on `focus?.seq`, then calls `ui.consumeFocus(seq)`. A jump must never overwrite the user's filters or prefs: Logs suspends only the filters that hide the line ("Show in context" also those hiding its neighbours) behind a "Back to my filters" bar (`features/logs/model/reveal.ts`); Network clears them with a 10 s "Back to my filters" toast action |
@@ -241,7 +242,9 @@ Use `compiled.key` as the memo key for scans (it changes when the app's sessions
 
 - `explainSources({ device, deviceApp, sessions })` (`data/explain.ts`, pure, the only place the rules live) →
   `{ badge, rows[logs|network|metrics|crashes|mocks|tools] {status, sources, reasons, actions}, notes, context }`.
-  Extra exports: `buildBadgeOf()`, `buildKindOf()`, `explainContext()`, `explainRow()`.
+  Extra exports: `buildBadgeOf()`, `buildKindOf()`, `explainContext()`, `explainRow()`,
+  `screenshotAvailability(device)` (`yes | noDevice | imported | offline | unsupported`: whether "Report a bug" can take
+  a fresh screenshot, and the reason it shows when not).
 - `src/sources/`: `useAppExplain(groupKey)`, `useScopeExplain()`, `pickEmptyReason(capability, scope, {includePartial})`,
   `<SourceBadge badge short?>`, `<BuildBadgeChip>`, `<SourcesPanel item>`, `<WhatCanISeeButton groupKey>` (the ⓘ popover),
   `<ScopeSourcesButton>` (top bar), `<ExplainEmpty capability fallback onAction? includePartial?>` (renders the reasons when
@@ -288,6 +291,7 @@ with `tCode(code, data, fallback)`. Default timeouts: 15 s; `device.action` 30 s
 | `api.exportUrl({ deviceId?, appId?, bundleId?, mask? })` | `GET /api/export` URL. Masked unless `mask: false` (adds `mask=0`); a masked file ends with `"masked": true`. An app scope exports by `deviceId` + `bundleId` (every session plus its device lines), an exact one by `appId` (`scopeExportParams` in `features/transfer/dataExport.ts`) |
 | `api.importSession(input, signal | { name?, signal? })` | `POST /api/import?name=<file name>` → `{ deviceIds }` (a `File` sends its own name; the server labels the imported devices with it) |
 | `api.harExport(ids?, { mask?, signal? })` / `api.downloadHar(ids?, filename?, { mask? })` | `POST /api/har` `{ ids?, mask? }`: no `ids` = every request; masked unless `mask: false` (`log._durbun.masked`) |
+| `api.bugReport(req)` → `{ blob, fileName, skipped }` | `POST /api/bug-report` (`BugReportRequest`): one .zip with `report.md`, `logs.txt`, `requests.har`, the screenshot, an iOS crash report and `recording.durbun.json` of the window; masked unless `mask: false`; `skipped` names parts the server could not add (`X-Durbun-Skipped`). `api.exportUrl` also takes `fromTs` / `toTs` on the server (a bad value: `export.invalidTime`) |
 | `api.doctor()` | `GET /api/doctor` → `ToolCheck[]` |
 | `api.upload(file, { name?, onProgress?, signal? })` | `POST /api/upload` → `{ file }` (pass to `app-install`); errors keep the server `code` (`upload.tooLarge`…) |
 | `api.fileUrl(name)`, `api.health()` | `/api/files/:name`, `/api/health` |

@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import {
   ArrowLeftRight,
+  Bug,
   ChevronDown,
   Copy,
   Drama,
@@ -56,9 +57,11 @@ export interface DetailPanelProps {
   onEditReplay: () => void;
   onCompare: () => void;
   onShare: () => void;
+  /** "Report a bug" anchored to this request. */
+  onReport?: () => void;
 }
 
-export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCompare, onShare }: DetailPanelProps) {
+export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCompare, onShare, onReport }: DetailPanelProps) {
   const t = useT();
   const [savedTab, setTab] = usePersistentState<DetailTab>('network.detailTab', 'response');
   const tab = DETAIL_TABS.includes(savedTab) ? savedTab : 'response';
@@ -89,6 +92,7 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
         onClose={onClose}
         tools={
           <>
+            {onReport && !gone ? <IconButton icon={Bug} size="sm" label={t('report.open')} onClick={onReport} /> : null}
             <Button size="sm" variant="ghost" icon={Share2} onClick={onShare} title={t('network.share.title')}>
               {t('network.share.button')}
             </Button>

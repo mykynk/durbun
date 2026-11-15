@@ -72,6 +72,11 @@ All notable changes to Dürbün are listed here. The format follows
 
 ### Added
 
+- **Report a bug.** One dialog from the crash banner, the crash notification, a log line, a request, ⌘K and
+  the top bar. It gathers the moment's time window: the app's log lines, the failed requests, a fresh
+  screenshot, device and app facts and your note, and shows the counts before anything leaves. Secret values
+  are masked by default. Copy it as Markdown, save one .zip (report, logs, masked HAR, screenshot, iOS crash
+  report and a Dürbün recording of the window) or send the text to Slack.
 - Logs and Network say when the memory limit has dropped the oldest lines or requests.
 - An iPhone with Developer Mode off says so, and actions that need it explain how to turn it on.
 - Android: log lines of your apps from before the phone was plugged in are read from the phone's log buffer.

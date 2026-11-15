@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { ChevronDown, ChevronUp, Copy, Download, ExternalLink, Funnel, FunnelX, History, LocateFixed, Share2, X } from 'lucide-react';
+import { Bug, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Funnel, FunnelX, History, LocateFixed, Share2, X } from 'lucide-react';
 import type { DeviceInfo, LogEntry, NetworkEntry } from '@durbun/protocol';
 import { Button, CodeView, CopyButton, IconButton, JsonTree, LevelBadge, MethodBadge, StatusBadge, copyText, formatBytes, formatClock, formatDateTime, formatDuration, toast } from '../../../components';
 import { networkStore, useHub, useNetworkVersion } from '../../../data';
@@ -32,6 +32,8 @@ export interface DetailPanelProps {
   onOpenNetwork(netId: string): void;
   /** Share dialog (report, Copy, Send to Slack). */
   onShare?(): void;
+  /** "Report a bug" anchored to this line. */
+  onReport?(): void;
 }
 
 /** Text used for copies/exports of any row kind (system lines localized, network rows summarized). */
@@ -118,7 +120,7 @@ interface MetaRow {
   filter?: { field: QueryField; value: string | number; exclude?: boolean };
 }
 
-export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, onNext, onFilter, onShowInContext, onOpenNetwork, onShare }: DetailPanelProps) {
+export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, onNext, onFilter, onShowInContext, onOpenNetwork, onShare, onReport }: DetailPanelProps) {
   const a = analyzeEntry(e);
   const devices = useHub((s) => s.devices);
   const apps = useHub((s) => s.apps);
@@ -225,6 +227,7 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
         </span>
         {e.kind && e.kind !== 'text' ? <span className="lg-detail__kind">{kindLabel}</span> : e.tag ? <span className="lg-detail__kind mono">{e.tag}</span> : null}
         <span className="grow" />
+        {onReport ? <IconButton icon={Bug} label={t('report.open')} size="sm" onClick={onReport} /> : null}
         {onShare ? <IconButton icon={Share2} label={t('logs.share.title')} size="sm" onClick={onShare} /> : null}
         <span className="lg-detail__pos tnum">{index >= 0 ? `${index + 1} / ${total}` : ''}</span>
         <IconButton icon={ChevronUp} label={t('logs.detail.prev')} shortcut="K" size="sm" disabled={index <= 0} onClick={onPrev} />

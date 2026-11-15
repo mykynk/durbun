@@ -4,6 +4,7 @@ import {
   Bell,
   Bookmark,
   Braces,
+  Bug,
   Copy,
   ExternalLink,
   FileDown,
@@ -80,6 +81,7 @@ import { deviceMarks, keepCrashRelevant } from './model/devices';
 import { FilterChips, LogsToolbar, SourceFilters } from './components/Toolbar';
 import { DetailPanel, displayText, rowAsLines } from './components/DetailPanel';
 import { ShareDialog } from './components/ShareDialog';
+import { bugReport } from '../report/store';
 import { Histogram } from './components/Histogram';
 import { ContextBar, CrashBanner, DroppedNote, IosScopeNote, NewLinesPill, PausedBar } from './components/Banners';
 import { NoLogsState, NoMatchState, type ActiveFilter } from './components/EmptyStates';
@@ -736,6 +738,7 @@ export default function LogsView() {
         { label: t('logs.ctx.copyLine'), onSelect: () => void copy(rowAsLines(row)) },
         { label: t('logs.ctx.copyJson'), icon: Braces, onSelect: () => void copy(JSON.stringify(e, null, 2)) },
         { label: t('logs.share.menu'), icon: Share2, onSelect: () => setShareEntry(e) },
+        { label: t('report.openEllipsis'), icon: Bug, onSelect: () => bugReport.open({ kind: 'log', logId: e.id }) },
         { type: 'separator' },
       ];
       if (e.tag) {
@@ -875,6 +878,14 @@ export default function LogsView() {
     },
     [dismissCrash, revealEntry],
   );
+  // "Report a bug" from the banner: the crash line opens behind the dialog, so it is there when the report is done.
+  const reportCrash = useCallback(
+    (e: LogEntry) => {
+      revealEntry(e.id, { open: true });
+      bugReport.open({ kind: 'log', logId: e.id });
+    },
+    [revealEntry],
+  );
   const gotoLatestCrash = useCallback(() => {
     const scope = scopeRef.current.logs;
     // The ring plus the crash records it keeps after a flood (`logStore.kept`): the counters include them too.
@@ -980,7 +991,10 @@ export default function LogsView() {
     { id: 'logs.noiseRules', title: t('logs.cmd.noiseRules'), group, icon: VolumeX, keywords: ['noise', 'gürültü', 'rules', 'kural'], run: () => { ui.setTab('logs'); setDialog('noise'); } },
     { id: 'logs.highlightRules', title: t('logs.cmd.highlightRules'), group, icon: HighlighterIcon, keywords: ['highlight', 'vurgu', 'color', 'renk'], run: () => { ui.setTab('logs'); setDialog('highlight'); } },
     ...(sel
-      ? [{ id: 'logs.sel.share', title: t('logs.share.title'), group, icon: Share2, keywords: ['share', 'paylaş', 'slack', 'report', 'rapor', 'bug', 'hata'], run: () => setShareEntry(sel.entry) }]
+      ? [
+          { id: 'logs.sel.share', title: t('logs.share.title'), group, icon: Share2, keywords: ['share', 'paylaş', 'slack', 'report', 'rapor'], run: () => setShareEntry(sel.entry) },
+          { id: 'logs.sel.report', title: t('logs.cmd.reportLine'), group, icon: Bug, keywords: ['bug', 'hata', 'report', 'rapor', 'zip', 'jira'], run: () => bugReport.open({ kind: 'log', logId: sel.entry.id }) },
+        ]
       : []),
   ]);
 
@@ -1061,6 +1075,7 @@ export default function LogsView() {
         onShowInContext={(id) => revealEntry(id, { open: true, context: true })}
         onOpenNetwork={(id) => ui.focusNetwork(id)}
         onShare={() => setShareEntry(sel.entry)}
+        onReport={() => bugReport.open({ kind: 'log', logId: sel.entry.id })}
       />
     ) : null;
 
@@ -1100,7 +1115,7 @@ export default function LogsView() {
           onToggleNoise={onToggleNoise}
         />
       </div>
-      {bannerCrashes.length ? <CrashBanner crashes={bannerCrashes} appName={appName} device={deviceMark} onGoto={gotoCrash} onDismiss={dismissCrash} /> : null}
+      {bannerCrashes.length ? <CrashBanner crashes={bannerCrashes} appName={appName} device={deviceMark} onGoto={gotoCrash} onReport={reportCrash} onDismiss={dismissCrash} /> : null}
       {paused ? <PausedBar pending={snap.pending} onResume={togglePause} /> : null}
       {ctx ? <ContextBar parts={contextPartKeys(ctx)} scopeName={ctx.scope ? scopeDisplayName(ctx.scope, useHub.getState()) : undefined} onBack={leaveContext} /> : null}
       {!empty && atTop && (logStore.dropped > 0 || logStore.size >= logStore.maxEntries) ? (

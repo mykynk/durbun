@@ -1,6 +1,7 @@
 import type {
   BackupSettings,
   BackupSettingsPatch,
+  BugReportRequest,
   FlowDoc,
   FlowEnvironments,
   FlowIssue,
@@ -175,6 +176,20 @@ export async function downloadHar(ids?: string[], filename?: string, opts: { mas
   const blob = await harExport(ids, opts);
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   downloadBlob(blob, filename ?? `durbun-${stamp}.har`);
+}
+
+/**
+ * "Report a bug" (`POST /api/bug-report`): the .zip, its file name and the parts the server could not add
+ * (`X-Durbun-Skipped`: a screenshot the temp-dir cleanup removed, a crash report that is gone).
+ */
+export async function bugReport(req: BugReportRequest, signal?: AbortSignal): Promise<{ blob: Blob; fileName: string; skipped: string[] }> {
+  const res = await fetchOk('/api/bug-report', postJson(req, signal));
+  const skipped = (res.headers.get('X-Durbun-Skipped') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const m = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '');
+  return { blob: await res.blob(), fileName: m?.[1] ?? `${req.name ?? 'durbun-bug'}.zip`, skipped };
 }
 
 /** Environment checks (`GET /api/doctor`). */

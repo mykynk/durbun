@@ -1133,3 +1133,55 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
   dialogs. `features/transfer`: share / backup export, package import, Settings → Backup, the UI prefs sync.
   Import / export menu and the command palette open them; any Dürbün file can be dropped on the window.
 - Network: **Create a flow from this request…** (row menu, detail panel, palette) and the multi-select action.
+
+## 12. Report a bug (authoritative)
+
+### 12.1 Why
+A tester sees something go wrong and, from where they are, makes one report a developer can act on without asking
+back: what happened around that moment on that device and app, the failed requests, the screen, the build, and the
+tester's own words. One click from wherever the problem shows; nothing leaves the Mac before the tester has seen
+what goes in.
+
+### 12.2 Entry points (all open the same dialog, anchored to a moment, a device and an app)
+- Logs: the crash banner (**Hata bildir**), the detail panel and the row menu of a line (the line is the moment).
+- Network: the detail panel and the row menu of a request (its start is the moment).
+- The desktop crash notification: clicking it opens the line in Logs and the dialog for it.
+- ⌘K **Hata bildir…** and a top bar button (always visible): the moment is "now", the target the current scope.
+- The single-item share dialogs (log line, request) stay as the quick way to pass ONE item on and offer
+  **Hata bildir…** for "this and what happened around it"; the bug report quotes the same item text, so there is
+  one wording for one item.
+
+### 12.3 What goes in (each part can be left out; counts shown before anything leaves)
+- **Window**: before / after the moment (default 30 s each, "now" has no after); at most 10 minutes
+  (`BUG_REPORT_MAX_WINDOW_MS`), longer choices are cut and the dialog says so.
+- **Log lines** of the target in the window as the Logs view would show them (noise hidden by the noise rules),
+  network rows left out (requests have their own part); at most `BUG_REPORT_MAX_LOG_LINES`, the newest kept, the
+  dialog says when lines were left out. The report quotes the last lines; `logs.txt` holds them all.
+- **Failed requests** of the target in the window (network error, 4xx, 5xx); `requests.har` holds them, masked.
+- **Screenshot**: taken when the dialog opens if the device can (`screenshotAvailability` in `data/explain.ts`),
+  retake or leave out; not for all devices, imported recordings, offline devices or devices without the action. It
+  also lands in the Device tab's gallery. Screenshots are not masked: the dialog says what is on screen goes in.
+- **Device and app**: model, OS, app name, version (build), bundle id, install source, SDK and Dürbün versions.
+- **The moment's item**: the crash / line or request as its share report writes it (stack trace, bodies masked).
+- **iOS crash report**: the `.ips` copy of the moment's crash record, else of the window's newest one (zip only).
+- **Dürbün recording** of the target and the window (zip only): every line and request of it, opens in Dürbün.
+- **Note**: what the tester did, what they expected (first field, focused). It survives a close (Connect Slack,
+  Esc) until the report is saved, copied or sent.
+- **Mask secret values**: on by default, the export dialog's wording; off is an explicit choice with the warning.
+
+### 12.4 Outputs
+- **Copy as Markdown** (the report text; Slack, Jira, e-mail).
+- **Save .zip** — `POST /api/bug-report` (`protocol/src/bugReport.ts`): `report.md`, `logs.txt`, `requests.har`,
+  `screenshot.png`, `crash/<name>.ips` (iOS crash report copy), `recording.durbun.json` (the window, opens in
+  Dürbün). Masked unless `mask: false`. Parts the server no longer has (temp files are cleaned after 24 h) are
+  left out and named in `X-Durbun-Skipped`; the UI says so.
+- **Send to Slack** through the configured webhook: Slack receives the report text only (shortened to Slack's
+  limit), never the files; the dialog says so next to the button.
+- `GET /api/export` also takes `fromTs` / `toTs` (epoch ms): the lines, requests and samples inside the window.
+
+### 12.5 States
+No device connected: the report holds the note and the Dürbün version. "Now" from All devices with several devices:
+pick one, or report on all devices without a screenshot (one device is picked by itself).
+Nothing in the window: the parts say "none in this window" and the report still goes out with the note. Screenshot
+unavailable (why) / taking / failed (why, retry). Slack not set up: the button opens Settings → Slack. Imported
+recording: reported from the recording, no screenshot. Window cut: says to how much.

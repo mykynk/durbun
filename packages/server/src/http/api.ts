@@ -6,7 +6,8 @@
  *   GET  /api/network/:id/body/(request|response) raw bytes, original Content-Type (?download=1)
  *   POST /api/network/search                      { text, ids?, caseSensitive? } → { ids }
  *   POST /api/har                                 { ids? } → HAR 1.2 download
- *   GET  /api/export?deviceId=&appId=             SessionExport download
+ *   GET  /api/export?deviceId=&appId=&bundleId=&fromTs=&toTs=&mask=0   SessionExport download (masked unless mask=0)
+ *   POST /api/bug-report                          BugReportRequest → .zip (report.md, logs, HAR, screenshot, recording)
  *   POST /api/import[?name=file]                  SessionExport body → { deviceIds }
  *   GET  /api/doctor                              ToolCheck[]
  *   POST /api/upload?name=<file>                  raw body (≤ 2 GB) → { file, name, size }
@@ -25,6 +26,7 @@ import { isPlainObject } from '../config';
 import { sessionVersionProblem } from '../hub/sanitize';
 import type { Hub, Logger } from '../types';
 import { cleanHarDetails, cleanSessionExport, localRoots, maskParam } from './exportClean';
+import { bugReportZip, crashFileParts, parseBugReportRequest, sliceSessionExport, tempFileName } from './bugReport';
 import { buildHar, headerValue } from './har';
 import { parseJsonBuffer } from './jsonParse';
 import type { SlackStore } from './slack';
@@ -315,7 +317,12 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
       if (appId) throw new HttpError(400, 'Give either appId or bundleId, not both', 'export.scopeConflict');
       scope.bundleId = bundleId;
     }
-    const data = cleanSessionExport(deps.hub.exportSession(scope), { mask: maskParam(query.get('mask')), roots: localRoots([tempDir]) });
+    let session = deps.hub.exportSession(scope);
+    // A time window (epoch ms): the lines, requests and samples inside it.
+    const fromTs = timeParam(query, 'fromTs');
+    const toTs = timeParam(query, 'toTs');
+    if (fromTs !== undefined || toTs !== undefined) session = sliceSessionExport(session, fromTs ?? 0, toTs ?? Number.MAX_SAFE_INTEGER);
+    const data = cleanSessionExport(session, { mask: maskParam(query.get('mask')), roots: localRoots([tempDir]) });
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Disposition': contentDisposition(`durbun-${fileTimestamp()}.durbun.json`),
@@ -323,6 +330,63 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
     });
     await streamJson(res, data, 2);
     res.end();
+  }
+
+  function timeParam(query: URLSearchParams, key: string): number | undefined {
+    const raw = queryString(query, key);
+    if (!raw) return undefined;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `${key} must be a time in epoch milliseconds`, 'export.invalidTime');
+    return n;
+  }
+
+  async function bugReport(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const r = parseBugReportRequest(await readJson(req, JSON_LIMIT_BYTES));
+    const mask = r.mask !== false;
+    const skipped: string[] = [];
+    let har: unknown;
+    if (r.requestIds?.length) {
+      const details: NetworkDetail[] = [];
+      for (const id of r.requestIds) {
+        const d = deps.hub.getNetworkDetail(id);
+        if (d) details.push(d);
+      }
+      if (details.length) {
+        const doc = buildHar(cleanHarDetails(details, { mask }), { name: PRODUCT_NAME, version: deps.version });
+        if (mask) doc.log._durbun = { ...doc.log._durbun, masked: true };
+        har = doc;
+      }
+    }
+    let screenshot: { name: string; data: Buffer } | undefined;
+    if (r.screenshot) {
+      const name = tempFileName(r.screenshot);
+      const found = await tempFile(name);
+      const data = found ? await fsp.readFile(found.real).catch(() => undefined) : undefined;
+      if (data) screenshot = { name, data };
+      else skipped.push('screenshot');
+    }
+    let crashReport: { name: string; data: Buffer } | undefined;
+    if (r.crashReport) {
+      const parts = crashFileParts(r.crashReport);
+      const found = parts ? await crashCopy(parts.udid, parts.name) : undefined;
+      const data = found ? await fsp.readFile(found.real).catch(() => undefined) : undefined;
+      if (parts && data) crashReport = { name: parts.name, data };
+      else skipped.push('crashReport');
+    }
+    let recording: SessionExport | undefined;
+    if (r.recording) {
+      const { fromTs, toTs, ...scope } = r.recording;
+      recording = cleanSessionExport(sliceSessionExport(deps.hub.exportSession(scope), fromTs, toTs), { mask, roots: localRoots([tempDir]) });
+    }
+    const zip = bugReportZip({ report: r.report, logs: r.logs, har, screenshot, crashReport, recording });
+    res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Length': String(zip.length),
+      'Content-Disposition': contentDisposition(`${r.name ?? `durbun-bug-${fileTimestamp()}`}.zip`),
+      ...(skipped.length ? { 'X-Durbun-Skipped': skipped.join(',') } : {}),
+      ...API_HEADERS,
+    });
+    res.end(zip);
   }
 
   async function importSession(req: IncomingMessage, res: ServerResponse, query: URLSearchParams): Promise<void> {
@@ -387,16 +451,39 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
     sendJson(res, 200, { file: finalPath, name, size });
   }
 
-  async function file(req: IncomingMessage, res: ServerResponse, name: string, query: URLSearchParams): Promise<void> {
-    if (!name || name === '.' || name === '..' || name.startsWith('.') || /[\\/\0]/.test(name)) {
-      throw new HttpError(404, 'File not found', 'file.unknown');
-    }
+  /** A file directly inside the temp dir (no dot files, no way out through a symlink), or undefined. */
+  async function tempFile(name: string): Promise<{ real: string; stat: NonNullable<Awaited<ReturnType<typeof statFile>>> } | undefined> {
+    if (!name || name === '.' || name === '..' || name.startsWith('.') || /[\\/\0]/.test(name)) return undefined;
     const filePath = path.join(tempDir, name);
-    if (path.dirname(filePath) !== tempDir) throw new HttpError(404, 'File not found', 'file.unknown');
+    if (path.dirname(filePath) !== tempDir) return undefined;
     const stat = await statFile(filePath);
-    if (!stat?.isFile()) throw new HttpError(404, 'File not found', 'file.unknown');
-    const [real, realRoot] = await Promise.all([fsp.realpath(filePath), fsp.realpath(tempDir)]);
-    if (!isInside(realRoot, real) || real === realRoot) throw new HttpError(404, 'File not found', 'file.unknown');
+    if (!stat?.isFile()) return undefined;
+    const [real, realRoot] = await Promise.all([fsp.realpath(filePath), fsp.realpath(tempDir)]).catch(() => [undefined, undefined]);
+    if (!real || !realRoot || !isInside(realRoot, real) || real === realRoot) return undefined;
+    return { real, stat };
+  }
+
+  /** An iOS crash report copy (`<tempDir>/crash/<udid>/<name>.ips`), or undefined. */
+  async function crashCopy(udid: string, name: string): Promise<{ real: string; stat: NonNullable<Awaited<ReturnType<typeof statFile>>> } | undefined> {
+    if (!isServableCrashFile(udid, name)) return undefined;
+    const crashRoot = path.join(tempDir, 'crash');
+    const dir = path.join(crashRoot, udid);
+    const filePath = path.join(dir, name);
+    if (path.dirname(filePath) !== dir || path.dirname(dir) !== crashRoot) return undefined;
+    const stat = await statFile(filePath);
+    if (!stat?.isFile()) return undefined;
+    // Symlinks must not lead out of the crash folder of that device.
+    const reals = await Promise.all([fsp.realpath(filePath), fsp.realpath(dir), fsp.realpath(tempDir)]).catch(() => undefined);
+    if (!reals) return undefined;
+    const [real, realDir, realTemp] = reals;
+    if (path.dirname(real) !== realDir || !isInside(realTemp, realDir) || realDir === realTemp) return undefined;
+    return { real, stat };
+  }
+
+  async function file(req: IncomingMessage, res: ServerResponse, name: string, query: URLSearchParams): Promise<void> {
+    const found = await tempFile(name);
+    if (!found) throw new HttpError(404, 'File not found', 'file.unknown');
+    const { real, stat } = found;
     const headers: Record<string, string> = {};
     if (isTruthyParam(query, 'download')) headers['Content-Disposition'] = contentDisposition(name);
     sendFile(req, res, real, stat, { cacheControl: 'no-cache', sandboxActive: true, headers });
@@ -404,19 +491,9 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
 
   /** iOS crash report copies (SPEC §10.3: `<tempDir>/crash/<udid>/<name>.ips`), always as a download. */
   async function crashFile(req: IncomingMessage, res: ServerResponse, udid: string, name: string): Promise<void> {
-    const notFound = () => new HttpError(404, 'Crash report not found', 'file.unknown');
-    if (!isServableCrashFile(udid, name)) throw notFound();
-    const crashRoot = path.join(tempDir, 'crash');
-    const dir = path.join(crashRoot, udid);
-    const filePath = path.join(dir, name);
-    if (path.dirname(filePath) !== dir || path.dirname(dir) !== crashRoot) throw notFound();
-    const stat = await statFile(filePath);
-    if (!stat?.isFile()) throw notFound();
-    // Symlinks must not lead out of the crash folder of that device.
-    const [real, realDir, realTemp] = await Promise.all([fsp.realpath(filePath), fsp.realpath(dir), fsp.realpath(tempDir)]).catch(() => {
-      throw notFound();
-    });
-    if (path.dirname(real) !== realDir || !isInside(realTemp, realDir) || realDir === realTemp) throw notFound();
+    const found = await crashCopy(udid, name);
+    if (!found) throw new HttpError(404, 'Crash report not found', 'file.unknown');
+    const { real, stat } = found;
     sendFile(req, res, real, stat, {
       cacheControl: 'no-cache',
       contentType: 'text/plain; charset=utf-8',
@@ -457,6 +534,10 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
         if (segs.length !== 1) break;
         requireMethod(req, 'GET');
         return exportSession(res, query);
+      case 'bug-report':
+        if (segs.length !== 1) break;
+        requireMethod(req, 'POST');
+        return bugReport(req, res);
       case 'import':
         if (segs.length !== 1) break;
         requireMethod(req, 'POST');

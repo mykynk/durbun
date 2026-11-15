@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { Archive, ArrowLeftRight, BookOpen, Columns3, Copy, Drama, Eraser, FileDown, FilterX, Link2, Pause, PencilLine, Play, Radio, RotateCw, ScrollText, Settings2, Share2, Workflow, X } from 'lucide-react';
+import { Archive, ArrowLeftRight, BookOpen, Bug, Columns3, Copy, Drama, Eraser, FileDown, FilterX, Link2, Pause, PencilLine, Play, Radio, RotateCw, ScrollText, Settings2, Share2, Workflow, X } from 'lucide-react';
 import type { NetworkEntry, UiCommand } from '@durbun/protocol';
 import {
   ALL_SCOPE,
@@ -60,6 +60,7 @@ import { DetailPanel } from './components/DetailPanel';
 import { ReplayDialog } from './components/ReplayDialog';
 import { CompareDialog } from './components/CompareDialog';
 import { ShareDialog } from './components/ShareDialog';
+import { bugReport } from '../report/store';
 import { copyEntryAs, copyUrl, createMockFrom, exportHarFor, harFileName, harLabel, replayRequest, showInLogs } from './actions';
 import { harFileStamp } from '../transfer/dataExport';
 import { useBodySearch } from './useBodySearch';
@@ -266,6 +267,7 @@ export default function NetworkView() {
     const base = compareBase && compareBase !== e.id ? networkStore.get(compareBase) : undefined;
     return [
       { label: t('network.share.menu'), icon: Share2, onSelect: () => setShareEntry(e) },
+      { label: t('report.openEllipsis'), icon: Bug, onSelect: () => bugReport.open({ kind: 'request', netId: e.id }) },
       { type: 'separator' },
       { label: t('network.menu.copyUrl'), icon: Link2, onSelect: () => void copyUrl(e) },
       ...COPY_FORMATS.map((f): MenuItem => ({ label: t(`network.menu.copyAs.${f}`), icon: f === 'curl' ? Copy : undefined, onSelect: () => void copyEntryAs(e, f) })),
@@ -468,7 +470,8 @@ export default function NetworkView() {
     { id: 'network.bodySearch', title: bodySearch ? t('network.commands.bodySearchOff') : t('network.commands.bodySearchOn'), group, keywords: ['body', 'gövde', 'search', 'ara'], run: () => setBodySearch(!bodySearch) },
     ...(sel
       ? [
-          { id: 'network.sel.share', title: t('network.share.title'), group, icon: Share2, keywords: ['share', 'paylaş', 'report', 'rapor', 'bug', 'hata', 'markdown'], run: () => setShareEntry(sel) },
+          { id: 'network.sel.share', title: t('network.share.title'), group, icon: Share2, keywords: ['share', 'paylaş', 'report', 'rapor', 'markdown'], run: () => setShareEntry(sel) },
+          { id: 'network.sel.report', title: t('network.commands.reportRequest'), group, icon: Bug, keywords: ['bug', 'hata', 'report', 'rapor', 'zip', 'jira'], run: () => bugReport.open({ kind: 'request', netId: sel.id }) },
           { id: 'network.sel.curl', title: t('network.menu.copyAs.curl'), group, icon: Copy, keywords: ['curl', 'copy', 'kopyala'], run: () => void copyEntryAs(sel, 'curl') },
           { id: 'network.sel.replay', title: t('network.menu.replay'), group, icon: RotateCw, keywords: ['replay', 'tekrar', 'gönder'], run: () => void doReplay(sel) },
           { id: 'network.sel.edit', title: t('network.menu.editReplayEllipsis'), group, icon: PencilLine, keywords: ['edit', 'düzenle', 'replay'], run: () => setReplayEntry(sel) },
@@ -653,6 +656,7 @@ export default function NetworkView() {
             onEditReplay={() => setReplayEntry(selected)}
             onCompare={() => setCompareBase(selected.id)}
             onShare={() => setShareEntry(selected)}
+            onReport={() => bugReport.open({ kind: 'request', netId: selected.id })}
           />
         ) : (
           <span />

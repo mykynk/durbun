@@ -6,6 +6,7 @@ import {
   ArrowDownUp,
   ArrowLeftRight,
   BookOpen,
+  Bug,
   ChevronDown,
   ChevronRight,
   CircleQuestionMark,
@@ -71,6 +72,7 @@ import { appTitle } from './labels';
 import { BuildBadgeChip, ScopeSourcesButton, SourceBadge } from '../sources';
 import { exportHar, exportSession, pickAndImport, setTheme, toggleLanguage, toggleSidebar } from './actions';
 import { transfer } from '../features/transfer/store';
+import { bugReport } from '../features/report/store';
 
 export const TAB_ICONS: Record<TabId, IconType> = {
   logs: ScrollText,
@@ -261,6 +263,7 @@ export function TopBar() {
             <Kbd combo="Mod+K" size="sm" />
           </button>
         </Tooltip>
+        <IconButton icon={Bug} label={t('report.open')} onClick={() => bugReport.open()} />
         <span className="topbar__wide">
           <ImportExportMenu />
           <ThemeMenu />

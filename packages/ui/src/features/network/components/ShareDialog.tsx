@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Copy, FileDown, Share2 } from 'lucide-react';
+import { Bug, Copy, FileDown, Share2 } from 'lucide-react';
 import type { NetworkEntry } from '@durbun/protocol';
 import { useApp, useDevice, useDeviceApp, useMocks } from '../../../data';
 import { Button, Callout, CodeView, Dialog, SlackButton, Spinner, Toggle, copyText, downloadText, formatBytes, toast, usePersistentState, useShortcut } from '../../../components';
@@ -8,8 +8,12 @@ import { ruleLabel } from '../../mocks/model/rules';
 import { useNetworkDetail } from '../detailCache';
 import { DEFAULT_SHARE_OPTIONS, buildShareReport, type ShareOptions } from '../model/shareReport';
 import { shareFileName, shareInputFor, shareInstallLabel, shareLabels } from '../share';
+import { bugReport } from '../../report/store';
 
-/** "Share request": the share report (same text as the in-app Flutter panel) with its options, a preview, Copy and Send to Slack. */
+/**
+ * "Share request": the share report (same text as the in-app Flutter panel) with its options, a preview, Copy and
+ * Send to Slack — one request, quickly. "Report a bug…" takes the request with its context (the window around it).
+ */
 export function ShareDialog({ entry, gone, onClose }: { entry: NetworkEntry; gone?: boolean; onClose: () => void }) {
   const t = useT();
   const lang = useLanguage();
@@ -56,6 +60,19 @@ export function ShareDialog({ entry, gone, onClose }: { entry: NetworkEntry; gon
       description={t('network.share.description')}
       footer={
         <>
+          {gone ? null : (
+            <Button
+              variant="ghost"
+              icon={Bug}
+              title={t('report.openHint')}
+              onClick={() => {
+                onClose();
+                bugReport.open({ kind: 'request', netId: entry.id });
+              }}
+            >
+              {t('report.openEllipsis')}
+            </Button>
+          )}
           <span className="net-dim net-small grow tnum">{t('network.share.size', { size: formatBytes(size) })}</span>
           <Button variant="ghost" icon={FileDown} disabled={waiting} onClick={() => downloadText(report, shareFileName(entry), 'text/markdown;charset=utf-8')}>
             {t('network.share.save')}
