@@ -25,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { splashUrl, statusPageUrl, syncFullScreen, TRAFFIC_LIGHTS } from './chrome';
 import { applyLoginShellEnv, SHELL_ENV_TIMEOUT_MS, type ShellEnvKey, type ShellEnvResult } from './env';
-import { pickLanguage, STRINGS, type Strings } from './i18n';
+import { pickLanguage, shortPath, STRINGS, type Strings } from './i18n';
 import { createPrefsStore, parsePrefsPatch, prefsView, startupOptions } from './desktopPrefs';
 import { diagnosticsText, issueUrl, lastLines, shortLocation } from './diagnostics';
 import { createQuitFlow } from './lifecycle';
@@ -40,7 +40,7 @@ import { devIconPath, serverPaths } from './paths';
 import { DEFAULT_HTTP_PORT, DEFAULT_SDK_PORT, isPortFree, parsePortEnv, probeDurbun, proveDurbun, watchAttached, type DurbunProbe } from './ports';
 import { createReloadGuard, resolveFailure, type FailureChoice } from './recovery';
 import { runSelfTest, type ConsoleEntry } from './selftest';
-import { startedOrigin, startOrAttachServer } from './startup';
+import { DATA_DIR_IN_USE, startedOrigin, startOrAttachServer } from './startup';
 import { applyZoomLevel, BLANK_PAGE, LEGACY_HOST, legacyOriginFor, migrateUiStorage, planZoomMove, recordZoomMoved } from './storageMigration';
 import { renderTrayBitmap } from './trayIcon';
 import { createUpdateFlow, type MessageBoxRequest, type UpdatePhase } from './updateFlow';
@@ -982,10 +982,20 @@ function run(): void {
       },
     });
     if (isQuitting() || outcome.kind === 'cancelled') return; // a server started meanwhile is stopped by stopServer()
-    if (outcome.kind === 'failed') return fail(outcome.error);
+    if (outcome.kind === 'failed') {
+      if (outcome.code === DATA_DIR_IN_USE) {
+        log.warn(`${outcome.error}; ${outcome.holderPort ? `no Dürbün answered on port ${outcome.holderPort}` : 'it has no port yet'}`);
+        return fail(t.dataDirInUse(shortPath(dataDir), outcome.holderPort));
+      }
+      return fail(outcome.error);
+    }
     if (outcome.kind === 'attached') {
       const warnings = attachNotices(t, outcome, bundledServerVersion(mod, app.getVersion()));
-      log.info(`a Dürbün ${outcome.version} already runs on port ${outcome.port} (${outcome.page ?? 'ui'}); opening ${outcome.origin}`);
+      log.info(
+        outcome.dataDirInUse
+          ? `the data folder ${dataDir} is in use by Dürbün ${outcome.version} on port ${outcome.port}; opening that one (${outcome.origin}) instead of starting a second server`
+          : `a Dürbün ${outcome.version} already runs on port ${outcome.port} (${outcome.page ?? 'ui'}); opening ${outcome.origin}`,
+      );
       for (const w of warnings) log.warn(w);
       serverVersion = outcome.version;
       applyAboutPanel();

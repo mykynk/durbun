@@ -4,15 +4,24 @@
  * EADDRINUSE (ServerStartError.code) although the port looked free (a race, or a bind the check cannot
  * see), that port is avoided on the next attempt, so the plan moves on to 9760 / 9770 / 9780 / an
  * OS-assigned port instead of planning the same busy port again.
+ *
+ * The server also refuses to start on a data folder another Dürbün holds (code 'server.dataDirInUse', with
+ * the holder's port when it listens): the app then opens that Dürbün, as it would one found on the port,
+ * once it proves to be one. A holder that does not answer (or is still starting) is a failure that says so.
  */
 import { originFor, planHttpPort, type DurbunPage, type PortDeps } from './ports';
 
 /** `origin`: what the window loads, on the host the probe checked (ports.ts APP_HOST). */
 export type StartOutcome<S> =
-  | { kind: 'attached'; port: number; version: string; page?: DurbunPage; origin: string }
+  /** `dataDirInUse`: found through the data folder lock, not on the planned port. */
+  | { kind: 'attached'; port: number; version: string; page?: DurbunPage; origin: string; dataDirInUse?: boolean }
   | { kind: 'started'; server: S; port: number; fallback: boolean }
   | { kind: 'cancelled' }
-  | { kind: 'failed'; error: string; code?: string };
+  /** `holderPort`: with code 'server.dataDirInUse', the port of the Dürbün holding the data folder. */
+  | { kind: 'failed'; error: string; code?: string; holderPort?: number };
+
+/** packages/server/src/dataDirLock.ts DATA_DIR_IN_USE_CODE */
+export const DATA_DIR_IN_USE = 'server.dataDirInUse';
 
 export interface StartDeps<S> extends PortDeps {
   /** Start the server on this port (0 = OS-assigned); rejects with `code` 'EADDRINUSE' when it is taken. */
@@ -35,9 +44,16 @@ export async function startOrAttachServer<S>(preferred: number, sdkPort: number,
     try {
       return { kind: 'started', server: await deps.start(plan.port), port: plan.port, fallback: plan.fallback };
     } catch (err) {
-      const e = err as (Error & { code?: unknown }) | undefined;
+      const e = err as (Error & { code?: unknown; port?: unknown }) | undefined;
       const code = typeof e?.code === 'string' ? e.code : undefined;
       const message = e?.message ?? String(err);
+      if (code === DATA_DIR_IN_USE) {
+        const holder = typeof e?.port === 'number' && Number.isInteger(e.port) && e.port > 0 && e.port <= 65_535 ? e.port : undefined;
+        const proof = holder && !deps.cancelled() ? await deps.probe(holder).catch(() => undefined) : undefined;
+        if (deps.cancelled()) return { kind: 'cancelled' };
+        if (holder && proof) return { kind: 'attached', port: holder, version: proof.version, page: proof.page, origin: originFor(holder), dataDirInUse: true };
+        return { kind: 'failed', error: message, code, holderPort: holder };
+      }
       if (code !== 'EADDRINUSE') return { kind: 'failed', error: message, code };
       lastError = message;
       avoid.add(plan.port);

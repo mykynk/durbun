@@ -282,6 +282,8 @@ export interface Strings {
   verboseRestartTitle(on: boolean): string;
   verboseRestartMessage: string;
   summaryLine(devices: number, apps: number): string;
+  /** The start failed: another Dürbün holds the data folder (port: it listens there but did not answer). */
+  dataDirInUse(dir: string, port?: number): string;
   unresponsiveTitle: string;
   unresponsiveMessage: string;
   wait: string;
@@ -469,6 +471,8 @@ const tr: Strings = {
   verboseRestartTitle: (on) => (on ? 'Ayrıntılı günlük, Dürbün yeniden başlayınca açılır' : 'Ayrıntılı günlük, Dürbün yeniden başlayınca kapanır'),
   verboseRestartMessage: 'Dürbün şimdi yeniden başlatılsın mı? Yakalama birkaç saniye durur; bağlı uygulamalar kendiliğinden yeniden bağlanır.',
   summaryLine: (devices, apps) => `${devices} cihaz · ${apps} uygulama`,
+  dataDirInUse: (dir, port) =>
+    `${port ? `Başka bir Dürbün (port ${port}) ${dir} veri klasörünü kullanıyor, ama yanıt vermediği için penceresi açılamadı.` : `Başka bir Dürbün ${dir} veri klasörüyle başlatılıyor.`} Diğer Dürbün'den çıkın (durbun çalıştıran bir terminal ya da uygulamanın başka bir kopyası), sonra Tekrar Dene'yi seçin. İkisini birlikte çalıştırmak için birine kendi veri klasörünü verin (DURBUN_DATA_DIR).`,
   unresponsiveTitle: 'Dürbün penceresi yanıt vermiyor',
   unresponsiveMessage: 'Sunucu çalışmaya ve yakalamaya devam ediyor. Bekleyebilir ya da pencereyi yeniden yükleyebilirsiniz; yeniden yüklemede donmaya yol açmış olabilecek kayıtlı arama sıfırlanır.',
   wait: 'Bekle',
@@ -656,6 +660,8 @@ const en: Strings = {
   verboseRestartTitle: (on) => (on ? 'Verbose logging starts when Dürbün restarts' : 'Verbose logging stops when Dürbün restarts'),
   verboseRestartMessage: 'Restart Dürbün now? Capture stops for a few seconds; connected apps reconnect on their own.',
   summaryLine: (devices, apps) => `${devices} ${devices === 1 ? 'device' : 'devices'} · ${apps} ${apps === 1 ? 'app' : 'apps'}`,
+  dataDirInUse: (dir, port) =>
+    `${port ? `Another Dürbün (port ${port}) uses the data folder ${dir}, but it did not answer, so its window could not be opened.` : `Another Dürbün is starting with the data folder ${dir}.`} Quit the other Dürbün (a terminal running durbun, or another copy of the app), then choose Try Again. To run both at once, give one of them its own data folder (DURBUN_DATA_DIR).`,
   unresponsiveTitle: 'The Dürbün window is not responding',
   unresponsiveMessage: 'The server keeps running and capturing. You can wait or reload the window; a reload resets the saved search that may have caused the hang.',
   wait: 'Wait',
