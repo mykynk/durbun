@@ -1328,6 +1328,24 @@
 .settings__group-body > .callout {
   margin: 10px 0 4px;
 }
+/* Settings → Mac app: server ports and the restart note. */
+.settings__desktop-port {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.settings__desktop-portinput {
+  width: 84px;
+}
+.settings__desktop-error {
+  color: var(--danger);
+}
+.settings__desktop-restart {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .setting-row {
   display: flex;
   align-items: center;

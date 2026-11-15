@@ -5,6 +5,7 @@ import {
   Binoculars,
   Bookmark,
   Box,
+  Compass,
   ChevronDown,
   ChevronRight,
   Cpu,
@@ -13,6 +14,8 @@ import {
   History,
   Hourglass,
   Layers,
+  Eye,
+  EyeOff,
   MemoryStick,
   OctagonX,
   Play,
@@ -35,7 +38,8 @@ import { frameDisplayText, parseStack, type AppIdentity, type StackLine } from '
 import { highlightSegments, type Highlighter } from '../model/highlight';
 import { flapSummary, flapTimeRange, systemText } from '../model/systemText';
 import { isPreviousLaunch, type LogRow } from '../model/types';
-import { appStartupOf, crashWhen, crashedBuildOf, memoryKill, recordUnsymbolicated } from '../model/records';
+import { appStartupOf, crashWhen, crashedBuildOf, isLayoutError, memoryKill, recordUnsymbolicated } from '../model/records';
+import { appLifecycleOf, exitReportMessage, exitReportOf, isExitAnr, navigationOf } from '../model/appEvents';
 import { entrySourceText, isDeviceCrashRecord } from '../../../sources/text';
 import type { TimeFormat } from '../../../data';
 
@@ -155,6 +159,28 @@ export function shortProcess(name: string): string {
   const dot = tail.lastIndexOf('.');
   const short = dot >= 0 && dot < tail.length - 1 ? tail.slice(dot + 1) : tail;
   return `${short}${sub}`;
+}
+
+/** The localized sentence of an earlier-launch report (Android exit info, iOS MetricKit); undefined = show the SDK's text. */
+function exitText(e: LogEntry): string | undefined {
+  const r = exitReportOf(e);
+  if (!r) return undefined;
+  const m = exitReportMessage(r, { seconds: (s) => formatDuration(s * 1000) });
+  return m ? t(`logs.exit.${m.key}`, m.params) : undefined;
+}
+
+/** Lines whose `data` only holds what a chip already shows (start-up time, a memory kill): no JSON preview. */
+function factsOnly(e: LogEntry): boolean {
+  return appStartupOf(e) !== undefined || (memoryKill(e) !== undefined && e.source === 'device');
+}
+
+function EarlierLaunchChip() {
+  return (
+    <span key="prev" className="lg-twin lg-earlier" title={t('logs.row.earlierLaunchTip')}>
+      <History size={10} aria-hidden />
+      <span className="lg-twin__text">{t('logs.row.earlierLaunch')}</span>
+    </span>
+  );
 }
 
 function Who({ e, d }: { e: LogEntry; d: RowDisplay }) {
@@ -315,6 +341,10 @@ function ExpandedBody({ e, a, expanded, d }: { e: LogEntry; a: EntryAnalysis; ex
 function TextRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
   const e = row.e;
   const a = analyzeEntry(e);
+  // How an earlier launch ended, or a Dürbün system line with a code, worded in the UI language (the English text
+  // stays in the tooltip and the detail panel).
+  const exit = exitText(e) ?? (e.source === 'system' && e.code ? systemText(e) : undefined);
+  const earlier = exitReportOf(e) !== undefined;
   return (
     <div
       className={clsx('lg-row', `lg-row--${e.level}`, selected && 'is-selected', flash && 'is-flash', d.wrap && 'is-wrap', expanded && 'is-expanded')}
@@ -327,12 +357,17 @@ function TextRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
         <DeviceChip e={e} d={d} />
         <Who e={e} d={d} />
         <span className="lg-msg">
-          {a.headline ? (
+          {exit !== undefined ? (
+            <span className="lg-text" title={e.message}>
+              <HlText text={exit} hl={d.hl} />
+            </span>
+          ) : a.headline ? (
             <span className="lg-text">
               <HlText text={a.headline} hl={d.hl} />
             </span>
           ) : null}
-          <JsonChip a={a} expanded={expanded} />
+          {earlier ? <EarlierLaunchChip /> : null}
+          {exit === undefined && !factsOnly(e) ? <JsonChip a={a} expanded={expanded} /> : null}
           <Badges row={row} a={a} expanded={expanded} />
         </span>
       </div>
@@ -406,7 +441,9 @@ function NetworkRow({ row, time, net, selected, flash, d }: LogRowProps) {
             </span>
           ) : null}
           {typeof net.status === 'number' ? <span className={`status status--${cls}`}>{net.status}</span> : null}
-          {failed ? (
+          {net.tooLarge ? (
+            <span className="lg-net-big">{t('network.tooLarge.short')}</span>
+          ) : failed ? (
             <span className="lg-net-error" title={net.error}>
               {net.state === 'cancelled' ? t('logs.net.cancelled') : t('logs.net.failed')}
               {net.error ? ` · ${net.error}` : ''}
@@ -431,7 +468,7 @@ function NetworkRow({ row, time, net, selected, flash, d }: LogRowProps) {
       </span>
     );
   }
-  const failed = net && (net.state === 'failed' || (typeof net.status === 'number' && net.status >= 500));
+  const failed = net && !net.tooLarge && (net.state === 'failed' || (typeof net.status === 'number' && net.status >= 500));
   // Who: the app that made the request (the tag is always "network" — the globe icon already says that).
   const app = d.appName(e);
   return (
@@ -485,7 +522,12 @@ function CrashRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
   const Icon = CRASH_ICON[c.kind];
   const open = (expanded & EXPAND_STACK) !== 0;
   const frames = a.frames;
-  const kindLabel = c.kind === 'crash' ? t('logs.kind.crash') : c.kind === 'anr' ? t('logs.kind.anr') : t('logs.kind.flutterError');
+  // A Flutter layout error (overflow, unbounded constraints) is not a crash: the app keeps running.
+  const layout = c.kind === 'flutter-error' && isLayoutError(e);
+  // An earlier launch's ANR comes as a crash line from the SDK (Android exit info): name it an ANR.
+  const anr = c.kind === 'anr' || isExitAnr(e);
+  const kindLabel = anr ? t('logs.kind.anr') : c.kind === 'crash' ? t('logs.kind.crash') : layout ? t('logs.kind.layoutError') : t('logs.kind.flutterError');
+  const title = exitText(e) ?? c.title;
   const who = d.appName(e) ?? e.process ?? e.tag;
   // Android dropbox / iOS .ips: a record the device kept itself (any build, no SDK needed).
   const record = isDeviceCrashRecord(e);
@@ -494,7 +536,7 @@ function CrashRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
   const builtTip = built ? t(c.kind === 'anr' ? 'logs.row.anrInBuild' : 'logs.row.crashedInBuild', { build: built }) : undefined;
   return (
     <div
-      className={clsx('lg-row lg-crash', `lg-crash--${c.kind}`, selected && 'is-selected', flash && 'is-flash', open && 'is-expanded')}
+      className={clsx('lg-row lg-crash', layout ? 'lg-crash--layout' : anr ? 'lg-crash--anr' : `lg-crash--${c.kind}`, selected && 'is-selected', flash && 'is-flash', open && 'is-expanded')}
       data-row={row.id}
     >
       <div className="lg-crash__head">
@@ -504,7 +546,7 @@ function CrashRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
         </span>
         <span className="lg-crash__main">
           <span className="lg-crash__title">
-            <HlText text={c.title} hl={d.hl} max={600} />
+            <HlText text={title} hl={d.hl} max={600} />
           </span>
           <span className="lg-crash__meta">
             <span className="lg-crash__kind">{kindLabel}</span>
@@ -617,6 +659,38 @@ function SeparatorRow(props: LogRowProps) {
   );
 }
 
+const LIFECYCLE_ICON = { resumed: Eye, inactive: EyeOff, hidden: EyeOff, paused: EyeOff, detached: Unplug } as const;
+
+/**
+ * A quiet line for what the app did, not what it logged: a screen change (`navigation` event) or a Flutter lifecycle
+ * change ("Arka plana geçti"). Shown like a separator so the lines around it stay easy to read.
+ */
+function MomentRow({ row, selected, flash, d }: LogRowProps) {
+  const e = row.e;
+  const nav = navigationOf(e);
+  const life = nav ? undefined : appLifecycleOf(e);
+  const Icon = nav ? Compass : LIFECYCLE_ICON[life ?? 'inactive'];
+  const label = nav ? t('logs.moment.screen', { to: nav.to }) : t(`logs.moment.lifecycle.${life}`);
+  const tip = nav ? (nav.from ? t('logs.moment.screenFrom', { from: nav.from, to: nav.to }) : t('logs.moment.screen', { to: nav.to })) : e.message;
+  const app = d.appName(e);
+  return (
+    <div className={clsx('lg-sep lg-sep--moment', selected && 'is-selected', flash && 'is-flash')} data-row={row.id} title={tip}>
+      <span className="lg-sep__rule" />
+      <span className="lg-sep__label">
+        <Icon size={12} aria-hidden />
+        <DeviceChip e={e} d={d} />
+        {app ? <span className="lg-sep__app">{app}</span> : null}
+        <span className="lg-sep__text">
+          <HlText text={label} hl={d.hl} />
+        </span>
+        <span className="lg-sep__time tnum">{formatClock(e.ts, { ms: false })}</span>
+        {row.n > 1 ? <span className="lg-repeat tnum">×{row.n}</span> : null}
+      </span>
+      <span className="lg-sep__rule" />
+    </div>
+  );
+}
+
 /** A flapping connection: one line («Bağlantı 6 kez koptu ve geri geldi · 40 sn içinde»), the events when expanded. */
 function FlapRow({ row, selected, expanded, flash, d }: LogRowProps) {
   const events = row.flap!.events;
@@ -673,6 +747,7 @@ export const LogRowView = memo(function LogRowView(props: LogRowProps) {
   if (e.source === 'system' && e.kind === 'lifecycle') return <SeparatorRow {...props} />;
   if (e.kind === 'crash' || e.kind === 'anr' || e.kind === 'flutter-error') return <CrashRow {...props} />;
   if (e.kind === 'network') return <NetworkRow {...props} />;
+  if (navigationOf(e) || appLifecycleOf(e)) return <MomentRow {...props} />;
   if (e.kind === 'event') return <EventRow {...props} />;
   return <TextRow {...props} />;
 });

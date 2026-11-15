@@ -9,6 +9,7 @@ import {
   Checkbox,
   IconButton,
   SearchInput,
+  Select,
   Spinner,
   StatusDot,
   confirm,
@@ -20,9 +21,9 @@ import {
 } from '../../components';
 import { useT } from '../../i18n';
 import { describeError } from './codes';
-import { checkInstallFile, filterApps, hasAction, installAccept, installTarget, mergeApps, type AppRow } from './model';
-import { loadInstalledApps, useInstalledApps } from './stores';
-import { ActionErrorCallout, DeviceCard, useDeviceAction, type ActionError } from './useAction';
+import { checkInstallFile, filterApps, hasAction, installAccept, installRefusal, installTarget, mergeApps, type AppRow } from './model';
+import { loadInstalledApps, setDeviceUser, useInstalledApps, useSelectedUser } from './stores';
+import { ActionErrorCallout, DeviceCard, useDeviceAction, useStickyDefault, type ActionError } from './useAction';
 
 type AppOp = 'launch' | 'stop' | 'stopBackground' | 'restart' | 'clearData' | 'uninstall';
 const OPS: { op: AppOp; action: DeviceActionId; icon: typeof Play; danger?: boolean; params?: Record<string, unknown>; android?: boolean }[] = [
@@ -50,17 +51,26 @@ export function AppsCard({ device, sessions, preferredAppId, active }: { device:
   const { run, isPending, busy, error, clearError } = useDeviceAction(device.id);
   const canList = hasAction(device, 'list-apps');
   const listRef = useRef<HTMLDivElement>(null);
+  // Phones with a work profile or several users: every app action runs for the picked user.
+  const userId = useSelectedUser(device);
+  const user = userId === undefined ? {} : { userId };
+  const reload = () => void loadInstalledApps(device.id, includeSystem, userId);
 
   useEffect(() => {
     if (!active || !canList) return;
     const cur = useInstalledApps.getState().byDevice[device.id];
     if (cur?.loading) return;
-    if (!cur?.apps || cur.includeSystem !== includeSystem) void loadInstalledApps(device.id, includeSystem);
-  }, [active, canList, device.id, includeSystem]);
+    if (!cur?.apps || cur.includeSystem !== includeSystem || cur.userId !== userId) void loadInstalledApps(device.id, includeSystem, userId);
+  }, [active, canList, device.id, includeSystem, userId]);
 
   const rows = useMemo(() => mergeApps(entry?.apps, sessions), [entry?.apps, sessions]);
   const visible = useMemo(() => filterApps(rows, query), [rows, query]);
-  const fallbackId = preferredAppId && rows.some((r) => r.id === preferredAppId) ? preferredAppId : rows.find((r) => r.sdk)?.id;
+  // Without a pick: the app in scope, else the first SDK app, kept when the list re-sorts under it.
+  const firstSdkApp = useStickyDefault(
+    rows.find((r) => r.sdk)?.id,
+    (id) => rows.some((r) => r.id === id),
+  );
+  const fallbackId = preferredAppId && rows.some((r) => r.id === preferredAppId) ? preferredAppId : firstSdkApp;
   const selectedId = selected && rows.some((r) => r.id === selected) ? selected : (fallbackId ?? null);
   const sel = rows.find((r) => r.id === selectedId);
   const ops = OPS.filter((o) => hasAction(device, o.action) && (!o.android || device.platform === 'android'));
@@ -82,11 +92,11 @@ export function AppsCard({ device, sessions, preferredAppId, active }: { device:
     const r = await run({
       key: o.op,
       action: o.action,
-      params: { appId: sel.id, ...o.params },
+      params: { appId: sel.id, ...o.params, ...user },
       success: t(`device.apps.done.${o.op}`, { app }),
       failure: t(`device.apps.failed.${o.op}`, { app }),
     });
-    if (r.ok && (o.op === 'uninstall' || o.op === 'clearData') && canList) void loadInstalledApps(device.id, includeSystem);
+    if (r.ok && (o.op === 'uninstall' || o.op === 'clearData') && canList) reload();
   };
 
   const onListKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -111,12 +121,31 @@ export function AppsCard({ device, sessions, preferredAppId, active }: { device:
         canList ? (
           <>
             <Checkbox checked={includeSystem} onChange={(v) => setIncludeSystem(v)} label={t('device.apps.system')} />
-            <IconButton icon={RefreshCw} size="sm" label={t('device.apps.refresh')} disabled={entry?.loading} onClick={() => void loadInstalledApps(device.id, includeSystem)} />
+            <IconButton icon={RefreshCw} size="sm" label={t('device.apps.refresh')} disabled={entry?.loading} onClick={reload} />
           </>
         ) : undefined
       }
     >
       <ActionErrorCallout error={error} onDismiss={clearError} />
+      {userId !== undefined && device.users ? (
+        <div className="dv-row dv-row--field dv-users">
+          <span className="dv-label" title={t('device.users.hint')}>
+            {t('device.users.label')}
+          </span>
+          <Select
+            size="sm"
+            value={String(userId)}
+            onChange={(e) => setDeviceUser(device.id, Number(e.target.value))}
+            options={device.users.map((u) => ({
+              value: String(u.id),
+              label: t(u.current ? 'device.users.current' : 'device.users.option', { name: u.name, kind: t(`device.users.kind.${u.kind}`) }),
+            }))}
+            aria-label={t('device.users.label')}
+            aria-description={t('device.users.hint')}
+            className="dv-grow"
+          />
+        </div>
+      ) : null}
       {listError ? (
         <Callout
           tone="danger"
@@ -124,7 +153,7 @@ export function AppsCard({ device, sessions, preferredAppId, active }: { device:
           title={t('device.apps.listFailed')}
           className="dv-error"
           actions={
-            <Button size="sm" variant="ghost" icon={RefreshCw} onClick={() => void loadInstalledApps(device.id, includeSystem)}>
+            <Button size="sm" variant="ghost" icon={RefreshCw} onClick={reload}>
               {t('common.retry')}
             </Button>
           }
@@ -196,14 +225,14 @@ export function AppsCard({ device, sessions, preferredAppId, active }: { device:
           <p className="dv-muted">{t('device.apps.choose')}</p>
         )
       ) : null}
-      {hasAction(device, 'app-install') ? <InstallDrop device={device} onInstalled={() => canList && void loadInstalledApps(device.id, includeSystem)} /> : null}
+      {hasAction(device, 'app-install') ? <InstallDrop device={device} userId={userId} onInstalled={() => canList && reload()} /> : null}
     </DeviceCard>
   );
 }
 
 type InstallState = { phase: 'idle' } | { phase: 'uploading'; name: string; loaded: number; total: number } | { phase: 'installing'; name: string };
 
-function InstallDrop({ device, onInstalled }: { device: DeviceInfo; onInstalled: () => void }) {
+function InstallDrop({ device, userId, onInstalled }: { device: DeviceInfo; userId?: number; onInstalled: () => void }) {
   const t = useT();
   const target = installTarget(device);
   const accept = installAccept(target);
@@ -211,6 +240,8 @@ function InstallDrop({ device, onInstalled }: { device: DeviceInfo; onInstalled:
   const [over, setOver] = useState(false);
   const [state, setState] = useState<InstallState>({ phase: 'idle' });
   const [error, setError] = useState<ActionError | null>(null);
+  /** A refused install the copy on the phone is in the way of: "Uninstall and install" offers to fix it. */
+  const [refused, setRefused] = useState<{ file: string; name: string; packageId?: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const { run } = useDeviceAction(device.id);
   const depth = useRef(0);
@@ -225,6 +256,7 @@ function InstallDrop({ device, onInstalled }: { device: DeviceInfo; onInstalled:
   const install = async (file: File) => {
     if (state.phase !== 'idle') return;
     setError(null);
+    setRefused(null);
     const check = checkInstallFile(file, target);
     if (!check.ok) {
       reject(t(`device.apps.install.${check.reason}`, { types }));
@@ -256,7 +288,7 @@ function InstallDrop({ device, onInstalled }: { device: DeviceInfo; onInstalled:
     setState({ phase: 'installing', name: file.name });
     const r = await run({
       action: 'app-install',
-      params: { file: serverPath },
+      params: { file: serverPath, ...(userId === undefined ? {} : { userId }) },
       success: t('device.apps.install.done', { file: file.name }),
       failure: t('device.apps.install.failed'),
     });
@@ -265,6 +297,40 @@ function InstallDrop({ device, onInstalled }: { device: DeviceInfo; onInstalled:
     else {
       const d = describeError(r.error);
       setError({ title: t('device.apps.install.failed'), text: d.text, detail: d.detail });
+      const refusal = installRefusal(r.error);
+      if (refusal) setRefused({ file: serverPath, name: file.name, ...refusal });
+    }
+  };
+
+  /** Uninstall the copy on the phone (its data goes too: asked first), then install the same uploaded file. */
+  const replace = async () => {
+    if (!refused || state.phase !== 'idle') return;
+    const ok = await confirm({
+      title: refused.packageId ? t('device.replace.title', { packageId: refused.packageId }) : t('device.replace.titleUnknown'),
+      message: t('device.replace.message'),
+      confirmLabel: t('device.replace.confirm'),
+      danger: true,
+    });
+    if (!ok) return;
+    const target = refused;
+    setError(null);
+    setState({ phase: 'installing', name: target.name });
+    const r = await run({
+      key: 'replace',
+      action: 'app-install',
+      params: { file: target.file, replace: true, ...(userId === undefined ? {} : { userId }) },
+      success: (data) => {
+        const id = (data as { packageId?: unknown } | null)?.packageId ?? target.packageId;
+        return typeof id === 'string' && id ? t('device.replace.done', { packageId: id }) : t('device.replace.doneUnknown');
+      },
+      failure: t('device.replace.failed'),
+    });
+    setState({ phase: 'idle' });
+    setRefused(null);
+    if (r.ok) onInstalled();
+    else {
+      const d = describeError(r.error);
+      setError({ title: t('device.replace.failed'), text: d.text, detail: d.detail });
     }
   };
 
@@ -343,6 +409,17 @@ function InstallDrop({ device, onInstalled }: { device: DeviceInfo; onInstalled:
         )}
       </div>
       <ActionErrorCallout error={error} onDismiss={() => setError(null)} />
+      {refused && state.phase === 'idle' ? (
+        <div className="dv-action-row dv-replace">
+          <div className="dv-action-row__text">
+            <span className="dv-action-row__title mono truncate">{refused.packageId ?? refused.name}</span>
+            <span className="dv-hint">{t('device.replace.offerHint')}</span>
+          </div>
+          <Button size="sm" variant="secondary" icon={RefreshCw} className="dv-danger-text" onClick={() => void replace()}>
+            {t('device.replace.offer')}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

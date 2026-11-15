@@ -44,6 +44,7 @@ registerMessages('logsQuery', {
       json: 'JSON içeren satırlar',
       network: 'Ağ istekleri',
       event: 'Özel olaylar',
+      nav: 'Ekran geçişleri (navigation olayları)',
       marker: 'İşaretler',
       stacktrace: 'Yığın izi (stack trace) içerenler',
       oom: 'Sistemin bellek için kapattığı uygulamalar',
@@ -151,6 +152,7 @@ registerMessages('logsQuery', {
       marker: 'Markers',
       stacktrace: 'Lines with a stack trace',
       oom: 'Apps the system closed to free memory',
+      nav: 'Screen changes (navigation events)',
       flutter: 'Flutter errors and logs',
     },
     age: {

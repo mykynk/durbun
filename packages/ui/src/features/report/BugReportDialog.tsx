@@ -5,14 +5,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Bug, Camera, ChevronDown, ChevronRight, Copy, FileArchive, RotateCw, ShieldAlert, ShieldCheck } from 'lucide-react';
 import type { BugReportRequest, DeviceInfo, LogEntry, NetworkEntry } from '@durbun/protocol';
-import { Button, Callout, Checkbox, CodeView, Dialog, Select, SlackButton, Spinner, Textarea, copyText, downloadBlob, formatClock, toast, useShortcut } from '../../components';
+import { Button, Callout, Checkbox, CodeView, Dialog, Select, SlackButton, Spinner, Textarea, copyText, downloadBlob, formatClock, sdkLabel, toast, useShortcut } from '../../components';
 import { api, compileNoiseRules, compileScope, getScope, logStore, networkStore, sendCommand, useConnection, useHub, useLogVersion, useNetworkVersion, usePrefs, type Scope } from '../../data';
-import { screenshotAvailability } from '../../data/explain';
+import { actionAvailability, screenshotAvailability } from '../../data/explain';
 import { errorText, useLanguage, useT } from '../../i18n';
 import { deviceDisplayName } from '../../i18n/codes';
 import { codeText, describeError } from '../device/codes';
 import { mediaResult } from '../device/model';
 import { addShot } from '../device/stores';
+import { requestDeviceSection } from '../device/request';
+import '../device/i18n';
 import { crashReportDownload, displayText } from '../logs/components/DetailPanel';
 import { logShareReport } from '../logs/components/ShareDialog';
 import { buildShareReport } from '../network/model/shareReport';
@@ -125,7 +127,7 @@ export function BugReportDialog({ anchor, onClose }: BugReportDialogProps) {
   const deviceApp = compiled.deviceApp;
   const appLabel = target.kind === 'app' || target.kind === 'deviceApp' ? shareAppLabel(app, deviceApp, shareInstallLabel(deviceApp, app, device)) : undefined;
   const deviceLabel = shareDeviceLabel(device);
-  const sdk = app ? `${app.sdk.name} ${app.sdk.version} · ${app.sdk.platform}` : undefined;
+  const sdk = app ? `${app.sdk.name} ${app.sdk.version} · ${sdkLabel(app.sdk.platform)}` : undefined;
 
   /* ───── screenshot ───── */
   const avail = screenshotAvailability(device);
@@ -362,6 +364,22 @@ export function BugReportDialog({ anchor, onClose }: BugReportDialogProps) {
                   }
                 />
               )}
+              {device && actionAvailability(device, 'bug-report').state === 'yes' ? (
+                // Android's own full report takes minutes: a link to the Device tab rather than a part of this dialog.
+                <p className="br-hint br-hint--indent">
+                  {t('device.bugReport.fromReport')}{' '}
+                  <button
+                    type="button"
+                    className="br-link"
+                    onClick={() => {
+                      bugReport.close();
+                      requestDeviceSection('bug-report');
+                    }}
+                  >
+                    {t('device.bugReport.fromReportLink')}
+                  </button>
+                </p>
+              ) : null}
             </section>
           </div>
 

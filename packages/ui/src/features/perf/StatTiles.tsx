@@ -80,7 +80,7 @@ export const StatTile = memo(function StatTile({ label, color, value, unit, unit
           <span className="pf-tile__placeholder">{placeholder ?? '—'}</span>
         )}
       </div>
-      <div className="pf-tile__sub">{sub ?? ' '}</div>
+      <div className="pf-tile__sub" title={typeof sub === 'string' ? sub : undefined}>{sub ?? ' '}</div>
       {action ? <div className="pf-tile__action">{action}</div> : <TrendLine values={trend ?? []} color={color} />}
     </div>
   );

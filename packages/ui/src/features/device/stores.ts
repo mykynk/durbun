@@ -3,12 +3,12 @@
  * the screenshot / recording gallery, running screen recordings and the installed-apps cache per device.
  */
 import { create } from 'zustand';
-import type { InstalledApp } from '@durbun/protocol';
+import type { DeviceInfo, InstalledApp } from '@durbun/protocol';
 import { toast } from '../../components';
 import { sendCommand } from '../../data';
 import { t } from '../../i18n';
 import { codeText, describeError } from './codes';
-import { parseInstalledApps, recordResult } from './model';
+import { deviceReportResult, parseInstalledApps, recordResult, selectedUserId } from './model';
 
 /* ───────────── Media gallery ───────────── */
 
@@ -184,6 +184,8 @@ function recordingFailed(deviceId: string, kind: RecordingFailure['kind'], err: 
 export interface InstalledAppsEntry {
   apps?: InstalledApp[];
   includeSystem: boolean;
+  /** Android user the list is for (absent = the phone's default; set only on phones with several users). */
+  userId?: number;
   loading: boolean;
   /** The caught error (described at render time, so it follows the UI language). */
   error?: unknown;
@@ -201,16 +203,92 @@ function patch(deviceId: string, p: Partial<InstalledAppsEntry>): void {
   });
 }
 
-/** Load (or reload) `list-apps` for a device. Errors are stored on the entry (never thrown). */
-export function loadInstalledApps(deviceId: string, includeSystem: boolean): Promise<void> {
-  const key = `${deviceId}|${includeSystem}`;
+/** Load (or reload) `list-apps` for a device (and Android user). Errors are stored on the entry (never thrown). */
+export function loadInstalledApps(deviceId: string, includeSystem: boolean, userId?: number): Promise<void> {
+  const key = `${deviceId}|${includeSystem}|${userId ?? ''}`;
   const running = inflight.get(key);
   if (running) return running;
-  patch(deviceId, { loading: true, includeSystem, error: undefined });
-  const p = sendCommand({ name: 'device.action', deviceId, action: 'list-apps', params: { includeSystem } })
+  patch(deviceId, { loading: true, includeSystem, userId, error: undefined });
+  const params = userId === undefined ? { includeSystem } : { includeSystem, userId };
+  const p = sendCommand({ name: 'device.action', deviceId, action: 'list-apps', params })
     .then((data) => patch(deviceId, { apps: parseInstalledApps(data), loading: false, loadedAt: Date.now(), error: undefined }))
     .catch((err: unknown) => patch(deviceId, { loading: false, error: err ?? new Error('list-apps failed') }))
     .finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
+}
+
+/* ───────────── Android user ───────────── */
+
+/** The Android user picked per device (phones with a work profile or several users); absent = the phone's default. */
+export const useDeviceUser = create<{ byDevice: Record<string, number> }>()(() => ({ byDevice: {} }));
+
+export function setDeviceUser(deviceId: string, userId: number): void {
+  useDeviceUser.setState((s) => ({ byDevice: { ...s.byDevice, [deviceId]: userId } }));
+}
+
+/** `userId` for app actions: the picked user, else the one in the foreground; undefined on a phone with one user. */
+export function useSelectedUser(device: Pick<DeviceInfo, 'id' | 'users'>): number | undefined {
+  const picked = useDeviceUser((s) => s.byDevice[device.id]);
+  return selectedUserId(device, picked);
+}
+
+/* ───────────── Device report (Android `bug-report`) ───────────── */
+
+export interface DeviceReportFile {
+  deviceId: string;
+  url: string;
+  file?: string;
+  bytes: number;
+  durationSec: number;
+  ts: number;
+}
+
+/** Reports this window asked for (in flight), and the finished files of this session. */
+export const useDeviceReports = create<{ running: Record<string, number>; files: DeviceReportFile[] }>()(() => ({ running: {}, files: [] }));
+
+function setReportRun(deviceId: string, startedAt: number | undefined): void {
+  useDeviceReports.setState((s) => {
+    const running = { ...s.running };
+    if (startedAt === undefined) delete running[deviceId];
+    else running[deviceId] = startedAt;
+    return { running };
+  });
+}
+
+/**
+ * `bug-report`: replies once the .zip is ready (1–3 minutes, up to 15). Runs outside the card, so switching tabs
+ * does not lose it; progress comes with `DeviceInfo.bugReport`.
+ */
+export async function takeDeviceReport(deviceId: string): Promise<void> {
+  if (useDeviceReports.getState().running[deviceId]) return;
+  const startedAt = Date.now();
+  setReportRun(deviceId, startedAt);
+  try {
+    const data = await sendCommand({ name: 'device.action', deviceId, action: 'bug-report', params: {} }, { timeoutMs: 16 * 60_000 });
+    const r = deviceReportResult(data);
+    if (!r) {
+      toast.error(t('device.bugReport.failed'), { description: codeText('action.invalidResult') });
+      return;
+    }
+    const file: DeviceReportFile = { deviceId, ...r, ts: startedAt };
+    useDeviceReports.setState((s) => ({ files: [file, ...s.files].slice(0, 10) }));
+    toast.success(t('device.bugReport.done'), { action: { label: t('device.bugReport.download'), onClick: () => window.open(file.url, '_blank', 'noopener') } });
+  } catch (err) {
+    const d = describeError(err);
+    if (d.code === 'action.bugReport.cancelled') toast.info(t('device.bugReport.cancelled'));
+    else if (d.code !== 'command.aborted') toast.error(t('device.bugReport.failed'), { description: d.text });
+  } finally {
+    setReportRun(deviceId, undefined);
+  }
+}
+
+export async function cancelDeviceReport(deviceId: string): Promise<void> {
+  try {
+    await sendCommand({ name: 'device.action', deviceId, action: 'bug-report-cancel', params: {} });
+  } catch (err) {
+    const d = describeError(err);
+    // Already finished or never ran: nothing to stop.
+    if (d.code !== 'action.bugReport.notRunning') toast.error(t('device.bugReport.cancelFailed'), { description: d.text });
+  }
 }

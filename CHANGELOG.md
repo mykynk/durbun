@@ -55,6 +55,7 @@ All notable changes to Dürbün are listed here. The format follows
 - A response too large to receive no longer stays pending: the request ends with a note that says so, and
   Dürbün writes a line when it drops a message from an app because it is too large or unreadable.
 - React Native console lines on Android no longer show twice (once from the SDK, once from logcat).
+- A search that froze the page is cleared on reload instead of coming back.
 - React Native: large text responses fetched as Blobs no longer stall the app; the platform decodes them, and
   where it cannot, decoding runs in short slices.
 - An app connected over Wi-Fi moves under the plugged-in phone it runs on once that phone reports it.
@@ -96,7 +97,8 @@ All notable changes to Dürbün are listed here. The format follows
   opens the running one instead of both rewriting each other's settings, mock rules and flows;
   `--data-dir` gives a separate copy.
 - The CLI opens `http://127.0.0.1:<port>` instead of `localhost`, where another program could answer on
-  IPv6. A browser keeps interface preferences per address, so they start fresh at the new one.
+  IPv6. A browser keeps interface preferences per address; at a new address Dürbün brings your settings
+  back once from the copy the server keeps, with Undo.
 - Flows: a regular expression that can take very long on some inputs is marked in the editor, and every
   match has a time limit.
 - Flutter SDK: while no desktop answers, connection attempts slow down after two minutes to about one
@@ -133,7 +135,12 @@ All notable changes to Dürbün are listed here. The format follows
 - Apps the system closed for memory have their own badge and crash banner, and `is:oom` finds them.
 - System check gives the command that fixes a simulator problem.
 - A line says when an app's SDK is newer than this Dürbün understands or older than it supports, and when a
-  phone's clock is far off the Mac's.
+  phone's clock is far off the Mac's. The app's info panel shows the SDK protocol, what to update when it
+  does not match, and how far the device clock is off.
+- Reports of an earlier launch (Android exit reasons, iOS MetricKit), screen changes (`is:nav`) and app
+  lifecycle changes read as plain rows in the log list; `is:anr` finds exits after an ANR.
+- Flows: a flow with problems or a failed run can be handed to your AI tool from the More menu and the run
+  panel.
 - Exported flow files name their schema, so editors complete and check them without setup; the pack for
   your AI tool lists the flow's problems and what failed in its last run.
 - Flows: an environment can trust extra certificates (an internal CA) or turn certificate checks off for a
@@ -154,6 +161,16 @@ All notable changes to Dürbün are listed here. The format follows
   watched side by side. Clicking a notification brings forward the window that sent it.
 - Mac app: the ports and the verbose diagnostic log can be kept in the app's own settings file, so a copy
   opened from Finder no longer needs environment variables for them; environment variables still win.
+  **Settings → Mac app** changes them and restarts the app after asking.
+- Several windows share settings live; each keeps its own tab and panel sizes.
+- Device tab: the reason is shown when an action is not available on this device.
+- Device tab, tester controls: app permissions and app language, airplane mode, Wi-Fi, mobile data, screen
+  rotation, "Don't keep activities" and the simulator keychain reset. Every setting Dürbün changed is listed
+  with its previous value and can be put back.
+- Device tab: when Android refuses an install (another signature or an older version), Dürbün can remove
+  the installed copy and install again, after a warning.
+- Device tab: a picker for Android users and work profiles; app actions apply to the chosen one.
+- Device tab: a full Android device report with progress and cancel, also offered from Report a bug.
 - Keyboard: the sidebar is one Tab stop with arrow keys, `i` opens "What can I see?", and Shift+F10 opens a
   request's menu in the network list. Flow steps announce their connections to screen readers.
 - Mac app: `.durbun` packages and backups and `.durbun.json` recordings open from Finder (double click, Open

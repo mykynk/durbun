@@ -81,7 +81,7 @@ export async function replayRequest(e: NetworkEntry, overrides?: ReplayOverrides
     } else if (res.state === 'failed') {
       toast.error(t('network.replay.failed'), { description: res.error });
     } else {
-      toast.success(t('network.replay.done', { status: res.status ?? '—', duration: formatDuration(res.duration) }));
+      toast.success(t('network.replay.done', { status: res.status ?? '—', duration: formatDuration(res.duration) }), overrides?.skipTlsVerify ? { description: t('network.replay.sentUnverified') } : undefined);
     }
     return res;
   } catch (err) {

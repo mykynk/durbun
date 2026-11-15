@@ -95,7 +95,7 @@ import { loadEnvironments, useEnvironments } from './model/envStore';
 import './i18n';
 import './flows.css';
 
-type DialogState = { kind: 'env' } | { kind: 'import'; text: string | null } | { kind: 'ai'; flowId: string | null } | { kind: 'requests'; ids?: string[] } | null;
+type DialogState = { kind: 'env' } | { kind: 'import'; text: string | null } | { kind: 'ai'; flowId: string | null; fix?: boolean } | { kind: 'requests'; ids?: string[] } | null;
 
 /** Inputs typed for each flow in this window (never stored: they may hold passwords). */
 const lastInputs = new Map<string, Record<string, string>>();
@@ -311,6 +311,9 @@ export default function FlowsView() {
   }, [doc.issues]);
   const errorCount = doc.issues.filter((i) => i.level === 'error').length;
   const warnCount = doc.issues.length - errorCount;
+  // A flow with problems or a failed latest run: the AI pack is offered to fix it (it carries both).
+  const lastRunFailed = (flowRun ?? summary?.lastRun)?.status === 'failed';
+  const needsFix = doc.issues.length > 0 || lastRunFailed;
 
   /* ── templates ── */
   const envs = useEnvironments();
@@ -775,7 +778,7 @@ export default function FlowsView() {
   useCommands([
     { id: 'flows.new', title: t('flows.commands.new'), group, icon: Plus, keywords: ['flow', 'akış', 'new', 'yeni', 'graph'], run: () => void createBlank() },
     { id: 'flows.fromRequests', title: t('flows.commands.fromRequests'), group, icon: ListPlus, keywords: ['flow', 'akış', 'request', 'istek', 'network'], run: () => setDialog({ kind: 'requests' }) },
-    { id: 'flows.ai', title: t('flows.commands.ai'), group, icon: Sparkles, keywords: ['ai', 'yapay zeka', 'prompt', 'chatgpt', 'claude', 'flow'], run: () => setDialog({ kind: 'ai', flowId }) },
+    { id: 'flows.ai', title: t('flows.commands.ai'), group, icon: Sparkles, keywords: ['ai', 'yapay zeka', 'prompt', 'chatgpt', 'claude', 'flow'], run: () => setDialog({ kind: 'ai', flowId, fix: !!flowId && needsFix }) },
     { id: 'flows.import', title: t('flows.commands.import'), group, icon: FileUp, keywords: ['import', 'içe aktar', 'flow', 'akış', 'json'], run: () => void importFromFile() },
     { id: 'flows.environments', title: t('flows.commands.environments'), group, icon: Globe, keywords: ['env', 'ortam', 'environment', 'variables', 'değişken'], run: () => setDialog({ kind: 'env' }) },
     ...(flow
@@ -849,7 +852,9 @@ export default function FlowsView() {
                   </>
                 }
                 moreItems={(): MenuItem[] => [
-                  { label: t('flows.more.ai'), icon: Sparkles, onSelect: () => setDialog({ kind: 'ai', flowId: flow.id }) },
+                  needsFix
+                    ? { label: t('flows.more.aiFix'), icon: Sparkles, onSelect: () => setDialog({ kind: 'ai', flowId: flow.id, fix: true }) }
+                    : { label: t('flows.more.ai'), icon: Sparkles, onSelect: () => setDialog({ kind: 'ai', flowId: flow.id }) },
                   { label: t('flows.more.export'), icon: FileDown, onSelect: () => void exportFlow(flow.id) },
                   { label: t('flows.more.share'), icon: Share2, onSelect: () => transfer.openExport('share', [flow.id]) },
                   {
@@ -920,6 +925,7 @@ export default function FlowsView() {
                       onRerun={() => void requestRun()}
                       onPickTarget={() => document.querySelector<HTMLButtonElement>('.fl-header [data-picker="target"]')?.click()}
                       onManageEnvironments={() => setDialog({ kind: 'env' })}
+                      onAskAi={() => setDialog({ kind: 'ai', flowId: flow.id, fix: true })}
                       // Closed, the canvas and "last run" follow the newest run again, not the one shown here.
                       onClose={() => setPanel({ runId: null, open: false })}
                     />
@@ -1012,6 +1018,9 @@ export default function FlowsView() {
       <AiPackDialog
         open={dialog?.kind === 'ai'}
         flowId={dialog?.kind === 'ai' ? dialog.flowId : null}
+        fix={dialog?.kind === 'ai' && dialog.fix === true}
+        issues={dialog?.kind === 'ai' && dialog.flowId && dialog.flowId === flowId ? doc.issues : undefined}
+        failedRun={dialog?.kind === 'ai' && dialog.flowId === flowId && lastRunFailed}
         onClose={() => setDialog(null)}
         onImported={(ids) => {
           setDialog(null);

@@ -189,10 +189,15 @@
 .pf-tile__sub {
   margin-top: 1px;
   font-size: var(--fs-xs);
+  line-height: 1.35;
   color: var(--text-muted);
-  white-space: nowrap;
+  /* Two lines at most: a narrow tile wraps its note instead of cutting it. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: break-word;
 }
 .pf-tile__action {
   margin-top: auto;

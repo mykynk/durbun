@@ -80,6 +80,14 @@ registerMessages('network', {
       cancelledShort: 'İPTAL',
       failedAfterHeaders: 'Başlıklar geldi ama yanıt yarıda kesildi: {error}',
     },
+    tooLarge: {
+      short: 'Çok büyük',
+      title: 'Dürbün’ün alamayacağı kadar büyük',
+      response: 'Yanıt {size}; Dürbün en çok {limit} alabildiği için burada gösterilemiyor. Uygulama yanıtı aldı.',
+      responseUnknown: 'Yanıt, Dürbün’ün alabildiği {limit} sınırından büyük olduğu için burada gösterilemiyor. Uygulama yanıtı aldı.',
+      request: 'İstek {size}; Dürbün en çok {limit} alabildiği için yalnızca yöntem ve adres gösteriliyor, başlıklar ve gövde yok.',
+      requestUnknown: 'İstek, Dürbün’ün alabildiği {limit} sınırından büyük olduğu için yalnızca yöntem ve adres gösteriliyor, başlıklar ve gövde yok.',
+    },
     errors: {
       timeout: 'Zaman aşımı',
       dns: 'DNS çözümlenemedi',
@@ -315,6 +323,7 @@ registerMessages('network', {
       error: 'İstek yeniden gönderilemedi',
       tlsOffer: 'Sunucu sertifikası kabul edilmedi. Güvendiğiniz bir test sunucusuysa doğrulamadan yeniden gönderebilirsiniz.',
       resendUnverified: 'Doğrulamadan gönder',
+      sentUnverified: 'Sunucu sertifikası doğrulanmadan gönderildi.',
     },
     replayDialog: {
       title: 'Düzenle ve gönder',
@@ -519,6 +528,14 @@ registerMessages('network', {
       cancelled: 'Cancelled',
       cancelledShort: 'CANCEL',
       failedAfterHeaders: 'Headers arrived but the response was cut off: {error}',
+    },
+    tooLarge: {
+      short: 'Too large',
+      title: 'Too large for Dürbün to receive',
+      response: 'The response is {size}; Dürbün takes at most {limit}, so it cannot be shown here. The app itself got the response.',
+      responseUnknown: 'The response is over the {limit} Dürbün can take, so it cannot be shown here. The app itself got the response.',
+      request: 'The request is {size}; Dürbün takes at most {limit}, so only its method and URL are shown, without headers or body.',
+      requestUnknown: 'The request is over the {limit} Dürbün can take, so only its method and URL are shown, without headers or body.',
     },
     errors: {
       timeout: 'Timed out',
@@ -755,6 +772,7 @@ registerMessages('network', {
       error: 'Could not replay the request',
       tlsOffer: 'The server certificate was not accepted. If this is a test server you trust, you can resend without verifying.',
       resendUnverified: 'Resend without verifying',
+      sentUnverified: 'Sent without verifying the server certificate.',
     },
     replayDialog: {
       title: 'Edit and send',

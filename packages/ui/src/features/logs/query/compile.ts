@@ -15,6 +15,8 @@ import type { CompiledLogQuery, LogQueryContext, ParsedQuery } from './index';
 import { astOf, type QueryNode } from './parser';
 import { findJsonPayload, looksLikeStackTrace } from './analysis';
 import { foldCase, LEVEL_RANK, literalPattern } from './syntax';
+import { memoryKill } from '../model/records';
+import { isExitAnr, navigationOf } from '../model/appEvents';
 
 type Pred = (e: LogEntry) => boolean;
 type Built = { k: true; v: boolean } | { k: false; f: Pred; cost: number };
@@ -191,13 +193,13 @@ function term(node: QueryNode, ctx: Ctx): Built {
         case 'crash':
           return pred((e) => e.kind === 'crash', 1);
         case 'anr':
-          return pred((e) => e.kind === 'anr', 1);
+          return pred((e) => e.kind === 'anr' || isExitAnr(e), 1);
+        case 'nav':
+          return pred((e) => navigationOf(e) !== undefined, 1);
         case 'oom':
           // Apps the system closed for memory (iOS Jetsam, Android low-memory killer).
-          return pred((e) => {
-            const term = e.data && typeof e.data === 'object' ? (e.data as { termination?: unknown }).termination : undefined;
-            return term === 'jetsam' || term === 'low-memory';
-          }, 1);
+          // Also an earlier launch the SDK reports as ended by the low-memory killer.
+          return pred((e) => memoryKill(e) !== undefined, 1);
         case 'network':
           return pred((e) => e.kind === 'network', 1);
         case 'event':

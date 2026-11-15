@@ -88,10 +88,25 @@
 .br-hint--indent {
   padding-left: 24px;
 }
+.br-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.br-link:hover {
+  color: var(--accent-hover);
+}
 
 .br-zip {
   color: var(--text-subtle);
   font-size: var(--fs-sm);
+  /* "yalnızca .zip’te" moves to the next line as a whole, never split at the dot. */
+  white-space: nowrap;
 }
 
 .br-shot {

@@ -60,6 +60,9 @@ apps on a USB iPhone), exact origins, dropbox / .ips crash records (one `duplica
 readers and SDK layers.
 Flows, environments, packages, backups and UI prefs come from `dev/mock-flows.mjs`: an in-memory store with the real
 REST shapes (two sample flows; a run answers `flow.engine.closed`, nothing is written to disk).
+`--no-flows` starts with no flows (the Flows welcome page and starters). The showcase lines (seeded once) cover
+SDK earlier-launch reports, the low-memory killer, startup times, navigation and lifecycle lines, too-large
+bodies and a self-signed server for replay; Pixel's Pati has a clock 47 s behind the Mac, Kasa a newer SDK protocol.
 The mock answers every command with `{ok:true}` and plausible data; `demo.set false/true` empties/refills
 it (onboarding). It is a dev tool only — the real server is `packages/server`. Its system lines use the real
 server params (SPEC §9.2).
@@ -187,13 +190,27 @@ Counters & rates (throttled hooks): `useScopedLogCounts(throttleMs = 250)`,
 | `useTransfer` / `transfer` (`features/transfer/store.ts`) | package dialogs: `transfer.openExport('share' \| 'backup', flowIds?)`, `transfer.openImport(text?, fileName?)`, `transfer.close()`; session / HAR export dialog: `transfer.openDataExport('session' \| 'har', { ids?, label?, fileName? }?)` (scope + counts, "mask secret values" on by default; `ids` fixes the requests, e.g. the Network tab's visible rows). Never start an export download without it |
 | `useBugReport` / `bugReport` (`features/report/store.ts`) | "Report a bug" (SPEC §12): `bugReport.open({ kind: 'log', logId } \| { kind: 'request', netId } \| { kind: 'now' })` from every entry point (crash banner and notification, log and request detail panels and context menus, both Share dialogs, ⌘K, the top bar button); `bugReport.close()` keeps the note (`draft`), `bugReport.done()` clears it once the report left (saved, copied, sent). The dialog decides the scope from the anchor (`bugScope`), the window (`bugWindow`, ≤ 10 min), the lines and requests (`collectLogs` / `collectRequests`) and the Markdown (`buildBugReport`) in `features/report/model.ts`; never build a bug report elsewhere |
 | `useServerSettings(s => s.settings)` / `updateServerSettings(patch)` | `ServerSettings`; update = `settings.update` (optimistic) |
-| `usePrefs` | UI prefs, persisted to localStorage (`durbun.prefs.v1`) |
+| `usePrefs` | UI prefs, persisted to localStorage (`durbun.prefs.v1`); shared by every window of the same address (see "Several windows" below) |
 | `useUi` / `ui` | active tab + global screens: `ui.setTab(id)`, `ui.openPalette()`, `ui.openSettings(section?)`, `ui.openDoctor()`, `ui.openSdkGuide(tab?)`, `ui.openShortcuts()`; cross-feature navigation: `ui.focusLog(logId)`, `ui.focusNetwork(netId)`, `ui.focusMock(ruleId)`, `ui.newMockFromDraft(draft)`, `ui.newFlowFromRequests(ids)`, `ui.importFlows(text)` set `useUi(s => s.focus)` (`UiFocus` with a `seq`) and switch tabs — the target view handles it in an effect keyed on `focus?.seq`, then calls `ui.consumeFocus(seq)`. A jump must never overwrite the user's filters or prefs: Logs suspends only the filters that hide the line ("Show in context" also those hiding its neighbours) behind a "Back to my filters" bar (`features/logs/model/reveal.ts`); Network clears them with a 10 s "Back to my filters" toast action |
 
 `UiPrefs` fields: `theme ('system'|'dark'|'light')`, `language ('tr'|'en')`, `logFontSize (11–16)`,
 `density ('compact'|'comfortable')`, `timeFormat ('absolute'|'relative'|'delta')`, `wrapLines`,
 `showNetworkInLogs`, `hideNoise`, `noiseRules: NoiseRule[]`, `highlightRules: HighlightRule[]`,
 `notifyOnCrash`, `sidebarCollapsed`, `panelSizes: Record<string, number>`, `lastTab`.
+**Several windows** (the Mac app's windows, browser tabs) share one localStorage. The rule:
+- `durbun.prefs.v1`: a window writes only the keys it changed over what is stored now (`mergePrefsWrite`; panel
+  sizes per pane), so it never puts back another window's older choice. Shared keys follow other windows live (the
+  `storage` event, `sharedPrefsChange`). `WINDOW_KEYS` (`lastTab`, `panelSizes`, `sidebarCollapsed`) stay as this
+  window has them; the stored value is only where a new window starts.
+- `durbun.scope.v1` (device / app scope): read once at load, then per window; the last window to change it decides
+  where the next one starts.
+- `durbun.state.*` (`usePersistentState`: Network's body search and pretty print, Compare's options, the Flows
+  minimap and inspector, the logs query, the SDK guide's repo folder) and `durbun.palette.recent`: read when the
+  view mounts, written on change, never followed live — the newest choice is what the next view starts with.
+- A new address (the Mac app moved from `localhost` to `127.0.0.1`, another port) starts empty: `prefsSync` takes the
+  server's copy back once (`restorePatch`, portable keys only) with an Undo toast, before it sends anything, and
+  never when the user changed something here first or another window stored preferences meanwhile.
+
 Write with `usePrefs.getState().setPref(key, value)` / `updatePrefs(patch)`. `DEFAULT_NOISE_RULES`,
 `HIGHLIGHT_COLORS` are exported. `<html>` already reflects theme (`data-theme`), density
 (`data-density` → `--row-h`), font size (`--log-fs`) and `lang`.
@@ -512,3 +529,17 @@ monospace content at `var(--log-fs)`, row height `var(--row-h)`. Detail panes: `
   one it replaces.
 - Mac app prefs: `shell/desktopPrefs.ts` reads `window.durbunDesktop.prefs` (`get` / `set`, refreshed on the
   `durbun:command` event `prefs-changed`; `null` = not asked yet). Without the bridge the Settings rows are hidden.
+- Mac app server settings: `shell/desktopConfig.ts` reads `window.durbunDesktop.config` (`get` / `set` with a
+  `ConfigPatch`, `null` = back to the default; re-read on `config-changed`) and `relaunch()`. A field whose
+  `source` is `env` shows the variable and cannot change; `pending` waits for a restart, which always asks first.
+- SDK lines with a known shape (`features/logs/model/appEvents.ts`): `app-exit` (Android ApplicationExitInfo) and
+  `app-diagnostics` (iOS MetricKit) reports of an earlier launch are worded per reason (`logs.exit.*`); a
+  low-memory one counts as `is:oom`, an ANR one as `is:anr`. `navigation` events (`is:nav`) and Flutter lifecycle
+  lines render as quiet separator rows (`MomentRow`).
+- App sessions (`sources/session.ts`): `sdkProtocol`, a `protocolMismatch` badge with what to update, and the device
+  clock when it is more than 5 s off the Mac (`clockSkewOf`; app info, log details, one line above the log list).
+  Log times are never corrected.
+- Network: `NetworkEntry.tooLarge` is not a failed request in the list (status cell icon, no red row); the detail says
+  what was too large and the limit (`tooLargeMessage`). Replay TLS notices are said in place, not as global toasts.
+- AI pack (`api.aiPack`): `include.issues` / `include.lastRun` (default on) and `issues` (the editor's, at most
+  `AI_PACK_MAX_ISSUES`). A flow with problems or a failed last run offers "Fix with AI" (More menu, run panel).

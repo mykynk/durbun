@@ -29,6 +29,8 @@ import { notificationPermission, requestNotificationPermission } from '../lib/no
 import { errorMessage } from './actions';
 import { DurbunMark } from '../components/Icons';
 import { sdkHostLines } from './sdkHosts';
+import { DesktopServerRows } from './DesktopServerRows';
+import { hasDesktopConfig } from './desktopConfig';
 import { Snippet } from './Snippet';
 import { SLACK_ADD_URL, toSlackText } from '../lib/slack';
 import { Group, OfflineNote, Row, SectionHeader } from './settingsParts';
@@ -791,7 +793,7 @@ function AboutSection() {
 function DesktopAppGroup() {
   const t = useT();
   const { available, prefs, saving, set } = useDesktopPrefs();
-  if (!available) return null;
+  if (!available && !hasDesktopConfig()) return null;
   const change = async (patch: { autoUpdateCheck?: boolean; openAtLogin?: boolean }) => {
     if (!(await set(patch))) toast.error(t('shell.settings.desktop.failed'));
   };
@@ -799,6 +801,8 @@ function DesktopAppGroup() {
   const loginOff = prefs ? !prefs.openAtLoginAvailable : false;
   return (
     <Group title={t('shell.settings.desktop.title')}>
+      {available ? (
+        <>
       <Row label={t('shell.settings.desktop.autoUpdate')} hint={notAsked ? t('shell.settings.desktop.autoUpdateNotAsked') : t('shell.settings.desktop.autoUpdateHint')}>
         <Toggle
           checked={prefs?.autoUpdateCheck === true}
@@ -815,6 +819,9 @@ function DesktopAppGroup() {
           aria-label={t('shell.settings.desktop.openAtLogin')}
         />
       </Row>
+        </>
+      ) : null}
+      <DesktopServerRows />
     </Group>
   );
 }

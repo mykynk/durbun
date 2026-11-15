@@ -7,6 +7,8 @@
 import { readStorage, removeStorage, writeStorage } from '../../lib/persist';
 
 const MARK = 'logs.applying';
+/** Where the logs view keeps its query (`usePersistentState('logs.query')`). */
+export const QUERY_STATE_KEY = 'state.logs.query';
 /** How long the page must keep running timers after applying a pattern. */
 export const RESPONSIVE_MS = 2_000;
 
@@ -38,7 +40,7 @@ export function markApplying(source: HangSource): void {
 export function recoverFromHang(disableRegexHighlights: () => void): HangSource[] {
   const sources = marked();
   removeStorage(MARK);
-  if (sources.includes('query')) writeStorage('logs.query', '');
+  if (sources.includes('query')) writeStorage(QUERY_STATE_KEY, '');
   if (sources.includes('highlight')) disableRegexHighlights();
   return sources;
 }

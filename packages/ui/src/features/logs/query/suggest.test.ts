@@ -100,7 +100,7 @@ describe('values', () => {
   });
 
   it('is:, source:, age:', () => {
-    expect(labels('is:')).toEqual(['crash', 'anr', 'oom', 'error', 'json', 'network', 'event', 'marker', 'stacktrace', 'flutter']);
+    expect(labels('is:')).toEqual(['crash', 'anr', 'oom', 'error', 'json', 'network', 'event', 'nav', 'marker', 'stacktrace', 'flutter']);
     expect(labels('is:s')).toEqual(['stacktrace']);
     expect(at('is:fl')[0]).toMatchObject({ label: 'flutter', detail: 'Flutter errors and logs', preselect: true });
     expect(labels('source:')).toEqual(['device', 'app', 'system']);

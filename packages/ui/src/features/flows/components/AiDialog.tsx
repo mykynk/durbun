@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Copy, FileDown, Import, ShieldCheck, Sparkles } from 'lucide-react';
-import type { PackageConflict } from '@durbun/protocol';
+import type { FlowIssue, PackageConflict } from '@durbun/protocol';
 import { Button, Callout, Checkbox, Dialog, SegmentedControl, Textarea, copyText, downloadText, formatBytes, toast } from '../../../components';
 import { api, useCompiledScope, useFlows } from '../../../data';
-import type { AiPackRequest } from '../../../data/api';
+import { AI_PACK_MAX_ISSUES, type AiPackRequest } from '../../../data/api';
 import { errorText, useLanguage, useT } from '../../../i18n';
 import { ImportPreview, importCount, runImport, useImportPreview } from './ImportDialog';
 
@@ -11,6 +11,12 @@ export interface AiPackDialogProps {
   open: boolean;
   /** Edit this flow (its JSON goes into the pack); null = a new flow. */
   flowId: string | null;
+  /** The flow's problems as the editor has them (unsaved edits included); sent with the pack. */
+  issues?: readonly FlowIssue[];
+  /** The flow's latest run failed: the server adds what failed. */
+  failedRun?: boolean;
+  /** Opened to fix the flow (its problems or a failed run): the wording says so. */
+  fix?: boolean;
   onClose(): void;
   onImported(ids: string[]): void;
 }
@@ -21,13 +27,13 @@ type Include = Required<NonNullable<AiPackRequest['include']>>;
  * "Yapay zekâyla yaz": Dürbün never calls an AI. It writes a Markdown pack (the goal, the flow format, recent
  * requests of the app, other flows) the user gives to their own assistant, then imports the answer.
  */
-export function AiPackDialog({ open, flowId, onClose, onImported }: AiPackDialogProps) {
+export function AiPackDialog({ open, flowId, issues = [], failedRun = false, fix = false, onClose, onImported }: AiPackDialogProps) {
   const t = useT();
   const lang = useLanguage();
   const scope = useCompiledScope();
   const editing = useFlows((s) => (flowId ? s.summaries.find((f) => f.id === flowId) : undefined));
   const [goal, setGoal] = useState('');
-  const [include, setInclude] = useState<Include>({ schema: true, requests: true, flows: true, environments: true });
+  const [include, setInclude] = useState<Include>({ schema: true, requests: true, flows: true, environments: true, issues: true, lastRun: true });
   const [packLang, setPackLang] = useState<'tr' | 'en'>(lang);
   const [building, setBuilding] = useState<'copy' | 'download' | null>(null);
   const [size, setSize] = useState<number | null>(null);
@@ -53,9 +59,11 @@ export function AiPackDialog({ open, flowId, onClose, onImported }: AiPackDialog
   const build = async (mode: 'copy' | 'download') => {
     setBuilding(mode);
     try {
+      const sendIssues = flowId && include.issues && issues.length ? issues.slice(0, AI_PACK_MAX_ISSUES) : undefined;
       const req: AiPackRequest = {
         include,
         language: packLang,
+        ...(sendIssues ? { issues: sendIssues.map(({ level, code, message, nodeId, path }) => ({ level, code, message, ...(nodeId ? { nodeId } : {}), ...(path ? { path } : {}) })) } : {}),
         ...(goal.trim() ? { goal: goal.trim() } : {}),
         ...(flowId ? { flowId } : {}),
         ...(scope.bundleId ? { appId: scope.bundleId } : {}),
@@ -82,7 +90,7 @@ export function AiPackDialog({ open, flowId, onClose, onImported }: AiPackDialog
     <Dialog
       open={open}
       onClose={onClose}
-      title={editing ? t('flows.ai.titleEdit', { name: editing.name }) : t('flows.ai.title')}
+      title={editing ? t(fix ? 'flows.ai.titleFix' : 'flows.ai.titleEdit', { name: editing.name }) : t('flows.ai.title')}
       description={t('flows.ai.description')}
       icon={Sparkles}
       size="lg"
@@ -119,7 +127,7 @@ export function AiPackDialog({ open, flowId, onClose, onImported }: AiPackDialog
             rows={3}
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
-            placeholder={editing ? t('flows.ai.goalEditPlaceholder') : t('flows.ai.goalPlaceholder')}
+            placeholder={editing ? t(fix ? 'flows.ai.goalFixPlaceholder' : 'flows.ai.goalEditPlaceholder') : t('flows.ai.goalPlaceholder')}
             aria-label={t('flows.ai.goal')}
           />
           <div className="fl-ai__includes" role="group" aria-label={t('flows.ai.include')}>
@@ -127,7 +135,10 @@ export function AiPackDialog({ open, flowId, onClose, onImported }: AiPackDialog
             <Checkbox checked={include.requests} onChange={toggle('requests')} label={scope.bundleId ? t('flows.ai.inc.requestsOf', { app: scope.app?.app.name ?? scope.bundleId }) : t('flows.ai.inc.requests')} />
             <Checkbox checked={include.flows} onChange={toggle('flows')} label={t('flows.ai.inc.flows')} />
             <Checkbox checked={include.environments} onChange={toggle('environments')} label={t('flows.ai.inc.environments')} />
+            {editing && issues.length ? <Checkbox checked={include.issues} onChange={toggle('issues')} label={t('flows.ai.inc.issues', { count: issues.length })} /> : null}
+            {editing && failedRun ? <Checkbox checked={include.lastRun} onChange={toggle('lastRun')} label={t('flows.ai.inc.lastRun')} /> : null}
           </div>
+          {editing && fix && ((issues.length && include.issues) || (failedRun && include.lastRun)) ? <p className="fl-insp__hint">{t('flows.ai.fixNote')}</p> : null}
           <div className="fl-ai__row">
             <span className="fl-ai__label">{t('flows.ai.language')}</span>
             <SegmentedControl<'tr' | 'en'>

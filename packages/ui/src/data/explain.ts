@@ -6,7 +6,7 @@
  * the sidebar badges, the "Neler görünüyor?" panel and the Network / Performance / Mocks empty states all
  * render from it so they can never disagree.
  */
-import type { AppInstallSource, AppSession, DeviceApp, DeviceInfo, DeviceReaderState, SdkLayer, SdkPlatform } from '@durbun/protocol';
+import type { AppInstallSource, AppSession, DeviceActionId, DeviceApp, DeviceInfo, DeviceReaderState, DeviceUnavailableAction, SdkLayer, SdkPlatform } from '@durbun/protocol';
 
 /** One row of the matrix. */
 export type ExplainCapability = 'logs' | 'network' | 'metrics' | 'crashes' | 'mocks' | 'tools';
@@ -631,9 +631,56 @@ const IPHONE_CARDS: readonly { card: HiddenDeviceCard; action: string; reason: H
  * (Developer Mode off, devicectl / Xcode missing, no screenshot tool, no idevicesyslog). Android and simulators get
  * every action from adb / simctl, so a missing card there is the platform, not a tool, and is not listed.
  */
-export function hiddenDeviceCards(device: Pick<DeviceInfo, 'id' | 'platform' | 'kind' | 'state' | 'stateCode' | 'actions'>): { card: HiddenDeviceCard; reason: HiddenCardReason }[] {
+export function hiddenDeviceCards(device: Pick<DeviceInfo, 'id' | 'platform' | 'kind' | 'state' | 'stateCode' | 'actions'> & Partial<Pick<DeviceInfo, 'unavailableActions'>>): { card: HiddenDeviceCard; reason: HiddenCardReason }[] {
+  // A server that says why itself (`unavailableActions`) is read with `hiddenDeviceActions` instead.
+  if (device.unavailableActions) return [];
   if (device.platform !== 'ios' || device.kind !== 'physical' || device.state !== 'online' || !device.id.startsWith('ios:')) return [];
   const devModeOff = device.stateCode === 'device.developerModeOff';
   const have = new Set<string>(device.actions);
   return IPHONE_CARDS.filter((c) => !have.has(c.action)).map((c) => ({ card: c.card, reason: devModeOff && c.devMode ? 'developerMode' : c.reason }));
+}
+
+/**
+ * Whether an action can run on this device now: 'yes' (in `actions`), 'blocked' with the server's reason
+ * (`unavailableActions`: Developer Mode off, a tool missing, the OS too old, a Wi-Fi connection it would cut…), or
+ * 'no' (not this platform, the device is not online, or an older server that does not say).
+ */
+export type ActionAvailability = { state: 'yes' } | { state: 'blocked'; code: string; params?: Record<string, string | number> } | { state: 'no' };
+
+export function actionAvailability(device: Pick<DeviceInfo, 'state' | 'actions'> & Partial<Pick<DeviceInfo, 'unavailableActions'>>, action: DeviceActionId): ActionAvailability {
+  if (device.state !== 'online') return { state: 'no' };
+  if (device.actions.includes(action)) return { state: 'yes' };
+  const why = device.unavailableActions?.find((u) => u.action === action);
+  return why ? { state: 'blocked', code: why.code, ...(why.params ? { params: why.params } : {}) } : { state: 'no' };
+}
+
+/** A card (a group of actions) is worth showing when one of its actions runs or is blocked for a reason to show. */
+export function anyActionShown(device: Pick<DeviceInfo, 'state' | 'actions'> & Partial<Pick<DeviceInfo, 'unavailableActions'>>, actions: readonly DeviceActionId[]): boolean {
+  return actions.some((a) => actionAvailability(device, a).state !== 'no');
+}
+
+/**
+ * The actions this device cannot do now and why, as the server reports them (`DeviceInfo.unavailableActions`), minus
+ * the ones a card already shows with their reason (`shownInline`); grouped by reason so one cause is said once.
+ * Undefined from an older server (then `hiddenDeviceCards` guesses for iPhones).
+ */
+export function hiddenDeviceActions(
+  device: Pick<DeviceInfo, 'state'> & Partial<Pick<DeviceInfo, 'unavailableActions'>>,
+  shownInline: ReadonlySet<DeviceActionId> = new Set(),
+): { code: string; params?: Record<string, string | number>; actions: DeviceActionId[] }[] | undefined {
+  if (!device.unavailableActions) return undefined;
+  if (device.state !== 'online') return [];
+  const groups = new Map<string, { code: string; params?: Record<string, string | number>; actions: DeviceActionId[] }>();
+  const all = device.unavailableActions as DeviceUnavailableAction[];
+  for (const u of all) {
+    if (shownInline.has(u.action)) continue;
+    // The stop half of a pair goes with its start (one "Screen recording" line, not two).
+    if (u.action === 'screen-record-stop' && all.some((o) => o.action === 'screen-record')) continue;
+    const key = `${u.code}|${JSON.stringify(u.params ?? {})}`;
+    const g = groups.get(key);
+    if (g) {
+      if (!g.actions.includes(u.action)) g.actions.push(u.action);
+    } else groups.set(key, { code: u.code, ...(u.params ? { params: u.params } : {}), actions: [u.action] });
+  }
+  return [...groups.values()];
 }

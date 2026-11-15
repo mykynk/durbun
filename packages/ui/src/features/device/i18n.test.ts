@@ -6,7 +6,19 @@ import { messageKeys } from '../../i18n/core';
 import './i18n';
 import '../perf/i18n';
 import { codeText, describeError, fixHint, logStreamText, stateText } from './codes';
-import { ACTION_GROUP_ORDER, ANDROID_FONT_PRESETS, ANDROID_KEYS, BUILTIN_APP_ACTIONS, IOS_CONTENT_SIZES, LOCATION_PRESETS, APNS_TEMPLATES } from './model';
+import {
+  ACTION_GROUP_ORDER,
+  ANDROID_FONT_PRESETS,
+  ANDROID_KEYS,
+  ANDROID_PERMISSIONS,
+  BUILTIN_APP_ACTIONS,
+  DEVICE_SECTIONS,
+  IOS_CONTENT_SIZES,
+  LOCATION_PRESETS,
+  APNS_TEMPLATES,
+  ROTATIONS,
+  SIM_PRIVACY_SERVICES,
+} from './model';
 import { PERF_WINDOWS } from '../perf/model';
 
 const FEATURES = ['device', 'perf'];
@@ -68,6 +80,11 @@ describe('device + perf dictionaries', () => {
       'device.url.problem': ['spaces', 'noScheme'],
       'device.look.done': ['dark', 'light'],
       'device.bar.done': ['clean', 'reset'],
+      'device.jump': [...DEVICE_SECTIONS],
+      'device.tester.app.perm': ANDROID_PERMISSIONS.map((p) => p.key),
+      'device.tester.app.service': [...SIM_PRIVACY_SERVICES],
+      'device.tester.screen': [...ROTATIONS],
+      'device.users.kind': ['main', 'work', 'profile', 'secondary'],
       'perf.window': [...PERF_WINDOWS],
       'perf.table.cols': ['cpu', 'memory', 'heap', 'fps', 'jank', 'logs', 'errorLogs', 'requests', 'failed'],
       'perf.events': ['crash', 'anr', 'marker', 'connect', 'reconnect'],

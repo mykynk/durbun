@@ -337,6 +337,27 @@ registerMessages('sources', {
     },
     /** Performance of a process measured from outside, when the device gives no frame stats. */
     framesNote: { title: 'FPS bu cihazda dışarıdan ölçülemiyor' },
+    /** An app session's SDK protocol and the device clock (app info, log details). */
+    session: {
+      protocol: 'protokol {n}',
+      seconds: '{n} sn',
+      clock: {
+        ahead: 'Cihaz saati Mac’ten {amount} ileri',
+        behind: 'Cihaz saati Mac’ten {amount} geri',
+        hint: 'Uygulama satırlarının saati cihazdan gelir ve düzeltilmez; Mac’teki olaylarla karşılaştırırken bu farkı hesaba katın.',
+        short: 'Saat farkı',
+      },
+      mismatch: {
+        'sdk-newer': {
+          label: 'Dürbün’ü güncelleyin',
+          body: 'Bu uygulamadaki SDK, Dürbün’den yeni bir protokol konuşuyor; bazı veriler görünmeyebilir.',
+        },
+        'sdk-older': {
+          label: 'SDK’yı güncelleyin',
+          body: 'Bu uygulamadaki SDK eski bir protokol konuşuyor; bazı özellikler bu uygulamada çalışmaz.',
+        },
+      },
+    },
     /** A scoped app that is not running (its device is online). */
     idle: {
       title: '{app} şu an açık değil',
@@ -727,6 +748,27 @@ registerMessages('sources', {
       toastTitle: 'No crash visible in this scope',
     },
     framesNote: { title: 'FPS cannot be measured from outside on this device' },
+    /** An app session's SDK protocol and the device clock (app info, log details). */
+    session: {
+      protocol: 'protocol {n}',
+      seconds: '{n} s',
+      clock: {
+        ahead: 'The device clock is {amount} ahead of the Mac',
+        behind: 'The device clock is {amount} behind the Mac',
+        hint: 'App lines carry the device’s time and are not corrected; allow for this when comparing with events on the Mac.',
+        short: 'Clock offset',
+      },
+      mismatch: {
+        'sdk-newer': {
+          label: 'Update Dürbün',
+          body: 'The SDK in this app speaks a newer protocol than Dürbün; some data may not show.',
+        },
+        'sdk-older': {
+          label: 'Update the SDK',
+          body: 'The SDK in this app speaks an older protocol; some features do not work in this app.',
+        },
+      },
+    },
     idle: {
       title: '{app} is not running',
       body: {

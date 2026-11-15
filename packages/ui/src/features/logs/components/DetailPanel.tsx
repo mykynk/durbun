@@ -2,7 +2,7 @@ import { useMemo, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { Bug, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Funnel, FunnelX, History, LocateFixed, Share2, X } from 'lucide-react';
 import type { DeviceInfo, LogEntry, NetworkEntry } from '@durbun/protocol';
-import { Button, CodeView, CopyButton, IconButton, JsonTree, LevelBadge, MethodBadge, StatusBadge, copyText, formatBytes, formatClock, formatDateTime, formatDuration, toast } from '../../../components';
+import { Button, CodeView, CopyButton, IconButton, JsonTree, LevelBadge, MethodBadge, StatusBadge, copyText, formatBytes, formatClock, formatDateTime, formatDuration, sdkLabel, toast } from '../../../components';
 import { networkStore, useHub, useNetworkVersion } from '../../../data';
 import { deviceDisplayName, t } from '../../../i18n';
 import { analyzeEntry } from '../model/analyze';
@@ -14,6 +14,7 @@ import { isPreviousLaunch, type LogRow } from '../model/types';
 import { crashForeground, crashedBuildOf, entryClock, isNativeTombstone, isWholeSecond, recordUnsymbolicated } from '../model/records';
 import type { ExplainSource } from '../../../data';
 import { entryOrigin, entrySourceText, isDeviceCrashRecord, sourceHint } from '../../../sources/text';
+import { clockSkewOf, clockSkewText, protocolMismatchText, protocolText } from '../../../sources/session';
 import { StackLines, errorHeadParts, type RowDisplay } from './LogRow';
 import { downloadUrl } from '../../../lib/download';
 
@@ -143,10 +144,22 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
 
   const meta: MetaRow[] = [];
   const seconds = isWholeSecond(e);
+  // The app's lines carry the device's time: say how far that clock is from the Mac's when it is far.
+  const skew = e.source === 'app' && app ? clockSkewOf(app) : undefined;
+  const timeText = seconds ? <span title={t('logs.detail.secondsOnly')}>{preciseTime(e)}</span> : preciseTime(e);
   meta.push({
     key: 'time',
     label: t('logs.detail.fields.time'),
-    value: seconds ? <span title={t('logs.detail.secondsOnly')}>{preciseTime(e)}</span> : preciseTime(e),
+    value: skew ? (
+      <>
+        {timeText}
+        <span className="lg-kv__note" title={t('sources.session.clock.hint')}>
+          {clockSkewText(skew)}
+        </span>
+      </>
+    ) : (
+      timeText
+    ),
     copy: new Date(e.ts).toISOString(),
   });
   meta.push({ key: 'level', label: t('logs.detail.fields.level'), value: <LevelBadge level={e.level} variant="text" />, copy: e.level, filter: { field: 'level', value: e.level } });
@@ -194,7 +207,25 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
       copy: app.app.id,
       filter: { field: 'app', value: app.app.id },
     });
-  if (app) meta.push({ key: 'sdk', label: t('logs.detail.fields.sdk'), value: `${app.sdk.name} ${app.sdk.version} · ${app.sdk.platform}`, copy: `${app.sdk.name} ${app.sdk.version}` });
+  if (app) {
+    const sdkText = [`${app.sdk.name} ${app.sdk.version}`, sdkLabel(app.sdk.platform), protocolText(app)].filter(Boolean).join(' · ');
+    const mismatch = protocolMismatchText(app);
+    meta.push({
+      key: 'sdk',
+      label: t('logs.detail.fields.sdk'),
+      value: mismatch ? (
+        <>
+          {sdkText}
+          <span className="lg-kv__note lg-kv__note--warn">
+            {mismatch.label}: {mismatch.body}
+          </span>
+        </>
+      ) : (
+        sdkText
+      ),
+      copy: `${app.sdk.name} ${app.sdk.version}`,
+    });
+  }
   if (e.subsystem) meta.push({ key: 'subsystem', label: t('logs.detail.fields.subsystem'), value: e.subsystem, copy: e.subsystem });
   if (e.category) meta.push({ key: 'category', label: t('logs.detail.fields.category'), value: e.category, copy: e.category });
   if (e.code) meta.push({ key: 'code', label: t('logs.detail.fields.code'), value: e.code, copy: e.code });

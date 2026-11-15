@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import type { AppSession, DeviceInfo, ProcessUpdate, UiToServer } from '@durbun/protocol';
 import { hubActions, setScope } from '../../data';
 import { __resetCommandsForTests, handleReply, setCommandTransport } from '../../data/commands';
@@ -7,6 +7,7 @@ import { FeatureContext } from '../../components';
 import { setLanguage } from '../../i18n';
 import DeviceView from './index';
 import { useMedia, useRecorder } from './stores';
+import { useStickyDefault } from './useAction';
 
 const PIXEL: DeviceInfo = {
   id: 'demo:1',
@@ -62,9 +63,9 @@ const PATI: AppSession = {
 
 const proc = (pid: number, name: string): ProcessUpdate => ({ deviceId: 'demo:1', pid, name, event: 'seen', ts: 0 });
 
-function renderView() {
+function renderView(active = false) {
   return render(
-    <FeatureContext.Provider value={{ tab: 'device', active: false }}>
+    <FeatureContext.Provider value={{ tab: 'device', active }}>
       <DeviceView />
     </FeatureContext.Provider>,
   );
@@ -189,5 +190,81 @@ describe('DeviceView', () => {
     expect(screen.getByText('Bilgiler son bağlantıdan. Cihaz işlemleri cihaz yeniden bağlandığında kullanılabilir.')).toBeTruthy();
     expect(screen.queryByText('Ekran görüntüsü al')).toBeNull();
     expect(screen.queryByText('Uygulama araçları')).toBeNull();
+    // Two cards do not need a jump strip.
+    expect(screen.queryByRole('navigation', { name: 'Bu sayfadaki kartlar' })).toBeNull();
+  });
+
+  it('jump strip: one chip per shown card in reading order; a chip scrolls to its card and focuses the heading', async () => {
+    const scrolled = vi.fn();
+    const proto = Element.prototype as unknown as { scrollIntoView?: unknown };
+    const before = proto.scrollIntoView;
+    proto.scrollIntoView = scrolled;
+    try {
+      act(() => setScope({ kind: 'device', deviceId: 'demo:1' }));
+      renderView(true);
+      const nav = screen.getByRole('navigation', { name: 'Bu sayfadaki kartlar' });
+      const chips = within(nav)
+        .getAllByRole('button')
+        .map((b) => b.textContent);
+      expect(chips).toEqual(['Bilgiler', 'Araçlar', 'Uygulamalar', 'Dart VM', 'Süreçler', 'Loglar', 'Ekran görüntüsü', 'Deep link', 'Görünüm', 'Girdi', 'Konum']);
+      // Every chip has its card, and the other way round.
+      const cards = [...document.querySelectorAll('[data-section]')].map((c) => c.getAttribute('data-section'));
+      expect(cards).toEqual(['info', 'tools', 'apps', 'vm', 'processes', 'logs', 'screenshot', 'open-url', 'appearance', 'input', 'location']);
+
+      fireEvent.click(within(nav).getByRole('button', { name: 'Konum' }));
+      const heading = screen.getByRole('heading', { name: 'Konum' });
+      await waitFor(() => expect(document.activeElement).toBe(heading));
+      expect(scrolled).toHaveBeenCalledTimes(1);
+      expect(heading.closest('[data-section]')!.getAttribute('data-flash')).toBe('true');
+    } finally {
+      proto.scrollIntoView = before;
+    }
+  });
+
+  it('the device\'s own data (logs, report) sits in the left column, tester actions in the right', () => {
+    hubActions.upsertDevices([{ ...PIXEL, actions: [...PIXEL.actions, 'bug-report', 'bug-report-cancel', 'rotation'] }]);
+    act(() => setScope({ kind: 'device', deviceId: 'demo:1' }));
+    renderView();
+    const left = screen.getByRole('region', { name: 'Cihaz ve uygulamalar' });
+    const right = screen.getByRole('region', { name: 'Cihaz işlemleri' });
+    const sections = (el: HTMLElement) => [...el.querySelectorAll('[data-section]')].map((c) => c.getAttribute('data-section'));
+    expect(sections(left)).toEqual(['info', 'tools', 'apps', 'vm', 'processes', 'logs', 'bug-report']);
+    expect(sections(right)).toEqual(['screenshot', 'open-url', 'appearance', 'screen', 'input', 'location']);
+  });
+
+  it('a default app stays put when the list re-sorts, and moves on only when it is gone', () => {
+    let list = ['pati', 'kasa'];
+    const hook = renderHook(() => useStickyDefault(list[0], (id) => list.includes(id)));
+    expect(hook.result.current).toBe('pati');
+    // Pati's SDK disconnects (its permission was revoked): it drops below Kasa, the choice does not follow the order.
+    list = ['kasa', 'pati'];
+    hook.rerender();
+    expect(hook.result.current).toBe('pati');
+    list = ['kasa'];
+    hook.rerender();
+    expect(hook.result.current).toBe('kasa');
+  });
+
+  it('changed settings name the permission and the app; the package and full id stay in the tooltip', () => {
+    hubActions.upsertDevices([
+      {
+        ...PIXEL,
+        actions: [...PIXEL.actions, 'app-permission', 'app-locale'],
+        settingOverrides: [
+          { action: 'app-permission', appId: 'com.mykynk.pati', key: 'android.permission.CAMERA', previous: 'granted', current: 'revoked', since: 1 },
+          { action: 'app-permission', appId: 'com.example.other', key: 'android.permission.BODY_SENSORS', previous: 'revoked', current: 'granted', since: 2 },
+          { action: 'app-locale', appId: 'com.mykynk.pati', previous: 'system', current: 'de-DE', since: 3 },
+        ],
+      },
+    ]);
+    act(() => setScope({ kind: 'device', deviceId: 'demo:1' }));
+    renderView();
+    const card = document.querySelector<HTMLElement>('[data-section="overrides"]')!;
+    const camera = within(card).getByText('Kamera izni · Pati: reddedildi');
+    expect(camera.getAttribute('title')).toBe('com.mykynk.pati · android.permission.CAMERA');
+    // A permission the UI does not name keeps its id; an app it does not know keeps its package.
+    expect(within(card).getByText('BODY_SENSORS izni · com.example.other: verildi')).toBeTruthy();
+    expect(within(card).getByText('Uygulama dili · Pati: de-DE')).toBeTruthy();
+    expect(within(card).getByRole('button', { name: 'Kamera izni · Pati ayarını geri al' })).toBeTruthy();
   });
 });

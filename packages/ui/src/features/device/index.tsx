@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeftRight, Camera, Link as LinkIcon, Moon, Plug, RotateCcw, Smartphone, Sun } from 'lucide-react';
 import type { AppSession, DeviceActionId, DeviceInfo } from '@durbun/protocol';
 import { sendCommand, useDevice, useDevices, useHub, useScope } from '../../data';
@@ -27,19 +27,34 @@ import { DevicePicker } from './DevicePicker';
 import { InfoCard, stateTone } from './InfoCard';
 import { InputCard } from './InputCard';
 import { LocationCard } from './LocationCard';
-import { hasAction, hasAnyAction, isReadOnlyDevice, osLine } from './model';
-import { hiddenDeviceCards } from '../../data/explain';
+import { deviceColumns, hasAction, hasAnyAction, isReadOnlyDevice, osLine, type DeviceSectionId } from './model';
+import { JUMP_STRIP_MIN, JumpStrip } from './JumpStrip';
+import { hiddenDeviceActions, hiddenDeviceCards } from '../../data/explain';
 import { OpenUrlCard } from './OpenUrlCard';
 import { ProcessesCard } from './ProcessesCard';
 import { PushCard } from './PushCard';
 import { RecordCard } from './RecordCard';
-import { consumeDeviceRequest, requestDeviceSection, useDeviceRequest } from './request';
+import { consumeDeviceRequest, flashDeviceSection, requestDeviceSection, revealDeviceCard, useDeviceRequest } from './request';
 import { ScreenshotCard, captureScreenshot } from './ScreenshotCard';
 import { LogsCard, StatusBarCard } from './SmallCards';
 import { useMedia } from './stores';
 import { VmCard } from './VmCard';
 import { HiddenCardsCard } from './HiddenCards';
 import { OverridesCard } from './OverridesCard';
+import {
+  APP_ACCESS_ACTIONS,
+  AppAccessCard,
+  CONNECTION_ACTIONS,
+  ConnectionCard,
+  DEV_OPTION_ACTIONS,
+  DevOptionsCard,
+  DeviceReportCard,
+  REPORT_ACTIONS,
+  SCREEN_ACTIONS,
+  ScreenCard,
+  TESTER_ACTIONS,
+  showsCard,
+} from './TesterCards';
 
 const APP_ACTIONS: DeviceActionId[] = ['list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install'];
 const LOOK_ACTIONS: DeviceActionId[] = ['appearance', 'font-scale', 'animations'];
@@ -113,8 +128,8 @@ export default function DeviceView() {
     const id = requestAnimationFrame(() => {
       const el = rootRef.current?.querySelector<HTMLElement>(`[data-section="${request.section}"]`);
       if (el) {
-        el.scrollIntoView({ block: 'start', behavior: 'smooth' });
-        el.querySelector<HTMLElement>('textarea, input:not([type="checkbox"]):not([type="range"])')?.focus({ preventScroll: true });
+        revealDeviceCard(el, request.focus);
+        flashDeviceSection(request.section);
       }
       consumeDeviceRequest(request.seq);
     });
@@ -221,42 +236,64 @@ function DevicePage({ device, apps, preferredAppId, active }: { device: DeviceIn
   const online = device.state === 'online' && !readOnly;
   const can = (a: DeviceActionId) => online && hasAction(device, a);
   const canAny = (list: DeviceActionId[]) => online && hasAnyAction(device, list);
-  const hiddenCount = online ? hiddenDeviceCards(device).length : 0;
+  const hiddenCount = online ? (hiddenDeviceActions(device, TESTER_ACTIONS) ?? hiddenDeviceCards(device)).length : 0;
+  // Tester cards: shown when one of their actions runs here or is blocked for a reason they say.
+  const shows = (list: readonly DeviceActionId[]) => online && showsCard(device, list);
 
-  const actionCards = [
-    online && device.settingOverrides?.length ? <OverridesCard key="overrides" device={device} /> : null,
-    can('screenshot') || hasShots ? <ScreenshotCard key="shot" device={device} canTake={can('screenshot')} /> : null,
-    can('open-url') ? <OpenUrlCard key="url" device={device} apps={appRows} /> : null,
-    canAny(LOOK_ACTIONS) ? <AppearanceCard key="look" device={device} /> : null,
-    canAny(INPUT_ACTIONS) ? <InputCard key="input" device={device} /> : null,
-    can('location') ? <LocationCard key="loc" device={device} /> : null,
-    can('push-notification') ? <PushCard key="push" device={device} apps={appRows} preferredAppId={preferredAppId} /> : null,
-    can('status-bar') ? <StatusBarCard key="bar" device={device} /> : null,
-    can('screen-record') || hasRecordings ? <RecordCard key="rec" device={device} /> : null,
-    canAny(LOG_ACTIONS) ? <LogsCard key="logs" device={device} /> : null,
-  ].filter(Boolean);
+  // One entry per card that is shown, in reading order; `section` is the card's own `data-section`.
+  type Entry = { section: DeviceSectionId; node: ReactNode };
+  const entries = (
+    [
+      // What the device is and holds (info, apps, processes, its logs and its own report).
+      { section: 'info', node: <InfoCard device={device} /> },
+      online && { section: 'tools', node: <AppToolsCard sessions={sessions} preferredAppId={preferredAppId} /> },
+      canAny(APP_ACTIONS) && { section: 'apps', node: <AppsCard device={device} sessions={sessions} preferredAppId={preferredAppId} active={active} /> },
+      (online || sessions.some((x) => x.transport === 'vm-service')) && !imported && { section: 'vm', node: <VmCard device={device} sessions={sessions} /> },
+      processesKnown && { section: 'processes', node: <ProcessesCard device={device} sessions={sessions} canWatch={online && canPoll(device)} /> },
+      canAny(LOG_ACTIONS) && { section: 'logs', node: <LogsCard device={device} /> },
+      (shows(REPORT_ACTIONS) || Boolean(device.bugReport)) && { section: 'bug-report', node: <DeviceReportCard device={device} /> },
+      // What a tester does to the device.
+      online && Boolean(device.settingOverrides?.length) && { section: 'overrides', node: <OverridesCard device={device} apps={appRows} /> },
+      (can('screenshot') || hasShots) && { section: 'screenshot', node: <ScreenshotCard device={device} canTake={can('screenshot')} /> },
+      can('open-url') && { section: 'open-url', node: <OpenUrlCard device={device} apps={appRows} /> },
+      shows(APP_ACCESS_ACTIONS) && { section: 'app-access', node: <AppAccessCard device={device} sessions={sessions} preferredAppId={preferredAppId} /> },
+      shows(CONNECTION_ACTIONS) && { section: 'connection', node: <ConnectionCard device={device} /> },
+      canAny(LOOK_ACTIONS) && { section: 'appearance', node: <AppearanceCard device={device} /> },
+      shows(SCREEN_ACTIONS) && { section: 'screen', node: <ScreenCard device={device} /> },
+      shows(DEV_OPTION_ACTIONS) && { section: 'dev-options', node: <DevOptionsCard device={device} /> },
+      canAny(INPUT_ACTIONS) && { section: 'input', node: <InputCard device={device} /> },
+      can('location') && { section: 'location', node: <LocationCard device={device} /> },
+      can('push-notification') && { section: 'push', node: <PushCard device={device} apps={appRows} preferredAppId={preferredAppId} /> },
+      can('status-bar') && { section: 'status-bar', node: <StatusBarCard device={device} /> },
+      (can('screen-record') || hasRecordings) && { section: 'record', node: <RecordCard device={device} /> },
+      online && hiddenCount > 0 && { section: 'hidden', node: <HiddenCardsCard device={device} shownInline={TESTER_ACTIONS} /> },
+    ] as (Entry | false)[]
+  ).filter((e): e is Entry => Boolean(e));
+  const columns = deviceColumns(entries.map((e) => e.section));
+  const sections = [...columns.left, ...columns.right];
+  const cards = (list: DeviceSectionId[]) => list.map((s) => <Fragment key={s}>{entries.find((e) => e.section === s)!.node}</Fragment>);
+  // "No actions for this device" only when no card does anything to it (the logs and report cards are actions too).
+  const NOT_ACTIONS: readonly DeviceSectionId[] = ['info', 'tools', 'apps', 'vm', 'processes'];
+  const noActions = online && hiddenCount === 0 && sections.every((s) => NOT_ACTIONS.includes(s));
 
   return (
-    <div className="dv-page">
-      <div className="dv-cols">
-        <div className="dv-col" role="region" aria-label={t('device.columns.info')}>
-          <InfoCard device={device} />
-          {online ? <AppToolsCard sessions={sessions} preferredAppId={preferredAppId} /> : null}
-          {canAny(APP_ACTIONS) ? <AppsCard device={device} sessions={sessions} preferredAppId={preferredAppId} active={active} /> : null}
-          {(online || sessions.some((x) => x.transport === 'vm-service')) && !imported ? <VmCard device={device} sessions={sessions} /> : null}
-          {processesKnown ? <ProcessesCard device={device} sessions={sessions} canWatch={online && canPoll(device)} /> : null}
-        </div>
-        <div className="dv-col" role="region" aria-label={t('device.columns.actions')}>
-          {actionCards.length > 0 ? (
-            actionCards
-          ) : online && hiddenCount === 0 ? (
-            <Callout tone="info" title={t('device.noActions')}>
-              {device.id.startsWith('net:') ? t('device.codes.device.networkOnly') : t('device.noActionsHint')}
-            </Callout>
-          ) : null}
-          {online ? <HiddenCardsCard device={device} /> : null}
+    <>
+      {sections.length >= JUMP_STRIP_MIN ? <JumpStrip sections={sections} onJump={(section) => requestDeviceSection(section, 'heading')} /> : null}
+      <div className="dv-page">
+        <div className="dv-cols">
+          <div className="dv-col" role="region" aria-label={t('device.columns.info')}>
+            {cards(columns.left)}
+          </div>
+          <div className="dv-col" role="region" aria-label={t('device.columns.actions')}>
+            {noActions ? (
+              <Callout tone="info" title={t('device.noActions')}>
+                {device.id.startsWith('net:') ? t('device.codes.device.networkOnly') : t('device.noActionsHint')}
+              </Callout>
+            ) : null}
+            {cards(columns.right)}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -16,7 +16,10 @@ export {
   NotRunningEmpty,
   NotRunningNote,
   IosLogScopeNote,
+  SessionNotes,
+  ClockSkewNote,
 } from './components';
+export { clockSkewOf, clockSkewText, protocolMismatchText, protocolText, CLOCK_NOTE_MS, type ClockSkew } from './session';
 export type { ExplainEmptyProps } from './components';
 export { DataSourcesDialog, DataSourcesExplainer, buildMatrix } from './DataSourcesDialog';
 export {

@@ -94,7 +94,90 @@
   }
 }
 .dv-card {
-  scroll-margin-top: 12px;
+  /* Below the sticky jump strip when there is one. */
+  scroll-margin-top: calc(var(--dv-jump-h, 0px) + 12px);
+}
+.dv-card > .card {
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+/* The card a jump landed on, for a moment. */
+.dv-card[data-flash] > .card {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ───────────── Jump strip ───────────── */
+.dv-jump {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.dv-jump + .dv-page {
+  --dv-jump-h: 39px;
+}
+.dv-jump__inner {
+  position: relative;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+.dv-jump__track {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  /* Room for the focus ring: a sideways scroller clips what leaves it. */
+  padding: 8px 16px;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.dv-jump__track::-webkit-scrollbar {
+  display: none;
+}
+.dv-jump__track > li {
+  flex-shrink: 0;
+}
+.dv-jump__chip {
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dv-jump__chip:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+  filter: none;
+}
+/* More chips to that side. */
+.dv-jump__inner::before,
+.dv-jump__inner::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+.dv-jump__inner::before {
+  left: 0;
+  background: linear-gradient(to right, var(--bg-panel) 20%, transparent);
+}
+.dv-jump__inner::after {
+  right: 0;
+  background: linear-gradient(to left, var(--bg-panel) 20%, transparent);
+}
+.dv-jump__inner[data-fade-start]::before,
+.dv-jump__inner[data-fade-end]::after {
+  opacity: 1;
+}
+@container (max-width: 860px) {
+  .dv-jump__track {
+    padding: 8px 10px;
+  }
 }
 .dv-card > .card {
   background: var(--bg-panel);
@@ -637,24 +720,26 @@
 /* ───────────── Input ───────────── */
 .dv-keys {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 6px;
 }
 .dv-key {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 32px;
-  padding: 0 10px;
+  min-height: 32px;
+  padding: 5px 10px;
+  text-align: start;
+  line-height: 1.25;
   border-radius: var(--radius);
   border: 1px solid var(--border-strong);
   background: var(--bg-elevated);
   color: var(--text);
   font-size: var(--fs-sm);
-  white-space: nowrap;
   transition: background var(--dur) var(--ease);
 }
 .dv-key svg {
+  flex: none;
   color: var(--text-muted);
 }
 .dv-key:not(:disabled):hover {
@@ -667,8 +752,8 @@
   opacity: 0.55;
 }
 .dv-key__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 /* ───────────── Location ───────────── */
@@ -993,4 +1078,57 @@
 .dv-hidden__card {
   font-size: var(--fs-sm);
   font-weight: 500;
+}
+
+/* ───────────── Tester cards (permissions, connection, screen, developer options, device report) ───────────── */
+.dv-row--wrap {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.dv-grow {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.dv-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.dv-setting:first-child,
+.dv-error + .dv-setting {
+  padding-top: 0;
+  border-top: 0;
+}
+.dv-setting__hint {
+  padding-left: 108px;
+}
+@container (max-width: 420px) {
+  .dv-setting__hint {
+    padding-left: 0;
+  }
+}
+.dv-blocked {
+  flex: 1 1 200px;
+  min-width: 0;
+  color: var(--text-muted);
+}
+/* The reason several rows share, once under them (a child of the card's column: no flex basis). */
+.dv-blocked-note {
+  margin: 0;
+  color: var(--text-muted);
+}
+.dv-files {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dv-users {
+  padding-bottom: 6px;
+}
+.dv-replace {
+  margin-top: 8px;
 }

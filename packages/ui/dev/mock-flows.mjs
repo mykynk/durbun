@@ -13,7 +13,11 @@ let runSeq = 0;
 let environments = {
   format: 'durbun-environments',
   version: 1,
-  environments: [{ id: 'staging', name: 'Staging', vars: [{ key: 'baseUrl', value: 'https://staging.example.com' }, { key: 'token', value: 'mock-token', secret: true }] }],
+  environments: [
+    { id: 'staging', name: 'Staging', vars: [{ key: 'baseUrl', value: 'https://staging.example.com' }, { key: 'token', value: 'mock-token', secret: true }] },
+    // A test server with a self-signed certificate: runs warn and the history marks them unverified.
+    { id: 'qa', name: 'QA (self-signed)', vars: [{ key: 'baseUrl', value: 'https://qa.internal.example' }], tls: { skipVerify: true } },
+  ],
   activeId: 'staging',
 };
 let uiPrefs = null;
@@ -62,7 +66,73 @@ function seed() {
     updatedAt: at,
   });
 }
-seed();
+// `--no-flows`: an empty Flows tab, to see its welcome page and starter flows.
+if (!process.argv.includes('--no-flows')) {
+  seed();
+  seedRuns();
+}
+
+/** One finished run in the history against the self-signed QA server (TLS chip "unverified"). */
+function seedRuns() {
+  const at = now() - 1_800_000;
+  runs.push({
+    id: `run-${++runSeq}`,
+    flowId: 'login',
+    flowName: 'Log in',
+    status: 'passed',
+    startedAt: at,
+    endedAt: at + 2_400,
+    durationMs: 2_400,
+    trigger: { kind: 'manual' },
+    environment: { id: 'qa', name: 'QA (self-signed)', tls: 'unverified' },
+    preflight: [{ level: 'warn', code: 'preflight.env.insecureTls', message: 'QA (self-signed) does not verify server certificates: HTTP steps accept any server, also one pretending to be yours', params: { env: 'QA (self-signed)' } }],
+    steps: [
+      { id: 1, nodeId: 'start', type: 'trigger.manual', flowId: 'login', depth: 0, status: 'passed', startedAt: at, endedAt: at + 5, durationMs: 5, port: 'out' },
+      { id: 2, nodeId: 'signIn', type: 'http.request', label: 'Sign in', flowId: 'login', depth: 0, status: 'passed', startedAt: at + 5, endedAt: at + 2_300, durationMs: 2_295, port: 'out' },
+      { id: 3, nodeId: 'ok', type: 'check.assert', flowId: 'login', depth: 0, status: 'passed', startedAt: at + 2_300, endedAt: at + 2_400, durationMs: 100, port: 'out' },
+    ],
+    counts: { passed: 3, failed: 0, skipped: 0, total: 3 },
+  });
+  // A failed checkout run: the run panel and the More menu offer the AI pack to fix it.
+  const at2 = now() - 600_000;
+  runs.push({
+    id: `run-${++runSeq}`,
+    flowId: 'checkout',
+    flowName: 'Checkout smoke',
+    status: 'failed',
+    startedAt: at2,
+    endedAt: at2 + 3_100,
+    durationMs: 3_100,
+    trigger: { kind: 'manual' },
+    error: 'Step "Get cart" failed: HTTP 401',
+    steps: [
+      { id: 1, nodeId: 'start', type: 'trigger.manual', flowId: 'checkout', depth: 0, status: 'passed', startedAt: at2, endedAt: at2 + 5, durationMs: 5, port: 'out' },
+      { id: 2, nodeId: 'login', type: 'flow.call', label: 'Log in', flowId: 'checkout', depth: 0, status: 'passed', startedAt: at2 + 5, endedAt: at2 + 2_400, durationMs: 2_395, port: 'out' },
+      { id: 3, nodeId: 'cart', type: 'http.request', label: 'Get cart', flowId: 'checkout', depth: 0, status: 'failed', startedAt: at2 + 2_400, endedAt: at2 + 3_100, durationMs: 700, error: 'HTTP 401 Unauthorized' },
+    ],
+    counts: { passed: 2, failed: 1, skipped: 0, total: 3 },
+  });
+}
+
+/** The environment a run uses (the request's, else the active one) as the engine records it. */
+function runEnvironment(req) {
+  const wanted = req.environmentId === null ? undefined : (req.environmentId ?? environments.activeId);
+  const env = environments.environments.find((e) => e.id === wanted);
+  if (!env) return undefined;
+  const tls = env.tls?.skipVerify ? 'unverified' : env.tls?.ca ? 'customCa' : undefined;
+  return { id: env.id, name: env.name, ...(tls ? { tls } : {}) };
+}
+
+/** Preflight notes about the environment's certificates, worded like the server's preflight. */
+function tlsIssues(flow, req) {
+  const wanted = req.environmentId === null ? undefined : (req.environmentId ?? environments.activeId);
+  const env = environments.environments.find((e) => e.id === wanted);
+  if (!env?.tls || !flow.nodes.some((n) => n.type === 'http.request')) return [];
+  if (env.tls.skipVerify) {
+    return [{ level: 'warn', code: 'preflight.env.insecureTls', message: `${env.name} does not verify server certificates: HTTP steps accept any server, also one pretending to be yours`, params: { env: env.name } }];
+  }
+  return env.tls.ca ? [{ level: 'info', code: 'preflight.env.customCa', message: `${env.name} trusts its own certificates for HTTPS steps`, params: { env: env.name } }] : [];
+}
 
 function summary(f) {
   return {
@@ -77,7 +147,13 @@ function summary(f) {
     automation: false,
     calls: f.nodes.filter((n) => n.type === 'flow.call' && n.params?.flowId).map((n) => n.params.flowId),
     issues: { errors: 0, warnings: 0 },
+    ...lastRunOf(f.id),
   };
+}
+
+function lastRunOf(flowId) {
+  const r = runs.filter((x) => x.flowId === flowId).sort((a, b) => b.startedAt - a.startedAt)[0];
+  return r ? { lastRun: { id: r.id, status: r.status, startedAt: r.startedAt, ...(r.durationMs !== undefined ? { durationMs: r.durationMs } : {}) } } : {};
 }
 
 const runHeader = ({ steps, ...run }) => ({ ...run, stepCount: steps.length });
@@ -102,6 +178,8 @@ function startRun(flow, req, broadcast) {
     status: 'running',
     startedAt: now(),
     trigger: { kind: 'manual' },
+    ...(runEnvironment(req) ? { environment: runEnvironment(req) } : {}),
+    ...(tlsIssues(flow, req).length ? { preflight: tlsIssues(flow, req).filter((i) => i.level === 'warn' || i.code === 'preflight.env.customCa') } : {}),
     ...(req.inputs ? { inputs: req.inputs } : {}),
     steps: [],
     counts: { passed: 0, failed: 0, skipped: 0, total: order.length },
@@ -137,6 +215,47 @@ function startRun(flow, req, broadcast) {
   };
   setTimeout(tick, 300);
   return run;
+}
+
+/**
+ * The flow documents in an AI answer: the whole text as JSON, else every ```json block (a flow, a list of flows or
+ * `{ flows }`). A shorter copy of the server's `extractFlowDocs`; it does not validate.
+ */
+function flowDocsOf(text) {
+  const problems = [];
+  const docs = [];
+  const add = (v) => {
+    if (Array.isArray(v)) v.forEach(add);
+    else if (v && Array.isArray(v.flows)) v.flows.forEach(add);
+    else if (v && typeof v === 'object' && Array.isArray(v.nodes)) docs.push(v);
+    else problems.push('A JSON block is not a flow');
+  };
+  try {
+    add(JSON.parse(text));
+  } catch {
+    const blocks = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
+    if (!blocks.length) problems.push('No flow JSON found in the text');
+    for (const [, block] of blocks) {
+      try {
+        add(JSON.parse(block));
+      } catch (err) {
+        problems.push(`A JSON block could not be read: ${err.message}`);
+      }
+    }
+  }
+  return { docs, problems };
+}
+
+/** Steps without a type the editor knows are reported like the server's validation does. */
+function previewItem(raw) {
+  const flow = { format: 'durbun-flow', version: 1, ...raw, edges: raw.edges ?? [] };
+  flow.nodes = flow.nodes.map((n, i) => (n.position ? n : { ...n, position: flows.get(flow.id)?.nodes.find((o) => o.id === n.id)?.position ?? { x: i * 260, y: 0 } }));
+  const issues = flow.nodes
+    .filter((n) => typeof n.type !== 'string' || !/^(check|device|flow|http|logic|mock|output|trigger|wait)\./.test(n.type))
+    .map((n) => ({ level: 'error', code: 'flow.node.unknownType', message: `Unknown node type "${n.type}" (see the node catalog)`, nodeId: n.id, path: `nodes[${flow.nodes.indexOf(n)}].type`, params: { type: String(n.type), suggestion: '' } }));
+  const current = flows.get(flow.id);
+  const comparable = (f) => JSON.stringify({ name: f.name, nodes: f.nodes.map(({ position: _p, ...n }) => n), edges: f.edges });
+  return { flow, issues, exists: !!current, differs: !!current && comparable(current) !== comparable(flow), nodes: flow.nodes.length };
 }
 
 /** Summaries for the WS snapshot and the `flows` message (the Flows tab lists them from there). */
@@ -261,8 +380,36 @@ async function route(req, res, p, { json, readBody, broadcast }) {
     const { flow } = await body();
     return json(res, 201, saveFlow(flow, freeId(flow?.id || 'new-flow'))), true;
   }
-  if (p === '/api/flows/import/preview' && m === 'POST') return json(res, 200, { items: [], problems: ['The mock server does not read flow files'] }), true;
-  if (p === '/api/flows/ai-pack' && m === 'POST') return json(res, 200, { markdown: '# Dürbün flow pack (mock)\n\nThe real server writes the full pack here.\n' }), true;
+  if (p === '/api/flows/import/preview' && m === 'POST') {
+    const b = await body();
+    const { docs, problems } = flowDocsOf(typeof b.text === 'string' ? b.text : JSON.stringify(b.flows ?? b.flow ?? ''));
+    return json(res, 200, { items: docs.map(previewItem), problems }), true;
+  }
+  if (p === '/api/flows/import' && m === 'POST') {
+    const b = await body();
+    const conflict = b.conflict === 'replace' || b.conflict === 'keepBoth' ? b.conflict : 'skip';
+    const saved = [];
+    let skipped = 0;
+    for (const doc of Array.isArray(b.flows) ? b.flows : []) {
+      if (!doc?.id) continue;
+      if (!flows.has(doc.id)) saved.push({ id: saveFlow(doc, doc.id).flow.id, name: doc.name, created: true });
+      else if (conflict === 'replace') saved.push({ id: saveFlow(doc, doc.id).flow.id, name: doc.name, created: false });
+      else if (conflict === 'keepBoth') {
+        const id = freeId(doc.id);
+        saved.push({ id: saveFlow({ ...doc, name: `${doc.name} (2)` }, id).flow.id, name: `${doc.name} (2)`, created: true });
+      } else skipped++;
+    }
+    return json(res, 200, { saved, skipped, problems: [] }), true;
+  }
+  if (p === '/api/flows/ai-pack' && m === 'POST') {
+    // The real server writes the whole pack; the mock echoes what decides its "What is wrong now" part.
+    const b = await body();
+    const issues = b.include?.issues === false || !Array.isArray(b.issues) ? [] : b.issues.slice(0, 200);
+    const lines = ['# Dürbün flow pack (mock)', '', 'The real server writes the full pack here.', ''];
+    if (issues.length) lines.push('## What is wrong now', '', ...issues.map((i) => `- ${i.level} ${i.code}${i.nodeId ? ` (step "${i.nodeId}")` : ''}: ${i.message}`), '');
+    if (b.flowId && b.include?.lastRun !== false) lines.push(`(last failed run of ${b.flowId} added when there is one)`);
+    return json(res, 200, { markdown: lines.join('\n') }), true;
+  }
   const flowRoute = /^\/api\/flows\/([^/]+)(?:\/(duplicate|preflight|run|export))?$/.exec(p);
   if (flowRoute) {
     const id = decodeURIComponent(flowRoute[1]);
@@ -276,7 +423,7 @@ async function route(req, res, p, { json, readBody, broadcast }) {
       const { name } = await body();
       return json(res, 201, saveFlow({ ...flow, name: name || `${flow.name} (copy)` }, freeId(`${id}-copy`))), true;
     }
-    if (action === 'preflight') return json(res, 200, { ok: true, issues: [], irreversible: [], skipped: [] }), true;
+    if (action === 'preflight') return json(res, 200, { ok: true, issues: tlsIssues(flow, await body()), irreversible: [], skipped: [] }), true;
     if (action === 'run' && m === 'POST') return json(res, 201, { ...startRun(flow, await body(), broadcast), steps: [] }), true;
     if (action === 'export') return json(res, 200, flow, { 'Content-Disposition': `attachment; filename="${id}.flow.json"` }), true;
   }
@@ -306,7 +453,13 @@ async function route(req, res, p, { json, readBody, broadcast }) {
     return json(res, 200, run), true;
   }
   if (p === '/api/flow-environments') {
-    if (m === 'PUT') environments = { format: 'durbun-environments', version: 1, ...(await body()) };
+    if (m === 'PUT') {
+      const next = { format: 'durbun-environments', version: 1, ...(await body()) };
+      // Like the server: a CA that is not a PEM certificate is refused, nothing is saved.
+      const bad = next.environments?.find((e) => e.tls?.ca && !/-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/.test(e.tls.ca));
+      if (bad) return json(res, 400, { error: `${bad.name}: the certificate is not a PEM certificate (-----BEGIN CERTIFICATE-----)`, code: 'env.tls.invalidCa' }), true;
+      environments = next;
+    }
     return json(res, 200, environments), true;
   }
 

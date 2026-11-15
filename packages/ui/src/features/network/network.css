@@ -483,6 +483,25 @@
 .net-st-broken__icon {
   color: var(--danger);
 }
+.net-st-big {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.net-st-big__icon {
+  flex: none;
+  color: var(--warning);
+}
+.net-st-big__label {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border-strong));
+  color: var(--warning);
+  font-size: 10.5px;
+  line-height: 15px;
+  white-space: nowrap;
+}
 .net-dur--slow {
   color: var(--warning);
 }
@@ -608,6 +627,12 @@
     display: none;
   }
 }
+/* The header tools give their words up first, so the status ("500 Internal Server Error") keeps its line. */
+@container (max-width: 640px) {
+  .net-detail__tool .btn__label {
+    display: none;
+  }
+}
 .net-detail__head {
   display: flex;
   flex-direction: column;
@@ -621,9 +646,14 @@
   min-height: 26px;
 }
 .net-detail__method {
+  flex: none;
   font-size: 12px;
 }
 .net-hstatus {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-variant-ligatures: none;
   font-size: var(--fs-md);
@@ -643,6 +673,9 @@
 .net-hstatus--fail,
 .net-hstatus__fail {
   color: var(--st-fail);
+}
+.net-hstatus__fail--big {
+  color: var(--warning);
 }
 .net-hstatus--pending,
 .net-hstatus--cancel {

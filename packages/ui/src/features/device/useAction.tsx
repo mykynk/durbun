@@ -5,6 +5,8 @@ import { sendCommand } from '../../data';
 import { Callout, Card, IconButton, toast, type IconType } from '../../components';
 import { useT } from '../../i18n';
 import { describeError } from './codes';
+import type { DeviceSectionId } from './model';
+import { useDeviceRequest } from './request';
 
 export interface ActionError {
   title: string;
@@ -85,6 +87,20 @@ export function useDeviceAction(deviceId: string) {
   };
 }
 
+/**
+ * A default choice that stays put: once shown it is kept for as long as it is still offered, even when the list
+ * re-sorts under it (an app whose SDK disconnects drops down the app list — revoking a permission ends the app, so
+ * the next click must not land on another one).
+ */
+export function useStickyDefault(fallback: string | undefined, offered: (id: string) => boolean): string | undefined {
+  const [kept, setKept] = useState<string | undefined>(undefined);
+  const value = kept !== undefined && offered(kept) ? kept : fallback;
+  useEffect(() => {
+    if (value !== kept) setKept(value);
+  }, [value, kept]);
+  return value;
+}
+
 /** Inline error of the last failed action (dismissible). */
 export function ActionErrorCallout({ error, onDismiss }: { error: ActionError | null; onDismiss: () => void }) {
   const t = useT();
@@ -107,7 +123,7 @@ export function DeviceCard({
   children,
   className,
 }: {
-  section: string;
+  section: DeviceSectionId;
   title: ReactNode;
   icon: IconType;
   description?: ReactNode;
@@ -115,8 +131,9 @@ export function DeviceCard({
   children?: ReactNode;
   className?: string;
 }) {
+  const flash = useDeviceRequest((s) => s.flash === section);
   return (
-    <div className={className ? `dv-card ${className}` : 'dv-card'} data-section={section}>
+    <div className={className ? `dv-card ${className}` : 'dv-card'} data-section={section} data-flash={flash || undefined}>
       <Card title={title} icon={icon} description={description} actions={actions}>
         {children}
       </Card>

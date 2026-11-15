@@ -18,7 +18,7 @@ import {
 import { ActionErrorCallout, DeviceCard, useDeviceAction } from './useAction';
 
 /** Stateless choice buttons: the device does not report its current value, so the last applied one is marked. */
-function ChoiceButtons<T extends string>({
+export function ChoiceButtons<T extends string>({
   options,
   last,
   pendingKey,

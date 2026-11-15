@@ -85,7 +85,7 @@ import { bugReport } from '../report/store';
 import { Histogram } from './components/Histogram';
 import { ContextBar, CrashBanner, DroppedNote, IosScopeNote, NewLinesPill, PausedBar } from './components/Banners';
 import { NoLogsState, NoMatchState, type ActiveFilter } from './components/EmptyStates';
-import { CrashRecordsNote, ExplainEmpty, NotRunningNote, crashReaderText, crashRecordsState, useIosSystemLinesHidden } from '../../sources';
+import { ClockSkewNote, CrashRecordsNote, ExplainEmpty, NotRunningNote, crashReaderText, crashRecordsState, useIosSystemLinesHidden } from '../../sources';
 import { markApplying } from './hangGuard';
 import { HighlightRulesDialog, NoiseRulesDialog, SavedFiltersDialog } from './components/RulesDialogs';
 
@@ -1127,6 +1127,8 @@ export default function LogsView() {
       {/* The scoped app is closed but the list is not empty (its earlier lines, the device's own separators): say why
           nothing new arrives and offer to launch it. An empty list says the same in its empty state. */}
       {!empty ? <NotRunningNote capability="logs" className="lg-idle" /> : null}
+      {/* App lines carry the device's time: say so when that clock is far from the Mac's. */}
+      {!empty ? <ClockSkewNote session={compiledScope.app} className="lg-clock" /> : null}
       <SplitPane id="logs.detail" sizedPane="second" defaultSize={460} minSize={340} maxSize={0.62} collapsed={detail ? null : 'second'} onOverlayDismiss={() => setDetailOpen(false)} className="lg-split">
         <div className="lg-main">
           {!empty ? <HistogramSlot model={model} version={snap.version} win={win} onJump={onHistogramJump} /> : null}

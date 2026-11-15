@@ -22,10 +22,12 @@ export interface RunPanelProps {
   /** Opens the run target picker (a run that stopped for want of a device). */
   onPickTarget?(): void;
   onManageEnvironments?(): void;
+  /** Opens the AI pack for this flow (a failed run: the pack carries what failed). */
+  onAskAi?(): void;
 }
 
 /** The run under the canvas: live steps, the selected step's details, the report and the history of this flow. */
-export function RunPanel({ flow, runId, onRunId, onSelectNode, onRerun, onClose, onPickTarget, onManageEnvironments }: RunPanelProps) {
+export function RunPanel({ flow, runId, onRunId, onSelectNode, onRerun, onClose, onPickTarget, onManageEnvironments, onAskAi }: RunPanelProps) {
   const t = useT();
   const lang = useLanguage();
   const run = useFlows((s) => (runId ? s.runs[runId] : undefined));
@@ -95,7 +97,7 @@ export function RunPanel({ flow, runId, onRunId, onSelectNode, onRerun, onClose,
       {beforeFirst ? (
         <BeforeFirstStep run={run} onRerun={onRerun} onPickTarget={onPickTarget} onManageEnvironments={onManageEnvironments} />
       ) : run.status === 'failed' || run.status === 'cancelled' ? (
-        <RunErrorLine run={run} onSelectStep={(s) => setStepId(s.id)} failedStep={failedStep} />
+        <RunErrorLine run={run} onSelectStep={(s) => setStepId(s.id)} failedStep={failedStep} onAskAi={run.status === 'failed' ? onAskAi : undefined} />
       ) : null}
       {beforeFirst && !run.preflight?.length ? null : (
         <div className={clsx('fl-runpanel__body', stepId !== null && selected && 'has-pick', beforeFirst && 'is-empty')}>
@@ -224,7 +226,7 @@ function RunHeader({ run, flow, onRunId, onRerun, onClose, report }: { run: Flow
   );
 }
 
-function RunErrorLine({ run, failedStep, onSelectStep }: { run: FlowRun; failedStep?: FlowRunStep; onSelectStep(s: FlowRunStep): void }) {
+function RunErrorLine({ run, failedStep, onSelectStep, onAskAi }: { run: FlowRun; failedStep?: FlowRunStep; onSelectStep(s: FlowRunStep): void; onAskAi?(): void }) {
   const t = useT();
   const text = runErrorText(run) ?? (failedStep ? stepError(failedStep) : undefined);
   if (!text) return null;
@@ -235,6 +237,11 @@ function RunErrorLine({ run, failedStep, onSelectStep }: { run: FlowRun; failedS
       {failedStep ? (
         <button type="button" className="fl-link" onClick={() => onSelectStep(failedStep)}>
           {t('flows.runPanel.showFailed')}
+        </button>
+      ) : null}
+      {onAskAi ? (
+        <button type="button" className="fl-link" onClick={onAskAi}>
+          {t('flows.runPanel.askAi')}
         </button>
       ) : null}
     </div>

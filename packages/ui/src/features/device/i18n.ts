@@ -1,5 +1,6 @@
 import { registerMessages } from '../../i18n';
 import './codes';
+import './i18nTester';
 
 /** Device view dictionary (`device.*`; server codes live in codes.ts under `device.codes.*`). */
 registerMessages('device', {

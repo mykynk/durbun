@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { AppSession, ProcessUpdate } from '@durbun/protocol';
 import {
   APNS_TEMPLATES,
+  DEVICE_SECTIONS,
+  deviceColumns,
   IOS_CONTENT_SIZES,
   actionGroups,
   appActionParams,
@@ -34,12 +36,14 @@ import {
   parseCoordinate,
   parseCoordinatePair,
   parseInstalledApps,
+  permissionLabelKey,
   processRows,
   pushHistory,
   recordClock,
   recordLimitSec,
   recordResult,
   recordingExtension,
+  shortPermission,
   templateText,
   urlProblem,
   validateLocation,
@@ -318,5 +322,28 @@ describe('processes', () => {
     expect(processRows(byPid, sessions, 'SYSTEM', false).rows.map((x) => x.pid)).toEqual([1043]);
     expect(processRows(byPid, sessions, '10', false).rows.map((x) => x.pid)).toEqual([1043]);
     expect(processRows(undefined, [], '', false)).toEqual({ rows: [], total: 0, died: 0 });
+  });
+});
+
+describe('page sections and permission names', () => {
+  it('every card has one section id', () => {
+    expect(new Set(DEVICE_SECTIONS).size).toBe(DEVICE_SECTIONS.length);
+    // The device's own data comes before what a tester does to it.
+    expect(DEVICE_SECTIONS.indexOf('bug-report')).toBeLessThan(DEVICE_SECTIONS.indexOf('overrides'));
+  });
+  it('columns: device data left, actions right; a device with almost no actions gets its app cards on the right', () => {
+    expect(deviceColumns(['info', 'tools', 'apps', 'vm', 'processes', 'logs', 'bug-report', 'overrides', 'screenshot', 'open-url'])).toEqual({
+      left: ['info', 'tools', 'apps', 'vm', 'processes', 'logs', 'bug-report'],
+      right: ['overrides', 'screenshot', 'open-url'],
+    });
+    // An iPhone without developer tools: a screenshot and the "unavailable" list would sit next to four long cards.
+    expect(deviceColumns(['info', 'tools', 'apps', 'vm', 'screenshot', 'hidden'])).toEqual({ left: ['info', 'tools'], right: ['apps', 'vm', 'screenshot', 'hidden'] });
+    expect(deviceColumns(['info'])).toEqual({ left: ['info'], right: [] });
+  });
+  it('known permissions have a label key, the others keep their id', () => {
+    expect(permissionLabelKey('android.permission.CAMERA')).toBe('device.tester.app.perm.camera');
+    expect(permissionLabelKey('android.permission.BODY_SENSORS')).toBeUndefined();
+    expect(shortPermission('android.permission.BODY_SENSORS')).toBe('BODY_SENSORS');
+    expect(shortPermission('com.example.permission.FOO')).toBe('com.example.permission.FOO');
   });
 });

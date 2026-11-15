@@ -224,6 +224,11 @@ registerMessages('transfer', {
       saveFailed: 'Kaydedilemedi',
       loadFailed: 'Yedekleme ayarları okunamadı',
     },
+    prefsRestore: {
+      title: 'Ayarlarınız geri yüklendi',
+      desc: 'Bu adreste kayıtlı ayar yoktu; Dürbün’ün sakladığı kopyadan alındı (tema, dil, gürültü ve vurgu kuralları…).',
+      undo: 'Geri al',
+    },
   },
   en: {
     menu: {
@@ -443,6 +448,11 @@ registerMessages('transfer', {
       openPackage: 'Open a package…',
       saveFailed: 'Could not save',
       loadFailed: 'Could not read the backup settings',
+    },
+    prefsRestore: {
+      title: 'Your settings were restored',
+      desc: 'This address had no saved settings; they were taken from the copy Dürbün keeps (theme, language, noise and highlight rules…).',
+      undo: 'Undo',
     },
   },
 });

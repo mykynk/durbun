@@ -84,6 +84,7 @@ export const TimeChart = memo(function TimeChart(props: TimeChartProps) {
     const p = latest.current;
     const c = p.colors;
     let hovered = false;
+    let dragging = false;
     const tip = document.createElement('div');
     tip.className = 'pf-tip';
     tip.setAttribute('aria-hidden', 'true');
@@ -181,12 +182,20 @@ export const TimeChart = memo(function TimeChart(props: TimeChartProps) {
         ready: [
           (u) => {
             u.over.appendChild(tip);
-            u.over.addEventListener('mouseenter', () => {
-              hovered = true;
+            // `mousemove`, not `mouseenter`: after a range drag the page layout shifts (the range bar appears) and
+            // the pointer may no longer be over the plot without a `mouseleave`; the tooltip waits for a real move.
+            u.over.addEventListener('mousemove', () => {
+              hovered = !dragging;
             });
             u.over.addEventListener('mouseleave', () => {
               hovered = false;
               tip.style.display = 'none';
+            });
+            u.over.addEventListener('mousedown', () => {
+              dragging = true;
+              hovered = false;
+              tip.style.display = 'none';
+              window.addEventListener('mouseup', () => (dragging = false), { once: true });
             });
             report(u);
           },
@@ -196,6 +205,8 @@ export const TimeChart = memo(function TimeChart(props: TimeChartProps) {
           (u) => {
             const sel = u.select;
             if (!latest.current.onSelectRange || sel.width < 4) return;
+            hovered = false;
+            tip.style.display = 'none';
             const from = u.posToVal(sel.left, 'x');
             const to = u.posToVal(sel.left + sel.width, 'x');
             if (Number.isFinite(from) && Number.isFinite(to) && to > from) latest.current.onSelectRange(Math.round(from * 1000), Math.round(to * 1000));

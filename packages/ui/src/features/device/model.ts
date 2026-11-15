@@ -578,3 +578,122 @@ export function processRows(
   rows.sort((a, b) => Number(Boolean(b.appName)) - Number(Boolean(a.appName)) || Number(a.event === 'died') - Number(b.event === 'died') || a.name.localeCompare(b.name) || a.pid - b.pid);
   return { rows, total: all.length, died };
 }
+
+/* ───────────── Tester actions ───────────── */
+
+/** `userId` for app actions on a phone with several users: the picked one when it still exists, else the one in front. */
+export function selectedUserId(device: Pick<DeviceInfo, 'users'>, picked: number | undefined): number | undefined {
+  const users = device.users;
+  if (!users || users.length < 2) return undefined;
+  if (picked !== undefined && users.some((u) => u.id === picked)) return picked;
+  return (users.find((u) => u.current) ?? users.find((u) => u.kind === 'main') ?? users[0]!).id;
+}
+
+/** `bug-report` reply data (BugReportData), or null when it does not look like one. */
+export function deviceReportResult(data: unknown): { url: string; file?: string; bytes: number; durationSec: number } | null {
+  if (!data || typeof data !== 'object') return null;
+  const r = data as Record<string, unknown>;
+  if (typeof r.url !== 'string' || !r.url) return null;
+  return {
+    url: r.url,
+    ...(typeof r.file === 'string' ? { file: r.file } : {}),
+    bytes: typeof r.bytes === 'number' ? r.bytes : 0,
+    durationSec: typeof r.durationSec === 'number' ? r.durationSec : 0,
+  };
+}
+
+/** Refused install data (InstallRefusalData) when "uninstall and install" can fix it. */
+export function installRefusal(err: unknown): { packageId?: string } | null {
+  const data = (err && typeof err === 'object' ? (err as { data?: unknown }).data : undefined) as { packageId?: unknown; replaceable?: unknown } | undefined;
+  if (!data || typeof data !== 'object' || data.replaceable !== true) return null;
+  return typeof data.packageId === 'string' && data.packageId ? { packageId: data.packageId } : {};
+}
+
+/** Runtime permissions a tester changes most (Android); any other one can be typed. */
+export const ANDROID_PERMISSIONS: readonly { id: string; key: string }[] = [
+  { id: 'android.permission.CAMERA', key: 'camera' },
+  { id: 'android.permission.ACCESS_FINE_LOCATION', key: 'fineLocation' },
+  { id: 'android.permission.ACCESS_COARSE_LOCATION', key: 'coarseLocation' },
+  { id: 'android.permission.RECORD_AUDIO', key: 'microphone' },
+  { id: 'android.permission.POST_NOTIFICATIONS', key: 'notifications' },
+  { id: 'android.permission.READ_CONTACTS', key: 'contacts' },
+  { id: 'android.permission.READ_MEDIA_IMAGES', key: 'photos' },
+  { id: 'android.permission.READ_CALENDAR', key: 'calendar' },
+  { id: 'android.permission.BLUETOOTH_CONNECT', key: 'bluetooth' },
+  { id: 'android.permission.READ_PHONE_STATE', key: 'phone' },
+];
+
+/** Privacy services `simctl privacy` takes (iOS simulator), in the order a tester looks for them. */
+export const SIM_PRIVACY_SERVICES = ['location', 'location-always', 'photos', 'photos-add', 'contacts', 'contacts-limited', 'calendar', 'reminders', 'microphone', 'motion', 'media-library', 'siri', 'all'] as const;
+
+/** A permission as a person reads it ("android.permission.READ_SMS" → "READ_SMS"). */
+export function shortPermission(id: string): string {
+  return id.replace(/^android\.permission\./, '');
+}
+
+/** Message key of a permission the UI names ("Kamera"); undefined for one it knows only by its id. */
+export function permissionLabelKey(id: string): string | undefined {
+  const known = ANDROID_PERMISSIONS.find((p) => p.id === id);
+  return known ? `device.tester.app.perm.${known.key}` : undefined;
+}
+
+/**
+ * Cards of the Device page by their `data-section`, in reading order: the left column (the device's own data),
+ * then the right one (what a tester does to it). The jump strip lists the shown ones in this order.
+ */
+export const DEVICE_SECTIONS = [
+  'info',
+  'tools',
+  'apps',
+  'vm',
+  'processes',
+  'logs',
+  'bug-report',
+  'overrides',
+  'screenshot',
+  'open-url',
+  'app-access',
+  'connection',
+  'appearance',
+  'screen',
+  'dev-options',
+  'input',
+  'location',
+  'push',
+  'status-bar',
+  'record',
+  'hidden',
+] as const;
+export type DeviceSectionId = (typeof DEVICE_SECTIONS)[number];
+
+/** Cards about the device itself and what it holds; every other card is something a tester does to it. */
+const DEVICE_DATA_SECTIONS: ReadonlySet<DeviceSectionId> = new Set(['info', 'tools', 'apps', 'vm', 'processes', 'logs', 'bug-report']);
+/** With fewer action cards than this the right column is almost empty. */
+const SPARSE_ACTION_CARDS = 3;
+
+/**
+ * The two columns of the page for the cards that are shown: the device's own data on the left, tester actions on the
+ * right. A device with almost no actions (an iPhone without developer tools: a screenshot and the "unavailable" list)
+ * gets its Apps and Dart VM cards on the right too, so a long column does not sit next to a nearly empty one.
+ */
+export function deviceColumns(shown: readonly DeviceSectionId[]): { left: DeviceSectionId[]; right: DeviceSectionId[] } {
+  const left = shown.filter((s) => DEVICE_DATA_SECTIONS.has(s));
+  const right = shown.filter((s) => !DEVICE_DATA_SECTIONS.has(s));
+  if (right.length >= SPARSE_ACTION_CARDS) return { left, right };
+  const moves = (s: DeviceSectionId) => s === 'apps' || s === 'vm';
+  return { left: left.filter((s) => !moves(s)), right: [...left.filter(moves), ...right] };
+}
+
+/** App languages offered first (any BCP 47 tag works); 'system' = follow the phone. */
+export const APP_LOCALES = ['system', 'tr-TR', 'en-US', 'en-GB', 'de-DE', 'fr-FR', 'es-ES', 'ar', 'ru-RU', 'ja-JP'] as const;
+
+export const ROTATIONS = ['auto', 'portrait', 'landscape', 'reverse-portrait', 'reverse-landscape'] as const;
+
+/** The override Dürbün keeps for a setting (app-scoped ones per app and permission). */
+export function overrideOf(
+  device: Pick<DeviceInfo, 'settingOverrides'>,
+  action: DeviceActionId,
+  scope?: { appId?: string; key?: string },
+): NonNullable<DeviceInfo['settingOverrides']>[number] | undefined {
+  return device.settingOverrides?.find((o) => o.action === action && (o.appId ?? '') === (scope?.appId ?? '') && (o.key ?? '') === (scope?.key ?? ''));
+}

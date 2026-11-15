@@ -38,7 +38,7 @@ import {
 import { useT } from '../../../i18n';
 import { queryParams, reasonPhrase, requestCookies, responseCookies, type SetCookie } from '../model/http';
 import { COPY_FORMATS, type CopyFormat } from '../model/copyAs';
-import { shortErrorKey, splitError } from '../model/errors';
+import { shortErrorKey, splitError, tooLargeMessage } from '../model/errors';
 import { timingBreakdown, type Phase } from '../model/waterfall';
 import { FORMAT_LABEL, copyEntryAs, copyUrl, createMockFrom, downloadBody, exportHarFor, harFileName, harLabel, showInLogs } from '../actions';
 import { useNetworkDetail } from '../detailCache';
@@ -93,12 +93,12 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
         tools={
           <>
             {onReport && !gone ? <IconButton icon={Bug} size="sm" label={t('report.open')} onClick={onReport} /> : null}
-            <Button size="sm" variant="ghost" icon={Share2} onClick={onShare} title={t('network.share.title')}>
+            <Button size="sm" variant="ghost" icon={Share2} onClick={onShare} title={t('network.share.title')} aria-label={t('network.share.button')} className="net-detail__tool">
               {t('network.share.button')}
             </Button>
             <DropdownMenu items={copyItems} aria-label={t('network.menu.copyMenu')}>
               {(p) => (
-                <Button size="sm" variant="ghost" icon={Copy} iconRight={ChevronDown} {...p}>
+                <Button size="sm" variant="ghost" icon={Copy} iconRight={ChevronDown} aria-label={t('network.menu.copy')} title={t('network.menu.copy')} className="net-detail__tool" {...p}>
                   {t('network.menu.copy')}
                 </Button>
               )}
@@ -158,17 +158,22 @@ function StatusLine({ entry }: { entry: NetworkEntry }) {
   if (entry.state === 'cancelled') return <span className="net-hstatus net-hstatus--cancel">{t('network.status.cancelled')}</span>;
   const code = entry.status;
   const cls = code === undefined ? 'fail' : code >= 500 ? '5xx' : code >= 400 ? '4xx' : code >= 300 ? '3xx' : '2xx';
+  // One line, cut with "…" in a narrow panel; the full text on hover.
+  const failText = entry.tooLarge ? t('network.tooLarge.short') : t(`network.errors.${shortErrorKey(entry.error)}`);
+  const full = [code !== undefined ? `${code} ${entry.statusText || reasonPhrase(code) || ''}`.trim() : '', entry.state === 'failed' ? failText : '']
+    .filter(Boolean)
+    .join(' · ');
   return (
-    <span className={clsx('net-hstatus', `net-hstatus--${cls}`)}>
+    <span className={clsx('net-hstatus', `net-hstatus--${cls}`)} title={full}>
       {code !== undefined ? (
         <>
           <span className="tnum">{code}</span> {entry.statusText || reasonPhrase(code) || ''}
         </>
       ) : null}
       {entry.state === 'failed' ? (
-        <span className="net-hstatus__fail">
+        <span className={clsx('net-hstatus__fail', entry.tooLarge && 'net-hstatus__fail--big')}>
           {code !== undefined ? ' · ' : ''}
-          {t(`network.errors.${shortErrorKey(entry.error)}`)}
+          {failText}
         </span>
       ) : null}
     </span>
@@ -236,7 +241,9 @@ function GeneralTab({ entry }: { entry: NetworkEntry }) {
   const app = useApp(entry.appId);
   const device = useDevice(entry.deviceId);
   const rule = useMocks((s) => (entry.mockRuleId ? s.rules.find((r) => r.id === entry.mockRuleId) : undefined));
-  const err = useMemo(() => (entry.error ? splitError(entry.error) : null), [entry.error]);
+  // A part too large for Dürbün is said in the UI language instead of the server's English error.
+  const big = tooLargeMessage(entry, (n) => formatBytes(n));
+  const err = useMemo(() => (entry.error && !entry.tooLarge ? splitError(entry.error) : null), [entry.error, entry.tooLarge]);
   const rows = useMemo(() => {
     const out: KeyValueRow[] = [];
     const push = (key: string, value: ReactNode, copyValue?: string) => out.push({ key, value, copyValue: copyValue ?? (typeof value === 'string' ? value : undefined) });
@@ -278,7 +285,11 @@ function GeneralTab({ entry }: { entry: NetworkEntry }) {
 
   return (
     <div className="net-col net-scroll net-pad">
-      {entry.state === 'failed' ? (
+      {big ? (
+        <Callout tone="warn" title={t('network.tooLarge.title')} className="net-mb">
+          {t(`network.tooLarge.${big.key}`, big.params)}
+        </Callout>
+      ) : entry.state === 'failed' ? (
         <Callout tone="danger" title={t(`network.errors.${shortErrorKey(entry.error)}`)} className="net-mb">
           {entry.status !== undefined ? t('network.general.failedAfterHeaders') : null} {entry.error}
         </Callout>
@@ -340,8 +351,19 @@ function MessageTab({
       <div className="net-subnav">
         <SegmentedControl<Section> size="sm" value={section} onChange={setPref} options={sections.map((s) => ({ value: s, label: label(s), disabled: s !== 'body' && counts[s] === 0 }))} aria-label={t('network.sections.label')} />
       </div>
+      {entry.tooLarge?.part === which ? (
+        <div className="net-pad net-pad--b0">
+          <Callout tone="warn" compact>
+            {(() => {
+              const m = tooLargeMessage(entry, (n) => formatBytes(n))!;
+              return t(`network.tooLarge.${m.key}`, m.params);
+            })()}
+          </Callout>
+        </div>
+      ) : null}
       <div className="net-col net-subbody">
-        {section === 'body' ? <BodyViewer entry={entry} which={which} detail={detail} loading={loading} error={error} onRetry={onRetry} /> : null}
+        {/* The body of a part too large for Dürbün never arrived: the note above says so, no "no body" state. */}
+        {section === 'body' && entry.tooLarge?.part !== which ? <BodyViewer entry={entry} which={which} detail={detail} loading={loading} error={error} onRetry={onRetry} /> : null}
         {section === 'headers' ? (
           <div className="net-col net-scroll net-pad">
             <KeyValueTable

@@ -348,9 +348,15 @@ export interface AiPackRequest {
   flowId?: string;
   appId?: string;
   deviceId?: string;
-  include?: { schema?: boolean; requests?: boolean; flows?: boolean; environments?: boolean };
+  /** `issues` and `lastRun` (both on unless false): the flow's problems and what failed in its latest run. */
+  include?: { schema?: boolean; requests?: boolean; flows?: boolean; environments?: boolean; issues?: boolean; lastRun?: boolean };
+  /** Problems the UI has for the flow (the editor's, unsaved edits included); at most `AI_PACK_MAX_ISSUES`. */
+  issues?: FlowIssue[];
   language?: 'tr' | 'en';
 }
+
+/** Problems the server writes into one pack (aiPack.ts MAX_PACK_ISSUES). */
+export const AI_PACK_MAX_ISSUES = 200;
 
 /** The Markdown the user hands to their own AI (Dürbün never calls one). */
 export function aiPack(req: AiPackRequest, signal?: AbortSignal): Promise<{ markdown: string }> {

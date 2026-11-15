@@ -1,3 +1,5 @@
+import type { NetworkEntry } from '@durbun/protocol';
+
 /**
  * Short, localizable labels for transport errors as reported by the different SDKs
  * (dart:io SocketException/HandshakeException, OkHttp, URLSession NSURLError…, fetch/undici, Dürbün).
@@ -25,4 +27,21 @@ export function splitError(error: string | undefined): { type?: string; message:
   const m = /^([A-Za-z_$][\w$.]*(?:Exception|Error|Failure))(?::\s*|\s+)([\s\S]*)$/.exec(e);
   if (m && m[2]) return { type: m[1], message: m[2] };
   return { message: e };
+}
+
+/**
+ * Words for a request or response too large for Dürbün to receive (`NetworkEntry.tooLarge`), under
+ * `network.tooLarge.`: the long sentence and its params. Sizes 0 = unknown.
+ */
+export function tooLargeMessage(
+  e: Pick<NetworkEntry, 'tooLarge'>,
+  bytes: (n: number) => string,
+): { key: string; params: Record<string, string> } | undefined {
+  const big = e.tooLarge;
+  if (!big) return undefined;
+  const known = big.bytes > 0;
+  return {
+    key: `${big.part}${known ? '' : 'Unknown'}`,
+    params: { size: known ? bytes(big.bytes) : '', limit: big.limit > 0 ? bytes(big.limit) : '?' },
+  };
 }

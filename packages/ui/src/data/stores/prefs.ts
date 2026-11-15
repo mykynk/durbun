@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { detectLanguage, type Lang } from '../../i18n/core';
-import { readStorage, writeStorage } from '../../lib/persist';
+import { readStorage, STORAGE_PREFIX, writeStorage } from '../../lib/persist';
 
 export type ThemePref = 'system' | 'dark' | 'light';
 export type Density = 'compact' | 'comfortable';
@@ -102,6 +102,8 @@ export function defaultPrefs(): UiPrefs {
 }
 
 const STORAGE_KEY = 'prefs.v1';
+/** The preferences' localStorage key, without the `durbun.` prefix (lib/persist adds it). */
+export const PREFS_STORAGE_KEY = STORAGE_KEY;
 
 function pick<T extends string>(v: unknown, allowed: readonly T[], fallback: T): T {
   return typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
@@ -161,6 +163,13 @@ export interface PrefsActions {
 
 export type PrefsState = UiPrefs & PrefsActions;
 
+/**
+ * Whether this address had stored preferences when the page loaded. A new address (the Mac app moved from
+ * `localhost` to `127.0.0.1`, another port) starts with an empty localStorage: prefsSync then offers the
+ * server's copy instead of sending the defaults over it.
+ */
+export const PREFS_STORED_AT_LOAD = readStorage<unknown>(STORAGE_KEY, null) !== null;
+
 /** UI preferences, persisted to localStorage (`durbun.prefs.v1`). */
 export const usePrefs = create<PrefsState>()((set) => ({
   ...sanitizePrefs(readStorage<unknown>(STORAGE_KEY, null)),
@@ -199,14 +208,85 @@ function snapshot(s: PrefsState): UiPrefs {
   };
 }
 
+/**
+ * Several windows (the Mac app's, browser tabs) share one localStorage. Each window writes only the keys it
+ * changed over what is stored now, so it never puts back another window's older choices. Shared preferences
+ * follow other windows live (`storage` event); the window layout (`WINDOW_KEYS`) stays as this window has it.
+ */
+export const WINDOW_KEYS = ['lastTab', 'panelSizes', 'sidebarCollapsed'] as const satisfies readonly (keyof UiPrefs)[];
+const isWindowKey = (k: string): boolean => (WINDOW_KEYS as readonly string[]).includes(k);
+const same = (a: unknown, b: unknown): boolean => a === b || JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * What to store: the stored value with only the keys that changed in this window (`before` → `after`) put
+ * over it. Panel sizes merge per pane. Returns null when nothing changed.
+ */
+export function mergePrefsWrite(stored: unknown, before: UiPrefs, after: UiPrefs): Record<string, unknown> | null {
+  const base: Record<string, unknown> = stored && typeof stored === 'object' && !Array.isArray(stored) ? { ...(stored as Record<string, unknown>) } : { ...before };
+  let changed = false;
+  for (const k of Object.keys(after) as (keyof UiPrefs)[]) {
+    if (same(before[k], after[k])) continue;
+    changed = true;
+    if (k === 'panelSizes') {
+      const sizes: Record<string, unknown> = base.panelSizes && typeof base.panelSizes === 'object' ? { ...(base.panelSizes as Record<string, unknown>) } : {};
+      for (const id of new Set([...Object.keys(before.panelSizes), ...Object.keys(after.panelSizes)])) {
+        if (before.panelSizes[id] === after.panelSizes[id]) continue;
+        if (after.panelSizes[id] === undefined) delete sizes[id];
+        else sizes[id] = after.panelSizes[id];
+      }
+      base.panelSizes = sizes;
+    } else base[k] = after[k];
+  }
+  return changed ? base : null;
+}
+
+/** The shared preferences another window stored that differ from this window's (`current`). */
+export function sharedPrefsChange(storedRaw: unknown, current: UiPrefs): Partial<UiPrefs> {
+  if (!storedRaw || typeof storedRaw !== 'object') return {};
+  const incoming = sanitizePrefs(storedRaw);
+  const patch: Partial<UiPrefs> = {};
+  for (const k of Object.keys(incoming) as (keyof UiPrefs)[]) {
+    if (isWindowKey(k) || !(k in (storedRaw as object))) continue;
+    if (!same(incoming[k], current[k])) (patch as Record<string, unknown>)[k] = incoming[k];
+  }
+  return patch;
+}
+
+/** What this window last stored or took from storage: the base its next write is compared with. */
+let written: UiPrefs = snapshot(usePrefs.getState());
+
+function persistNow(): void {
+  const next = snapshot(usePrefs.getState());
+  const out = mergePrefsWrite(readStorage<unknown>(STORAGE_KEY, null), written, next);
+  written = next;
+  if (out) writeStorage(STORAGE_KEY, out);
+}
+
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
-usePrefs.subscribe((state) => {
+usePrefs.subscribe(() => {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    writeStorage(STORAGE_KEY, snapshot(state));
+    persistNow();
   }, 150);
 });
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== STORAGE_PREFIX + STORAGE_KEY || e.newValue == null) return;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(e.newValue);
+    } catch {
+      return;
+    }
+    const patch = sharedPrefsChange(raw, usePrefs.getState());
+    if (Object.keys(patch).length === 0) return;
+    // Taken as this window's base too, so the next write does not count them as this window's changes.
+    written = { ...written, ...patch };
+    usePrefs.setState(patch);
+  });
+}
 
 /** Write pending prefs immediately (e.g. on pagehide). */
 export function flushPrefs(): void {
@@ -214,5 +294,5 @@ export function flushPrefs(): void {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
-  writeStorage(STORAGE_KEY, snapshot(usePrefs.getState()));
+  persistNow();
 }

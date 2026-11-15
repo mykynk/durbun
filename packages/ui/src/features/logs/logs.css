@@ -393,6 +393,11 @@
   flex-shrink: 0;
   margin: 6px 8px 0;
 }
+.lg-clock {
+  flex-shrink: 0;
+  min-width: 0;
+  padding: 4px 12px 0;
+}
 
 /* ───────────── layout ───────────── */
 .lg-split {
@@ -833,6 +838,17 @@
   border: 1px dashed var(--border-strong);
   white-space: nowrap;
 }
+/* Facts the system adds to a line: start-up time, a memory kill, an earlier launch. Solid border = a measured fact. */
+.lg-startup,
+.lg-memkill,
+.lg-earlier {
+  border-style: solid;
+  color: var(--text-muted);
+}
+.lg-memkill.is-visible {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-strong));
+}
 .lg-repeat {
   display: inline-flex;
   align-items: center;
@@ -937,7 +953,8 @@
     inset 0 1px 0 color-mix(in srgb, var(--lv-error) 28%, transparent),
     inset 0 -1px 0 color-mix(in srgb, var(--lv-error) 28%, transparent);
 }
-.lg-crash--anr {
+.lg-crash--anr,
+.lg-crash--layout {
   --lg-edge: var(--lv-warn);
   background-color: color-mix(in srgb, var(--lv-warn) 10%, var(--bg-panel));
   box-shadow:
@@ -961,7 +978,8 @@
   color: var(--lv-error);
   margin-top: 1px;
 }
-.lg-crash--anr .lg-crash__icon {
+.lg-crash--anr .lg-crash__icon,
+.lg-crash--layout .lg-crash__icon {
   color: var(--lv-warn);
 }
 .lg-crash__main {
@@ -997,7 +1015,8 @@
   font-weight: 600;
   color: var(--lv-error);
 }
-.lg-crash--anr .lg-crash__kind {
+.lg-crash--anr .lg-crash__kind,
+.lg-crash--layout .lg-crash__kind {
   color: var(--lv-warn);
 }
 .lg-crash__src {
@@ -1093,6 +1112,17 @@
 }
 .lg-sep--warn .lg-sep__text {
   color: var(--text);
+}
+/* What the app did (a screen change, a lifecycle change): quieter than device / app separators. */
+.lg-sep--moment .lg-sep__rule {
+  background: var(--border);
+}
+.lg-sep--moment .lg-sep__text {
+  font-weight: 400;
+}
+.lg-sep__app {
+  color: var(--text-subtle);
+  white-space: nowrap;
 }
 /* A flapping connection merged into one separator (expandable list of the events). */
 .lg-flaprow {
@@ -1205,6 +1235,9 @@
   color: var(--text-subtle);
   font-family: var(--font-ui);
   font-size: var(--fs-xs);
+}
+.lg-net-big {
+  color: var(--warning);
 }
 .lg-net-error {
   color: var(--danger);
@@ -1474,6 +1507,16 @@
 .lg-kv__key {
   color: var(--text-muted);
   background: var(--bg-sunken);
+}
+.lg-kv__note {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  color: var(--text-meta);
+}
+.lg-kv__note--warn {
+  color: var(--warning);
 }
 .lg-kv__val {
   font-family: var(--font-mono);

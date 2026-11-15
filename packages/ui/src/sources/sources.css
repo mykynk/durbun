@@ -79,6 +79,25 @@
 .src-popover {
   padding: 0;
 }
+.src-more {
+  position: sticky;
+  bottom: 0;
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 30px;
+  margin-top: -30px;
+  padding-bottom: 3px;
+  pointer-events: none;
+  color: var(--text-muted);
+  background: linear-gradient(to bottom, transparent, var(--bg-elevated) 75%);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+.src-more--on {
+  opacity: 1;
+}
 .src-panel {
   display: flex;
   flex-direction: column;
@@ -427,4 +446,37 @@
 .src-crash-note--ok strong {
   color: var(--text);
   font-weight: 600;
+}
+
+/* The SDK line under an app's header, and its protocol notes. */
+.src-panel__sdk {
+  gap: 6px;
+}
+.src-mismatch {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.src-session {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.src-clock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-meta);
+}
+.src-clock > svg {
+  flex: none;
+}
+.src-clock--warn {
+  color: var(--warning);
 }

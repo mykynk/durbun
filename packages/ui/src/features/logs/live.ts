@@ -3,7 +3,9 @@ import type { LogEntry } from '@durbun/protocol';
 import { isCrashEntry, keptAfter, logStore, useConnection } from '../../data';
 import { isMarkedDuplicate, isTwinPair } from './model/dedupe';
 import { isPreviousLaunch } from './model/types';
-import { isVisibleMemoryKill } from './model/records';
+import { isLayoutError, isVisibleMemoryKill } from './model/records';
+
+export { isLayoutError };
 import { isDeviceCrashRecord } from '../../sources/text';
 
 /**
@@ -50,21 +52,6 @@ export function isQuietCrashRecord(e: LogEntry): boolean {
   if (isLayoutError(e)) return true;
   if (e.data === undefined) return false;
   return isMarkedDuplicate(e) || (isDeviceCrashRecord(e) && isPreviousLaunch(e));
-}
-
-const LAYOUT_TEXT =
-  /EXCEPTION CAUGHT BY RENDERING LIBRARY|\boverflowed by [\d.]+ pixels|BoxConstraints forces an infinite|unbounded (?:height|width)|was given unbounded|RenderBox was not laid out|was not laid out:|Cannot hit test a render box that has never been laid out/i;
-
-/**
- * A Flutter layout error (a RenderFlex overflow, unbounded constraints): the app keeps running and draws the yellow
- * and black stripes, and the framework reports it again on every rebuild. It stays a red row (and in the crash
- * filter) but is not a crash: no banner, no desktop notification.
- */
-export function isLayoutError(e: Pick<LogEntry, 'kind' | 'message' | 'data' | 'error'>): boolean {
-  if (e.kind !== 'flutter-error') return false;
-  const library = e.data && typeof e.data === 'object' ? (e.data as { library?: unknown }).library : undefined;
-  if (library === 'rendering library') return true;
-  return LAYOUT_TEXT.test(e.message.slice(0, 2000)) || (!!e.error?.message && LAYOUT_TEXT.test(e.error.message.slice(0, 2000)));
 }
 
 export function useLiveCrashes(scope: (e: LogEntry) => boolean, scopeKey: string, onCrash?: (e: LogEntry) => void): [LiveCrashState, (id: number) => void] {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSession, DeviceApp, DeviceInfo } from '@durbun/protocol';
-import { buildBadgeOf, buildKindOf, explainContext, hiddenDeviceCards, explainRow, explainSources, type ExplainCapability, type ExplainInput, type ExplainResult } from './explain';
+import { actionAvailability, anyActionShown, buildBadgeOf, buildKindOf, explainContext, hiddenDeviceActions, hiddenDeviceCards, explainRow, explainSources, type ExplainCapability, type ExplainInput, type ExplainResult } from './explain';
 
 /* ───────────── fixtures (shapes as the server sends them) ───────────── */
 
@@ -539,5 +539,45 @@ describe('hiddenDeviceCards', () => {
     expect(hiddenDeviceCards({ ...iphone([]), id: 'android:x', platform: 'android' })).toEqual([]);
     expect(hiddenDeviceCards({ ...iphone([]), id: 'ios-sim:x', kind: 'simulator' })).toEqual([]);
     expect(hiddenDeviceCards(iphone(['list-apps', 'open-url', 'screenshot', 'screen-record', 'logs-restart']))).toEqual([]);
+  });
+});
+
+describe('unavailable actions from the server', () => {
+  const dev = (extra: Partial<DeviceInfo> = {}) =>
+    ({ id: 'android:X', platform: 'android', kind: 'physical', state: 'online', actions: ['wifi', 'rotation'], ...extra }) as DeviceInfo;
+
+  it('says yes, blocked with the reason, or no', () => {
+    const d = dev({ unavailableActions: [{ action: 'airplane-mode', code: 'action.wouldDisconnect', params: { connection: 'wifi' } }] });
+    expect(actionAvailability(d, 'wifi')).toEqual({ state: 'yes' });
+    expect(actionAvailability(d, 'airplane-mode')).toEqual({ state: 'blocked', code: 'action.wouldDisconnect', params: { connection: 'wifi' } });
+    expect(actionAvailability(d, 'keychain-reset')).toEqual({ state: 'no' });
+    expect(actionAvailability({ ...d, state: 'offline' }, 'wifi')).toEqual({ state: 'no' });
+    expect(anyActionShown(d, ['airplane-mode', 'mobile-data'])).toBe(true);
+    expect(anyActionShown(d, ['mobile-data'])).toBe(false);
+  });
+
+  it('groups hidden actions by reason and leaves out the ones a card shows', () => {
+    const d = dev({
+      unavailableActions: [
+        { action: 'screenshot', code: 'action.developerModeOff' },
+        { action: 'open-url', code: 'action.developerModeOff' },
+        { action: 'wifi', code: 'action.wouldDisconnect', params: { connection: 'wifi' } },
+      ],
+    });
+    expect(hiddenDeviceActions(d, new Set(['wifi']))).toEqual([{ code: 'action.developerModeOff', actions: ['screenshot', 'open-url'] }]);
+    expect(hiddenDeviceActions(dev())).toBeUndefined();
+    const rec = dev({
+      unavailableActions: [
+        { action: 'screen-record', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'x' } },
+        { action: 'screen-record-stop', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'x' } },
+      ],
+    });
+    expect(hiddenDeviceActions(rec)?.map((g) => g.actions)).toEqual([['screen-record']]);
+  });
+
+  it('the iPhone guess is only the fallback for a server that does not say', () => {
+    const iphone = { id: 'ios:1', platform: 'ios', kind: 'physical', state: 'online', actions: [] } as unknown as DeviceInfo;
+    expect(hiddenDeviceCards(iphone).length).toBeGreaterThan(0);
+    expect(hiddenDeviceCards({ ...iphone, unavailableActions: [] })).toEqual([]);
   });
 });

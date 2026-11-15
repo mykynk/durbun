@@ -28,10 +28,14 @@ import { useCrashNotifications } from './shell/crashNotify';
 
 const NOTICE_KIND: Record<'info' | 'success' | 'warn' | 'error', ToastKind> = { info: 'info', success: 'success', warn: 'warn', error: 'error' };
 
+/** Notices the action that caused them already words in its own toast (with a follow-up button). */
+const SAID_IN_PLACE = new Set(['replay.tlsRejected', 'replay.tlsUnverified']);
+
 function useNoticeToasts(): void {
   useEffect(
     () =>
       onNotice((n) => {
+        if (n.code && SAID_IN_PLACE.has(n.code)) return;
         const { title, description } = noticeToastParts(n);
         toast({ kind: NOTICE_KIND[n.level] ?? 'info', title, description, duration: description && description.length > 90 ? 9000 : undefined });
       }),

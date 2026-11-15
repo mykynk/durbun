@@ -1,9 +1,9 @@
-import { useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { clsx } from 'clsx';
-import { BookOpen, CircleCheck, CircleDashed, CircleMinus, Info, Lightbulb, Play, Settings2, Stethoscope, type LucideIcon } from 'lucide-react';
+import { BookOpen, ChevronDown, CircleCheck, CircleDashed, CircleMinus, Clock, Info, Lightbulb, Play, Settings2, Stethoscope, type LucideIcon } from 'lucide-react';
 import { useT } from '../i18n';
 import { deviceDisplayName, logStatusText } from '../i18n/codes';
-import type { DeviceInfo } from '@durbun/protocol';
+import type { AppSession, DeviceInfo } from '@durbun/protocol';
 import type { BuildBadge, ExplainAction, ExplainBadge, ExplainCapability, ExplainReason, ExplainRow, ExplainStatus } from '../data/explain';
 import { buildBadgeOf } from '../data/explain';
 import { ui } from '../data/stores/ui';
@@ -12,7 +12,7 @@ import { Button, IconButton } from '../components/Button';
 import { Callout, EmptyState } from '../components/Layout';
 import { Popover } from '../components/Popover';
 import { Tooltip } from '../components/Tooltip';
-import type { IconType } from '../components/Icons';
+import { sdkLabel, type IconType } from '../components/Icons';
 import { formatRelative } from '../lib/format';
 import {
   TIP_ACTIONS,
@@ -36,6 +36,7 @@ import {
 } from './text';
 import { idleApp, pickEmptyReason, useAppExplain, useCrashRecordsState, useIdleApp, useIosSystemLinesHidden, useScopeExplain, type EmptyExplanation, type ExplainedApp } from './model';
 import { actionAvailable, runExplainAction } from './actions';
+import { clockSkewOf, clockSkewText, protocolMismatchText, protocolText } from './session';
 import './sources.css';
 
 /* ───────────── badges ───────────── */
@@ -221,7 +222,57 @@ function PanelHeader({ item }: { item: ExplainedApp }) {
         <span className="mono truncate selectable">{item.group.bundleId}</span>
         {da?.crashReports ? <span>{t('sources.crashReports', { count: da.crashReports })}</span> : null}
       </div>
+      {item.group.latest ? <SdkLine session={item.group.latest} /> : null}
     </div>
+  );
+}
+
+/** "Flutter · durbun 0.3.0 · protokol 2", with a badge when the SDK and Dürbün speak different protocols. */
+function SdkLine({ session }: { session: AppSession }) {
+  const mismatch = protocolMismatchText(session);
+  const proto = protocolText(session);
+  return (
+    <div className="src-panel__sub src-panel__sdk">
+      <span className="truncate">{[sdkLabel(session.sdk.platform), `${session.sdk.name} ${session.sdk.version}`, proto].filter(Boolean).join(' · ')}</span>
+      {mismatch ? (
+        <Tooltip content={mismatch.body}>
+          <span className="src-mismatch" tabIndex={0}>
+            {mismatch.label}
+          </span>
+        </Tooltip>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * What an app session says about itself that matters when reading its data: a protocol mismatch (one line,
+ * what to update) and a device clock far from the Mac's. Null when neither applies.
+ */
+export function SessionNotes({ session, className }: { session: AppSession | undefined; className?: string }) {
+  if (!session) return null;
+  const mismatch = protocolMismatchText(session);
+  const skew = clockSkewOf(session);
+  if (!mismatch && !skew) return null;
+  return (
+    <div className={clsx('src-session', className)}>
+      {/* The badge in the header names what to update; this line says why. */}
+      {mismatch ? <p className="src-clock src-clock--warn">{mismatch.body}</p> : null}
+      <ClockSkewNote session={session} />
+    </div>
+  );
+}
+
+/** One quiet line when the device clock is far from the Mac's (app info, above the log list). */
+export function ClockSkewNote({ session, className }: { session: AppSession | undefined; className?: string }) {
+  const t = useT();
+  const skew = clockSkewOf(session);
+  if (!skew) return null;
+  return (
+    <p className={clsx('src-clock', className)} title={t('sources.session.clock.hint')}>
+      <Clock size={12} aria-hidden />
+      <span className="truncate">{clockSkewText(skew)}</span>
+    </p>
   );
 }
 
@@ -235,6 +286,7 @@ export function SourcesPanel({ item, onNavigate }: { item: ExplainedApp; onNavig
     <div className="src-panel" onClick={(e) => (e.target as HTMLElement).closest('button') && onNavigate?.()}>
       <PanelHeader item={item} />
       <p className="src-panel__summary">{summaryText(item.result.badge, ctx)}</p>
+      <SessionNotes session={item.group.latest} />
       {notes.map((n) => (
         <Callout key={n} tone="info" compact className="src-note">
           <RichText text={reasonText(n, ctx, undefined, reasonOptions(item.input.device))} />
@@ -301,7 +353,36 @@ function SourcesPopover({ groupKey, anchor, onClose }: { groupKey: string; ancho
   return (
     <Popover open anchor={anchor} onClose={onClose} side="right" align="start" width={400} aria-label={t('sources.title')} className="src-popover">
       {item ? <SourcesPanel item={item} onNavigate={onClose} /> : <p className="src-panel__summary">{t('sources.notRunningShort')}</p>}
+      <MoreBelow />
     </Popover>
+  );
+}
+
+/**
+ * A fade with a chevron at the bottom of a scrolling panel while more of it is below (macOS hides scrollbars, so
+ * a cut-off panel otherwise looks complete). Place it last inside the scroll container.
+ */
+function MoreBelow() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+  useEffect(() => {
+    const box = ref.current?.parentElement;
+    if (!box) return;
+    const check = () => setMore(box.scrollHeight - box.scrollTop - box.clientHeight > 4);
+    check();
+    box.addEventListener('scroll', check, { passive: true });
+    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(check);
+    ro?.observe(box);
+    if (box.firstElementChild) ro?.observe(box.firstElementChild);
+    return () => {
+      box.removeEventListener('scroll', check);
+      ro?.disconnect();
+    };
+  }, []);
+  return (
+    <div ref={ref} className={clsx('src-more', more && 'src-more--on')} aria-hidden>
+      <ChevronDown size={14} />
+    </div>
   );
 }
 

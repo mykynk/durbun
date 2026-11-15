@@ -1,6 +1,7 @@
 import type { LogEntry } from '@durbun/protocol';
 import { formatClock, formatDateTime } from '../../../lib/format';
 import { entryOrigin, isDeviceCrashRecord, isUnsymbolicated } from '../../../sources/text';
+import { exitMemoryKill } from './appEvents';
 
 /**
  * Facts the device's own crash / ANR records carry (Android dropbox, iOS .ips — SPEC §10.3) that the rows and
@@ -82,22 +83,40 @@ export function crashWhen(e: Pick<LogEntry, 'ts' | 'origin' | 'data'>, now = Dat
  * 'jetsam' / 'low-memory'. `visible` is the one the user was looking at (iOS frontmost, Android visible adj): to a
  * tester that is a crash; background kills are routine.
  */
-export function memoryKill(e: Pick<LogEntry, 'data'>): { visible: boolean } | undefined {
+export function memoryKill(e: Pick<LogEntry, 'data'> & Partial<Pick<LogEntry, 'source'>>): { visible: boolean } | undefined {
   const d = data(e);
   const kind = d?.termination;
   if (kind === 'jetsam') return { visible: d?.frontmost === true };
   if (kind === 'low-memory') return { visible: d?.visible === true };
-  return undefined;
+  // The SDK's report of an earlier launch the low-memory killer ended (Android `ApplicationExitInfo`).
+  return exitMemoryKill(e);
 }
 
 /** A memory kill of the app on screen: it raises the crash banner and joins the crash filter. */
-export function isVisibleMemoryKill(e: Pick<LogEntry, 'data'>): boolean {
+export function isVisibleMemoryKill(e: Pick<LogEntry, 'data'> & Partial<Pick<LogEntry, 'source'>>): boolean {
   return memoryKill(e)?.visible === true;
 }
 
 /** Android "Displayed …: +612ms" lines (`data.startup`): how long the screen took to appear, and whether it was the full draw. */
 export function appStartupOf(e: Pick<LogEntry, 'data'>): { ms: number; total?: number; fullyDrawn: boolean } | undefined {
-  const s = data(e)?.startup as { ms?: unknown; total?: unknown; kind?: unknown } | undefined;
+  // The server sends `totalMs` (the whole launch of several activities); `total` is read too for older copies.
+  const s = data(e)?.startup as { ms?: unknown; totalMs?: unknown; total?: unknown; kind?: unknown } | undefined;
   if (!s || typeof s !== 'object' || typeof s.ms !== 'number') return undefined;
-  return { ms: s.ms, ...(typeof s.total === 'number' ? { total: s.total } : {}), fullyDrawn: s.kind === 'fully-drawn' };
+  const total = typeof s.totalMs === 'number' ? s.totalMs : typeof s.total === 'number' ? s.total : undefined;
+  return { ms: s.ms, ...(total !== undefined ? { total } : {}), fullyDrawn: s.kind === 'fully-drawn' };
+}
+
+const LAYOUT_TEXT =
+  /EXCEPTION CAUGHT BY RENDERING LIBRARY|\boverflowed by [\d.]+ pixels|BoxConstraints forces an infinite|unbounded (?:height|width)|was given unbounded|RenderBox was not laid out|was not laid out:|Cannot hit test a render box that has never been laid out/i;
+
+/**
+ * A Flutter layout error (a RenderFlex overflow, unbounded constraints): the app keeps running and draws the yellow
+ * and black stripes, and the framework reports it again on every rebuild. It stays a red row (and in the crash
+ * filter) but is not a crash: no banner, no desktop notification.
+ */
+export function isLayoutError(e: Pick<LogEntry, 'kind' | 'message' | 'data' | 'error'>): boolean {
+  if (e.kind !== 'flutter-error') return false;
+  const library = e.data && typeof e.data === 'object' ? (e.data as { library?: unknown }).library : undefined;
+  if (library === 'rendering library') return true;
+  return LAYOUT_TEXT.test(e.message.slice(0, 2000)) || (!!e.error?.message && LAYOUT_TEXT.test(e.error.message.slice(0, 2000)));
 }

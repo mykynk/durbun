@@ -122,6 +122,22 @@ describe('is:', () => {
     expect(compile('is:oom level:error').test(entry({ message: 'x', level: 'info', data: { termination: 'low-memory' } }))).toBe(false);
   });
 
+  it('the SDK’s report of how an earlier launch ended joins oom and anr', () => {
+    const exit = (exitReason: string, extra: Partial<LogEntry> = {}) =>
+      entry({ source: 'app', tag: 'app-exit', message: 'previous launch', data: { previousLaunch: true, exitReason, importance: 'foreground' }, ...extra });
+    expect(compile('is:oom').test(exit('lowMemory'))).toBe(true);
+    expect(compile('is:oom').test(exit('crashNative'))).toBe(false);
+    expect(compile('is:anr').test(exit('anr', { tag: 'crash', kind: 'crash' }))).toBe(true);
+    // Only an SDK line: the same data on a device line is not a report.
+    expect(compile('is:oom').test(exit('lowMemory', { source: 'device' }))).toBe(false);
+  });
+
+  it('nav = screen changes (navigation events with a route)', () => {
+    expect(compile('is:nav').test(entry({ kind: 'event', message: 'navigation', data: { from: 'Home', to: 'Cart' } }))).toBe(true);
+    expect(compile('is:nav').test(entry({ kind: 'event', message: 'navigation', data: {} }))).toBe(false);
+    expect(compile('is:nav').test(entry({ kind: 'event', message: 'purchase', data: { to: 'Cart' } }))).toBe(false);
+  });
+
   it('error = level ≥ error (iOS fault is error, not fatal)', () => {
     expect(matches('is:error')).toEqual(matches('level:error'));
     expect(matches('is:error')).toContain('iosFault');

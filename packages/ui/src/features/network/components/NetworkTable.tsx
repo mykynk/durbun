@@ -1,13 +1,14 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowDownNarrowWide, ArrowUpWideNarrow, CircleAlert, Drama } from 'lucide-react';
+import { ArrowDown, ArrowDownNarrowWide, ArrowUpWideNarrow, CircleAlert, Drama, FileWarning } from 'lucide-react';
 import type { NetworkEntry } from '@durbun/protocol';
 import { networkStore } from '../../../data';
 import { MethodBadge, StatusBadge, Tooltip, formatBytes, formatClock, formatDuration, formatNumber, useElementSize } from '../../../components';
 import { t, type Lang } from '../../../i18n';
 import { columnWidth, fitColumns, gridTemplate, minTableWidth, type ColumnDef, type ColumnId, type ColumnPrefs, type SortKey, type SortState } from '../model/columns';
 import { shortTypeLabel } from '../model/filters';
+import { tooLargeMessage } from '../model/errors';
 
 /** Where a row menu opens: the pointer, or the selected row for the keyboard. */
 export interface MenuPoint {
@@ -358,7 +359,8 @@ interface RowProps {
 }
 
 function rowTone(e: NetworkEntry): string | undefined {
-  if (e.state === 'failed') return 'net-row--fail';
+  // Too large to keep is not a failed request: the status cell marks it.
+  if (e.state === 'failed' && !e.tooLarge) return 'net-row--fail';
   if (typeof e.status === 'number' && e.status >= 500) return 'net-row--5xx';
   if (typeof e.status === 'number' && e.status >= 400) return 'net-row--4xx';
   return undefined;
@@ -402,6 +404,22 @@ const Row = memo(
 );
 
 function StatusCell({ e }: { e: NetworkEntry }) {
+  if (e.tooLarge) {
+    // Not a network failure: the app sent or got it, Dürbün could not take it in.
+    const m = tooLargeMessage(e, (n) => formatBytes(n))!;
+    return (
+      <span className="net-st-big" title={`${t('network.tooLarge.short')} · ${t(`network.tooLarge.${m.key}`, m.params)}`}>
+        {typeof e.status === 'number' ? (
+          <>
+            <StatusBadge status={e.status} state="complete" statusText={e.statusText} />
+            <FileWarning size={11} className="net-st-big__icon" aria-label={t('network.tooLarge.short')} />
+          </>
+        ) : (
+          <span className="net-st-big__label">{t('network.tooLarge.short')}</span>
+        )}
+      </span>
+    );
+  }
   if (e.state === 'cancelled') {
     return (
       <span className="status net-st-cancel" title={e.error || t('network.status.cancelled')}>
@@ -426,7 +444,7 @@ function PathCell({ e }: { e: NetworkEntry }) {
     return <span className="net-dim net-noreq">{t('network.table.responseOnly')}</span>;
   }
   const { pathname, query } = splitPathQuery(displayUrl(e.path || e.url));
-  const errKey = e.state === 'failed' ? shortErrorKey(e.error) : null;
+  const errKey = e.state === 'failed' && !e.tooLarge ? shortErrorKey(e.error) : null;
   return (
     <>
       <span className="net-path truncate" title={e.url}>
@@ -478,7 +496,7 @@ function WaterfallCell({ e, range, now }: { e: NetworkEntry; range: TimeRange | 
   const bar = barLayout(e, range, now);
   const breakdown = timingBreakdown(e);
   const total = breakdown.total ?? 0;
-  const tone = e.state === 'failed' ? 'fail' : e.state === 'cancelled' ? 'cancel' : e.state === 'pending' ? 'pending' : 'ok';
+  const tone = e.state === 'failed' && !e.tooLarge ? 'fail' : e.state === 'cancelled' ? 'cancel' : e.state === 'pending' ? 'pending' : 'ok';
   return (
     <span className="net-wf" aria-hidden>
       <span className={clsx('net-wf__bar', `net-wf__bar--${tone}`, bar.open && 'is-open')} style={{ left: `${bar.left * 100}%`, width: `${bar.width * 100}%` }}>

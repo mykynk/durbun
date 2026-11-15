@@ -3,7 +3,7 @@
  * Dürbün UI dev mock — a stand-in for the real server so the UI can be built and judged without
  * hardware. Node + `ws` only.
  *
- *   node packages/ui/dev/mock-server.mjs [--port 9799] [--empty] [--rate 30]
+ *   node packages/ui/dev/mock-server.mjs [--port 9799] [--empty] [--no-flows] [--rate 30]
  *   DURBUN_SERVER=http://127.0.0.1:9799 npx vite --port 5179     (from packages/ui)
  *
  * WS /ui: hello → snapshot (3 devices, 3 apps + an older session, device apps, mocks, drivers) → ~2000
@@ -16,6 +16,7 @@
  * log origins, dropbox / .ips crash records (one marked `duplicateOf`, one with a downloadable .ips),
  * device readers (frame stats without data on the Pixel, dropbox refused on the Galaxy) and SDK layers.
  * `--empty` starts with no devices (onboarding); `demo.set {enabled:true}` then fills everything.
+ * `--no-flows` starts the Flows tab empty (its welcome page with the starter flows).
  */
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
@@ -70,8 +71,8 @@ const server = () => ({
   platform: 'darwin',
 });
 
-const ANDROID_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'logs-clear-buffer', 'logs-restart', 'appearance', 'font-scale', 'animations', 'input-text', 'key-event', 'screen-record', 'screen-record-stop'];
-const SIM_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'appearance', 'font-scale', 'push-notification', 'location', 'status-bar', 'logs-restart', 'screen-record', 'screen-record-stop'];
+const ANDROID_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'logs-clear-buffer', 'logs-restart', 'appearance', 'font-scale', 'animations', 'input-text', 'key-event', 'screen-record', 'screen-record-stop', 'app-permission', 'app-settings', 'app-locale', 'airplane-mode', 'wifi', 'mobile-data', 'rotation', 'dont-keep-activities', 'bug-report', 'bug-report-cancel'];
+const SIM_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'appearance', 'font-scale', 'push-notification', 'location', 'status-bar', 'logs-restart', 'screen-record', 'screen-record-stop', 'app-permission', 'keychain-reset'];
 
 function baseDevices() {
   return [
@@ -85,8 +86,22 @@ function baseDevices() {
       osVersion: '15',
       apiLevel: 35,
       serial: 'R5CT20XK9QM',
+      hardwareSerial: 'R5CT20XK9QM',
       connection: 'usb',
+      // Wireless debugging is on too: USB in use, Wi-Fi on standby (DeviceInfo.connections).
+      connections: ['usb', 'wifi'],
       state: 'online',
+      // Settings Dürbün changed earlier (the server keeps them per action, app-scoped ones per app and permission).
+      settingOverrides: [
+        { action: 'animations', previous: '1', current: '0', since: startedAt - 1_200_000 },
+        { action: 'mobile-data', previous: 'on', current: 'off', since: startedAt - 900_000 },
+        { action: 'app-permission', appId: 'com.mykynk.pati', key: 'android.permission.CAMERA', previous: 'granted', current: 'revoked', since: startedAt - 600_000 },
+      ],
+      // A work profile: app actions take a userId.
+      users: [
+        { id: 0, name: 'Owner', kind: 'main', running: true, current: true },
+        { id: 10, name: 'Work profile', kind: 'work', running: true },
+      ],
       battery: { level: 82, charging: true },
       screen: { width: 1080, height: 2400, density: 420 },
       logs: { status: 'streaming', via: 'logcat' },
@@ -130,6 +145,14 @@ function baseDevices() {
       battery: { level: 64, charging: false },
       logs: { status: 'streaming', via: 'idevicesyslog' },
       actions: ['screenshot', 'list-apps', 'app-launch', 'app-stop'],
+      // Why the other iPhone actions are missing (the server says it per action).
+      unavailableActions: [
+        { action: 'open-url', code: 'action.developerModeOff' },
+        { action: 'screen-record', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)' } },
+        { action: 'screen-record-stop', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)' } },
+        { action: 'app-install', code: 'action.developerModeOff' },
+        { action: 'app-uninstall', code: 'action.developerModeOff' },
+      ],
       readers: {
         crashReports: { status: 'ok', lastOk: Date.now() },
         frameStats: { status: 'unsupported', code: 'reader.frameStats.unsupported', detail: 'iOS does not give the frame timing of an app to the Mac' },
@@ -184,6 +207,10 @@ function baseApps() {
       capabilities: caps,
       actions: FLUTTER_ACTIONS,
       stats: { logs: 0, requests: 0, errors: 0 },
+      sdkProtocol: 1,
+      // The phone's clock runs 47 s behind the Mac (Mac minus device, ms).
+      clockOffsetMs: 47_260,
+      clockOffsetAccuracyMs: 180,
     },
     {
       id: 'app:3',
@@ -197,6 +224,11 @@ function baseApps() {
       capabilities: ['logs', 'network', 'mocks', 'metrics', 'events', 'crash'],
       actions: [],
       stats: { logs: 0, requests: 0, errors: 0 },
+      // A newer SDK build than this Dürbün: the server reports what to update.
+      sdkProtocol: 2,
+      protocolMismatch: 'sdk-newer',
+      clockOffsetMs: 320,
+      clockOffsetAccuracyMs: 40,
     },
     {
       id: 'app:4',
@@ -349,6 +381,8 @@ function genDeviceOnlyLog(ts) {
       ['KumbaraWidget', 'Widget refreshed (2 goals)', 'debug'],
       ['FirebaseMessaging', 'Token refreshed', 'debug'],
     ]);
+    // system_server's "Displayed" line: the server moves it to the app and adds `data.startup` (android/logcat.ts).
+    if (tag === 'ActivityTaskManager') return logEntry({ ts, deviceId: PIXEL, source: 'device', level, tag, message, pid: 14210, process: 'com.mykynk.kumbara', data: { startup: { app: 'com.mykynk.kumbara', activity: '.MainActivity', kind: 'displayed', ms: 412 }, reporterPid: 1203 } });
     return logEntry({ ts, deviceId: PIXEL, source: 'device', level, tag, message, pid, tid: pid, process: pid === 14388 ? 'com.mykynk.kumbara:widget' : 'com.mykynk.kumbara' });
   }
   const [tag, message, level] = pick([
@@ -393,6 +427,15 @@ function genLog(ts) {
     const data = chance(0.45) ? { userId: int(1, 9999), screen: pick(['Home', 'PetDetail', 'Cart', 'Checkout']), items: [{ sku: 'MAMA-2KG', qty: 2 }, { sku: 'TASMA-M', qty: 1 }], durationMs: int(8, 900) } : undefined;
     const a = apps.find((x) => x.id === appId);
     return logEntry({ ts, deviceId: a?.deviceId ?? PIXEL, appId, source: 'app', level, tag, message: pick(msgs[tag]), data, tid: 1 });
+  }
+  if (r < 0.875) {
+    // Screen changes (navigator observer / trackNavigation) and Flutter lifecycle lines, as the SDKs send them.
+    const appId = pick(['app:2', 'app:4']);
+    const deviceId = appId === 'app:4' ? SIM : PIXEL;
+    if (chance(0.25)) return logEntry({ ts, deviceId, appId, source: 'app', level: 'info', tag: 'lifecycle', message: `AppLifecycleState.${pick(['paused', 'resumed', 'inactive', 'hidden'])}` });
+    const to = pick(['Home', 'PetDetail', 'Cart', 'Checkout', 'Profile']);
+    const from = pick(['Home', 'PetDetail', 'Cart']);
+    return logEntry({ ts, deviceId, appId, source: 'app', level: 'info', tag: 'event', kind: 'event', message: 'navigation', data: from === to ? { to } : { from, to } });
   }
   if (r < 0.9) {
     const appId = pick(['app:2', 'app:4']);
@@ -607,12 +650,97 @@ function seedHistory() {
     if (i === 1500) logs.push(logEntry({ ts, deviceId: PIXEL, source: 'system', level: 'info', tag: 'durbun', kind: 'marker', code: 'marker', params: { label: 'Payment flow test', n: 1 }, message: 'Payment flow test' }));
     if (i === 1200) logs.push(...kumbaraCrash(ts));
     if (i === 1700) logs.push(kumbaraIpsCrash(ts));
+    if (i === 1850) logs.push(...showcaseLines(ts));
   }
+  showcaseRequests();
   for (let i = 0; i < 60; i++) {
     const r = makeRequest(pick(['app:2', 'app:3', 'app:4']));
     const d = network.get(r.id);
     d.startTs = Date.now() - int(5_000, 500_000);
   }
+}
+
+/**
+ * One of each line the newer servers and SDKs send, with their real shapes, so each row style can be seen:
+ * an Android low-memory kill (android/logcat.ts), earlier-launch reports (Android ExitReports.kt, iOS
+ * SystemDiagnostics.swift), and the SDK diagnostics system lines (server sdk/diagnostics.ts, sdk/layer.ts).
+ */
+function showcaseLines(ts) {
+  const pati = { app: 'Pati', bundleId: 'com.mykynk.pati' };
+  const at = (n) => ts + n * 40;
+  return [
+    logEntry({ ts: at(0), deviceId: PIXEL, appId: 'app:2', source: 'device', level: 'error', tag: 'lowmemorykiller', pid: 12345, process: 'com.mykynk.pati',
+      message: "Kill 'com.mykynk.pati' (12345), uid 10234, oom_score_adj 0 to free 182340kB rss, 2048kB swap; reason: low watermark is breached",
+      data: { termination: 'low-memory', reporterPid: 512, process: 'com.mykynk.pati', pid: 12345, adj: 0, visible: true, freedKb: 182340, reason: 'low watermark is breached' } }),
+    logEntry({ ts: at(1), deviceId: PIXEL, source: 'device', level: 'info', tag: 'ActivityTaskManager', pid: 12345, process: 'com.mykynk.pati',
+      message: 'Fully drawn com.mykynk.pati/.MainActivity: +1s240ms (total +1s610ms)',
+      data: { startup: { app: 'com.mykynk.pati', activity: '.MainActivity', kind: 'fully-drawn', ms: 1240, totalMs: 1610 }, reporterPid: 1203 } }),
+    // Kasa (Kotlin SDK): how its earlier launches ended (ApplicationExitInfo).
+    logEntry({ ts: at(2), deviceId: PIXEL, appId: 'app:3', source: 'app', level: 'warn', tag: 'app-exit', kind: 'text',
+      message: 'Previous launch was ended by Android in the foreground to free memory (low memory killer).',
+      data: { previousLaunch: true, exitReason: 'lowMemory', exitedAt: ts - 3_600_000, pid: 12011, processName: 'com.mykynk.kasa', importance: 'foreground', pssMB: 312.4, rssMB: 388.1 } }),
+    logEntry({ ts: at(3), deviceId: PIXEL, appId: 'app:3', source: 'app', level: 'fatal', tag: 'crash', kind: 'crash',
+      message: 'Previous launch ended: App Not Responding (ANR). The main thread was blocked, so Android closed the app.',
+      error: { type: 'ANR', message: 'Input dispatching timed out (Waiting to send non-key event because the touched window has not finished processing certain input events)', stack: '"main" prio=5 tid=1 Blocked\n  at com.mykynk.kasa.sync.SyncRepository.load(SyncRepository.kt:88)\n  - waiting to lock <0x0a1b2c3d> held by thread 14\n  at com.mykynk.kasa.ui.BalanceViewModel.refresh(BalanceViewModel.kt:41)' },
+      data: { previousLaunch: true, exitReason: 'anr', exitedAt: ts - 2_400_000, pid: 12088, processName: 'com.mykynk.kasa', importance: 'foreground', description: 'Input dispatching timed out' } }),
+    // Pati on iOS (MetricKit): a hang and a slow launch of earlier launches.
+    logEntry({ ts: at(4), deviceId: SIM, appId: 'app:4', source: 'app', level: 'warn', tag: 'app-diagnostics', kind: 'text',
+      message: 'The main thread hung for 2.4 s in an earlier launch (reported by iOS).',
+      data: { previousLaunch: true, source: 'MetricKit', diagnostic: 'hang', appVersion: '1.4.2', appBuild: '42', osVersion: 'iPhone OS 18.2', durationSeconds: 2.4 } }),
+    logEntry({ ts: at(5), deviceId: SIM, appId: 'app:4', source: 'app', level: 'warn', tag: 'app-diagnostics', kind: 'text',
+      message: 'An earlier launch took 3.1 s to start (reported by iOS).',
+      data: { previousLaunch: true, source: 'MetricKit', diagnostic: 'slowLaunch', appVersion: '1.4.2', appBuild: '42', osVersion: 'iPhone OS 18.2', durationSeconds: 3.1 } }),
+    // SDK diagnostics (system lines with codes).
+    logEntry({ ts: at(6), deviceId: PIXEL, appId: 'app:2', source: 'system', level: 'warn', tag: 'durbun', code: 'app.messageTooLarge',
+      params: { ...pati, type: 'net.response', count: 1, bytes: 23_489_331, limit: 16_777_216 },
+      message: 'Dürbün dropped a 22.4 MB "net.response" message from Pati: it is over the 16 MB message limit' }),
+    logEntry({ ts: at(7), deviceId: PIXEL, appId: 'app:2', source: 'system', level: 'warn', tag: 'durbun', code: 'app.messageInvalid',
+      params: { ...pati, type: 'metrics', count: 3 },
+      message: 'Dürbün dropped an unreadable "metrics" message from Pati: required fields are missing or have the wrong type (3 messages since the last note)' }),
+    logEntry({ ts: at(8), deviceId: PIXEL, appId: 'app:3', source: 'system', level: 'warn', tag: 'durbun', code: 'app.messageUnknown',
+      params: { app: 'Kasa', bundleId: 'com.mykynk.kasa', type: 'trace.span', count: 12 },
+      message: 'Dürbün does not know the "trace.span" messages Kasa sends and skipped them: its SDK is newer than this Dürbün; update Dürbün (12 messages since the last note)' }),
+    logEntry({ ts: at(9), deviceId: PIXEL, appId: 'app:3', source: 'system', level: 'warn', tag: 'durbun', code: 'app.sdkNewer',
+      params: { app: 'Kasa', bundleId: 'com.mykynk.kasa', sdk: 'durbun-android', sdkVersion: '0.4.0', protocol: 3, serverProtocol: 2, minProtocol: 1 },
+      message: 'Kasa uses durbun-android 0.4.0 (protocol 3), newer than this Dürbün understands (protocol 2): some data may be missing. Update Dürbün.' }),
+    logEntry({ ts: at(10), deviceId: SIM, appId: 'app:4', source: 'system', level: 'warn', tag: 'durbun', code: 'app.sdkOlder',
+      params: { ...pati, sdk: 'durbun', sdkVersion: '0.0.9', protocol: 0, serverProtocol: 2, minProtocol: 1 },
+      message: 'Pati uses durbun 0.0.9 (protocol 0), older than this Dürbün supports (protocol 1 or later): some data may be missing. Update the Dürbün SDK in the app.' }),
+    logEntry({ ts: at(11), deviceId: PIXEL, appId: 'app:2', source: 'system', level: 'warn', tag: 'durbun', code: 'app.clockBehind',
+      params: { ...pati, device: 'Pixel 8', seconds: 42, offsetMs: 42_310, accuracyMs: 180 },
+      message: 'The clock of Pixel 8 is about 42 s behind the Mac (measured while Pati was connected, ±0.2 s). Times of its log lines are shown as the device reports them.' }),
+    logEntry({ ts: at(12), deviceId: SIM, appId: 'app:4', source: 'system', level: 'warn', tag: 'durbun', code: 'app.clockAhead',
+      params: { ...pati, device: 'iPhone 16 Pro', seconds: 8, offsetMs: -8_120, accuracyMs: 40 },
+      message: 'The clock of iPhone 16 Pro is about 8 s ahead of the Mac (measured while Pati was connected, ±0.1 s). Times of its log lines are shown as the device reports them.' }),
+    logEntry({ ts: at(13), deviceId: PIXEL, appId: 'app:3', source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'app.deviceFound',
+      params: { app: 'Kasa', bundleId: 'com.mykynk.kasa', device: 'Pixel 8', deviceId: PIXEL, from: 'net:192.168.1.24' },
+      message: 'Kasa (connected over the network) runs on Pixel 8: its session now shows under this device' }),
+  ];
+}
+
+/**
+ * Requests for the newer network states: a response and a request too large for Dürbün (hub/index.ts
+ * markTooLarge), and a request to a test server with a self-signed certificate (replay offers to resend unverified).
+ */
+function showcaseRequests() {
+  const now = Date.now() - 90_000;
+  const base = (id, appId, method, url, extra) => {
+    const u = new URL(url);
+    const e = { id, appId, deviceId: PIXEL, source: appId === 'app:3' ? 'okhttp' : 'dart:io', method, url, host: u.host, path: u.pathname + u.search, startTs: now, requestHeaders: [['Accept', 'application/json']], hasRequestBody: false, hasResponseBody: false, ...extra };
+    network.set(id, e);
+  };
+  base(`app:2:${netSeq++}`, 'app:2', 'GET', 'https://cdn.pati.app/export/all-photos.zip', {
+    state: 'failed', status: 200, endTs: now + 4_200, duration: 4_200,
+    error: 'Dürbün could not receive this response: its message (22.4 MB) is over the 16 MB limit. The app itself got the response.',
+    tooLarge: { part: 'response', bytes: 23_489_331, limit: 16_777_216 },
+  });
+  base(`app:2:${netSeq++}`, 'app:2', 'POST', 'https://api.pati.app/v1/pets/42/video', {
+    requestHeaders: [], state: 'complete', status: 201, statusText: 'Created', endTs: now + 6_100, duration: 6_100,
+    tooLarge: { part: 'request', bytes: 41_943_040, limit: 16_777_216 },
+  });
+  base(`app:3:${netSeq++}`, 'app:3', 'GET', 'https://qa.internal.example/v2/health', {
+    state: 'failed', endTs: now + 140, duration: 140, error: 'Trust anchor for certification path not found (self-signed certificate)',
+  });
 }
 
 /* ───────────── broadcasting ───────────── */
@@ -757,7 +885,18 @@ function simulate() {
         osVersion: '14',
         apiLevel: 34,
         logs: { status: 'streaming', via: 'logcat' },
-        actions: ANDROID_ACTIONS,
+        actions: ANDROID_ACTIONS.filter((a) => a !== 'wifi' && a !== 'airplane-mode'),
+        // Unplugged after the prompt: it carries on over wireless debugging (adb-tls-connect serial).
+        connection: 'wifi',
+        connections: ['wifi'],
+        serial: 'adb-RF8N30ABCD-x7Kp2a._adb-tls-connect._tcp',
+        hardwareSerial: 'RF8N30ABCD',
+        unavailableActions: [
+          { action: 'wifi', code: 'action.wouldDisconnect', params: { connection: 'wifi' } },
+          { action: 'airplane-mode', code: 'action.wouldDisconnect', params: { connection: 'wifi' } },
+        ],
+        // A device report someone started from another window, still collecting.
+        bugReport: { startedAt: now - 40_000, progress: 12 },
         // Some OEM builds refuse `dumpsys dropbox` to the shell user.
         readers: { crashReports: { status: 'unavailable', code: 'reader.crashReports.dropboxRefused', detail: 'dumpsys dropbox: Permission Denial: can\'t access dropbox from pid=8812, uid=2000' }, frameStats: { status: 'ok' } },
         lastSeen: now,
@@ -766,7 +905,17 @@ function simulate() {
       deviceApps.push(store);
       queue.deviceApps.push(store);
       queue.devices.push(g);
-      pushLogs([logEntry({ ts: now, deviceId: g.id, source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'device.connected', params: { device: 'Galaxy S23', deviceId: g.id, platform: 'android', kind: 'physical', connection: 'usb', osVersion: '14' }, message: 'Device connected: Galaxy S23 (Android 14)' })]);
+      pushLogs([logEntry({ ts: now, deviceId: g.id, source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'device.connected', params: { device: 'Galaxy S23', deviceId: g.id, platform: 'android', kind: 'physical', connection: 'wifi', osVersion: '14' }, message: 'Device connected: Galaxy S23 (Android 14)' })]);
+    }
+  }
+  // the Galaxy's device report (started elsewhere) creeps towards 100 %
+  if (tick > 650 && tick % 10 === 0) {
+    const g = devices.find((d) => d.id === 'android:RF8N30ABCD');
+    if (g?.bugReport && !bugReports.has(g.id)) {
+      const progress = Math.min(100, (g.bugReport.progress ?? 0) + 1);
+      if (progress >= 100) delete g.bugReport;
+      else g.bugReport = { ...g.bugReport, progress };
+      queue.devices.push(g);
     }
   }
   // Kasa disconnects / reconnects occasionally
@@ -847,6 +996,136 @@ function screenRecord(command, reply) {
   }
 }
 
+/* ───────────── tester actions (like android/deviceSettings.ts, android/bugReport.ts, ios/simActions.ts) ───────────── */
+const bugReports = new Map();
+const SETTING_ACTIONS = new Set(['airplane-mode', 'wifi', 'mobile-data', 'rotation', 'dont-keep-activities', 'app-permission', 'app-locale']);
+const ROTATION_VALUES = ['auto', 'portrait', 'landscape', 'reverse-portrait', 'reverse-landscape'];
+/** What the phone had before Dürbün touched it (the server reads it with `settings get` / `dumpsys package`). */
+const DEVICE_DEFAULTS = { 'airplane-mode': 'off', wifi: 'on', 'mobile-data': 'on', rotation: 'auto', 'dont-keep-activities': '0', 'app-permission': 'granted', 'app-locale': 'system' };
+
+function changeDevice(d) {
+  d.lastSeen = Date.now();
+  queue.devices.push(d);
+}
+
+/** A setting change with the server's override bookkeeping: per action, app-scoped ones per app and permission. */
+function changeSetting(d, command, reply) {
+  const { action } = command;
+  const p = command.params ?? {};
+  const scope = action === 'app-permission' ? { appId: p.appId, key: p.permission } : action === 'app-locale' ? { appId: p.appId } : {};
+  if ((action === 'app-permission' || action === 'app-locale') && (typeof p.appId !== 'string' || !p.appId)) return reply(undefined, false, 'A valid package name (appId) is required', 'action.invalidParams');
+  if (action === 'app-permission' && !/^[A-Za-z][\w.]*\.[A-Z_0-9]+$/.test(p.permission ?? '')) return reply(undefined, false, 'permission must be a permission name such as android.permission.CAMERA', 'action.invalidParams');
+  const overrides = (d.settingOverrides ??= []);
+  const same = (o) => o.action === action && (o.appId ?? '') === (scope.appId ?? '') && (o.key ?? '') === (scope.key ?? '');
+  const kept = overrides.find(same);
+  if (p.restore === true) {
+    if (!kept) return reply(null, true, undefined, 'action.nothingToRestore');
+    d.settingOverrides = overrides.filter((o) => o !== kept);
+    changeDevice(d);
+    return reply({ previous: kept.current, current: kept.previous }, true, undefined, 'action.settingRestored');
+  }
+  let value;
+  if (action === 'rotation') {
+    if (!ROTATION_VALUES.includes(p.orientation)) return reply(undefined, false, 'orientation must be auto, portrait, landscape, reverse-portrait or reverse-landscape', 'action.invalidParams');
+    value = p.orientation;
+  } else if (action === 'app-permission') {
+    if (typeof p.grant !== 'boolean') return reply(undefined, false, 'grant (boolean) is required', 'action.invalidParams');
+    // Two of the refusals adb gives, so their texts can be seen.
+    if (p.permission === 'android.permission.BODY_SENSORS') return reply(undefined, false, `${p.appId} does not ask for ${p.permission}`, 'action.permissionNotRequested');
+    if (!p.permission.startsWith('android.permission.')) return reply(undefined, false, `Android does not know the permission ${p.permission}`, 'action.permissionUnknown');
+    value = p.grant ? 'granted' : 'revoked';
+  } else if (action === 'app-locale') {
+    if (typeof p.locale !== 'string' || !p.locale) return reply(undefined, false, 'locale must be a language tag such as tr-TR, or "system"', 'action.invalidParams');
+    value = p.locale;
+  } else {
+    if (typeof p.enabled !== 'boolean') return reply(undefined, false, 'enabled (boolean) is required', 'action.invalidParams');
+    value = action === 'dont-keep-activities' ? (p.enabled ? '1' : '0') : p.enabled ? 'on' : 'off';
+  }
+  const before = kept?.previous ?? DEVICE_DEFAULTS[action];
+  d.settingOverrides = overrides.filter((o) => o !== kept);
+  if (before !== value) d.settingOverrides.push({ action, ...(scope.appId ? { appId: scope.appId } : {}), ...(scope.key ? { key: scope.key } : {}), previous: before, current: value, since: kept?.since ?? Date.now() });
+  changeDevice(d);
+  return reply(null);
+}
+
+/** `adb bugreport` like the server: progress on the device record, the zip at the end; cancel kills it. */
+function bugReport(d, command, reply) {
+  if (command.action === 'bug-report-cancel') {
+    const run = bugReports.get(d.id);
+    if (run) {
+      clearInterval(run.timer);
+      bugReports.delete(d.id);
+      delete d.bugReport;
+      changeDevice(d);
+      run.reply(undefined, false, 'The device report was cancelled', 'action.bugReport.cancelled');
+      return reply(null, true, undefined, 'action.bugReport.cancelled');
+    }
+    // One started from another window (the Galaxy's): there is no waiter here.
+    if (d.bugReport) {
+      delete d.bugReport;
+      changeDevice(d);
+      return reply(null, true, undefined, 'action.bugReport.cancelled');
+    }
+    return reply(undefined, false, 'No device report is being collected', 'action.bugReport.notRunning');
+  }
+  if (bugReports.has(d.id) || d.bugReport) return reply(undefined, false, 'A device report is already being collected on this phone', 'action.bugReport.busy');
+  const startedAt = Date.now();
+  d.bugReport = { startedAt };
+  changeDevice(d);
+  const run = { reply, timer: undefined };
+  run.timer = setInterval(() => {
+    const progress = Math.min(100, (d.bugReport?.progress ?? 0) + 7);
+    if (progress < 100) {
+      d.bugReport = { startedAt, progress };
+      return changeDevice(d);
+    }
+    clearInterval(run.timer);
+    bugReports.delete(d.id);
+    delete d.bugReport;
+    changeDevice(d);
+    const file = `/tmp/durbun/bugreport-${(d.model ?? 'phone').replace(/\s+/g, '-')}-${new Date(startedAt).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip`;
+    reply({ url: '/api/files/bugreport.zip', file, bytes: 18_400_000, durationSec: Math.round((Date.now() - startedAt) / 1000) }, true, undefined, 'action.bugReport.saved');
+  }, 1500);
+  bugReports.set(d.id, run);
+}
+
+/** Install with the server's refusal over an installed copy: a file named "*other-sig*" was signed with another key. */
+function installApp(command, reply) {
+  const p = command.params ?? {};
+  const file = typeof p.file === 'string' ? p.file : '';
+  const packageId = 'com.mykynk.pati';
+  if (!file) return reply(undefined, false, 'file is required', 'action.invalidParams');
+  if (/other-sig/i.test(file)) {
+    if (p.replace === true) return reply({ packageId }, true, undefined, 'action.install.replaced');
+    return reply({ packageId, replaceable: true }, false, `${packageId} is installed with another signature`, 'action.install.signatureMismatch');
+  }
+  if (/older/i.test(file)) {
+    if (p.replace === true) return reply({ packageId }, true, undefined, 'action.install.replaced');
+    return reply({ packageId, replaceable: true }, false, `A newer ${packageId} is installed`, 'action.install.downgrade');
+  }
+  return reply(null);
+}
+
+function testerAction(command, reply) {
+  const d = devices.find((x) => x.id === command.deviceId);
+  if (!d) return reply(undefined, false, 'Unknown device', 'action.deviceOffline');
+  const blocked = d.unavailableActions?.find((u) => u.action === command.action);
+  if (blocked) return reply(undefined, false, `${command.action} is not available on this device`, blocked.code);
+  const p = command.params ?? {};
+  if (d.users && p.userId !== undefined && !d.users.some((u) => u.id === p.userId)) return reply(undefined, false, 'userId is not a user of this phone', 'action.invalidParams');
+  if (command.action === 'app-install') return installApp(command, reply);
+  if (command.action === 'bug-report' || command.action === 'bug-report-cancel') return bugReport(d, command, reply);
+  if (d.platform === 'ios' && command.action === 'app-permission') {
+    if (typeof p.appId !== 'string' || !p.appId) return reply(undefined, false, 'A bundle id (appId) is required', 'action.invalidParams');
+    if (p.restore === true) return reply(null, true, undefined, 'action.permissionReset');
+    if (typeof p.grant !== 'boolean') return reply(undefined, false, 'grant (boolean) is required', 'action.invalidParams');
+    return reply(null);
+  }
+  if (SETTING_ACTIONS.has(command.action)) return changeSetting(d, command, reply);
+  // keychain-reset, app-settings and the rest succeed without data.
+  return reply(null);
+}
+
 /* ───────────── commands ───────────── */
 function handleCommand(ws, { requestId, command }) {
   const reply = (data, ok = true, error, code) => send(ws, { type: 'reply', requestId, ok, data, error, code });
@@ -883,7 +1162,7 @@ function handleCommand(ws, { requestId, command }) {
       if (command.action === 'screenshot') return reply({ url: '/api/files/shot.png', file: '/tmp/shot.png', width: 1080, height: 2400 });
       if (command.action === 'screen-record' || command.action === 'screen-record-stop') return screenRecord(command, reply);
       if (command.action === 'list-apps') return reply([{ id: 'com.mykynk.pati', name: 'Pati', version: '1.4.2', debuggable: true }, { id: 'com.mykynk.kasa', name: 'Kasa', version: '2.0.1' }]);
-      return reply(null);
+      return testerAction(command, reply);
     case 'app.action':
       return reply(null);
     case 'vm.attach':
@@ -896,6 +1175,19 @@ function handleCommand(ws, { requestId, command }) {
       const src = network.get(command.id);
       if (!src) return reply(undefined, false, 'Unknown request', 'net.unknown');
       const id = `replay:${netSeq++}`;
+      // A self-signed test server: refused unless resent without verifying (server http/replay.ts warnings → notices).
+      if (/^https:\/\/qa\.internal\./.test(src.url)) {
+        const skip = command.overrides?.skipTlsVerify === true;
+        const entry = skip
+          ? { ...strip(src), id, appId: undefined, deviceId: 'desktop', source: 'replay', startTs: now, endTs: now + 90, duration: 90, state: 'complete', status: 200, statusText: 'OK', error: undefined, responseContentType: 'application/json', responseBodySize: 15, hasResponseBody: true }
+          : { ...strip(src), id, appId: undefined, deviceId: 'desktop', source: 'replay', startTs: now, endTs: now + 60, duration: 60, state: 'failed', status: undefined, error: 'self-signed certificate (DEPTH_ZERO_SELF_SIGNED_CERT)' };
+        network.set(id, { ...entry, ...(skip ? { responseBody: { encoding: 'utf8', data: '{"status":"ok"}', size: 15 } } : {}) });
+        queue.network.push(entry);
+        send(ws, skip
+          ? { type: 'notice', level: 'warn', code: 'replay.tlsUnverified', message: 'Sent without verifying the server certificate' }
+          : { type: 'notice', level: 'warn', code: 'replay.tlsRejected', message: 'The server certificate was not accepted (DEPTH_ZERO_SELF_SIGNED_CERT); resend without verifying only to a test server you trust' });
+        return reply(entry);
+      }
       const entry = { ...strip(src), id, appId: undefined, deviceId: 'desktop', source: 'replay', startTs: now, endTs: now + 120, duration: 120 };
       network.set(id, { ...src, ...entry });
       queue.network.push(entry);
@@ -912,11 +1204,18 @@ function doctorChecks() {
   return [
     // As inside Dürbün.app (the server runs in Electron): worded from the code.
     { id: 'node', label: 'Node.js', status: 'ok', version: process.version, detail: `Embedded in Dürbün.app (Electron 45.1.0, Node ${process.versions.node})`, code: 'doctor.node.embedded', params: { electron: '45.1.0', node: process.versions.node } },
-    { id: 'adb', label: 'adb', status: 'ok', version: '1.0.41', path: '/Users/dev/Library/Android/sdk/platform-tools/adb' },
-    { id: 'xcrun', label: 'Xcode command line tools', status: 'ok', version: 'Xcode 26.1', path: '/usr/bin/xcrun' },
-    { id: 'idevicesyslog', label: 'idevicesyslog', status: 'missing', detail: 'Needed for logs of physical iPhones. Flutter’s bundled copy was not found either.', fix: 'brew install libimobiledevice' },
-    { id: 'port.http', label: `Port ${PORT}`, status: 'ok' },
-    { id: 'port.sdk', label: 'Port 9751', status: 'warn', detail: 'Another process is listening on 9751; simulators may not reach Dürbün.', fix: 'lsof -nP -iTCP:9751 -sTCP:LISTEN' },
+    { id: 'adb', label: 'Android Debug Bridge (adb)', status: 'ok', version: '1.0.41', path: '/Users/dev/Library/Android/sdk/platform-tools/adb', detail: 'from ~/Library/Android/sdk' },
+    { id: 'simctl', label: 'Xcode simctl (iOS simulators)', status: 'ok', version: 'Xcode 26.1', path: '/Applications/Xcode.app/Contents/Developer', detail: '1 booted simulator(s)' },
+    { id: 'usbmuxd', label: 'usbmuxd (iOS USB connection)', status: 'ok', path: '/var/run/usbmuxd', detail: '1 device(s) attached' },
+    // Same ids, labels and English details as the real checks (server doctor.ts + platform/ios/deviceDriver.ts):
+    // the UI words them from these patterns and codes.
+    { id: 'idevicesyslog', label: 'idevicesyslog (iOS device logs)', status: 'missing', detail: 'idevicesyslog was not found — install libimobiledevice (brew install libimobiledevice) or Flutter', fix: 'brew install libimobiledevice', docsUrl: 'https://libimobiledevice.org' },
+    { id: 'devicectl', label: 'Xcode devicectl (iOS device actions)', status: 'ok', version: '477.29', detail: 'screenshot: yes · screen recording: no' },
+    { id: 'idevicescreenshot', label: 'idevicescreenshot (iOS screenshots, fallback)', status: 'ok', detail: 'not needed (devicectl captures screenshots)' },
+    { id: 'idevicecrashreport', label: 'idevicecrashreport (iOS crash reports, fallback)', status: 'ok', detail: 'not found (optional: used for iPhones devicectl cannot read, such as iOS 16 or Developer Mode off)', fix: 'brew install libimobiledevice' },
+    { id: 'ideviceinstaller', label: 'ideviceinstaller (installed iOS apps, fallback)', status: 'ok', detail: 'not found (optional: used for iPhones devicectl cannot read, such as iOS 16 or Developer Mode off)', fix: 'brew install ideviceinstaller' },
+    { id: 'port-http', label: `HTTP port ${PORT}`, status: 'ok', path: `127.0.0.1:${PORT}`, detail: `Listening on 127.0.0.1:${PORT}` },
+    { id: 'port-sdk', label: 'SDK port 9751', status: 'warn', path: '0.0.0.0:9751', detail: 'Port 9751 is used by another program', fix: 'lsof -nP -iTCP:9751 -sTCP:LISTEN' },
   ];
 }
 
