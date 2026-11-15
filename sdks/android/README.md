@@ -19,6 +19,7 @@ trigger buttons that run code inside the app.
 | The app's own logcat over Wi-Fi (no adb) | Read and forwarded by the SDK (multi-line messages are merged back) |
 | Network (OkHttp) | `DurbunInterceptor` |
 | Crashes | Uncaught exceptions; a crash that cannot reach the desktop is sent on the next launch |
+| How earlier launches ended | ANRs, native crashes and kills by the system, on the next launch (Android 11+, see [Earlier launches](#earlier-launches-anrs-native-crashes-system-kills)) |
 
 The desktop renders every line legibly: level colors, tag colors, collapsible stack traces, a JSON tree, and
 `→ GET /api/users 200 · 123 ms` lines inside the log stream.
@@ -205,20 +206,96 @@ a log entry) and **Run garbage collection**.
   check, run `adb reverse --list`.
 - **Emulator:** the same, plus `10.0.2.2:9751` (the Mac itself) is tried as a fallback.
 - **Wi-Fi only (no adb):** in the Dürbün Mac app, turn on Settings → "Allow local network (Wi-Fi) connections"
-  (when you run the server from the repository instead, start it with `node dist/durbun.mjs --lan`), and pass
-  the Mac's IP address:
-
-  ```kotlin
-  Durbun.start(this, DurbunOptions(host = "192.168.1.20"))
-  // or: DurbunOptions(host = BuildConfig.DURBUN_HOST)
-  ```
-
-  In this mode the desktop cannot read device logs, so the SDK forwards the app's **own logcat**.
+  (when you run the server from the repository instead, start it with `node dist/durbun.mjs --lan`), and give
+  the app the Mac's IP address (Dürbün → Settings lists it) in one of the ways below. In this mode the desktop
+  cannot read device logs, so the SDK forwards the app's **own logcat**.
 - If the connection drops, the SDK reconnects indefinitely with a 0.5 s → 3 s backoff. Meanwhile the last 5 000
   messages are kept in memory and sent on reconnect (a warning line reports how many were dropped, if any).
-- Troubleshooting: filter logcat by the `Durbun` tag
-  (`Waiting for the Dürbün desktop on 127.0.0.1:9751 …`, `Connected to the Dürbün desktop via …`). More
-  symptoms and fixes: [Troubleshooting](../../docs/guides/troubleshooting.md).
+
+### Giving the app the Mac's address
+
+The Mac's address changes with the network, so it does not have to be built into the app. From the first that
+is set to the last:
+
+| Way | Who uses it | Rebuild? |
+|---|---|---|
+| `Durbun.setDesktopHost(context, "192.168.1.20")` | The app's own debug menu, or a link the app opens | No |
+| Launch extra `durbun.host` (debuggable builds only) | `adb shell am start -n <app id>/<activity> --es durbun.host 192.168.1.20`, Android Studio's run configuration (Launch Flags), test runners that pass launch arguments | No |
+| `DurbunOptions(host = "192.168.1.20")` | Code, for example `BuildConfig.DURBUN_HOST` | Yes |
+| `<meta-data android:name="dev.durbun.host" android:value="${durbunHost}"/>` in the app's manifest | CI or a Gradle property through `manifestPlaceholders` | Yes |
+
+- For the manifest entry, fill the placeholder in `app/build.gradle.kts`, for example
+  `defaultConfig { manifestPlaceholders["durbunHost"] = providers.gradleProperty("durbunHost").getOrElse("") }`
+  and build with `-PdurbunHost=192.168.1.20`; an empty value is ignored.
+- The first two are **kept for the next launches** (in the app's no-backup files), so a tester sets the address
+  once and then opens the app from the launcher as usual. `Durbun.setDesktopHost(context, null)` (or an empty
+  `durbun.host` extra) goes back to the address built into the app.
+- A new address is tried at once; a connection through the old Wi-Fi address is closed, a USB connection stays.
+- `host:port` is accepted (`192.168.1.20:9751`); `setDesktopHost` returns `false` for anything that is not a host
+  name or IP address. The launch extra is ignored when the activity was opened from a browser or a deep link.
+- The launch extra is read in debuggable builds only, because another app on the phone can start the activity
+  with extras. Tester builds without the debuggable flag (for example a `staging` build with `forceInRelease`)
+  take the address from `Durbun.setDesktopHost` (a debug menu) or the manifest entry; there, the SDK logs one
+  line when it ignores the extra.
+- In the app's debug menu, a text field and two lines are enough:
+
+  ```kotlin
+  saveButton.setOnClickListener {
+      if (!Durbun.setDesktopHost(context, addressField.text.toString())) addressField.error = "Not an IP address"
+  }
+  statusText.text = Durbun.connectionStatus.toString()
+  ```
+
+  An app that already handles links can pass a value on, for example
+  `Durbun.setDesktopHost(context, uri.getQueryParameter("durbunHost"))` for `myapp://debug?durbunHost=192.168.1.20`.
+
+### Not connecting?
+
+About 10 seconds after start, when no desktop has connected yet, the SDK writes **one** warning under the
+`Durbun` logcat tag: what it tried, the likely reason and the next step. The same is available in code:
+
+```kotlin
+val status = Durbun.connectionStatus      // isConnected, via, desktopHost, issue, hint, failedAttempts
+Durbun.addConnectionListener { status -> Log.i("App", status.toString()) }   // on a background thread
+```
+
+| `issue` | Likely reason | Next step |
+|---|---|---|
+| `usbNotSetUp` | No `adb reverse` on the cable | Connect with USB debugging on and open the Dürbün Mac app, or set a Wi-Fi address |
+| `usbDesktopClosed` | `adb reverse` is there, nothing answers on the Mac | Open the Dürbün Mac app |
+| `desktopNotRunning` | Emulator: nothing listens on the Mac's port | Open the Dürbün Mac app (or check its SDK port) |
+| `lanRefused` | The Mac does not accept Wi-Fi connections | Settings → "Allow local network (Wi-Fi) connections" |
+| `lanTimeout` | No answer from the address | Check the address, the Wi-Fi network and the Mac's firewall |
+| `lanUnreachable` | The phone is on another network | Join the Mac's Wi-Fi |
+| `lanBadAddress` | The address cannot be resolved | Use the Mac's IP address |
+| `permissionDenied` | No `INTERNET` permission, a firewall or data saver app | Add the permission / allow the app |
+| `notDurbun` | Another program answered on the port | Check the port and the Dürbün version |
+
+The other Dürbün SDKs use the same table and words. More symptoms and fixes:
+[Troubleshooting](../../docs/guides/troubleshooting.md).
+
+## Earlier launches: ANRs, native crashes, system kills
+
+Some endings leave the app no chance to report: an ANR, a crash in native (C/C++) code, or Android ending the
+process to free memory. On Android 11 (API 30) and newer, the SDK reads how earlier launches ended
+(`ApplicationExitInfo`) on its own background thread at start and sends them once a desktop is connected:
+
+| Ending | Line on the desktop |
+|---|---|
+| ANR | Crash row "Previous launch ended: App Not Responding (ANR)" with the main thread's stack and the threads holding the locks it waited for |
+| Native crash | Crash row with the signal (`SIGSEGV`, `SIGABRT` …) |
+| Low memory kill | Info line (a warning when the app was in the foreground) with its memory use |
+| Too many resources, killed by a signal, start-up failure, a revoked permission | One line each |
+
+- Exits the app or the person caused (the app called `exit`, swiped away, force stop, an update) are not
+  reported; uncaught Java/Kotlin exceptions come from the crash handler as before.
+- Each exit is reported once. On the first launch with Dürbün, only the last 24 hours are read. When no desktop
+  connects during a launch, the next launch tries again.
+- Over USB the desktop already reads ANRs and native crashes from the device, so the SDK leaves those two out and
+  sends only the others.
+- `captureCrashes = false` turns this off too. Out of reach: anything before Android 11, an ANR that the person
+  waited out (the app kept running), and the native backtrace itself (it stays in the device's tombstone, which
+  the desktop reads over USB).
 
 ## Permissions, cleartext and release safety
 
@@ -282,7 +359,8 @@ Durbun.start(this, DurbunOptions(forceInRelease = BuildConfig.DURBUN))
   `Dürbün is off: this build is not debuggable (set forceInRelease = true to override).` under the `Durbun`
   tag.
 - A build with Dürbün on behaves as described in [How the connection works](#how-the-connection-works),
-  wherever it is installed from: over USB the phone needs USB debugging, over Wi-Fi the build needs `host`.
+  wherever it is installed from: over USB the phone needs USB debugging, over Wi-Fi the app needs the Mac's
+  address ([without a rebuild](#giving-the-app-the-macs-address) too).
 
 The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, iOS and React Native as well.
 
@@ -290,14 +368,14 @@ The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, iOS and 
 
 | Option | Default | Description |
 |---|---|---|
-| `host` | `null` | The Mac's IP address for Wi-Fi (not needed over USB or on an emulator) |
+| `host` | `null` | The Mac's IP address for Wi-Fi (not needed over USB or on an emulator; see [Giving the app the Mac's address](#giving-the-app-the-macs-address)) |
 | `port` | `9751` | Desktop SDK port |
 | `enabled` | `true` | `false` makes every call a no-op |
 | `forceInRelease` | `false` | Also run in non-debuggable builds |
 | `captureBodies` | `null` | Overrides the desktop setting (`false` records sizes only) |
 | `maxBodyBytes` | `null` | Capture limit per body (the desktop default is 1 MB) |
 | `maxBufferedMessages` | `5000` | Messages kept in memory while disconnected |
-| `captureCrashes` | `true` | Report uncaught exceptions (the previous handler always runs) |
+| `captureCrashes` | `true` | Report uncaught exceptions (the previous handler always runs) and how earlier launches ended |
 | `captureMetrics` | `true` | CPU, PSS memory, Java heap, thread count, FPS, janky frames |
 | `captureLogcat` | `true` | Forward the app's own logcat when the desktop cannot read device logs |
 | `appName` | `null` | Name shown on the desktop (default: the app label) |

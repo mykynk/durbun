@@ -536,4 +536,46 @@ final class NetworkCaptureTests: SDKTestCase {
         XCTAssertTrue(headers.contains(["X-App-Version", "••••"]))
         XCTAssertEqual(server.requests.last?.headers["authorization"], "Bearer secret")
     }
+
+    // MARK: Session bindings
+
+    func testNewTokenSessionsShareOneBindingAndSendTheirOwnHeader() throws {
+        SessionBinding.resetForTesting()
+        defer { SessionBinding.resetForTesting() }
+        startConnected(options(network: true))
+        var sessions: [URLSession] = []
+        defer { sessions.forEach { $0.invalidateAndCancel() } }
+        for token in 0..<(SessionBinding.maxBindings + 4) {
+            let configuration = URLSessionConfiguration.default
+            configuration.httpAdditionalHeaders = ["Authorization": "Bearer \(token)"]
+            let session = URLSession(configuration: configuration)
+            sessions.append(session)
+            XCTAssertEqual(perform(URLRequest(url: url("/json?t=\(token)")), session: session).response?.statusCode, 200)
+            XCTAssertEqual(server.requests.last?.headers["authorization"], "Bearer \(token)", "each session sends its own header")
+        }
+        XCTAssertEqual(SessionBinding.bindingCount, 1, "header values do not use up bindings")
+        let last = try XCTUnwrap(capture(for: "/json?t=\(SessionBinding.maxBindings + 3)"))
+        XCTAssertTrue((last.request["headers"] as? [[String]] ?? []).contains(["Authorization", "Bearer \(SessionBinding.maxBindings + 3)"]))
+    }
+
+    func testReachingTheBindingLimitIsSaidOnTheDesktop() throws {
+        SessionBinding.resetForTesting()
+        defer { SessionBinding.resetForTesting() }
+        startConnected(options(network: true))
+        var sessions: [URLSession] = []
+        defer { sessions.forEach { $0.invalidateAndCancel() } }
+        for limit in 1...(SessionBinding.maxBindings + 2) {
+            let configuration = URLSessionConfiguration.default
+            configuration.httpMaximumConnectionsPerHost = limit // a different setting each time
+            sessions.append(URLSession(configuration: configuration))
+        }
+        XCTAssertEqual(SessionBinding.bindingCount, SessionBinding.maxBindings)
+        let notes = desktop.messages(ofType: "log").filter { ($0["message"] as? String)?.contains("at most \(SessionBinding.maxBindings)") == true }
+        XCTAssertTrue(waitUntil {
+            desktop.messages(ofType: "log").contains { ($0["message"] as? String)?.contains("at most \(SessionBinding.maxBindings)") == true }
+        })
+        XCTAssertLessThanOrEqual(notes.count, 1)
+        // The sessions past the limit still work, uncaptured.
+        XCTAssertEqual(perform(URLRequest(url: url("/json")), session: sessions.last!).response?.statusCode, 200)
+    }
 }

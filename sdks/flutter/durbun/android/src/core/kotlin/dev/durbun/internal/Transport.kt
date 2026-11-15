@@ -46,8 +46,8 @@ internal class Transport(
 
         fun onDisconnected(endpoint: Endpoint, reason: String)
 
-        /** A full connect cycle failed; [attempt] counts consecutive failures. */
-        fun onConnectFailed(attempt: Int) = Unit
+        /** A full connect cycle failed; [attempt] counts consecutive failures, [attempts] says why per endpoint. */
+        fun onConnectFailed(attempt: Int, attempts: List<ConnectAttempt>) = Unit
 
         /** Encoded warning about [count] dropped messages, sent once the queue has drained. */
         fun droppedWarning(count: Long): String?
@@ -91,6 +91,10 @@ internal class Transport(
 
     @Volatile
     private var attemptSocket: Socket? = null
+
+    /** Set by [reconnectNow]: the next round starts at once, with the shortest backoff. */
+    @Volatile
+    private var retrySoon = false
     private var ioThread: Thread? = null
     private var writerThread: Thread? = null
 
@@ -150,6 +154,19 @@ internal class Transport(
         return false
     }
 
+    /**
+     * The endpoints changed (a new Wi-Fi address): closes the live connection when [dropActive] says it used an
+     * endpoint that is gone, and starts the next connect round at once.
+     */
+    fun reconnectNow(dropActive: (Endpoint) -> Boolean) {
+        synchronized(stateLock) {
+            if (!running) return
+            retrySoon = true
+            active?.let { if (!it.closed && dropActive(it.endpoint)) it.close() }
+            stateLock.notifyAll()
+        }
+    }
+
     /* ───────────── I/O thread ───────────── */
 
     private fun ioLoop() {
@@ -157,13 +174,19 @@ internal class Transport(
         var backoff = timing.backoffStartMs
         var failures = 0
         while (running) {
-            val conn = connectAny()
+            retrySoon = false
+            val attempts = ArrayList<ConnectAttempt>(3)
+            val conn = connectAny(attempts)
             if (conn == null) {
                 if (!running) break
                 failures++
-                safely { listener.onConnectFailed(failures) }
+                safely { listener.onConnectFailed(failures, attempts) }
+                if (retrySoon) {
+                    backoff = timing.backoffStartMs
+                    continue
+                }
                 pause(backoff)
-                backoff = minOf(backoff * 2, timing.backoffMaxMs)
+                backoff = if (retrySoon) timing.backoffStartMs else minOf(backoff * 2, timing.backoffMaxMs)
                 continue
             }
             failures = 0
@@ -183,7 +206,7 @@ internal class Transport(
         }
     }
 
-    private fun connectAny(): Connection? {
+    private fun connectAny(attempts: MutableList<ConnectAttempt>): Connection? {
         val candidates = try {
             endpoints()
         } catch (t: Throwable) {
@@ -192,28 +215,40 @@ internal class Transport(
         }
         for (endpoint in candidates) {
             if (!running) return null
-            handshake(endpoint)?.let { return it }
+            handshake(endpoint, attempts)?.let { return it }
         }
         return null
     }
 
-    /** connect → hello → wait for welcome. Returns the activated connection, or null (socket closed). */
-    private fun handshake(endpoint: Endpoint): Connection? {
+    /**
+     * connect → hello → wait for welcome. Returns the activated connection, or null (socket closed) after adding
+     * why to [attempts].
+     */
+    private fun handshake(endpoint: Endpoint, attempts: MutableList<ConnectAttempt>): Connection? {
         val socket = Socket()
         attemptSocket = socket
         var connection: Connection? = null
+        var socketConnected = false
+        var failure: String? = null
+        var detail = ""
         try {
             if (!running) return null
             socket.tcpNoDelay = true
             socket.keepAlive = true
             socket.connect(InetSocketAddress(endpoint.host, endpoint.port), endpoint.connectTimeoutMs)
+            socketConnected = true
             socket.soTimeout = timing.handshakeTimeoutMs
             val conn = Connection(socket, endpoint)
             conn.write(hello())
             conn.flush()
             val deadline = System.nanoTime() + timing.handshakeTimeoutMs * NANOS_PER_MS
             while (running && System.nanoTime() < deadline) {
-                val line = conn.reader.readLine() ?: break
+                val line = conn.reader.readLine()
+                if (line == null) {
+                    failure = AttemptKind.CLOSED
+                    detail = "closed before the welcome"
+                    break
+                }
                 val message = Json.parseObject(line) ?: continue
                 when (message.str("type")) {
                     "welcome" -> {
@@ -233,16 +268,31 @@ internal class Transport(
                     }
                 }
             }
-        } catch (_: IOException) {
+            if (failure == null) {
+                failure = AttemptKind.NO_WELCOME
+                detail = "no welcome within ${timing.handshakeTimeoutMs / 1000} s"
+            }
+        } catch (e: IOException) {
             // refused / unreachable / timed out / reset: try the next endpoint
+            failure = when {
+                !socketConnected -> AttemptKind.classify(e)
+                e is SocketTimeoutException -> AttemptKind.NO_WELCOME
+                else -> AttemptKind.CLOSED
+            }
+            detail = e.message ?: e.javaClass.simpleName
         } catch (e: SecurityException) {
+            failure = AttemptKind.DENIED
+            detail = e.message ?: e.javaClass.simpleName
             logger.warn("Cannot open a socket (is the INTERNET permission missing?)", e)
         } catch (e: RuntimeException) {
+            failure = AttemptKind.classify(e)
+            detail = e.message ?: e.javaClass.simpleName
             logger.debug("Handshake with $endpoint failed: $e")
         } finally {
             attemptSocket = null
             if (connection == null) closeQuietly(socket)
         }
+        if (connection == null && running) attempts += ConnectAttempt(endpoint.toString(), failure ?: AttemptKind.ERROR, detail)
         return null
     }
 

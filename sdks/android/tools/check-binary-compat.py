@@ -33,6 +33,8 @@ PUBLIC_CLASSES = [
     "dev.durbun.DurbunAction$ToggleHandler",
     "dev.durbun.DurbunAction$SelectHandler",
     "dev.durbun.DurbunInterceptor",
+    "dev.durbun.DurbunConnectionStatus",
+    "dev.durbun.DurbunConnectionListener",
 ]
 
 

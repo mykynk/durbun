@@ -51,6 +51,9 @@ All notable changes to Dürbün are listed here. The format follows
 - React Native: Expo Go apps show under their own bundle id, name and version instead of "main" or "Expo Go".
 - A React Native app connected over Wi-Fi attaches to the plugged-in phone that runs it, and several iPhones
   no longer collapse into one row.
+- iOS SDK: URLSessions that differ only in their additional headers (a new token after each login) share one
+  capture slot, so long-running apps no longer stop showing requests of new sessions. When the limit of
+  different session configurations is reached, a warning line says so on the Mac.
 
 ### Changed
 
@@ -111,6 +114,17 @@ All notable changes to Dürbün are listed here. The format follows
   upgrading, and Dürbün in test builds. The Android and iOS SDK guides gain a "Test builds" section.
 - React Native / JS SDK: when no connection is made within 10 seconds, one console note lists the addresses
   tried and the fix for the device, and a line confirms when it connects.
+- Android and iOS SDKs: when no desktop connects within about 10 seconds, one console line says what was
+  tried, the likely reason and the next step. `Durbun.connectionStatus` gives the same in code, for a status
+  label in the app's debug menu (iOS also posts a notification when it changes).
+- Android and iOS SDKs: the Mac's Wi-Fi address can be given without a rebuild. `Durbun.setDesktopHost`
+  takes it at run time and keeps it for later launches; a launch extra (`durbun.host`, debuggable Android
+  builds) or launch argument (`-DurbunHost`, iOS) does the same from Android Studio, Xcode or a test runner;
+  a manifest entry (`dev.durbun.host`) or Info.plist key (`DurbunHost`) sets it per build.
+- Android SDK: how earlier launches ended is reported on the next launch (Android 11+): ANRs with the main
+  thread's stack, native crashes with their signal, low-memory kills and other system kills.
+- iOS SDK: MetricKit diagnostics of earlier launches are reported (iOS 14+): crashes the SDK could not catch
+  such as watchdog kills, main-thread hangs, CPU and disk-write exceptions, slow launches.
 
 ## [0.2.0] - 2026-11-12
 

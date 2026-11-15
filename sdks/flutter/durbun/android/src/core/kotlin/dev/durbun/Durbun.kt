@@ -3,8 +3,12 @@ package dev.durbun
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.util.Log
+import dev.durbun.internal.DesktopAddress
+import dev.durbun.internal.DesktopHostStore
 import dev.durbun.internal.DurbunCore
+import dev.durbun.internal.android.AndroidEnvironment
 import dev.durbun.internal.android.AndroidRuntime
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Dürbün Android SDK: sends this app's logs, network traffic, crashes, events and performance metrics to
@@ -42,6 +46,18 @@ object Durbun {
     private var core: DurbunCore? = null
     private val lock = Any()
     private val actions = LinkedHashMap<String, DurbunAction>()
+    private val connectionListeners = CopyOnWriteArrayList<DurbunConnectionListener>()
+
+    private val notStarted = DurbunConnectionStatus(
+        isConnected = false,
+        via = null,
+        desktopHost = null,
+        desktopHostSource = null,
+        issue = "notStarted",
+        hint = "Dürbün is not running: Durbun.start(context) was not called, or this build is not debuggable " +
+            "(see DurbunOptions.forceInRelease).",
+        failedAttempts = 0,
+    )
 
     /** Whether the Flutter plugin is part of this app (it starts this core from Dart). Tests replace it. */
     @Volatile
@@ -85,7 +101,9 @@ object Durbun {
                     Log.i(TAG, "Dürbün is off: this build is not debuggable (set forceInRelease = true to override).")
                     return
                 }
-                core = runtimeStarter(appContext, options, actions.values.toList())
+                val started = runtimeStarter(appContext, options, actions.values.toList())
+                watchStatus(started)
+                core = started
             } catch (t: Throwable) {
                 Log.w(TAG, "Dürbün could not start; the app continues without it.", t)
             }
@@ -116,6 +134,77 @@ object Durbun {
     @JvmStatic
     val isConnected: Boolean
         get() = core?.isConnected == true
+
+    /**
+     * Why the app is (not) connected to the desktop, with the next step when it is not (the same words the SDK
+     * writes to logcat once, about 10 seconds after start). Handy for an app's own debug menu.
+     */
+    @JvmStatic
+    val connectionStatus: DurbunConnectionStatus
+        get() = try {
+            core?.connectionStatus() ?: notStarted
+        } catch (_: Throwable) {
+            notStarted
+        }
+
+    /** Calls [listener] (on a Dürbün background thread) whenever [connectionStatus] changes. */
+    @JvmStatic
+    fun addConnectionListener(listener: DurbunConnectionListener) {
+        connectionListeners.addIfAbsent(listener)
+    }
+
+    @JvmStatic
+    fun removeConnectionListener(listener: DurbunConnectionListener) {
+        connectionListeners.remove(listener)
+    }
+
+    /**
+     * Sets the Mac's address for Wi-Fi at run time, without a rebuild: `"192.168.1.20"` or `"192.168.1.20:9751"`.
+     * It wins over [DurbunOptions.host] and the `dev.durbun.host` manifest entry, is tried at once and is kept for
+     * the next launches; `null` goes back to the address built into the app. Call it from the app's own debug menu,
+     * or with the value of a link the app opens. Works before [start] too. Returns false when [address] is not a
+     * host name or IP address (with an optional port).
+     */
+    @JvmStatic
+    fun setDesktopHost(context: Context, address: String?): Boolean {
+        try {
+            val parsed = if (address.isNullOrBlank()) null else DesktopAddress.parse(address)
+            if (parsed == null && !address.isNullOrBlank()) {
+                Log.w(TAG, "Not a desktop address: \"$address\" (use the Mac's IP address, e.g. 192.168.1.20).")
+                return false
+            }
+            val current = core
+            if (current != null && current.isHosted) {
+                Log.i(TAG, "In Flutter apps, set the Mac's address in the in-app panel (Tools → Mac connection).")
+                return false
+            }
+            if (current != null) {
+                current.setDesktopHost(parsed)
+            } else {
+                val appContext = context.applicationContext ?: context
+                DesktopHostStore { AndroidEnvironment.settingsDirOf(appContext) }.save(parsed?.toString())
+            }
+            return true
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not set the desktop address.", t)
+            return false
+        }
+    }
+
+    private fun watchStatus(target: DurbunCore) {
+        target.onStatusChanged = {
+            if (core === target && connectionListeners.isNotEmpty()) {
+                val status = target.connectionStatus()
+                for (listener in connectionListeners) {
+                    try {
+                        listener.onConnectionChanged(status)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "A connection listener failed.", t)
+                    }
+                }
+            }
+        }
+    }
 
     /**
      * Sends a structured log line. [data] (maps, lists, JSON objects, numbers…) is shown as an expandable
@@ -190,6 +279,7 @@ object Durbun {
      * Flutter side owns the session. Returns the core that was replaced, if any.
      */
     internal fun attachHosted(hosted: DurbunCore): DurbunCore? {
+        watchStatus(hosted)
         val previous = synchronized(lock) {
             val p = core
             core = hosted

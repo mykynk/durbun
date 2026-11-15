@@ -1,12 +1,15 @@
 package dev.durbun.internal.android
 
+import android.app.Application
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import dev.durbun.DurbunAction
 import dev.durbun.DurbunOptions
 import dev.durbun.internal.CrashHandler
+import dev.durbun.internal.DesktopHostStore
 import dev.durbun.internal.DurbunCore
 import dev.durbun.internal.HostLink
 import dev.durbun.internal.LogcatForwarder
@@ -18,7 +21,20 @@ internal object AndroidRuntime {
         val env = AndroidEnvironment(context, options)
         val core = DurbunCore(options, env)
         core.crashStore = PendingCrashStore { env.storageDir }
+        core.hostStore = DesktopHostStore { env.settingsDir }
+        core.configuredHost = { env.manifestHost() }
+        if (options.captureCrashes) core.exitReasons = AndroidExitReasons(context) { env.settingsDir }
         actions.forEach(core::addAction)
+        (context.applicationContext as? Application)?.let { app ->
+            try {
+                val debuggable = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                val watcher = LaunchHostWatcher(core, debuggable)
+                app.registerActivityLifecycleCallbacks(watcher)
+                core.onStopped = { app.unregisterActivityLifecycleCallbacks(watcher) }
+            } catch (t: Throwable) {
+                env.logger.warn("Could not watch for the durbun.host launch extra", t)
+            }
+        }
         if (options.captureMetrics) {
             core.metricsSampler = try {
                 AndroidMetricsSampler(context)
@@ -63,6 +79,7 @@ internal object AndroidRuntime {
         val core = DurbunCore(hostedOptions, env, host = link, hostBarrier = { marker -> main.post(marker) })
         core.redactedHeaders = redactedHeaders
         core.crashStore = PendingCrashStore { env.storageDir }
+        if (hostedOptions.captureCrashes) core.exitReasons = AndroidExitReasons(context) { env.settingsDir }
         actions.forEach(core::addAction)
         if (hostedOptions.captureLogcat) {
             core.logcat = LogcatForwarder(

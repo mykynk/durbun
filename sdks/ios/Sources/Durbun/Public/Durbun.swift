@@ -41,6 +41,27 @@ public enum Durbun {
     /// True while a desktop connection completed the hello/welcome handshake.
     public static var isConnected: Bool { DurbunCore.shared.isConnected }
 
+    // MARK: Connection
+
+    /// Why the app is (not) connected to the desktop, with the next step when it is not (the same
+    /// words the SDK writes to the console once, about 10 seconds after start). Handy for an app's own
+    /// debug menu.
+    public static var connectionStatus: DurbunConnectionStatus { DurbunCore.shared.connectionStatus }
+
+    /// Posted on the main queue whenever `connectionStatus` changes.
+    public static let connectionStatusDidChangeNotification = Notification.Name("DurbunConnectionStatusDidChange")
+
+    /// Sets the Mac's address for Wi-Fi at run time, without a rebuild: `"192.168.1.20"` or
+    /// `"192.168.1.20:9751"`. It wins over `DurbunOptions.host`, `DURBUN_HOST` and the `DurbunHost`
+    /// Info.plist key, is tried at once and is kept for the next launches; `nil` goes back to the
+    /// address built into the app. Call it from the app's own debug menu, or with the value of a link
+    /// the app opens. Works before `start` too. Returns false when `address` is not a host name or IP
+    /// address (with an optional port).
+    @discardableResult
+    public static func setDesktopHost(_ address: String?) -> Bool {
+        DurbunCore.shared.setDesktopHost(address)
+    }
+
     // MARK: Logging
 
     /// Sends a structured log line. `data` may be a dictionary, array, `Encodable` value or any

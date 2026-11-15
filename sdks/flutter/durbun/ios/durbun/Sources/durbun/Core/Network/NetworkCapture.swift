@@ -124,6 +124,16 @@ enum SessionBinding {
     private static var serial = 0
     private static var limitNoted = false
 
+    /// Tests: forgets every binding (their classes stay registered) so the limit can be reached again.
+    static func resetForTesting() {
+        lock.withLock {
+            bindings.removeAll()
+            limitNoted = false
+        }
+    }
+
+    static var bindingCount: Int { lock.withLock { bindings.count } }
+
     /// Protocol classes without Dürbün's (the base class and its bound subclasses).
     static func withoutDurbun(_ classes: [AnyClass]?) -> [AnyClass] {
         (classes ?? []).filter { !isDurbun($0) }
@@ -153,6 +163,10 @@ enum SessionBinding {
         else { return configuration }
         let others = withoutDurbun(classes)
         inner.protocolClasses = others
+        // The app session puts its additional headers on every request before Dürbün sees it, so the
+        // forwarding session does not add them again: sessions that differ only in header values (a new
+        // token after each login) share one binding.
+        inner.httpAdditionalHeaders = nil
         guard let bound = protocolClass(for: inner) else {
             outer.protocolClasses = others
             return outer
@@ -169,12 +183,13 @@ enum SessionBinding {
 
     private static func protocolClass(for inner: URLSessionConfiguration) -> AnyClass? {
         let key = SettingsKey(inner)
-        return lock.withLock { () -> AnyClass? in
+        var reachedLimit = false
+        let bound: AnyClass? = lock.withLock { () -> AnyClass? in
             if let existing = bindings.first(where: { $0.key == key }) { return existing.protocolClass }
             guard bindings.count < maxBindings else {
                 if !limitNoted {
                     limitNoted = true
-                    Diagnostics.info("Dürbün: more than \(maxBindings) distinct URLSession configurations; new sessions are not captured.")
+                    reachedLimit = true
                 }
                 return nil
             }
@@ -182,6 +197,14 @@ enum SessionBinding {
             bindings.append(Binding(key: key, protocolClass: subclass, forwarding: ForwardingSession(configuration: inner)))
             return subclass
         }
+        if reachedLimit {
+            let text = "Dürbün captures the sessions of at most \(maxBindings) different URLSession configurations "
+                + "(cache, cookie storage, proxy, TLS and network settings); requests of sessions created with a new "
+                + "configuration after that are not shown. They run as without Dürbün."
+            Diagnostics.notice(text)
+            DurbunCore.shared.send(WireMessage.log(ts: Clock.nowMs(), level: .warning, tag: "durbun", message: text, kind: "text"))
+        }
+        return bound
     }
 
     /// A subclass that only differs from `DurbunURLProtocol` by identity. Runs under `lock`.
@@ -226,7 +249,6 @@ private struct SettingsKey: Equatable {
             "tls:\(c.tlsMinimumSupportedProtocolVersion.rawValue)-\(c.tlsMaximumSupportedProtocolVersion.rawValue)",
             "idle:\(c.shouldUseExtendedBackgroundIdleMode)",
             "proxy:\(Self.describe(c.connectionProxyDictionary))",
-            "headers:\(Self.describe(c.httpAdditionalHeaders))",
         ]
         if #available(iOS 16.0, macOS 13.0, tvOS 16.0, watchOS 9.0, *) {
             values.append("dnssec:\(c.requiresDNSSECValidation)")

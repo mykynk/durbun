@@ -37,6 +37,8 @@ final class Transport {
         var welcome: (ServerWelcome, Origin) -> Void
         var message: (ServerMessage) -> Void
         var disconnected: () -> Void
+        /// A client attempt failed: the latest failure of each client (loopback first), on `queue`.
+        var attemptsFailed: ([ConnectAttempt]) -> Void = { _ in }
     }
 
     private final class Link {
@@ -46,6 +48,10 @@ final class Transport {
         var framer = NDJSONFramer()
         var welcomed = false
         var closed = false
+        /// The TCP connection was established (a later failure is `closed` / `no-welcome`).
+        var ready = false
+        /// Why the attempt failed, when known (`AttemptKind`).
+        var failure: (kind: String, detail: String)?
         var createdAt = DispatchTime.now()
         var lastInbound = DispatchTime.now()
         var inFlightBytes = 0
@@ -69,7 +75,7 @@ final class Transport {
     private static let batchBytes = 64 * 1024
 
     let queue: DispatchQueue
-    private let config: Configuration
+    private var config: Configuration
     private let callbacks: Callbacks
     private var running = false
     private var links: [Int: Link] = [:]
@@ -82,6 +88,8 @@ final class Transport {
     private var outgoing: OutgoingBuffer
     private var watchdog: DispatchSourceTimer?
     private var flushWaiters: [FlushWaiter] = []
+    /// The latest failed attempt of each client since the last connection.
+    private var lastFailures: [Origin: ConnectAttempt] = [:]
 
     init(configuration: Configuration, callbacks: Callbacks) {
         config = configuration
@@ -146,6 +154,37 @@ final class Transport {
                 self.listenerRetry = nil
                 self.startListener(portIndex: 0)
             }
+        }
+    }
+
+    /// Uses another Wi-Fi address (nil: none) and tries it at once. A link through the old address is
+    /// closed; the loopback and USB links stay.
+    func setHost(_ host: String?, port: UInt16) {
+        queue.async {
+            let host = host.flatMap { $0.isEmpty ? nil : $0 }
+            guard self.config.host != host || self.config.hostPort != port else { return }
+            self.config.host = host
+            self.config.hostPort = port
+            self.lastFailures[.host] = nil
+            guard self.running else { return }
+            self.slots[.host]?.timer?.cancel()
+            let old = self.slots[.host]?.link
+            self.slots[.host] = host == nil ? nil : ClientSlot(delay: self.config.reconnectMinDelay)
+            if let old {
+                self.close(old, recordFailure: false)
+                self.slots[.host]?.link = nil
+            }
+            self.slots[.host]?.timer?.cancel()
+            self.slots[.host]?.timer = nil
+            if self.active == nil { self.connect(.host) }
+        }
+    }
+
+    private func endpointLabel(for origin: Origin) -> String {
+        switch origin {
+        case .loopback: return "127.0.0.1:\(config.loopbackPort ?? 0)"
+        case .host: return "\(config.host ?? ""):\(config.hostPort)"
+        case .usb: return "usb"
         }
     }
 
@@ -337,11 +376,19 @@ final class Transport {
             guard let self, let link, !link.closed else { return }
             switch state {
             case .ready:
+                link.ready = true
                 link.lastInbound = .now()
                 self.sendHello(on: link)
                 self.receive(on: link)
-            case .waiting, .failed:
+            case let .waiting(error), let .failed(error):
                 // `.waiting` = refused / unreachable: retry on our own backoff schedule instead.
+                if link.failure == nil {
+                    var denied = false
+                    if #available(iOS 14.0, macOS 11.0, tvOS 14.0, watchOS 7.0, *) {
+                        denied = link.connection.currentPath?.unsatisfiedReason == .localNetworkDenied
+                    }
+                    link.failure = (AttemptKind.classify(error, localNetworkDenied: denied), error.debugDescription)
+                }
                 self.close(link)
             case .cancelled:
                 self.close(link)
@@ -378,6 +425,9 @@ final class Transport {
                 }
             }
             if isComplete || error != nil {
+                if !link.welcomed, link.failure == nil {
+                    link.failure = (AttemptKind.closed, error?.debugDescription ?? "closed before the welcome")
+                }
                 self.close(link)
                 return
             }
@@ -396,13 +446,14 @@ final class Transport {
                 return
             }
             if let current = active, current !== link {
-                close(link)
+                close(link, recordFailure: false)
                 return
             }
             link.welcomed = true
             active = link
+            lastFailures.removeAll()
             slots[link.origin]?.delay = config.reconnectMinDelay
-            for other in Array(links.values) where other !== link { close(other) }
+            for other in Array(links.values) where other !== link { close(other, recordFailure: false) }
             Diagnostics.info("Dürbün connected to the desktop (\(link.origin.rawValue))")
             callbacks.welcome(welcome, link.origin)
             let dropped = outgoing.takeDroppedCount()
@@ -456,11 +507,20 @@ final class Transport {
         for waiter in waiters { waiter.finish(drained) }
     }
 
-    /// Closes a link and, for clients, schedules the next attempt. Safe to call repeatedly.
-    private func close(_ link: Link) {
+    /// Closes a link and, for clients, schedules the next attempt. Safe to call repeatedly. A client
+    /// that never got its welcome counts as a failed attempt unless `recordFailure` is false.
+    private func close(_ link: Link, recordFailure: Bool = true) {
         guard !link.closed else { return }
         closeQuietly(link)
         links[link.id] = nil
+        if recordFailure, running, !link.welcomed, link.origin != .usb {
+            let failure = link.failure ?? (link.ready ? (AttemptKind.closed, "") : (AttemptKind.error, ""))
+            lastFailures[link.origin] = ConnectAttempt(
+                endpoint: endpointLabel(for: link.origin), kind: failure.kind, detail: failure.detail
+            )
+            let attempts = [Origin.loopback, .host].compactMap { lastFailures[$0] }
+            callbacks.attemptsFailed(attempts)
+        }
         let wasActive = active === link
         if wasActive {
             active = nil
@@ -505,7 +565,14 @@ final class Transport {
                 if idle > config.idleTimeout { close(link) }
             } else {
                 let age = Double(now - link.createdAt.uptimeNanoseconds) / 1e9
-                if age > config.handshakeTimeout { close(link) }
+                if age > config.handshakeTimeout {
+                    if link.failure == nil {
+                        link.failure = link.ready
+                            ? (AttemptKind.noWelcome, "no welcome within \(Int(config.handshakeTimeout)) s")
+                            : (AttemptKind.timeout, "no answer within \(Int(config.handshakeTimeout)) s")
+                    }
+                    close(link)
+                }
             }
         }
     }

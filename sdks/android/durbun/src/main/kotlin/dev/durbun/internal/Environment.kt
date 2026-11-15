@@ -30,6 +30,9 @@ internal interface Environment {
     /** Directory for the pending-crash file; `null` disables crash persistence. */
     val storageDir: File?
 
+    /** Directory for settings kept across launches (the desktop address given at run time). */
+    val settingsDir: File? get() = storageDir
+
     fun nowMs(): Long = System.currentTimeMillis()
 }
 

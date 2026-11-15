@@ -2,6 +2,7 @@ package dev.durbun.internal
 
 import dev.durbun.Durbun
 import dev.durbun.DurbunAction
+import dev.durbun.DurbunConnectionStatus
 import dev.durbun.DurbunOptions
 import dev.durbun.Level
 import java.util.UUID
@@ -104,6 +105,58 @@ internal class DurbunCore(
     @Volatile
     var crashStore: PendingCrashStore? = null
 
+    /** Earlier launches that ended without the app noticing (ANR, native crash, killed by the system). */
+    @Volatile
+    var exitReasons: ExitReasonSource? = null
+
+    /** Keeps the desktop address given at run time for the next launches (standalone only). */
+    @Volatile
+    var hostStore: DesktopHostStore? = null
+
+    /** The address built into the app outside the code (Android: `dev.durbun.host` meta-data); I/O thread. */
+    @Volatile
+    var configuredHost: (() -> String?)? = null
+
+    /** Called when [connectionStatus] changes (any thread). */
+    @Volatile
+    var onStatusChanged: (() -> Unit)? = null
+
+    /** Platform clean-up run once by [stop] (Android: the launch-extra watcher). */
+    @Volatile
+    var onStopped: (() -> Unit)? = null
+
+    /* connection diagnostics */
+    @Volatile
+    private var runtimeHost: DesktopAddress.Parsed? = null
+
+    /** [runtimeHost] was set (or cleared) in this process: the saved value no longer applies. */
+    @Volatile
+    private var runtimeHostSet = false
+
+    @Volatile
+    private var manifestHost: DesktopAddress.Parsed? = null
+
+    @Volatile
+    private var attempts: List<ConnectAttempt> = emptyList()
+
+    @Volatile
+    private var failedRounds = 0
+
+    @Volatile
+    private var everConnected = false
+
+    @Volatile
+    private var startedAtNanos = System.nanoTime()
+    private val consoleHinted = AtomicBoolean(false)
+
+    /** Tests shorten it. */
+    internal var consoleHintAfterMs = CONSOLE_HINT_AFTER_MS
+
+    private val exitLock = Any()
+    private var pendingExits: PendingExits? = null
+
+    private class PendingExits(val reports: List<ExitReports.Report>, val newestMs: Long)
+
     private val metricsLock = Any()
     private var metricsExecutor: ScheduledExecutorService? = null
     private var metricsTask: ScheduledFuture<*>? = null
@@ -118,6 +171,7 @@ internal class DurbunCore(
     val maxBodyBytes: Int get() = (options.maxBodyBytes ?: config.maxBodyBytes).coerceIn(0, MAX_BODY_BYTES)
 
     fun start() {
+        startedAtNanos = System.nanoTime()
         if (relay != null) {
             relay.start()
             deviceLogRelay?.start()
@@ -128,6 +182,12 @@ internal class DurbunCore(
 
     fun stop() {
         if (!stopped.compareAndSet(false, true)) return
+        try {
+            onStopped?.invoke()
+        } catch (t: Throwable) {
+            logger.warn("Could not clean up", t)
+        }
+        onStatusChanged = null
         relay?.stop()
         deviceLogRelay?.stop()
         transport.stop()
@@ -252,10 +312,12 @@ internal class DurbunCore(
             )
             if (connected) {
                 applyRuntimeConfig()
+                sendExitReports()
             } else {
                 if (previous.connected) stopMetrics()
                 applyLogcat()
             }
+            if (connected != previous.connected) notifyStatus()
         } catch (t: Throwable) {
             logger.warn("Could not apply the desktop state from Flutter", t)
         }
@@ -282,6 +344,154 @@ internal class DurbunCore(
 
     private fun drainPendingCrashes() {
         crashStore?.drain()?.forEach(this::sendPreviousCrash)
+        collectExitReports()
+    }
+
+    /* ───────────── earlier launches that ended silently ───────────── */
+
+    /** Reads how earlier launches ended (I/O thread); they are sent once a desktop is connected. */
+    private fun collectExitReports() {
+        val source = exitReasons ?: return
+        val records = try {
+            source.newRecords()
+        } catch (t: Throwable) {
+            logger.warn("Could not read how earlier launches ended", t)
+            return
+        }
+        if (records.isEmpty()) return
+        val reports = records.mapNotNull { record ->
+            try {
+                ExitReports.report(record)
+            } catch (t: Throwable) {
+                logger.warn("Could not describe an earlier exit", t)
+                null
+            }
+        }
+        synchronized(exitLock) { pendingExits = PendingExits(reports, records.maxOf { it.timestampMs }) }
+        if (isConnected) sendExitReports()
+    }
+
+    /**
+     * Sends the exit reports once per launch, when a desktop is connected. ANRs and native crashes are left out when
+     * the desktop reads the device's own records (adb): it shows them already. Not connected in this launch: the
+     * next launch tries again.
+     */
+    private fun sendExitReports() {
+        val pending = synchronized(exitLock) {
+            val p = pendingExits ?: return
+            pendingExits = null
+            p
+        }
+        val desktopReads = config.deviceLogsAvailable
+        for (report in pending.reports) {
+            if (report.desktopReadsIt && desktopReads) continue
+            send(report.line)
+        }
+        try {
+            exitReasons?.markHandled(pending.newestMs)
+        } catch (_: Throwable) {
+        }
+    }
+
+    /* ───────────── connection status + desktop address ───────────── */
+
+    /** The Wi-Fi address in use and where it comes from, best first: run time, options, manifest. */
+    private fun lanAddress(): Pair<DesktopAddress.Parsed, String>? {
+        runtimeHost?.let { return it to "runtime" }
+        val fromOptions = options.host?.trim()
+        if (!fromOptions.isNullOrEmpty()) {
+            return (DesktopAddress.parse(fromOptions) ?: DesktopAddress.Parsed(fromOptions, null)) to "options"
+        }
+        manifestHost?.let { return it to "manifest" }
+        return null
+    }
+
+    private fun basePort(): Int = if (options.port in 1..65535) options.port else DurbunOptions.DEFAULT_PORT
+
+    private fun lanEndpoint(): Transport.Endpoint? {
+        val address = lanAddress()?.first ?: return null
+        val host = address.host
+        val port = address.port ?: basePort()
+        // This device's own loopback on the SDK port is tried anyway (adb reverse).
+        if ((host == "localhost" || host == LOOPBACK) && port == basePort()) return null
+        return Transport.Endpoint(host, port, 2_500)
+    }
+
+    /**
+     * Uses [address] as the Wi-Fi address (null: back to the one built into the app) and tries it at once. A
+     * connection through the old Wi-Fi address is closed; a USB connection stays. Kept for the next launches.
+     */
+    fun setDesktopHost(address: DesktopAddress.Parsed?) {
+        if (host != null || stopped.get()) return
+        val before = lanEndpoint()?.toString()
+        runtimeHost = address
+        runtimeHostSet = true
+        hostStore?.save(address?.toString())
+        val after = lanEndpoint()?.toString()
+        if (before == after) return
+        logger.info(
+            if (address == null) {
+                "Dürbün desktop address cleared" + (after?.let { "; using $it from the build" } ?: "")
+            } else {
+                "Dürbün desktop address set to $after"
+            },
+        )
+        attempts = emptyList()
+        failedRounds = 0
+        transport.reconnectNow { endpoint -> endpoint.toString() == before }
+        notifyStatus()
+    }
+
+    /** I/O thread, before the first round: the saved and the manifest addresses. */
+    private fun loadHosts() {
+        if (host != null) return
+        try {
+            configuredHost?.invoke()?.let { manifestHost = DesktopAddress.parse(it) }
+        } catch (t: Throwable) {
+            logger.warn("Could not read the dev.durbun.host meta-data", t)
+        }
+        val saved = hostStore?.load() ?: return
+        if (!runtimeHostSet) DesktopAddress.parse(saved)?.let { runtimeHost = it }
+    }
+
+    fun connectionStatus(): DurbunConnectionStatus {
+        if (host != null) {
+            val state = hostState
+            return DurbunConnectionStatus(
+                isConnected = state.connected,
+                via = state.endpoint?.toString(),
+                desktopHost = null,
+                desktopHostSource = null,
+                issue = null,
+                hint = if (state.connected) null else HOSTED_HINT,
+                failedAttempts = 0,
+            )
+        }
+        val connected = transport.isConnected
+        val lan = lanAddress()
+        val lanEndpoint = lanEndpoint()?.toString()
+        val current = attempts
+        val issue = if (connected || current.isEmpty()) null else diagnose(current, lanEndpoint)
+        return DurbunConnectionStatus(
+            isConnected = connected,
+            via = if (connected) transport.connectedEndpoint?.toString() else null,
+            desktopHost = lanEndpoint,
+            desktopHostSource = lanEndpoint?.let { lan?.second },
+            issue = issue?.name,
+            hint = issue?.let { ConnectionDiagnosis.nextStep(it, basePort(), lanEndpoint) },
+            failedAttempts = if (connected) 0 else failedRounds,
+        )
+    }
+
+    private fun diagnose(attempts: List<ConnectAttempt>, lanEndpoint: String?): ConnectIssue =
+        ConnectionDiagnosis.diagnose(attempts, "android", isPhysical = !env.isEmulator, lanEndpoint = lanEndpoint)
+
+    private fun notifyStatus() {
+        try {
+            onStatusChanged?.invoke()
+        } catch (t: Throwable) {
+            logger.warn("A connection listener failed", t)
+        }
     }
 
     /* ───────────── network capture support ───────────── */
@@ -375,6 +585,7 @@ internal class DurbunCore(
     /* ───────────── Transport.Listener ───────────── */
 
     override fun onIoThreadStarted() {
+        loadHosts()
         drainPendingCrashes()
     }
 
@@ -384,6 +595,11 @@ internal class DurbunCore(
         serverAppId = welcome.str("appId")
         logger.info("Connected to the Dürbün desktop via $endpoint (${welcome.str("server") ?: "unknown server"})")
         applyRuntimeConfig()
+        attempts = emptyList()
+        failedRounds = 0
+        everConnected = true
+        sendExitReports()
+        notifyStatus()
     }
 
     override fun onMessage(message: Map<String, Any?>) {
@@ -409,11 +625,23 @@ internal class DurbunCore(
         mockRules = emptyList()
         logger.info("Disconnected from the Dürbün desktop ($reason); reconnecting…")
         stopMetrics()
+        notifyStatus()
     }
 
-    override fun onConnectFailed(attempt: Int) {
+    override fun onConnectFailed(attempt: Int, attempts: List<ConnectAttempt>) {
+        val endpoints = endpoints().map { it.toString() }
         if (attempt == 1) {
-            logger.info("Waiting for the Dürbün desktop on ${endpoints().joinToString()} …")
+            logger.info("Waiting for the Dürbün desktop on ${endpoints.joinToString()} …")
+        }
+        // A round that started before the address changed says nothing about the new one.
+        if (attempts.isEmpty() || attempts.any { it.endpoint !in endpoints }) return
+        this.attempts = attempts
+        failedRounds++
+        notifyStatus()
+        val waitedMs = (System.nanoTime() - startedAtNanos) / 1_000_000
+        if (!everConnected && waitedMs >= consoleHintAfterMs && consoleHinted.compareAndSet(false, true)) {
+            val lan = lanEndpoint()?.toString()
+            logger.warn(ConnectionDiagnosis.consoleHint(diagnose(attempts, lan), attempts, basePort(), lan))
         }
     }
 
@@ -595,14 +823,12 @@ internal class DurbunCore(
     /* ───────────── hello / endpoints ───────────── */
 
     private fun endpoints(): List<Transport.Endpoint> {
-        val port = if (options.port in 1..65535) options.port else DurbunOptions.DEFAULT_PORT
+        val port = basePort()
         val list = ArrayList<Transport.Endpoint>(3)
         list += Transport.Endpoint(LOOPBACK, port, 1_000)
         if (env.isEmulator) list += Transport.Endpoint(EMULATOR_HOST, port, 1_500)
-        val host = options.host?.trim()
-        if (!host.isNullOrEmpty() && list.none { it.host == host } && host != "localhost") {
-            list += Transport.Endpoint(host, port, 2_500)
-        }
+        val lan = lanEndpoint()
+        if (lan != null && list.none { it.host == lan.host && it.port == lan.port }) list += lan
         return list
     }
 
@@ -644,6 +870,12 @@ internal class DurbunCore(
         private const val MIN_METRICS_INTERVAL_MS = 250L
         private const val MAX_METRICS_INTERVAL_MS = 60_000L
         private const val CRASH_CONNECT_WAIT_MS = 1_000L
+
+        /** After this long without a first connection, logcat gets one line saying why and what to do. */
+        const val CONSOLE_HINT_AFTER_MS = 10_000L
+
+        private const val HOSTED_HINT =
+            "The Flutter SDK owns the connection: its in-app panel explains it under Tools → Mac connection."
         private const val CRASH_FLUSH_WAIT_MS = 2_000L
 
         /** Hosted logcat lines waiting for the host (a burst at start-up replays the whole logcat buffer). */

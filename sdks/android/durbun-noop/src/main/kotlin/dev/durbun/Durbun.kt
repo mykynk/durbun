@@ -33,6 +33,34 @@ object Durbun {
     val isConnected: Boolean
         get() = false
 
+    /** Always "not included" in the no-op module. */
+    @JvmStatic
+    val connectionStatus: DurbunConnectionStatus
+        get() = notIncluded
+
+    private val notIncluded = DurbunConnectionStatus(
+        isConnected = false,
+        via = null,
+        desktopHost = null,
+        desktopHostSource = null,
+        issue = "notIncluded",
+        hint = "This build uses durbun-noop: it contains no Dürbün code.",
+        failedAttempts = 0,
+    )
+
+    @JvmStatic
+    @Suppress("UNUSED_PARAMETER")
+    fun addConnectionListener(listener: DurbunConnectionListener) = Unit
+
+    @JvmStatic
+    @Suppress("UNUSED_PARAMETER")
+    fun removeConnectionListener(listener: DurbunConnectionListener) = Unit
+
+    /** Always false in the no-op module. */
+    @JvmStatic
+    @Suppress("UNUSED_PARAMETER")
+    fun setDesktopHost(context: Context, address: String?): Boolean = false
+
     @JvmStatic
     @JvmOverloads
     @Suppress("UNUSED_PARAMETER")

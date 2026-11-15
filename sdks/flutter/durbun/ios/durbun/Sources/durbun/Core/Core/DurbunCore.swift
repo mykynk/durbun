@@ -37,7 +37,20 @@ final class DurbunCore {
         var releaseBuild: Bool?
         /// Whether the Flutter plugin is part of the app (default: looked up at runtime).
         var flutterPluginPresent: Bool?
+        /// Delay of the one console line explaining a missing connection (default 10 s).
+        var consoleHintDelay: TimeInterval?
+        /// The `DurbunHost` Info.plist value (default: the main bundle's).
+        var infoPlistHost: String??
+        /// Where the run-time address is kept (default: `UserDefaults.standard`).
+        var defaults: UserDefaults?
     }
+
+    /// Launch argument (`-DurbunHost 192.168.1.20`) and Info.plist key with the desktop address.
+    static let hostArgumentKey = "DurbunHost"
+    /// Where the address given at run time is kept for the next launches.
+    static let savedHostKey = "dev.durbun.desktopHost"
+    /// The newest MetricKit diagnostic already handled (seconds since 1970).
+    static let diagnosticsHandledKey = "dev.durbun.diagnosticsHandled"
 
     /// Present in every Flutter app that uses `package:durbun` (the plugin carries a copy of this core).
     static let flutterPluginClass = "durbun.DurbunFlutterPlugin"
@@ -75,6 +88,24 @@ final class DurbunCore {
     private var hostDeviceLogs = HostDeviceLogs()
     /// Lines seen on stdout/stderr: their NSLog copy in the unified log is sent once.
     private let recentConsole = RecentConsoleLines()
+
+    /* connection diagnostics (see ConnectionReport) */
+    private var attempts: [ConnectAttempt] = []
+    private var failedRounds = 0
+    private var everConnected = false
+    private var via: String?
+    private var basePort: UInt16 = 9751
+    /// The address built into the app: options, the environment or Info.plist.
+    private var buildHost: (address: DesktopAddress, source: String)?
+    /// The address given at run time (`setDesktopHost`, the launch argument), kept in UserDefaults.
+    private var runtimeHost: DesktopAddress?
+    private var runtimeHostSet = false
+    /// The Wi-Fi endpoint the transport uses now.
+    private var appliedLan: String?
+    /// Earlier launches' diagnostics from MetricKit, sent once a desktop is connected.
+    private var pendingDiagnostics: [SystemDiagnosticReport] = []
+    private var seenDiagnostics: Set<String> = []
+    private var systemDiagnostics = false
 
     init() {
         let builtins = BuiltinActions()
@@ -140,6 +171,10 @@ final class DurbunCore {
     func start(options: DurbunOptions) {
         lifecycle.lock()
         defer { lifecycle.unlock() }
+        startLocked(options: options)
+    }
+
+    private func startLocked(options: DurbunOptions) {
         guard options.enabled else { return }
         let overrides = self.overrides
         // Flutter apps: package:durbun starts this core from Dart (and keeps it off when Dart is off), so a
@@ -150,7 +185,11 @@ final class DurbunCore {
         }
         let debugBuild = overrides.releaseBuild.map { !$0 } ?? Self.buildAllowsRunning
         guard debugBuild || options.allowInReleaseBuilds else {
-            Diagnostics.info("Dürbün is disabled in non-DEBUG builds (set allowInReleaseBuilds to force it).")
+            Diagnostics.notice(
+                "Dürbün is disabled in non-DEBUG builds (set allowInReleaseBuilds to force it). The Durbun package "
+                    + "decides by its own DEBUG flag: a custom configuration such as Staging needs "
+                    + "DurbunOptions(allowInReleaseBuilds: true) where Dürbün should run."
+            )
             return
         }
         let env = ProcessInfo.processInfo.environment
@@ -163,12 +202,13 @@ final class DurbunCore {
             return self.generation
         }
         let environment = AppEnvironment.current()
-        let host = (options.host ?? env["DURBUN_HOST"])?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let infoHost = overrides.infoPlistHost ?? (Bundle.main.object(forInfoDictionaryKey: Self.hostArgumentKey) as? String)
+        let build = Self.buildHost(options: options.host, environment: env["DURBUN_HOST"], infoPlist: infoHost)
         let isDevice = AppEnvironment.isPhysicalIOSDevice
         var configuration = Transport.Configuration()
         configuration.loopbackPort = (overrides.loopbackClient ?? !isDevice) ? options.port : nil
-        configuration.host = (host?.isEmpty == false) ? host : nil
-        configuration.hostPort = options.port
+        configuration.host = build?.address.host
+        configuration.hostPort = build?.address.port ?? options.port
         configuration.listenerPorts = (overrides.deviceListener ?? isDevice) ? options.devicePorts : nil
         configuration.maxBufferedMessages = max(1, options.maxBufferedMessages)
         if let delay = overrides.reconnectMinDelay { configuration.reconnectMinDelay = delay }
@@ -177,9 +217,10 @@ final class DurbunCore {
 
         let transport = Transport(configuration: configuration, callbacks: Transport.Callbacks(
             hello: { [weak self] in self?.helloMessage() ?? .null },
-            welcome: { [weak self] welcome, _ in self?.didConnect(welcome, generation: generation) },
+            welcome: { [weak self] welcome, origin in self?.didConnect(welcome, origin: origin, generation: generation) },
             message: { [weak self] message in self?.handle(message, generation: generation) },
-            disconnected: { [weak self] in self?.didDisconnect(generation: generation) }
+            disconnected: { [weak self] in self?.didDisconnect(generation: generation) },
+            attemptsFailed: { [weak self] attempts in self?.didFailAttempts(attempts, generation: generation) }
         ))
 
         lock.withLock {
@@ -198,11 +239,18 @@ final class DurbunCore {
                 ignoredHosts: options.ignoredHosts.map { $0.lowercased() },
                 redactedHeaders: Set(options.redactHeaders.map { $0.lowercased() })
             )
+            resetConnectionReport(port: options.port, build: build)
+            appliedLan = configuration.host.map { "\($0):\(configuration.hostPort)" }
         }
 
         // Start first: messages queued below are buffered until the handshake completes.
         transport.start()
         observeForeground(transport)
+        DispatchQueue.global(qos: .utility).async { [weak self] in self?.loadRuntimeHost(generation: generation) }
+        let hintDelay = overrides.consoleHintDelay ?? 10
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + hintDelay) { [weak self] in
+            self?.consoleHintIfNeeded(generation: generation)
+        }
         if options.captureNetwork { NetworkCapture.install() }
         if options.captureCrashes {
             CrashCapture.install()
@@ -210,6 +258,7 @@ final class DurbunCore {
             DispatchQueue.global(qos: .utility).async {
                 for report in CrashCapture.prepareAndTakePendingReports() { transport.send(report) }
             }
+            startSystemDiagnostics(generation: generation)
         }
         if options.captureStdout {
             let capture = StdioCapture { [weak self] entries in self?.sendStdio(entries) }
@@ -230,7 +279,10 @@ final class DurbunCore {
         defer { lifecycle.unlock() }
         guard options.enabled else { return false }
         if isRunning { stop() }
-        lock.withLock { generation += 1 }
+        let generation: Int = lock.withLock {
+            self.generation += 1
+            return self.generation
+        }
         let environment = AppEnvironment.current()
         let relay = HostRelay(link: link, maxMessages: max(1, options.maxBufferedMessages))
         lock.withLock {
@@ -246,6 +298,7 @@ final class DurbunCore {
             self.transport = nil
             self.relay = relay
             self.hostLink = link
+            resetConnectionReport(port: options.port, build: nil)
             policy = NetworkCapturePolicy(
                 active: options.captureNetwork,
                 interceptUploadTasks: options.interceptUploadTasks,
@@ -260,6 +313,7 @@ final class DurbunCore {
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 for report in CrashCapture.prepareAndTakePendingReports() { self?.send(report) }
             }
+            startSystemDiagnostics(generation: generation)
         }
         if options.captureStdout {
             let capture = StdioCapture { [weak self] entries in self?.sendStdio(entries) }
@@ -276,21 +330,26 @@ final class DurbunCore {
         guard let data = json.data(using: .utf8),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return }
-        let hosted: Bool = lock.withLock {
-            guard running, relay != nil else { return false }
+        let (hosted, connectionChanged): (Bool, Bool) = lock.withLock {
+            guard running, relay != nil else { return (false, false) }
             if let newConfig = object["config"] as? [String: Any] {
                 config = SdkConfig(json: newConfig, fallback: config)
             }
             if object["mocks"] != nil { mocks = MockRule.parseList(object["mocks"]) }
+            let wasConnected = connected
             if let isConnected = object["connected"] as? Bool { connected = isConnected }
             // See didDisconnect: rules from a peer that went away must not keep rewriting responses.
             if !connected { mocks = [] }
             if let wanted = object["deviceLogs"] as? [String: Any] {
                 hostDeviceLogs = HostDeviceLogs(json: wanted, fallback: hostDeviceLogs)
             }
-            return true
+            return (true, wasConnected != connected)
         }
         if hosted { applyDeviceLogs() }
+        if connectionChanged {
+            sendSystemDiagnostics()
+            notifyStatus()
+        }
     }
 
     /// A desktop `command` forwarded by the host (JSON); the result goes back as `command.result`.
@@ -346,6 +405,8 @@ final class DurbunCore {
             return result
         }
         if let observer { NotificationCenter.default.removeObserver(observer) }
+        stopSystemDiagnostics()
+        notifyStatus()
         metrics?.stop()
         stdio?.stop()
         osLog?.stop()
@@ -365,6 +426,235 @@ final class DurbunCore {
             transport?.nudge()
         }
         lock.withLock { foregroundObserver = observer }
+    }
+
+    // MARK: Connection status and the desktop address
+
+    /// Under `lock`.
+    private func resetConnectionReport(port: UInt16, build: (address: DesktopAddress, source: String)?) {
+        attempts = []
+        failedRounds = 0
+        everConnected = false
+        via = nil
+        basePort = port
+        buildHost = build
+        runtimeHost = nil
+        runtimeHostSet = false
+        appliedLan = nil
+        pendingDiagnostics = []
+        seenDiagnostics = []
+    }
+
+    /// The address built into the app, best first: options, `DURBUN_HOST` (Xcode scheme), Info.plist.
+    static func buildHost(options: String?, environment: String?, infoPlist: String?) -> (address: DesktopAddress, source: String)? {
+        for (value, source) in [(options, "options"), (environment, "environment"), (infoPlist, "infoPlist")] {
+            guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
+                  !raw.hasPrefix("$(") // an Info.plist build setting that was not defined
+            else { continue }
+            return (DesktopAddress.parse(raw) ?? DesktopAddress(host: raw, port: nil), source)
+        }
+        return nil
+    }
+
+    private var defaults: UserDefaults { overrides.defaults ?? .standard }
+
+    /// The address given at run time: the launch argument (`-DurbunHost 192.168.1.20`, kept for the
+    /// next launches) or one saved by `setDesktopHost`. UserDefaults may touch the disk: utility queue.
+    private func loadRuntimeHost(generation: Int) {
+        let defaults = self.defaults
+        var value = defaults.string(forKey: Self.savedHostKey)
+        if let argument = defaults.volatileDomain(forName: UserDefaults.argumentDomain)[Self.hostArgumentKey] as? String {
+            let trimmed = argument.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                defaults.removeObject(forKey: Self.savedHostKey)
+                value = nil
+            } else if let address = DesktopAddress.parse(trimmed) {
+                defaults.set(address.description, forKey: Self.savedHostKey)
+                value = address.description
+            } else {
+                Diagnostics.notice("Dürbün ignores the -\(Self.hostArgumentKey) launch argument \"\(argument)\": use the Mac's IP address, e.g. 192.168.1.20.")
+            }
+        }
+        guard let address = DesktopAddress.parse(value) else { return }
+        let apply: Bool = lock.withLock {
+            guard self.generation == generation, running, relay == nil, !runtimeHostSet else { return false }
+            runtimeHost = address
+            return true
+        }
+        if apply { applyLan() }
+    }
+
+    /// See `Durbun.setDesktopHost`.
+    func setDesktopHost(_ input: String?) -> Bool {
+        let trimmed = input?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var address: DesktopAddress?
+        if !trimmed.isEmpty {
+            guard let parsed = DesktopAddress.parse(trimmed) else {
+                Diagnostics.notice("Dürbün: \"\(trimmed)\" is not a desktop address (use the Mac's IP address, e.g. 192.168.1.20).")
+                return false
+            }
+            address = parsed
+        }
+        if isHosted {
+            Diagnostics.notice("In Flutter apps, set the Mac's address in the in-app panel (Tools → Mac connection).")
+            return false
+        }
+        if let address {
+            defaults.set(address.description, forKey: Self.savedHostKey)
+        } else {
+            defaults.removeObject(forKey: Self.savedHostKey)
+        }
+        let apply: Bool = lock.withLock {
+            guard running, relay == nil else { return false }
+            runtimeHost = address
+            runtimeHostSet = true
+            return true
+        }
+        if apply { applyLan() }
+        return true
+    }
+
+    /// Hands the current Wi-Fi address to the transport when it changed.
+    private func applyLan() {
+        let change: (Transport, DesktopAddress?, UInt16)? = lock.withLock {
+            guard running, let transport else { return nil }
+            let lan = lanLocked()
+            guard lan?.endpoint != appliedLan else { return nil }
+            appliedLan = lan?.endpoint
+            attempts = []
+            failedRounds = 0
+            return (transport, lan.map { DesktopAddress(host: $0.host, port: $0.port) }, basePort)
+        }
+        guard let change else { return }
+        let (transport, address, port) = change
+        Diagnostics.info(address.map { "Dürbün desktop address: \($0)" } ?? "Dürbün desktop address cleared")
+        transport.setHost(address?.host, port: address?.port ?? port)
+        notifyStatus()
+    }
+
+    /// Under `lock`: the Wi-Fi endpoint in use and where it comes from.
+    private func lanLocked() -> (endpoint: String, host: String, port: UInt16, source: String)? {
+        let chosen = runtimeHost.map { ($0, "runtime") } ?? buildHost.map { ($0.address, $0.source) }
+        guard let chosen else { return nil }
+        let (address, source) = chosen
+        let port = address.port ?? basePort
+        return ("\(address.host):\(port)", address.host, port, source)
+    }
+
+    /// Transport queue.
+    private func didFailAttempts(_ latest: [ConnectAttempt], generation: Int) {
+        let changed: Bool = lock.withLock {
+            guard self.generation == generation, running, !connected else { return false }
+            attempts = latest
+            failedRounds += 1
+            return true
+        }
+        if changed { notifyStatus() }
+    }
+
+    private func consoleHintIfNeeded(generation: Int) {
+        let text: String? = lock.withLock {
+            guard self.generation == generation, running, relay == nil, !connected, !everConnected else { return nil }
+            let lan = lanLocked()
+            return ConnectionDiagnosis.consoleHint(
+                issueLocked(lan: lan?.endpoint), attempts: attempts, port: basePort, lanEndpoint: lan?.endpoint
+            )
+        }
+        if let text { Diagnostics.notice(text) }
+    }
+
+    /// Under `lock`.
+    private func issueLocked(lan: String?) -> ConnectIssue? {
+        guard !connected else { return nil }
+        let device = environment?.device
+        let platform = device?.platform ?? "other"
+        let physical = device?.isPhysical ?? true
+        if attempts.isEmpty {
+            // A physical iPhone without a Wi-Fi address only waits for the Mac over USB.
+            return platform == "ios" && physical && lan == nil ? .iosUsbWaiting : nil
+        }
+        return ConnectionDiagnosis.diagnose(attempts: attempts, platform: platform, isPhysical: physical, lanEndpoint: lan)
+    }
+
+    var connectionStatus: DurbunConnectionStatus {
+        lock.withLock {
+            guard running else { return .notStarted }
+            if relay != nil {
+                return DurbunConnectionStatus(
+                    isConnected: connected, via: nil, desktopHost: nil, desktopHostSource: nil, issue: nil,
+                    hint: connected ? nil : "The Flutter SDK owns the connection: its in-app panel explains it under Tools → Mac connection.",
+                    failedAttempts: 0
+                )
+            }
+            let lan = lanLocked()
+            let issue = issueLocked(lan: lan?.endpoint)
+            return DurbunConnectionStatus(
+                isConnected: connected,
+                via: connected ? via : nil,
+                desktopHost: lan?.endpoint,
+                desktopHostSource: lan?.source,
+                issue: issue?.rawValue,
+                hint: issue.map { ConnectionDiagnosis.nextStep($0, port: basePort, lanEndpoint: lan?.endpoint) },
+                failedAttempts: connected ? 0 : failedRounds
+            )
+        }
+    }
+
+    private func notifyStatus() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: Durbun.connectionStatusDidChangeNotification, object: nil)
+        }
+    }
+
+    // MARK: Earlier launches (MetricKit)
+
+    private func startSystemDiagnostics(generation: Int) {
+        let defaults = self.defaults
+        let started = SystemDiagnostics.start { [weak self] reports in
+            guard let self else { return }
+            let handled = defaults.double(forKey: Self.diagnosticsHandledKey)
+            let fresh = reports.filter { $0.timestamp > handled }
+            guard !fresh.isEmpty else { return }
+            let current: Bool = self.lock.withLock {
+                guard self.generation == generation, self.running else { return false }
+                for report in fresh where self.seenDiagnostics.insert(report.key).inserted {
+                    self.pendingDiagnostics.append(report)
+                }
+                return true
+            }
+            if current { self.sendSystemDiagnostics() }
+        }
+        lock.withLock { systemDiagnostics = started }
+    }
+
+    private func stopSystemDiagnostics() {
+        let started: Bool = lock.withLock {
+            let was = systemDiagnostics
+            systemDiagnostics = false
+            pendingDiagnostics = []
+            return was
+        }
+        if started { SystemDiagnostics.stop() }
+    }
+
+    /// Sends earlier launches' diagnostics once a desktop is connected. Crash reports are left out when
+    /// the desktop reads the device's own crash logs (USB): it shows them already.
+    private func sendSystemDiagnostics() {
+        let (reports, desktopReads): ([SystemDiagnosticReport], Bool) = lock.withLock {
+            guard running, connected, !pendingDiagnostics.isEmpty else { return ([], false) }
+            let reports = pendingDiagnostics
+            pendingDiagnostics = []
+            return (reports, config.deviceLogsAvailable)
+        }
+        guard !reports.isEmpty else { return }
+        for report in reports where !(report.desktopReadsIt && desktopReads) {
+            send(report.message)
+        }
+        let newest = reports.map(\.timestamp).max() ?? 0
+        let defaults = self.defaults
+        if newest > defaults.double(forKey: Self.diagnosticsHandledKey) {
+            defaults.set(newest, forKey: Self.diagnosticsHandledKey)
+        }
     }
 
     // MARK: Sending
@@ -519,30 +809,44 @@ final class DurbunCore {
         )
     }
 
-    private func didConnect(_ welcome: ServerWelcome, generation: Int) {
-        let metrics: MetricsReporter? = lock.withLock {
-            guard self.generation == generation else { return nil }
+    private func didConnect(_ welcome: ServerWelcome, origin: Transport.Origin, generation: Int) {
+        let (current, metrics): (Bool, MetricsReporter?) = lock.withLock {
+            guard self.generation == generation else { return (false, nil) }
             connected = true
             config = welcome.config
             mocks = welcome.mocks
-            return self.metrics
+            everConnected = true
+            attempts = []
+            failedRounds = 0
+            switch origin {
+            case .usb: via = "usb"
+            case .loopback: via = "127.0.0.1:\(basePort)"
+            case .host: via = appliedLan
+            }
+            return (true, self.metrics)
         }
+        guard current else { return }
         metrics?.start(intervalMs: welcome.config.metricsIntervalMs)
         applyDeviceLogs()
+        sendSystemDiagnostics()
+        notifyStatus()
     }
 
     private func didDisconnect(generation: Int) {
-        let metrics: MetricsReporter? = lock.withLock {
-            guard self.generation == generation else { return nil }
+        let (current, metrics): (Bool, MetricsReporter?) = lock.withLock {
+            guard self.generation == generation else { return (false, nil) }
             connected = false
+            via = nil
             // Mock rules hold only while the peer that pushed them is connected: whoever answered the
             // hello is not authenticated yet. The desktop sends them again in its next welcome.
             mocks = []
-            return self.metrics
+            return (true, self.metrics)
         }
+        guard current else { return }
         metrics?.stop()
         // Paused, not lost: the next read starts where this one ended.
         applyDeviceLogs()
+        notifyStatus()
     }
 
     private func handle(_ message: ServerMessage, generation: Int) {
