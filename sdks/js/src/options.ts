@@ -27,8 +27,9 @@ export interface DurbunOptions {
   captureNetwork?: boolean;
   /**
    * Report uncaught errors and unhandled promise rejections (default true). In React Native, rejections are
-   * picked up from the dev-mode warning React Native's own rejection tracker prints (it does not track them
-   * in release builds); browsers use `unhandledrejection`, Node the uncaught-exception monitor.
+   * picked up from React Native's own rejection tracker, which only runs in dev builds (LogBox in 0.71–0.81,
+   * the "Uncaught (in promise)" error in 0.82+, the console warning before 0.71); browsers use
+   * `unhandledrejection`, Node the uncaught-exception monitor.
    */
   captureErrors?: boolean;
   /** Send JS heap / FPS samples (default true). */

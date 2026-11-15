@@ -55,10 +55,10 @@ AppRegistry.registerComponent(appName, () => App);
 
 | Target | What to do |
 |---|---|
-| **Android device (USB)** | Nothing. Dürbün runs `adb reverse tcp:9750 tcp:9750` **automatically** for every connected device, so `localhost:9750` on the phone reaches the Mac. To do it manually: `adb reverse tcp:9750 tcp:9750`. |
-| **Android emulator** | Nothing (same `adb reverse`; the emulator alias `10.0.2.2` is also tried automatically). |
+| **Android device (USB)** | Nothing. For every connected device Dürbün points the phone's port 9750 (with `adb reverse`) at a separate device gateway on the Mac that serves only the SDK connection, so `localhost:9750` on the phone reaches Dürbün **automatically**. Do not create this mapping by hand: pointed at Dürbün's own port 9750, it would give every app on the phone Dürbün's full interface and API. To check it, `adb reverse --list` should show a `tcp:9750` line that points at a different port (the gateway's). |
+| **Android emulator** | Nothing (the same automatic mapping; the emulator alias `10.0.2.2` is also tried). |
 | **iOS simulator** | Nothing. The simulator shares the Mac's network, so `localhost` works. |
-| **iOS physical device** | The phone cannot reach the Mac through `localhost`. Start Dürbün with `durbun --lan`, keep the phone and the Mac on the same Wi-Fi network, and pass the **Mac's LAN IP address** (System Settings → Network): `Durbun.start({ host: '192.168.1.20' })`. Without `host`, the SDK also tries the Metro dev-server host (usually the same Mac). iOS asks for the Local Network permission on the first connection. |
+| **iOS physical device** | The phone cannot reach the Mac through `localhost`. In the Mac app, turn on **Settings → Allow local network (Wi-Fi) connections** (from a source checkout: `node dist/durbun.mjs --lan`), keep the phone and the Mac on the same Wi-Fi network, and pass the **Mac's LAN IP address** (System Settings → Network): `Durbun.start({ host: '192.168.1.20' })`. Without `host`, the SDK also tries the Metro dev-server host (usually the same Mac). iOS asks for the Local Network permission on the first connection. |
 | Browser / Node | `Durbun.start()` is enough. For Node < 22: `Durbun.start({ WebSocket: require('ws') })`. |
 
 While disconnected, the SDK keeps the last 5 000 messages, reconnects with backoff (0.5 s → 3 s) and sends them
@@ -107,7 +107,7 @@ Durbun.isStarted; Durbun.isConnected;
 | **SDK logs** | `Durbun.log/debug/info/warn/error`, `Durbun.event`. |
 | **Network** | Everything that goes through `XMLHttpRequest`: React Native `fetch`, axios and others. Method, URL, headers, request and response bodies (text/JSON as text, binary as base64, FormData field summary, Blobs), status code, timings (wait / receive), errors, timeouts and cancellations. In browsers and Node, native `fetch` is captured too; each request is reported **once**. Body limits come from Dürbün's settings (default 1 MB). Metro's and Dürbün's own traffic is ignored. |
 | **Mocks** | Rules from Dürbün's Mocks tab: *respond* (a fake response, the network is never hit), *delay* (then the real request; the app's own timeout still applies), *fail* (the platform's natural error, `Network request failed` in React Native). |
-| **Errors** | Uncaught errors via `ErrorUtils` (the previous handler chain is kept): fatal ones appear as **crash** rows. In React Native, unhandled promise rejections (taken from the warning RN prints in dev mode; LogBox still shows it). On the web, `error` and `unhandledrejection`; in Node, `uncaughtExceptionMonitor`. |
+| **Errors** | Uncaught errors via `ErrorUtils` (the previous handler chain is kept): fatal ones appear as **crash** rows. In React Native, unhandled promise rejections in dev builds, read from React Native's own rejection tracker (LogBox in 0.71–0.81, the "Uncaught (in promise)" error in 0.82 and later, the console warning before 0.71); LogBox still shows them. React Native does not track rejections in release builds, so none are reported there. On the web, `error` and `unhandledrejection`; in Node, `uncaughtExceptionMonitor`. |
 | **Performance** | JS heap (Hermes), JS-thread FPS and janky frame count (the "JS FPS" of the RN perf monitor). |
 | **Actions** | "Reload JS" and "Open dev menu" buttons in development mode, plus your own via `Durbun.addAction`. |
 
@@ -142,7 +142,8 @@ no-op. If you deliberately enable it in release builds (`enabled: true`), Androi
 ## Troubleshooting
 
 - **No connection**: is Dürbün running (`http://localhost:9750`)? On Android, does `adb reverse --list` show
-  `tcp:9750`? `Durbun.start({ debug: true })` prints the addresses the SDK tries.
+  `tcp:9750`? If not, check that Dürbün lists the phone (System check shows a missing `adb`); Dürbün adds the
+  mapping itself, never add it by hand. `Durbun.start({ debug: true })` prints the addresses the SDK tries.
 - **Metro: `Unable to resolve module react-native`**: the package was installed from a folder (symlink). Install
   the `.tgz` instead, or add `watchFolders: ['/path/to/durbun/sdks/js']` and
   `resolver.nodeModulesPaths: [path.resolve(__dirname, 'node_modules')]` to `metro.config.js`.

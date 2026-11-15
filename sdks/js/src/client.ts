@@ -264,7 +264,7 @@ export class DurbunClient implements NetworkHost {
   onConsole(method: ConsoleMethod, level: LogLevel, args: unknown[]): void {
     if (!this.started) return;
     // React Native's unhandled-rejection warning is reported once, as an error (see errors.ts).
-    if (this.opts.captureErrors && this.runtime === 'react-native' && (method === 'warn' || method === 'error') && isRejectionWarning(args)) return;
+    if (this.opts.captureErrors && this.runtime === 'react-native' && (method === 'warn' || method === 'error') && isRejectionWarning(args, method)) return;
     let rest = args;
     if (method === 'assert') {
       if (args[0]) return;
