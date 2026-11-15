@@ -32,6 +32,22 @@ describe('foundation dictionaries', () => {
     expect([...keys].filter((k) => !tr.has(k) || !en.has(k))).toEqual([]);
   });
 
+  it('no message uses plural syntax the i18n core does not resolve', () => {
+    // Plurals are objects ({ one, other }); an inline "{count, plural, …}" would be shown to the user as written.
+    const srcDir = existsSync(join(process.cwd(), 'src/i18n')) ? join(process.cwd(), 'src') : join(process.cwd(), 'packages/ui/src');
+    const inline = /\{\s*\w+\s*,\s*(plural|select|selectordinal)\s*,/;
+    const found: string[] = [];
+    for (const f of walk(srcDir)) {
+      if (/\.test\.tsx?$/.test(f)) continue;
+      readFileSync(f, 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (inline.test(line)) found.push(`${f.slice(srcDir.length + 1)}:${i + 1}`);
+        });
+    }
+    expect(found).toEqual([]);
+  });
+
   it('Turkish and English define exactly the same keys', () => {
     const tr = new Set(messageKeys('tr').filter((k) => FOUNDATION.test(k)));
     const en = new Set(messageKeys('en').filter((k) => FOUNDATION.test(k)));
