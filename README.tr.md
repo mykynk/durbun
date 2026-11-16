@@ -141,7 +141,8 @@ Kılavuzlar şimdilik yalnızca İngilizce. Okura göre sıralanmış tüm kıla
 Yakalanmayanlar:
 
 - **Flutter:** gRPC ve doğrudan socket kullanan kod, WebSocket mesajları (el sıkışma görünür), arka plan
-  isolate'lerindeki istekler ve loglar (`compute`, `Isolate.run`), Android'de package:http'nin `CronetClient`'ı
+  isolate'lerindeki `print` çıktısı ve bu isolate'lerin `Durbun.attachIsolate()` çağrılana kadarki istekleri,
+  Android'de package:http'nin `CronetClient`'ı
   ve `package:ok_http`. Dio'nun `NativeAdapter`'ı için [`durbun_dio`](https://pub.dev/packages/durbun_dio)
   gerekir.
 - **iOS:** arka plan URLSession'ları, WKWebView ve AVPlayer trafiği.

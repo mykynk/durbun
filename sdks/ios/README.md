@@ -1,16 +1,19 @@
 # Dürbün iOS SDK
 
-Swift package `Durbun` for iOS 13+ (macOS 11+ for the tests). It streams your app's logs, `print` output,
-crashes, URLSession network traffic and performance metrics live to the Dürbün desktop app.
-
 > **Flutter app?** Do not add this package separately. The Flutter package
 > [`package:durbun`](../flutter/durbun/README.md) already carries this iOS core (URLSession, crashes,
 > stdout/stderr) and starts it from Dart, so no `Durbun.start()` call is needed (in a Flutter app it does
-> nothing). To log from Swift code, use `import durbun`. This page is for native-only iOS apps. After changing
-> the sources here, run `dart run tool/sync_native.dart` in `sdks/flutter/durbun` (the plugin carries an exact
-> copy).
+> nothing). To log from Swift code, use `import durbun`. This page is for native-only iOS apps.
 
-## What is captured
+[What you get](#what-you-get) · [Install](#install) · [Start](#start) · [Connect to the Mac](#connect-to-the-mac) ·
+[What is captured](#what-is-captured) · [Mocks](#mocks) · [Tools](#tools) ·
+[Release builds and safety](#release-builds-and-safety) · [Options](#options) ·
+[Troubleshooting](#troubleshooting) · [Development](#development)
+
+## What you get
+
+Swift package `Durbun` for iOS 13+ (macOS 11+ for the tests). It streams your app's logs, `print` output,
+crashes, URLSession network traffic and performance metrics live to the Dürbün Mac app.
 
 | What | How it shows up |
 |---|---|
@@ -19,12 +22,12 @@ crashes, URLSession network traffic and performance metrics live to the Dürbün
 | Crashes | Uncaught Objective-C exceptions **immediately** (`kind: crash`). Swift runtime traps (force-unwrapping `nil`, index out of range, `fatalError`), EXC_BAD_ACCESS and other fatal signals **on the next launch**, with the last console lines ("Fatal error: …") and a backtrace |
 | Earlier launches (MetricKit) | What iOS reports later: watchdog kills (0x8badf00d), main-thread hangs, CPU and disk-write exceptions, slow launches (see [Earlier launches](#earlier-launches-metrickit)) |
 | Network | `URLSession.shared` **and** your own sessions (Alamofire included): headers, bodies, redirects, timings (DNS/TCP/TLS/wait/receive), protocol (h2/h3), errors and cancellations |
-| Mocks | Rules defined on the desktop: synthesized responses, latency, natural failures (timeout, connection, DNS, TLS) |
+| Mocks | Rules defined in the Mac app: synthesized responses, latency, natural failures (timeout, connection, DNS, TLS) |
 | Performance | CPU (%), memory (phys_footprint, the number Xcode shows), thread count, FPS and janky frames (CADisplayLink) |
 | Events | `Durbun.event("purchase", ["amount": 49.9])` |
-| App tools | From the desktop's Device panel: light/dark appearance, slow animations, view hierarchy dump, UserDefaults dump, plus your own buttons via `registerAction` |
+| App tools | From the Mac app's Device tab: light/dark appearance, slow animations, view hierarchy dump, UserDefaults dump, plus your own tools via `registerAction` |
 
-## Installation
+## Install
 
 **Swift Package Manager:** in Xcode, choose **File → Add Package Dependencies…**, enter
 `https://github.com/mykynk/durbun`, and add the **Durbun** product to your app target. In a `Package.swift`:
@@ -49,12 +52,11 @@ Manager or point the Podfile at the repository tag:
 `pod 'Durbun', :git => 'https://github.com/mykynk/durbun.git', :tag => 'v0.2.0'`.
 
 With SwiftPM the package is linked into every configuration; in a build that is not a development build, the
-SDK does nothing by itself (see [Release safety](#release-safety)). The package ships a privacy manifest
-(`PrivacyInfo.xcprivacy`, reason `CA92.1` for the UserDefaults dump).
+SDK does nothing by itself (see [Which builds run Dürbün](#which-builds-run-dürbün)). The package ships a privacy
+manifest (`PrivacyInfo.xcprivacy`, reason `CA92.1` for the UserDefaults dump).
 
-**From a local path (developing the SDK):** in Xcode choose **Add Local…** and select the `sdks/ios` folder of
-this repository. From another Swift package, use `.package(path: "../durbun/sdks/ios")` and
-`.product(name: "Durbun", package: "ios")` (a local path dependency is identified by its folder name, `ios`).
+Upgrading: [Versions and upgrades](../../docs/guides/versions.md). To try changes that are not released yet, see
+[Unreleased changes from a clone](#unreleased-changes-from-a-clone).
 
 ## Start
 
@@ -78,29 +80,6 @@ struct MyApp: App {
 // UIKit: the same lines go in application(_:didFinishLaunchingWithOptions:).
 ```
 
-Usage:
-
-```swift
-Durbun.log("Logged in", level: .info, tag: "auth", data: ["userId": 42])
-Durbun.debug("Read from cache", tag: "cache")
-Durbun.warning("Slow response", tag: "api", data: ["ms": 2300])
-Durbun.error("Payment failed", error: error, tag: "payment")
-Durbun.event("purchase", ["amount": 49.9, "currency": "USD"])
-
-// Your own tool in the desktop's Device panel (runs on the main thread):
-Durbun.registerAction(DurbunAction(id: "app.clearCache", label: "Clear image cache")) { _ in
-    ImageCache.shared.removeAll()
-    return nil
-}
-Durbun.registerAction(DurbunAction(id: "app.mockLogin", label: "Mock login", kind: .toggle(false))) { params in
-    FeatureFlags.mockLogin = params["value"] as? Bool ?? false
-    return nil
-}
-```
-
-`data` can be a dictionary, an array, an `Encodable` or any other value (converted to JSON on a best-effort
-basis).
-
 ### Objective-C
 
 The same SDK is available to Objective-C code as `DURDurbun`:
@@ -120,19 +99,18 @@ The same SDK is available to Objective-C code as `DURDurbun`:
 `isRunning`, `isConnected`, `connectionStatusDescription`, `setDesktopHost:`, `stop` and `removeActionWithId:`
 are there too. Options other than the host are set from Swift (`DurbunOptions`).
 
-## Connecting
+## Connect to the Mac
 
 | Setup | What to do |
 |---|---|
-| **Simulator** | Nothing. The SDK connects to `127.0.0.1:9751`; `SIMULATOR_UDID` lets the desktop match the right simulator. |
-| **iPhone/iPad over USB** | Nothing. The SDK listens on the first free port in `127.0.0.1:9752…9755` on the device, and the desktop connects through usbmux. Only loopback is listened on, so nobody on the network can connect and no Local Network permission is needed. |
-| **Wi-Fi** | Give the app the Mac's IP address in one of the [ways below](#giving-the-app-the-macs-address). Add `NSLocalNetworkUsageDescription` to Info.plist (iOS asks for permission on the first connection) and in the Dürbün Mac app turn on Settings → "Allow local network (Wi-Fi) connections" (when you run the server from the repository instead, start it with `node dist/durbun.mjs --lan`). |
+| **iPhone/iPad over USB** | Nothing. The SDK listens on the first free port in `127.0.0.1:9752…9755` on the device, and the Mac app connects through usbmux. Only loopback is listened on, so nobody on the network can connect and no Local Network permission is needed. |
+| **Simulator** | Nothing. The SDK connects to `127.0.0.1:9751`; `SIMULATOR_UDID` lets the Mac app match the right simulator. |
+| **Wi-Fi** | Give the app the Mac's IP address in one of the [ways below](#giving-the-app-the-macs-address). Add `NSLocalNetworkUsageDescription` to Info.plist (iOS asks for permission on the first connection) and in the Mac app turn on Settings → Connection → "Allow local network (Wi-Fi) connections" (when you run the server from the repository instead, start it with `node dist/durbun.mjs --lan`). |
 
 If the connection drops, the SDK retries forever with a 0.5 s to 3 s backoff. Meanwhile it keeps the last
 5,000 messages in memory and sends them in order once connected (a single warning line is added if some had to
 be dropped). Whichever path completes the `hello` → `welcome` handshake first is used; the others are closed.
-If the app does not show up, see [Not connecting?](#not-connecting) and
-[Troubleshooting](../../docs/guides/troubleshooting.md).
+If the app does not show up, see [Not connecting?](#not-connecting).
 
 ### Giving the app the Mac's address
 
@@ -164,83 +142,61 @@ is set to the last:
   `.onOpenURL { url in if let host = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "durbunHost" })?.value { Durbun.setDesktopHost(host) } }`
   for `myapp://debug?durbunHost=192.168.1.20`.
 
-### Not connecting?
+## What is captured
 
-About 10 seconds after start, when no desktop has connected yet, the SDK writes **one** line to Xcode's console
-(and Console.app, subsystem `dev.durbun.sdk`): what it tried, the likely reason and the next step. The same is
-available in code:
+### Network
+
+`URLSession.shared` and every session created **after** `start()` are captured, Alamofire included. Network
+requests are forwarded untouched (tee); timeouts and certificate validation (pinning) are still enforced by your
+own session.
+
+- **Background URLSessions** (`.background(withIdentifier:)`) run out of process and cannot be intercepted.
+- URLProtocol cannot report **upload progress**: `didSendBodyData` is not called for intercepted upload tasks
+  (use `interceptUploadTasks: false` if your UI depends on it).
+- An intercepted request is performed with a copy of the configuration of the session that started it: the same
+  `URLCache` (or none), cookie and credential storage, proxy, TLS limits, `waitsForConnectivity`,
+  cellular / expensive / constrained network rules and connection limits. This holds for sessions created after
+  `start()`; `URLSession.shared` uses the default configuration. Sessions that differ only in
+  `httpAdditionalHeaders` (a new token after each login) share one binding. In an app that creates more than
+  32 configurations that differ in other settings, later ones are not captured (they behave as if Dürbün were
+  absent) and the Mac app shows one warning line saying so.
+- Stream (`httpBodyStream`) and file/data upload bodies are held in memory only up to the capture limit plus
+  256 KB (at least 1.25 MB); larger ones are streamed through. A streamed body cannot be rewound: a 307/308
+  redirect or an authentication retry that has to resend it fails for that request. Smaller bodies and
+  `httpBody` are resent as usual.
+- WKWebView and AVPlayer traffic does not go through URLSession protocols.
+- `redactHeaders` masks header values as `••••`; `ignoredHosts` leaves hosts (and their subdomains) out.
+
+### Logs and events
 
 ```swift
-let status = Durbun.connectionStatus   // isConnected, via, desktopHost, issue, hint, failedAttempts
-NotificationCenter.default.addObserver(forName: Durbun.connectionStatusDidChangeNotification, object: nil, queue: .main) { _ in
-    statusLabel.text = Durbun.connectionStatus.description
-}
+Durbun.log("Logged in", level: .info, tag: "auth", data: ["userId": 42])
+Durbun.debug("Read from cache", tag: "cache")
+Durbun.warning("Slow response", tag: "api", data: ["ms": 2300])
+Durbun.error("Payment failed", error: error, tag: "payment")
+Durbun.event("purchase", ["amount": 49.9, "currency": "USD"])
 ```
 
-| `issue` | Likely reason | Next step |
-|---|---|---|
-| `iosUsbWaiting` | iPhone without a Wi-Fi address: the Mac has not connected over the cable yet | Open the Dürbün Mac app with the iPhone on the cable (and trusted), or set a Wi-Fi address |
-| `desktopNotRunning` | Simulator: nothing listens on the Mac's port | Open the Dürbün Mac app (or check its SDK port) |
-| `lanRefused` | The Mac does not accept Wi-Fi connections | Settings → "Allow local network (Wi-Fi) connections" |
-| `lanTimeout` | No answer from the address | Check the address, the Wi-Fi network and the Mac's firewall |
-| `lanUnreachable` | Another network, or Local Network access is off | Join the Mac's Wi-Fi; Settings → Privacy & Security → Local Network; `NSLocalNetworkUsageDescription` |
-| `lanBadAddress` | The address cannot be resolved | Use the Mac's IP address |
-| `permissionDenied` | iOS did not allow the connection (Local Network) | Allow Local Network access for the app |
-| `notDurbun` | Another program answered on the port | Check the port and the Dürbün version |
+`data` can be a dictionary, an array, an `Encodable` or any other value (converted to JSON on a best-effort
+basis).
 
-The other Dürbün SDKs use the same table and words.
+The Mac app reads `os_log` / `Logger` / `NSLog` messages from device logs (simulator, USB). When it cannot
+(Wi-Fi, no `idevicesyslog`), the SDK on iOS 15+ reads the app's own log store once a second and sends the
+entries; iOS does not keep `debug` entries, and `com.apple.*` lines are skipped. `captureOSLog: false` (or
+`captureStdout: false` without `captureOSLog`) turns this off.
 
-## Options (`DurbunOptions`)
+### Crashes
 
-| Field | Default | Description |
-|---|---|---|
-| `host` | `nil` (`DURBUN_HOST`) | Desktop IP address for Wi-Fi (see [Giving the app the Mac's address](#giving-the-app-the-macs-address)) |
-| `port` | `9751` | Simulator / Wi-Fi port |
-| `devicePorts` | `9752...9755` | USB listener ports on a physical device |
-| `enabled` | `true` | If `false`, `start` does nothing |
-| `captureStdout` | `true` | Capture `print` / stdout / stderr |
-| `captureOSLog` | `nil` (same as `captureStdout`) | Forward the app's own `os_log` / `Logger` / `NSLog` lines when the desktop cannot read device logs (Wi-Fi) |
-| `captureNetwork` | `true` | Capture URLSession traffic and apply mocks |
-| `captureCrashes` | `true` | Exception and signal (crash) reports, and MetricKit diagnostics of earlier launches |
-| `collectMetrics` | `true` | CPU / memory / FPS samples (only while connected) |
-| `interceptUploadTasks` | `true` | Intercept upload tasks; with `false`, `didSendBodyData` progress callbacks are preserved |
-| `ignoredHosts` | `[]` | Domains that are never captured (subdomains included) |
-| `redactHeaders` | `[]` | Header names (case-insensitive) whose values show as `••••`, e.g. `["Authorization", "Cookie"]`; the real request is unchanged |
-| `captureBodies` | `nil` | Overrides the desktop setting (`false` records sizes only) |
-| `maxBodyBytes` | `nil` | Capture limit per body, at most 8 MB (the desktop default is 1 MB) |
-| `appName` | `nil` | Name shown on the desktop (default: the bundle's display name) |
-| `maxBufferedMessages` | `5000` | Messages kept while disconnected |
-| `allowInReleaseBuilds` | `false` | Run in every build, also those that are not development builds (see [Release safety](#release-safety)) |
+Uncaught Objective-C exceptions arrive **immediately**. Swift runtime traps, EXC_BAD_ACCESS and other fatal
+signals arrive **on the next launch**, with the last console lines and a backtrace. `captureCrashes: false`
+turns this off.
 
-The Android SDK has the same options; a few names differ:
-
-| iOS | Android |
-|---|---|
-| `collectMetrics` | `captureMetrics` |
-| `allowInReleaseBuilds` | `forceInRelease` |
-| `captureOSLog` | `captureLogcat` |
-| `Durbun.isRunning` | `Durbun.isStarted` |
-| `Durbun.registerAction(...)` | `Durbun.addAction(...)` |
-
-## Mocks
-
-Rules are defined on the desktop (the Mocks tab; see the [mock rules guide](../../docs/guides/mocks.md)) and
-pushed to the SDK live. Matching is identical to
-`mockRuleMatches` in the protocol package; the tests verify it with more than 2,700 cases generated from the
-TypeScript reference. Mocked requests are marked `mocked` on the desktop.
-
-| Action | What the app sees |
-|---|---|
-| `respond` | A synthesized response that never touches the network (status, headers, utf8/base64 body, optional delay). For a JSON body without `Content-Type`, `application/json` is added |
-| `delay` | The real request, after waiting the given time |
-| `fail` | `timeout` → `URLError.timedOut`, `connection` → `.cannotConnectToHost`, `dns` → `.cannotFindHost`, `tls` → `.secureConnectionFailed`, `custom` → `.unknown` (with your message) |
-
-## Earlier launches (MetricKit)
+#### Earlier launches (MetricKit)
 
 Some endings leave the app no chance to report, and some problems are only measured by iOS. On iOS 14 and newer
-the SDK subscribes to MetricKit's diagnostics and sends them once a desktop is connected:
+the SDK subscribes to MetricKit's diagnostics and sends them once the Mac app is connected:
 
-| Diagnostic | Line on the desktop |
+| Diagnostic | Line in the Mac app |
 |---|---|
 | Crash the SDK could not catch (watchdog 0x8badf00d, a launch failure) | Crash row with the termination reason and the (unsymbolicated) stack |
 | Main-thread hang | Warning "The main thread hung for 3.2 s in an earlier launch" with the stack |
@@ -250,14 +206,57 @@ the SDK subscribes to MetricKit's diagnostics and sends them once a desktop is c
 - iOS decides when to deliver them: usually at the next launch on iOS 15 and newer, at most once a day on iOS 14,
   and never in the simulator. Each diagnostic is sent once.
 - Crashes the SDK's own handlers already reported ("Crash in previous launch: …") are not sent again. Over USB
-  the desktop reads the device's crash logs itself, so crash diagnostics are left out there.
+  the Mac app reads the device's crash logs itself, so crash diagnostics are left out there.
 - Stacks are addresses and offsets per binary (MetricKit does not symbolicate); the full tree is in the line's
   data (`callStackTree`) for symbolication with the build's dSYM.
 - Out of reach: memory (jetsam) kills and other terminations iOS only counts (MetricKit gives daily totals,
   not single events), and live hang reports while the app runs (a hang arrives on a later launch).
 - `captureCrashes: false` turns this off too.
 
-## Release safety
+### Performance
+
+CPU (%), memory (phys_footprint, the number Xcode shows), thread count, FPS and janky frames, sampled only while
+connected. FPS / janky frames are iOS-only (there is no CADisplayLink on macOS). `collectMetrics: false` turns
+them off.
+
+## Mocks
+
+Rules are defined in the Mac app (the Mocks tab; see the [mock rules guide](../../docs/guides/mocks.md)) and
+pushed to the SDK live. Matching is identical to
+`mockRuleMatches` in the protocol package; the tests verify it with more than 2,700 cases generated from the
+TypeScript reference. Mocked requests are marked `mocked` in the Mac app.
+
+| Action | What the app sees |
+|---|---|
+| `respond` | A synthesized response that never touches the network (status, headers, utf8/base64 body, optional delay). For a JSON body without `Content-Type`, `application/json` is added |
+| `delay` | The real request, after waiting the given time |
+| `fail` | `timeout` → `URLError.timedOut`, `connection` → `.cannotConnectToHost`, `dns` → `.cannotFindHost`, `tls` → `.secureConnectionFailed`, `custom` → `.unknown` (with your message) |
+
+- `regex` mock rules use NSRegularExpression (ICU). For typical URL patterns it behaves the same as
+  JavaScript; only exotic JavaScript-specific syntax may differ.
+- When the connection drops, the mock rules that connection pushed are removed at once; the Mac app sends them
+  again when it reconnects.
+
+## Tools
+
+Built in, under App tools in the Mac app's Device tab: light/dark appearance, slow animations, view hierarchy
+dump and UserDefaults dump. Add your own:
+
+```swift
+// Your own tool in the Mac app's Device tab (runs on the main thread):
+Durbun.registerAction(DurbunAction(id: "app.clearCache", label: "Clear image cache")) { _ in
+    ImageCache.shared.removeAll()
+    return nil
+}
+Durbun.registerAction(DurbunAction(id: "app.mockLogin", label: "Mock login", kind: .toggle(false))) { params in
+    FeatureFlags.mockLogin = params["value"] as? Bool ?? false
+    return nil
+}
+```
+
+## Release builds and safety
+
+### Which builds run Dürbün
 
 - With `Durbun.start()` inside `#if DEBUG`, release builds never start the SDK.
 - Without `#if DEBUG`, the SDK decides by itself and runs in **development builds** only: the package was
@@ -275,19 +274,10 @@ the SDK subscribes to MetricKit's diagnostics and sends them once a desktop is c
 - `allowInReleaseBuilds: true` in code runs it in every build. With it, or with `DurbunEnabled = YES`, it runs
   wherever the app was installed from (Xcode, ad-hoc, TestFlight, App Store). Each project decides which builds
   run Dürbün.
-- When the connection drops, the mock rules that connection pushed are removed at once; the desktop sends them
-  again when it reconnects.
-- Security note: the link has no pairing yet. On a physical device, a build with Dürbün enabled listens on one
-  of the ports `127.0.0.1:9752–9755` and talks to whatever connects there: the desktop (through usbmux) or
-  another app on the device. Logs and network traffic go to that peer, and the mock rules it pushes apply while
-  it stays connected.
 - The `DURBUN_DISABLED=1` environment variable turns the SDK off completely; it is also off inside SwiftUI
   previews (Xcode Previews).
-- All I/O runs on background queues with bounded buffers, and the SDK swallows its own errors and never
-  crashes the app. Network requests are forwarded untouched (tee); timeouts and certificate validation
-  (pinning) are still enforced by your own session.
 
-## Test builds (TestFlight, ad hoc, Firebase App Distribution)
+### Test builds (TestFlight, ad hoc, Firebase App Distribution)
 
 Builds for testers are usually archived with a Release-based configuration, where `DEBUG` is not set, so the
 SDK stays off. To run Dürbün in such builds only:
@@ -296,7 +286,7 @@ SDK stays off. To run Dürbün in such builds only:
 2. In the app target's Build Settings, add `DURBUN` to **Active Compilation Conditions**
    (`SWIFT_ACTIVE_COMPILATION_CONDITIONS`) for Staging only.
 3. Start the SDK under that condition and allow it outside `DEBUG` (or, instead of the option, set
-   `DurbunEnabled = YES` in Info.plist for Staging, see [Release safety](#release-safety)):
+   `DurbunEnabled = YES` in Info.plist for Staging, see [Which builds run Dürbün](#which-builds-run-dürbün)):
 
    ```swift
    #if DEBUG || DURBUN
@@ -316,40 +306,102 @@ SDK stays off. To run Dürbün in such builds only:
   with `DEBUG` nor signed for development; the app target's own compilation conditions do not reach the package.
 - With CocoaPods, link the pod only where it runs:
   `pod 'Durbun', :configurations => ['Debug', 'Staging']` (with a version requirement as in
-  [Installation](#installation)). A custom configuration also needs a mapping at the top of the Podfile, for
+  [Install](#install)). A custom configuration also needs a mapping at the top of the Podfile, for
   example `project 'MyApp', 'Staging' => :release`.
 - Over USB nothing else is needed: the SDK listens on the device's loopback and the Mac connects through
   usbmux, whatever the app was installed from. Wi-Fi needs `host` and `NSLocalNetworkUsageDescription`, as in
-  [Connecting](#connecting); the address can be [given without a rebuild](#giving-the-app-the-macs-address).
+  [Connect to the Mac](#connect-to-the-mac); the address can be
+  [given without a rebuild](#giving-the-app-the-macs-address).
 - When it stays off, the SDK writes `Dürbün is off in this build: …` with the reason and both switches to
   Xcode's console and the unified log (subsystem `dev.durbun.sdk`).
 
 The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, Android and React Native as well.
 
-## Known limitations
+### Safety and security
 
-- **Background URLSessions** (`.background(withIdentifier:)`) run out of process and cannot be intercepted.
-- URLProtocol cannot report **upload progress**: `didSendBodyData` is not called for intercepted upload tasks
-  (use `interceptUploadTasks: false` if your UI depends on it).
-- An intercepted request is performed with a copy of the configuration of the session that started it: the same
-  `URLCache` (or none), cookie and credential storage, proxy, TLS limits, `waitsForConnectivity`,
-  cellular / expensive / constrained network rules and connection limits. This holds for sessions created after
-  `start()`; `URLSession.shared` uses the default configuration. Sessions that differ only in
-  `httpAdditionalHeaders` (a new token after each login) share one binding. In an app that creates more than
-  32 configurations that differ in other settings, later ones are not captured (they behave as if Dürbün were
-  absent) and the desktop shows one warning line saying so.
-- Stream (`httpBodyStream`) and file/data upload bodies are held in memory only up to the capture limit plus
-  256 KB (at least 1.25 MB); larger ones are streamed through. A streamed body cannot be rewound: a 307/308
-  redirect or an authentication retry that has to resend it fails for that request. Smaller bodies and
-  `httpBody` are resent as usual.
-- WKWebView and AVPlayer traffic does not go through URLSession protocols.
-- The desktop reads `os_log` / `Logger` / `NSLog` messages from device logs (simulator, USB). When it cannot
-  (Wi-Fi, no `idevicesyslog`), the SDK on iOS 15+ reads the app's own log store once a second and sends the
-  entries; iOS does not keep `debug` entries, and `com.apple.*` lines are skipped. `captureOSLog: false` (or
-  `captureStdout: false` without `captureOSLog`) turns this off.
-- `regex` mock rules use NSRegularExpression (ICU). For typical URL patterns it behaves the same as
-  JavaScript; only exotic JavaScript-specific syntax may differ.
-- FPS / janky frames are iOS-only (there is no CADisplayLink on macOS).
+- All I/O runs on background queues with bounded buffers, and the SDK swallows its own errors and never
+  crashes the app. Network requests are forwarded untouched (tee); timeouts and certificate validation
+  (pinning) are still enforced by your own session.
+- When the connection drops, the mock rules that connection pushed are removed at once; the Mac app sends them
+  again when it reconnects.
+- Security note: the link has no pairing yet. On a physical device, a build with Dürbün enabled listens on one
+  of the ports `127.0.0.1:9752–9755` and talks to whatever connects there: the Mac app (through usbmux) or
+  another app on the device. Logs and network traffic go to that peer, and the mock rules it pushes apply while
+  it stays connected. See [Security](../../README.md#security).
+
+## Options
+
+`DurbunOptions`:
+
+| Field | Default | Description |
+|---|---|---|
+| `host` | `nil` (`DURBUN_HOST`) | The Mac's IP address for Wi-Fi (see [Giving the app the Mac's address](#giving-the-app-the-macs-address)) |
+| `port` | `9751` | Simulator / Wi-Fi port |
+| `devicePorts` | `9752...9755` | USB listener ports on a physical device |
+| `enabled` | `true` | If `false`, `start` does nothing |
+| `captureStdout` | `true` | Capture `print` / stdout / stderr |
+| `captureOSLog` | `nil` (same as `captureStdout`) | Forward the app's own `os_log` / `Logger` / `NSLog` lines when the Mac app cannot read device logs (Wi-Fi) |
+| `captureNetwork` | `true` | Capture URLSession traffic and apply mocks |
+| `captureCrashes` | `true` | Exception and signal (crash) reports, and MetricKit diagnostics of earlier launches |
+| `collectMetrics` | `true` | CPU / memory / FPS samples (only while connected) |
+| `interceptUploadTasks` | `true` | Intercept upload tasks; with `false`, `didSendBodyData` progress callbacks are preserved |
+| `ignoredHosts` | `[]` | Domains that are never captured (subdomains included) |
+| `redactHeaders` | `[]` | Header names (case-insensitive) masked as `••••`, e.g. `["Authorization", "Cookie"]`; the real request is unchanged |
+| `captureBodies` | `nil` | Overrides the Mac app's setting (`false` records sizes only) |
+| `maxBodyBytes` | `nil` | Capture limit per body, at most 8 MB (the Mac app's default is 1 MB) |
+| `appName` | `nil` | Name shown in the Mac app (default: the bundle's display name) |
+| `maxBufferedMessages` | `5000` | Messages kept while disconnected |
+| `allowInReleaseBuilds` | `false` | Run in every build, also those that are not development builds (see [Which builds run Dürbün](#which-builds-run-dürbün)) |
+
+### Same option, other names
+
+The SDKs share their options; where a name differs, this table maps it:
+
+| What | Flutter | Android | iOS | React Native / JS |
+|---|---|---|---|---|
+| Run in release builds | `--dart-define=DURBUN=true` or `enabled: true` | `forceInRelease` | `allowInReleaseBuilds` (or the `DurbunEnabled` Info.plist key) | `enabled: true` |
+| Performance metrics | `metrics` | `captureMetrics` | `collectMetrics` | `captureMetrics` |
+| Crashes | `captureErrors` | `captureCrashes` | `captureCrashes` | `captureErrors` |
+| `print` / stdout / console | `capturePrint` | none | `captureStdout` | `captureConsole` |
+| The app's own logcat / `os_log` lines when the Mac app cannot read device logs | `capturePrint` (`never` turns them off) | `captureLogcat` | `captureOSLog` | none |
+| Hosts never captured | none | `ignoredHosts` | `ignoredHosts` | `ignoreUrls` |
+| Is the SDK running? | `Durbun.isEnabled` | `Durbun.isStarted` | `Durbun.isRunning` | `Durbun.isStarted` |
+| Add your own tool | `Durbun.addAction(...)` | `Durbun.addAction(...)` | `Durbun.registerAction(...)` | `Durbun.addAction(...)` |
+| Set the Mac's address without a rebuild | In-app panel: Tools → Mac connection | `Durbun.setDesktopHost(context, ...)` | `Durbun.setDesktopHost(...)` | none |
+| Wait for mock rules at launch | `waitForDesktop` (a `Duration`) | none | none | `waitForDesktop` (milliseconds) |
+
+## Troubleshooting
+
+### Not connecting?
+
+About 10 seconds after start, when the Mac app has not connected yet, the SDK writes **one** line to Xcode's
+console (and Console.app, subsystem `dev.durbun.sdk`): what it tried, the likely reason and the next step. The
+same is available in code:
+
+```swift
+let status = Durbun.connectionStatus   // isConnected, via, desktopHost, issue, hint, failedAttempts
+NotificationCenter.default.addObserver(forName: Durbun.connectionStatusDidChangeNotification, object: nil, queue: .main) { _ in
+    statusLabel.text = Durbun.connectionStatus.description
+}
+```
+
+| `issue` | Likely reason | Next step |
+|---|---|---|
+| `iosUsbWaiting` | iPhone without a Wi-Fi address: the Mac has not connected over the cable yet | Open the Dürbün Mac app with the iPhone on the cable (and trusted), or set a Wi-Fi address |
+| `desktopNotRunning` | Simulator: nothing listens on the Mac's port | Open the Dürbün Mac app (or check its SDK port) |
+| `lanRefused` | The Mac does not accept Wi-Fi connections | Settings → Connection → "Allow local network (Wi-Fi) connections" |
+| `lanTimeout` | No answer from the address | Check the address, the Wi-Fi network and the Mac's firewall |
+| `lanUnreachable` | Another network, or Local Network access is off | Join the Mac's Wi-Fi; Settings → Privacy & Security → Local Network; `NSLocalNetworkUsageDescription` |
+| `lanBadAddress` | The address cannot be resolved | Use the Mac's IP address |
+| `permissionDenied` | iOS did not allow the connection (Local Network) | Allow Local Network access for the app |
+| `notDurbun` | Another program answered on the port | Check the port and the Dürbün version |
+
+The other Dürbün SDKs use the same table and words.
+
+### More help
+
+More symptoms and fixes, for every platform: [Troubleshooting](../../docs/guides/troubleshooting.md). Which SDK
+version works with which Mac app: [Versions and upgrades](../../docs/guides/versions.md).
 
 ## Development
 
@@ -360,3 +412,12 @@ swift test -j 2
 xcodebuild -scheme Durbun -destination 'generic/platform=iOS Simulator' -quiet build
 node scripts/generate-mock-vectors.mjs   # regenerates the mock-matching test cases from the TypeScript reference
 ```
+
+The Flutter plugin carries an exact copy of these sources: after changing them, run
+`dart run tool/sync_native.dart` in `sdks/flutter/durbun`.
+
+### Unreleased changes from a clone
+
+In Xcode choose **Add Local…** and select the `sdks/ios` folder of this repository. From another Swift package,
+use `.package(path: "../durbun/sdks/ios")` and `.product(name: "Durbun", package: "ios")` (a local path
+dependency is identified by its folder name, `ios`).

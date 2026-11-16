@@ -137,8 +137,8 @@ Every guide, sorted by reader, is listed in [the docs index](docs/README.md).
 
 Not captured:
 
-- **Flutter:** gRPC and raw sockets, WebSocket messages (the handshake shows), requests and logs in
-  background isolates (`compute`, `Isolate.run`), and on Android package:http's `CronetClient` and
+- **Flutter:** gRPC and raw sockets, WebSocket messages (the handshake shows), `print` in background isolates
+  and their requests until they call `Durbun.attachIsolate()`, and on Android package:http's `CronetClient` and
   `package:ok_http`. Dio's `NativeAdapter` needs [`durbun_dio`](https://pub.dev/packages/durbun_dio).
 - **iOS:** background URLSessions, WKWebView and AVPlayer traffic.
 - **Android:** `HttpURLConnection` (Volley, Media3's default data source, Ktor's CIO engine), Cronet, WebView

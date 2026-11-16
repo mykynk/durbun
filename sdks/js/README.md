@@ -1,7 +1,14 @@
 # Dürbün: React Native / JavaScript SDK
 
+[What you get](#what-you-get) · [Install](#install) · [Start](#start) · [Connect to the Mac](#connect-to-the-mac) ·
+[What is captured](#what-is-captured) · [Mocks](#mocks) · [Tools](#tools) ·
+[Release builds and safety](#release-builds-and-safety) · [Options](#options) ·
+[Troubleshooting](#troubleshooting) · [Development](#development)
+
+## What you get
+
 `@durbun/react-native` streams **all logs** (console, your own logs, errors and crashes), **all network traffic**
-(fetch, axios, XMLHttpRequest) and JS performance samples of your app to the Dürbün desktop app, live. It also
+(fetch, axios, XMLHttpRequest) and JS performance samples of your app to the Dürbün Mac app, live. It also
 applies Dürbün's mock rules (fake responses, latency, failures) inside the app.
 
 - **Zero runtime dependencies**; works in React Native (Hermes/JSC), browsers and Node.
@@ -19,22 +26,12 @@ npm install @durbun/react-native
 There is no native code: no `pod install` and no Gradle changes, so it also works in Expo projects (dev client
 and Expo Go).
 
-### Unreleased changes from a clone
+Upgrading: [Versions and upgrades](../../docs/guides/versions.md). To try changes that are not released yet, see
+[Unreleased changes from a clone](#unreleased-changes-from-a-clone).
 
-To try changes that are not released yet, install from a clone of the Dürbün repository using the **packed `.tgz`,
-not the folder** (Metro cannot resolve `react-native` through a symlinked folder outside the app):
+## Start
 
-```sh
-# 1) In your clone of the Dürbün repository: build the package (prepack builds it automatically)
-cd /path/to/durbun/sdks/js
-npm pack                      # → durbun-react-native-0.2.0.tgz
-
-# 2) In your app
-npm install /path/to/durbun/sdks/js/durbun-react-native-0.2.0.tgz
-# or: yarn add file:/path/to/durbun/sdks/js/durbun-react-native-0.2.0.tgz
-```
-
-## Start it in `index.js`
+In `index.js`:
 
 ```js
 import { AppRegistry } from 'react-native';
@@ -51,84 +48,76 @@ AppRegistry.registerComponent(appName, () => App);
 > its own file and import it first: `durbun.js` contains `Durbun.start();` and `index.js` starts with
 > `import './durbun';`.
 
+`Durbun.stop()` restores every patched API; `Durbun.isStarted` and `Durbun.isConnected` tell the state.
+
 ### Expo
 
 With Expo Router, create `durbun.js` as above and import it on the first line of `app/_layout.tsx`
 (`import '../durbun';`). Without Expo Router, import it at the top of the file your `main` entry points to.
 
-- **Expo Go**: the app shows in Dürbün under your project's own bundle id (`ios.bundleIdentifier` /
+- **Expo Go**: the app shows in the Mac app under your project's own bundle id (`ios.bundleIdentifier` /
   `android.package` from the app config), name and version, not as "Expo Go". If the app config cannot be read,
   the SDK prints one note in the Metro terminal; pass `Durbun.start({ appId: 'com.example.app' })` then, so mock
   rules scoped to your app match.
 - **Dev client and bare Expo**: install `expo-application` (`npx expo install expo-application`) and the real
   native id is used; without it the id comes from the app config.
-- `expo-device`, when installed, gives the device's name, which keeps several phones on Wi-Fi apart in Dürbün.
+- `expo-device`, when installed, gives the device's name, which keeps several phones on Wi-Fi apart in the Mac
+  app.
 
-## Connecting a device
+## Connect to the Mac
 
 | Target | What to do |
 |---|---|
-| **Android device (USB)** | Nothing. For every connected device Dürbün points the phone's port 9750 (with `adb reverse`) at a separate device gateway on the Mac that serves only the SDK connection, so `localhost:9750` on the phone reaches Dürbün **automatically**. Do not create this mapping by hand: pointed at Dürbün's own port 9750, it would give every app on the phone Dürbün's full interface and API. To check it, `adb reverse --list` should show a `tcp:9750` line that points at a different port (the gateway's). |
+| **Android device (USB)** | Nothing. For every connected device the Mac app points the phone's port 9750 (with `adb reverse`) at a separate device gateway on the Mac that serves only the SDK connection, so `localhost:9750` on the phone reaches the Mac app **automatically**. Do not create this mapping by hand: pointed at Dürbün's own port 9750, it would give every app on the phone Dürbün's full interface and API. To check it, `adb reverse --list` should show a `tcp:9750` line that points at a different port (the gateway's). |
 | **Android emulator** | Nothing (the same automatic mapping; the emulator alias `10.0.2.2` is also tried). |
-| **Android device over Wi-Fi (no USB)** | Like an iPhone: turn on **Settings → Allow local network (Wi-Fi) connections** in Dürbün and pass the Mac's LAN IP address: `Durbun.start({ host: '192.168.1.20' })`. |
 | **iOS simulator** | Nothing. The simulator shares the Mac's network, so `localhost` works. |
-| **iOS physical device** | The phone cannot reach the Mac through `localhost`. In the Mac app, turn on **Settings → Allow local network (Wi-Fi) connections** (from a source checkout: `node dist/durbun.mjs --lan`), keep the phone and the Mac on the same Wi-Fi network, and pass the **Mac's LAN IP address** (System Settings → Network): `Durbun.start({ host: '192.168.1.20' })`. Without `host`, the SDK also tries the Metro dev-server host (usually the same Mac). iOS asks for the Local Network permission on the first connection. |
+| **Android device over Wi-Fi (no USB)** | Like an iPhone: turn on **Settings → Connection → Allow local network (Wi-Fi) connections** in the Mac app and pass the Mac's LAN IP address: `Durbun.start({ host: '192.168.1.20' })`. |
+| **iOS physical device** | The phone cannot reach the Mac through `localhost`. In the Mac app, turn on **Settings → Connection → Allow local network (Wi-Fi) connections** (from a source checkout: `node dist/durbun.mjs --lan`), keep the phone and the Mac on the same Wi-Fi network, and pass the **Mac's LAN IP address** (System Settings → Network): `Durbun.start({ host: '192.168.1.20' })`. Without `host`, the SDK also tries the Metro dev-server host (usually the same Mac). iOS asks for the Local Network permission on the first connection. |
 | Browser / Node | `Durbun.start()` is enough. For Node < 22: `Durbun.start({ WebSocket: require('ws') })`. |
 
-If no Dürbün has accepted the app 10 seconds after `Durbun.start()`, the SDK prints one `console.info` note
-(in the Metro terminal): the addresses it tried and what to do for this device. It keeps retrying, and prints
-one more line when the connection works.
+This SDK connects to the Mac app's HTTP port (9750), not to the SDK port the other SDKs use. That port takes
+the Wi-Fi setting only when the Mac app starts: after you turn on **Allow local network (Wi-Fi) connections**,
+quit and reopen the Mac app before a phone connects over Wi-Fi.
 
 While disconnected, the SDK keeps the last 5 000 messages (about 8 MB at most), reconnects with backoff
 (0.5 s → 3 s) and sends them all in order once connected. So that an app that keeps `Durbun.start()` costs
-almost nothing while Dürbün is closed:
+almost nothing while the Mac app is closed:
 
-- Bodies are read while Dürbün is connected, during the first 30 seconds after start (while it may still be
-  connecting) and for 30 seconds after it went away. Requests made outside these windows arrive with their
+- Bodies are read while the Mac app is connected, during the first 30 seconds after start (while it may still
+  be connecting) and for 30 seconds after it went away. Requests made outside these windows arrive with their
   method, URL, headers, status and timings, and only the body's size.
 - Past about 8 MB, the oldest waiting bodies are dropped first (the request stays, its body shows as
   truncated); only then the oldest messages. If any message had to be dropped, a warning line says how many.
 
-## Usage
+If the app does not show up, see [Not connecting?](#not-connecting).
 
-```js
-import { Durbun } from '@durbun/react-native';
+### Giving the app the Mac's address
 
-Durbun.log('User logged in', { tag: 'auth', data: { userId: 42 } });   // level via { level: 'debug' }, default info
-Durbun.debug('Read from cache', { data: cacheEntry });
-Durbun.info('Cart updated');
-Durbun.warn('Slow response', { data: { ms: 3200 } });
+Pass it as `host` (`'192.168.1.20'` or `'192.168.1.20:9750'`), or a full `url`
+(`Durbun.start({ host: '192.168.1.20' })`). Without `host`, the SDK tries `localhost` and the Metro dev-server
+host (all at once; the first to answer wins).
 
-try {
-  await pay();
-} catch (e) {
-  Durbun.error('Payment failed', e);                                  // short form
-  Durbun.error('Payment failed', { error: e, tag: 'payment', data: { orderId } });
-}
+## What is captured
 
-Durbun.event('purchase', { amount: 49.9, currency: 'USD' });
+### Network
 
-// A button / toggle for this app in Dürbün's Device tab
-Durbun.addAction({ id: 'app.clearCache', label: 'Clear cache' }, async () => {
-  await cache.clear();
-  return { ok: true };
-});
-Durbun.addAction({ id: 'app.mockLocation', label: 'Mock location', kind: 'toggle', value: false }, ({ value }) => setMockLocation(!!value));
+Everything that goes through `XMLHttpRequest`: React Native `fetch`, axios and others. Method, URL, headers,
+request and response bodies (text/JSON as text, binary as base64, FormData field summary, Blobs), status code,
+timings (wait / receive), errors, timeouts and cancellations. In browsers and Node, native `fetch` is captured
+too; each request is reported **once**. Body limits come from the Mac app's settings (default 1 MB). Responses
+that stay open (server-sent events, NDJSON, media streams) are shown as soon as their headers arrive, with the
+size only. In React Native, text responses that arrive as a `Blob` (what `fetch` uses) are decoded by the
+platform (`FileReader.readAsText`), not on the JS thread. Metro's and Dürbün's own traffic is ignored.
 
-// Screen changes as "navigation" events, so rows show which screen they came from (route params are not sent).
-// React Navigation: the ref passed to <NavigationContainer ref={…}>; Expo Router: useNavigationContainerRef().
-Durbun.trackNavigation(navigationRef);
+`redactHeaders` masks header values as `••••`; `ignoreUrls` leaves URLs out.
 
-Durbun.stop();             // restores every patched API
-Durbun.isStarted; Durbun.isConnected;
-```
+**What a JS SDK cannot see:** React Native `<Image>` downloads and requests made by native modules (Firebase and
+similar) never pass through the JS layer, so they are not captured (report your own clients with
+`Durbun.network.begin`, see below). Requests that were opened (`open()` called)
+before `Durbun.start()` are not captured either. The app's stdout and system logs still show up in device logs
+without the SDK.
 
-- `data` may be any value: cycles, BigInt, Date, Map/Set and Error are snapshotted safely and shown in Dürbün
-  as a collapsible JSON tree.
-- A leading `[Tag]` in a console message, as in `console.log('[Auth] token refreshed')`, becomes the row's tag
-  chip (`Auth`). Objects appear as single-line JSON in the message and as a tree in the details.
-
-### Requests the SDK cannot see
+#### Reporting other clients yourself
 
 `react-native-blob-util`, Expo FileSystem downloads, gRPC-web and native modules do not go through `fetch` or
 `XMLHttpRequest`. Report them yourself; while the SDK is off these calls do nothing:
@@ -148,60 +137,61 @@ try {
 pass `bodySize` instead. To apply Dürbün's mock rules in your own client, `Durbun.network.findMock(method, url)`
 returns the matching rule; answer with `rule.action` and report it with `call.response({ …, mockRuleId: rule.id })`.
 
-## What is captured
-
-| | |
-|---|---|
-| **console.\*** | `log/info/debug/warn/error/trace/assert/dir/table`; `%s %d %o %c` formatting, objects → JSON data, Errors → stack traces. `captureConsole: 'auto'` (default): when Dürbün already receives the device's own log stream (Android logcat, iOS simulator), console lines are **not sent again**, so rows are not duplicated. |
-| **SDK logs** | `Durbun.log/debug/info/warn/error`, `Durbun.event`. |
-| **Network** | Everything that goes through `XMLHttpRequest`: React Native `fetch`, axios and others. Method, URL, headers, request and response bodies (text/JSON as text, binary as base64, FormData field summary, Blobs), status code, timings (wait / receive), errors, timeouts and cancellations. In browsers and Node, native `fetch` is captured too; each request is reported **once**. Body limits come from Dürbün's settings (default 1 MB). Responses that stay open (server-sent events, NDJSON, media streams) are shown as soon as their headers arrive, with the size only. In React Native, text responses that arrive as a `Blob` (what `fetch` uses) are decoded by the platform (`FileReader.readAsText`), not on the JS thread. Metro's and Dürbün's own traffic is ignored. |
-| **Mocks** | Rules from Dürbün's Mocks tab: *respond* (a fake response, the network is never hit), *delay* (then the real request; the app's own timeout still applies), *fail* (the platform's natural error, `Network request failed` in React Native). In React Native, a binary (base64) mock body cannot be delivered intact to a `blob` response (what `fetch` uses) unless it is valid UTF-8, because React Native's `Blob` only holds text: such a request goes to the network instead and Dürbün shows a warning line saying why. Text, JSON and `arraybuffer` responses are mocked as usual. |
-| **Errors** | Uncaught errors via `ErrorUtils` (the previous handler chain is kept): fatal ones appear as **crash** rows. A fatal error that ends the app before it reaches Dürbün is sent on the next launch as "Previous launch crashed — …" (see `crashStorage` below). In React Native, unhandled promise rejections in dev builds, read from React Native's own rejection tracker (LogBox in 0.71–0.81, the "Uncaught (in promise)" error in 0.82 and later, the console warning before 0.71); LogBox still shows them. React Native does not track rejections in release builds, so none are reported there. On the web, `error` and `unhandledrejection`; in Node, `uncaughtExceptionMonitor`. |
-| **Performance** | JS heap (Hermes), JS-thread FPS and janky frame count (the "JS FPS" of the RN perf monitor). FPS measurement stops while the app is in the background. |
-| **Actions** | "Reload JS", "Open dev menu", "Toggle element inspector", "Open debugger" (React Native DevTools, 0.76 and later) and Appearance (system / light / dark) in development mode, where the app's React Native version has them, plus your own via `Durbun.addAction`, for example a dump of AsyncStorage (below). |
-
-**What a JS SDK cannot see:** React Native `<Image>` downloads and requests made by native modules (Firebase and
-similar) never pass through the JS layer, so they are not captured (report your own clients with
-`Durbun.network.begin`, see above). Requests that were opened (`open()` called)
-before `Durbun.start()` are not captured either. The app's stdout and system logs still show up in Dürbün's
-device logs without any SDK.
-
-An AsyncStorage (or MMKV) dump as an action; the returned value shows as JSON on the desktop:
+### Logs and events
 
 ```js
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Durbun } from '@durbun/react-native';
 
-Durbun.addAction({ id: 'app.dumpStorage', label: 'Dump AsyncStorage', group: 'storage' }, async () => {
-  const keys = await AsyncStorage.getAllKeys();
-  return Object.fromEntries(await AsyncStorage.multiGet(keys));
-});
+Durbun.log('User logged in', { tag: 'auth', data: { userId: 42 } });   // level via { level: 'debug' }, default info
+Durbun.debug('Read from cache', { data: cacheEntry });
+Durbun.info('Cart updated');
+Durbun.warn('Slow response', { data: { ms: 3200 } });
+
+try {
+  await pay();
+} catch (e) {
+  Durbun.error('Payment failed', e);                                  // short form
+  Durbun.error('Payment failed', { error: e, tag: 'payment', data: { orderId } });
+}
+
+Durbun.event('purchase', { amount: 49.9, currency: 'USD' });
+
+// Screen changes as "navigation" events, so rows show which screen they came from (route params are not sent).
+// React Navigation: the ref passed to <NavigationContainer ref={…}>; Expo Router: useNavigationContainerRef().
+Durbun.trackNavigation(navigationRef);
+
+Durbun.stop();             // restores every patched API
+Durbun.isStarted; Durbun.isConnected;
 ```
 
-## Options
+- `data` may be any value: cycles, BigInt, Date, Map/Set and Error are snapshotted safely and shown in the Mac
+  app as a collapsible JSON tree.
+- A leading `[Tag]` in a console message, as in `console.log('[Auth] token refreshed')`, becomes the row's tag
+  chip (`Auth`). Objects appear as single-line JSON in the message and as a tree in the details.
+- **console.\***: `log/info/debug/warn/error/trace/assert/dir/table`; `%s %d %o %c` formatting, objects → JSON
+  data, Errors → stack traces. `captureConsole: 'auto'` (default): when the Mac app already reads device logs
+  (Android logcat, iOS simulator), console lines are **not sent again**, so rows are not duplicated.
+- **SDK logs**: `Durbun.log/debug/info/warn/error`, `Durbun.event`.
 
-| Option | Default | Description |
-|---|---|---|
-| `host` | `'localhost'` | The machine running Dürbün. May be `'192.168.1.20'` or `'192.168.1.20:9750'`. |
-| `port` / `path` / `url` | `9750` / `'/sdk'` / none | `url` is a full WebSocket URL (`ws://…/sdk`) and overrides the others. |
-| `enabled` | `__DEV__` (RN), otherwise `NODE_ENV !== 'production'` | Set `true` to force it on in release builds. |
-| `captureConsole` | `'auto'` | `true` always, `false` never. |
-| `captureNetwork` / `captureErrors` / `captureMetrics` | `true` | |
-| `waitForDesktop` | `0` | Milliseconds (at most 10 000). Requests made this soon after `start()` wait for Dürbün's mock rules, so mocks apply to launch requests (remote config, login). They stop waiting as soon as the rules arrive or no Dürbün answers. Even at `0`, a request made while Dürbün is answering waits for it (up to 0.8 s). |
-| `maxBufferedMessages` | `5000` | Number of messages kept while disconnected. |
-| `crashStorage` | iOS: React Native `Settings`; elsewhere none | Where a fatal JS error is kept until Dürbün has it, so a crash that ends the app first shows on the next launch. Any store with `getItem` / `setItem` (and optionally `removeItem`), sync or async. `false` turns it off. See below. |
-| `appId` / `appName` / `appVersion` | auto | Package id / display name. In React Native they are read from Metro's bundle URL and `AppRegistry`; in Expo, from `expo-application` or the app config (see Expo above). Mock rules are scoped by app id. |
-| `device` | auto | For example `{ name: "Jane's iPhone" }`. |
-| `ignoreUrls` | `[]` | URLs that are never captured or mocked (substring or RegExp). |
-| `redactHeaders` | `[]` | Header names (case-insensitive) whose values show as `••••` in Dürbün, for example `['Authorization', 'Cookie']`. The request sent to the server is unchanged. |
-| `WebSocket` | global | Implementation for runtimes without a global WebSocket. |
-| `debug` | `false` | Print SDK diagnostics to the console. |
+### Crashes
 
-### Crashes on the next launch
+Uncaught errors via `ErrorUtils` (the previous handler chain is kept): fatal ones appear as **crash** rows. A
+fatal error that ends the app before it reaches the Mac app is sent on the next launch as "Previous launch
+crashed — …" (see [Crashes on the next launch](#crashes-on-the-next-launch)). In React Native, unhandled promise
+rejections in dev builds, read from React Native's own rejection tracker (LogBox in 0.71–0.81, the "Uncaught
+(in promise)" error in 0.82 and later, the console warning before 0.71); LogBox still shows them. React Native
+does not track rejections in release builds, so none are reported there. On the web, `error` and
+`unhandledrejection`; in Node, `uncaughtExceptionMonitor`.
+
+Native crashes (Java / Kotlin / Objective-C / Swift) are not JS errors: the Mac app shows them from the device's
+own crash records while the phone is connected to the Mac.
+
+#### Crashes on the next launch
 
 In a release build (`enabled: true`), a fatal JS error ends the app right after the error handlers run, often
 before the report has left the device. The SDK therefore writes the last three fatal errors to a small store and
-sends them on the next launch, marked `previousLaunch`; once Dürbün has them they are removed. Dev builds keep
-running behind the red box, so there a crash that already reached Dürbün is not stored.
+sends them on the next launch, marked `previousLaunch`; once the Mac app has them they are removed. Dev builds
+keep running behind the red box, so there a crash that already reached the Mac app is not stored.
 
 On iOS the SDK uses React Native's `Settings` (the app's user defaults) when no store is given. React Native has no
 built-in store on Android, so pass one there. A synchronous store (MMKV) is the most reliable, because the write
@@ -217,16 +207,70 @@ Durbun.start({
 // or: crashStorage: AsyncStorage (from @react-native-async-storage/async-storage)
 ```
 
-Native crashes (Java / Kotlin / Objective-C / Swift) are not JS errors: Dürbün shows them from the device's own
-crash records while the phone is connected to the Mac.
+### Performance
 
-## Release safety
+JS heap (Hermes), JS-thread FPS and janky frame count (the "JS FPS" of the RN perf monitor). FPS measurement
+stops while the app is in the background. `captureMetrics: false` turns them off.
+
+## Mocks
+
+Rules from the Mac app's Mocks tab ([writing mock rules](../../docs/guides/mocks.md)):
+
+| Action | What the app sees |
+|---|---|
+| `respond` | A fake response; the network is never hit |
+| `delay` | The real request, after waiting the given time; the app's own timeout still applies |
+| `fail` | The platform's natural error, `Network request failed` in React Native |
+
+- In React Native, a binary (base64) mock body cannot be delivered intact to a `blob` response (what `fetch`
+  uses) unless it is valid UTF-8, because React Native's `Blob` only holds text: such a request goes to the
+  network instead and the Mac app shows a warning line saying why. Text, JSON and `arraybuffer` responses are
+  mocked as usual.
+- Requests to URLs in `ignoreUrls` are never mocked.
+- Launch requests (remote config, login) can wait for the rules with `waitForDesktop` (see [Options](#options)).
+
+## Tools
+
+In development mode, where the app's React Native version has them: "Reload JS", "Open dev menu", "Toggle element
+inspector", "Open debugger" (React Native DevTools, 0.76 and later) and Appearance (system / light / dark). They
+appear under App tools in the Mac app's Device tab. Add your own with `Durbun.addAction`:
+
+```js
+// A button / toggle for this app in Dürbün's Device tab
+Durbun.addAction({ id: 'app.clearCache', label: 'Clear cache' }, async () => {
+  await cache.clear();
+  return { ok: true };
+});
+Durbun.addAction({ id: 'app.mockLocation', label: 'Mock location', kind: 'toggle', value: false }, ({ value }) => setMockLocation(!!value));
+```
+
+An AsyncStorage (or MMKV) dump as a tool; the returned value shows as JSON in the Mac app:
+
+```js
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+Durbun.addAction({ id: 'app.dumpStorage', label: 'Dump AsyncStorage', group: 'storage' }, async () => {
+  const keys = await AsyncStorage.getAllKeys();
+  return Object.fromEntries(await AsyncStorage.multiGet(keys));
+});
+```
+
+<a id="release-safety"></a>
+
+## Release builds and safety
+
+### Which builds run Dürbün
 
 When `__DEV__` is `false`, `Durbun.start()` installs no patches and opens no connection; every other call is a
-no-op. If you deliberately enable it in release builds (`enabled: true`), Android needs cleartext permission for
+no-op. `enabled: true` turns it on in release builds too.
+
+### Test builds
+
+If you deliberately enable it in release builds (`enabled: true`), Android needs cleartext permission for
 `ws://` and iOS needs the ATS `NSAllowsLocalNetworking` exception (already enabled in the RN debug templates).
-[Dürbün in test builds](https://github.com/mykynk/durbun/blob/main/docs/guides/qa-builds.md) has the steps for
-builds you hand to testers.
+[Dürbün in test builds](../../docs/guides/qa-builds.md) has the steps for builds you hand to testers.
+
+### Size with Dürbün off
 
 The SDK's code is still in the release bundle (about 180 KB before minification) when it is imported
 statically. To leave it out, import it through one file and pick the no-op entry when `__DEV__` is false;
@@ -241,20 +285,78 @@ Durbun.start();
 `@durbun/react-native/noop` has the same API with empty bodies (`Durbun.network.begin` returns a call that does
 nothing). Builds you hand to testers with `enabled: true` need the first branch instead.
 
+### Safety and security
+
+- The SDK never changes app behavior: the original `console` methods are called, request and response bodies
+  are never consumed, the React Native red box and LogBox keep working, and SDK failures never reach the app.
+- When the connection drops, the mock rules are dropped too; requests made while disconnected go to the real
+  server ([what happens inside the app](../../docs/guides/mocks.md#what-happens-inside-the-app)).
+- The connection has no pairing yet; see [Security](../../README.md#security) before deciding which builds run
+  Dürbün.
+
+## Options
+
+`Durbun.start({ … })`:
+
+| Option | Default | Description |
+|---|---|---|
+| `host` | `'localhost'` | The machine running the Mac app. May be `'192.168.1.20'` or `'192.168.1.20:9750'`. |
+| `port` / `path` / `url` | `9750` / `'/sdk'` / none | `url` is a full WebSocket URL (`ws://…/sdk`) and overrides the others. |
+| `enabled` | `__DEV__` (RN), otherwise `NODE_ENV !== 'production'` | Set `true` to force it on in release builds. |
+| `captureConsole` | `'auto'` | `true` always, `false` never. |
+| `captureNetwork` / `captureErrors` / `captureMetrics` | `true` | |
+| `waitForDesktop` | `0` | Milliseconds (at most 10 000). Requests made this soon after `start()` wait for the Mac app's mock rules, so mocks apply to launch requests (remote config, login). They stop waiting as soon as the rules arrive or no Mac app answers. Even at `0`, a request made while the Mac app is answering waits for it (up to 0.8 s). |
+| `maxBufferedMessages` | `5000` | Number of messages kept while disconnected. |
+| `crashStorage` | iOS: React Native `Settings`; elsewhere none | Where a fatal JS error is kept until the Mac app has it, so a crash that ends the app first shows on the next launch. Any store with `getItem` / `setItem` (and optionally `removeItem`), sync or async. `false` turns it off. See [Crashes on the next launch](#crashes-on-the-next-launch). |
+| `appId` / `appName` / `appVersion` | auto | Package id / display name. In React Native they are read from Metro's bundle URL and `AppRegistry`; in Expo, from `expo-application` or the app config (see [Expo](#expo)). Mock rules are scoped by app id. |
+| `device` | auto | For example `{ name: "Jane's iPhone" }`. |
+| `ignoreUrls` | `[]` | URLs that are never captured or mocked (substring or RegExp). |
+| `redactHeaders` | `[]` | Header names (case-insensitive) whose values are masked as `••••` in the Mac app, for example `['Authorization', 'Cookie']`. The request sent to the server is unchanged. |
+| `WebSocket` | global | Implementation for runtimes without a global WebSocket. |
+| `debug` | `false` | Print SDK diagnostics to the console. |
+
+### Same option, other names
+
+The SDKs share their options; where a name differs, this table maps it:
+
+| What | Flutter | Android | iOS | React Native / JS |
+|---|---|---|---|---|
+| Run in release builds | `--dart-define=DURBUN=true` or `enabled: true` | `forceInRelease` | `allowInReleaseBuilds` (or the `DurbunEnabled` Info.plist key) | `enabled: true` |
+| Performance metrics | `metrics` | `captureMetrics` | `collectMetrics` | `captureMetrics` |
+| Crashes | `captureErrors` | `captureCrashes` | `captureCrashes` | `captureErrors` |
+| `print` / stdout / console | `capturePrint` | none | `captureStdout` | `captureConsole` |
+| The app's own logcat / `os_log` lines when the Mac app cannot read device logs | `capturePrint` (`never` turns them off) | `captureLogcat` | `captureOSLog` | none |
+| Hosts never captured | none | `ignoredHosts` | `ignoredHosts` | `ignoreUrls` |
+| Is the SDK running? | `Durbun.isEnabled` | `Durbun.isStarted` | `Durbun.isRunning` | `Durbun.isStarted` |
+| Add your own tool | `Durbun.addAction(...)` | `Durbun.addAction(...)` | `Durbun.registerAction(...)` | `Durbun.addAction(...)` |
+| Set the Mac's address without a rebuild | In-app panel: Tools → Mac connection | `Durbun.setDesktopHost(context, ...)` | `Durbun.setDesktopHost(...)` | none |
+| Wait for mock rules at launch | `waitForDesktop` (a `Duration`) | none | none | `waitForDesktop` (milliseconds) |
+
 ## Troubleshooting
 
-More symptoms and fixes, for every platform:
-[Troubleshooting](https://github.com/mykynk/durbun/blob/main/docs/guides/troubleshooting.md). Writing mock
-rules: [Mock rules](https://github.com/mykynk/durbun/blob/main/docs/guides/mocks.md).
+### Not connecting?
 
-- **No connection**: read the note the SDK prints 10 seconds after start. Is Dürbün running (`http://localhost:9750`)? On Android, does `adb reverse --list` show
-  `tcp:9750`? If not, check that Dürbün lists the phone (System check shows a missing `adb`); Dürbün adds the
-  mapping itself, never add it by hand. `Durbun.start({ debug: true })` prints the addresses the SDK tries.
+If no Mac app has accepted the app 10 seconds after `Durbun.start()`, the SDK prints one `console.info` note
+(in the Metro terminal): the addresses it tried and what to do for this device. It keeps retrying, and prints
+one more line when the connection works.
+
+- **No connection**: read the note the SDK prints 10 seconds after start. Is the Mac app running
+  (`http://localhost:9750`)? On Android, does `adb reverse --list` show `tcp:9750`? If not, check that the Mac
+  app lists the phone (System check shows a missing `adb`); the Mac app adds the mapping itself, never add it by
+  hand. `Durbun.start({ debug: true })` prints the addresses the SDK tries.
+- **Wi-Fi only**: after turning on **Allow local network (Wi-Fi) connections**, quit and reopen the Mac app
+  (see [Connect to the Mac](#connect-to-the-mac)).
+
+### More help
+
 - **Metro: `Unable to resolve module react-native`**: the package was installed from a folder (symlink). Install
   the `.tgz` instead, or add `watchFolders: ['/path/to/durbun/sdks/js']` and
   `resolver.nodeModulesPaths: [path.resolve(__dirname, 'node_modules')]` to `metro.config.js`.
 - **Jest**: the package also ships a CommonJS build, so no `transformIgnorePatterns` change is needed. In tests
   the SDK does nothing unless `Durbun.start()` is called.
+
+More symptoms and fixes, for every platform: [Troubleshooting](../../docs/guides/troubleshooting.md). Writing mock
+rules: [Mock rules](../../docs/guides/mocks.md).
 
 ## Development
 
@@ -263,4 +365,19 @@ npm run build -w @durbun/react-native     # ESM → dist/, CommonJS → dist/cjs
 npm run smoke -w @durbun/react-native     # plain-Node check of the built package
 cd sdks/js && npx vitest run              # unit + integration tests (fake desktop, local HTTP server)
 npx tsc -p sdks/js/tsconfig.json          # typecheck sources and tests
+```
+
+### Unreleased changes from a clone
+
+To try changes that are not released yet, install from a clone of the Dürbün repository using the **packed `.tgz`,
+not the folder** (Metro cannot resolve `react-native` through a symlinked folder outside the app):
+
+```sh
+# 1) In your clone of the Dürbün repository: build the package (prepack builds it automatically)
+cd /path/to/durbun/sdks/js
+npm pack                      # → durbun-react-native-0.2.0.tgz
+
+# 2) In your app
+npm install /path/to/durbun/sdks/js/durbun-react-native-0.2.0.tgz
+# or: yarn add file:/path/to/durbun/sdks/js/durbun-react-native-0.2.0.tgz
 ```

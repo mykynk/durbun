@@ -141,6 +141,9 @@ All notable changes to Dürbün are listed here. The format follows
 - Flutter SDK: release builds with Dürbün off no longer contain the in-app panel's pages (about 0.85 MB
   less Dart code in a typical Android app). The README gives measured sizes and a compile-time gate that
   leaves Dürbün out completely.
+- Docs: the SDK READMEs share one outline and one vocabulary (the Mac app, device logs, tools, masking) and
+  a common option-name table; the React Native Wi-Fi restart step and the Android 8 MB body cap are
+  documented.
 
 ### Added
 
