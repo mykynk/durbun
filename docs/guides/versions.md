@@ -18,9 +18,10 @@ Apps talk to the Mac over Dürbün's wire protocol. Its version number is `1`, a
   events, crashes, commands). Where an older SDK lacks something, the Mac app says so ("The connected Dürbün
   SDK does not send this (an older version or a disabled feature)") instead of failing.
 
-So any 0.1.x or 0.2.x SDK works with any 0.1.x or 0.2.x Mac app. A new feature works when both sides have
-it: for example the Flutter in-app panel's **Send to Slack** needs the 0.2.0 Flutter SDK, and Flows need the
-0.2.0 Mac app with whatever SDK the app already has.
+So any 0.1.x, 0.2.x or 0.3.x SDK works with any 0.1.x, 0.2.x or 0.3.x Mac app. A new feature works when both
+sides have it: for example the Flutter in-app panel's **Send to Slack** needs the 0.2.0 Flutter SDK, Flows need
+the 0.2.0 Mac app with whatever SDK the app already has, and a mock rule for one GraphQL operation needs the
+0.3.0 Mac app and a 0.3.0 SDK (an older SDK is not sent such a rule).
 
 Contributors keep this rule: existing protocol types are never changed, only optional members are added (see
 [CONTRIBUTING.md](../../CONTRIBUTING.md)). While the version is `0.x`, minor releases may still include
@@ -30,7 +31,7 @@ breaking changes, so read [CHANGELOG.md](../../CHANGELOG.md) before upgrading.
 
 | File | Rule |
 |---|---|
-| Session recording (`.durbun.json`) | Recordings use format version 1. Releases after 0.2.0 also open a recording with a higher format version and import what they understand; 0.2.0 and earlier refuse it |
+| Session recording (`.durbun.json`) | Recordings use format version 1. Dürbün 0.3.0 and later also open a recording with a higher format version and import what they understand; 0.2.0 and earlier refuse it |
 | Package (`.durbun`: shared setup or backup) | Package format version 1, read by Dürbün 0.2.0 and later. A Dürbün that reads another package version says so and asks you to update |
 | Flow file (`.json`) | Flow format version 1, read by Dürbün 0.2.0 and later. Another version is refused with a request to update Dürbün |
 | Mock rules export (`durbun-mocks-….json`) | Rules are checked one by one on import; a rule Dürbün cannot read is listed and skipped |

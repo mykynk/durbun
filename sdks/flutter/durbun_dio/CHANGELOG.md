@@ -1,5 +1,6 @@
-## Unreleased
+## 0.3.0
 
+- Requires `durbun: ^0.3.0`.
 - New `DurbunDioAdapter(inner)`: wraps your adapter (`NativeAdapter`, cronet_http) and reports every request
   that reaches the network, retries included. Every row ends, whatever other interceptors do. The response body
   and size are the bytes the adapter delivered, and the time runs until the last byte. Mock rules apply there

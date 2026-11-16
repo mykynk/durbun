@@ -6,6 +6,8 @@ All notable changes to Dürbün are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-16
+
 ### Security
 
 - Requests sent from the Mac (resends and flow steps) can no longer reach Dürbün's own server or its device
@@ -448,6 +450,7 @@ All notable changes to Dürbün are listed here. The format follows
   phones seen on the network, the address and the six-digit code.
 - Device: an iPhone gets a step-by-step guide for its full diagnostic report (sysdiagnose) and where to find
   it.
+
 ## [0.2.0] - 2026-11-12
 
 ### Added
@@ -513,6 +516,7 @@ First public release.
 - Android: `io.github.mykynk:durbun` and the no-op `durbun-noop` (OkHttp interceptor, Timber, metrics).
 - React Native / JavaScript: `@durbun/react-native` (fetch / XMLHttpRequest, console, errors).
 
-[Unreleased]: https://github.com/mykynk/durbun/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mykynk/durbun/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mykynk/durbun/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mykynk/durbun/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mykynk/durbun/releases/tag/v0.1.0

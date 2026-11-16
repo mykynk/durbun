@@ -28,7 +28,7 @@ body:
     attributes:
       label: Dürbün version
       description: "Mac app: Dürbün → About Dürbün. SDKs: the package version."
-      placeholder: 0.2.0
+      placeholder: 0.3.0
     validations:
       required: true
   - type: input

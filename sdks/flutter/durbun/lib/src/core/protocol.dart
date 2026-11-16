@@ -16,7 +16,7 @@ const int kProtocolVersion = 1;
 const String kSdkName = 'durbun-flutter';
 
 /// This package's version, sent in `hello.sdk` next to [kSdkName].
-const String kSdkVersion = '0.2.0';
+const String kSdkVersion = '0.3.0';
 
 /// `DEFAULT_PORTS`.
 const int kDefaultSdkPort = 9751;

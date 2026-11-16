@@ -1,4 +1,4 @@
-## Unreleased
+## 0.3.0
 
 - In-app panel: **Tools → Mac connection** says why the app is not connected
   and what to do next (Mac app not open, USB debugging, wrong address, local
