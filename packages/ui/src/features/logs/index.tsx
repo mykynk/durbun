@@ -77,6 +77,7 @@ import { buildHighlighter } from './model/highlight';
 import { appIdentity, type AppIdentity } from './model/frames';
 import { exportCount, exportFileName, exportJson, exportTxt } from './model/export';
 import { makeTerm, normalizeQuery, PRESETS, pushHistory, sanitizeSavedFilters, toggleTerm, type QueryField, type SavedFilter } from './model/queryEdit';
+import { setSavedFilters, useSavedFilters } from './model/savedFilters';
 import { useLiveCrashes } from './live';
 import { deviceAppForEntry, sessionForEntry } from './model/appOf';
 import { contextPartKeys, mergeContext, revealNeeds, type RevealContext } from './model/reveal';
@@ -203,8 +204,10 @@ export default function LogsView() {
   const [dedupe, setDedupe] = usePersistentState<boolean>('logs.dedupe', true);
   const [fold, setFold] = usePersistentState<boolean>('logs.fold', true);
   const [historyRaw, setHistory] = usePersistentState<string[]>('logs.queryHistory', []);
-  const [savedRaw, setSaved] = usePersistentState<SavedFilter[]>('logs.savedFilters', []);
-  const saved = useMemo(() => sanitizeSavedFilters(savedRaw), [savedRaw]);
+  // Saved filters travel with backups, packages and the server's preference copy (model/savedFilters).
+  const saved = useSavedFilters((s) => s.filters);
+  const savedRaw = saved;
+  const setSaved = setSavedFilters;
 
   /* ───── transient state ───── */
   const [paused, setPaused] = useState(false);

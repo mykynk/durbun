@@ -95,7 +95,11 @@ The mock also carries the phase-3 data: `snapshot.deviceApps` (Play, Firebase, a
 apps on a USB iPhone), exact origins, dropbox / .ips crash records (one `duplicateOf`, one downloadable .ips), device
 readers and SDK layers.
 Flows, environments, packages, backups and UI prefs come from `dev/mock-flows.mjs`: an in-memory store with the real
-REST shapes (two sample flows; a run answers `flow.engine.closed`, nothing is written to disk).
+REST shapes (sample flows tagged `smoke`, runs that pass or fail on purpose, nothing is written to disk). It also
+answers set runs (`/api/flow-batches`, one finished `smoke` set seeded), versions (`/api/flows/:id/history`, three
+seeded for `login`), deleted flows (`/api/flow-trash`, one seeded), `/api/flows/schema` and
+`/api/flows/from-requests` (it reads the mock's own `/api/network/:id`). `packages/server/test/flows/mockContract.test.ts`
+compares these answers with the real handlers, so the mock cannot drift from them unnoticed.
 `--no-flows` starts with no flows (the Flows welcome page and starters). The showcase lines (seeded once) cover
 SDK earlier-launch reports, the low-memory killer, startup times, navigation and lifecycle lines, too-large
 bodies and a self-signed server for replay; Pixel's Pati has a clock 47 s behind the Mac, Kasa a newer SDK protocol.
@@ -265,6 +269,10 @@ Counters & rates (throttled hooks): `useScopedLogCounts(throttleMs = 250)`,
 - A new address (the Mac app moved from `localhost` to `127.0.0.1`, another port) starts empty: `prefsSync` takes the
   server's copy back once (`restorePatch`, portable keys only) with an Undo toast, before it sends anything, and
   never when the user changed something here first or another window stored preferences meanwhile.
+- Saved log filters (`features/logs/model/savedFilters.ts`, `useSavedFilters`) keep their old storage key
+  `durbun.state.logs.savedFilters` (nothing to migrate), follow other windows through the `storage` event and ride in
+  the preference copy as `logSavedFilters`: backups and packages carry them, and filters that come in are added to
+  the ones here (`mergeSavedFilters`: same name + query once, a taken name gets " (2)"), never put in their place.
 
 Write with `usePrefs.getState().setPref(key, value)` / `updatePrefs(patch)`. `DEFAULT_NOISE_RULES`,
 `HIGHLIGHT_COLORS` are exported. `<html>` already reflects theme (`data-theme`), density
@@ -599,6 +607,19 @@ monospace content at `var(--log-fs)`, row height `var(--row-h)`. Detail panes: `
   `usePinRevision` and read the runs again. "Clear history" (`api.clearFlowRunHistory`) keeps pinned runs and says so.
   "Flow from requests" reads the focus's `visibleIds` / `filterLabel` / `from`: where the requests came from, and
   "select the N visible" when the caller's list was filtered.
+- Set runs ("run my smoke flows"): REST in `features/flows/model/setsApi.ts` (same `ApiError` as `data/api.ts`), the
+  store in `model/sets.ts` (`useSets` running / recent / byId; `useSetsSync(active)` reads the list when the tab
+  shows and every second while a set runs: there is no WS message for sets, a `flowRun` with an unknown `batchId`
+  tells a window that another one started a set), words and the Markdown report in `model/batch.ts` (pure, tested).
+  Entry points: the list head menu (pick flows, a tag, recent sets), a row's tags, the palette. `BatchDialog` checks
+  each flow with its preflight (blocked flows and hard-to-undo steps show as "will be skipped" before the start);
+  `BatchView` replaces the editor (`setView` in `index.tsx`) while a set is shown; a set that ends while another
+  view is open says so in a toast. "Share with runs…" opens the share package with the set's runs preset
+  (`transfer.openExport('share', flowIds, { runs, name })`). A run of a set shows a "Set run" chip in the run panel.
+- Deleting a flow moves it to the server's trash (`deleteFlowToTrash`): the toast has Undo (`restoreTrashed`), only a
+  flow other flows call asks first. `TrashDialog` lists, restores and removes for good. `VersionsDialog` (More menu,
+  palette) lists `flowHistory` with what each save changed (`model/versions.ts`); Restore saves the editor first,
+  then the toast's Undo restores the version the restore kept.
 - Package notices (`features/transfer/notices.ts`, `packageNoticeText`): `package.flow.invalid` / `.problems` are
   worded from `params.issue` (a flow check code) and `package.mock.invalid` from `field` + `expected`, never from the
   English `problem`.

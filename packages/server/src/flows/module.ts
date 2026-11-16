@@ -11,7 +11,11 @@
  *   POST   /api/flows/from-requests           { ids, name, saveEnv?, environmentId? } → { flow, issues, envVars, links }
  *   GET    /api/flows/:id                     { flow, issues }
  *   PUT    /api/flows/:id                     { flow, baseUpdatedAt? } → { flow, issues } (409 flow.conflict: changed since)
- *   DELETE /api/flows/:id
+ *   DELETE /api/flows/:id                     → { ok, trash: FlowTrashItem } (kept in the trash; see history.ts)
+ *   GET    /api/flows/:id/history             FlowHistory (earlier versions, newest first)
+ *   GET    /api/flows/:id/history/:versionId  { flow } (that version's content)
+ *   POST   /api/flows/:id/history/:versionId/restore  { baseUpdatedAt? } → { flow, issues, versionId? } (versionId: the
+ *                                             replaced content, kept as a version: restoring it undoes the restore)
  *   POST   /api/flows/:id/duplicate           { name? } → { flow, issues }
  *   GET    /api/flows/:id/export              the flow file (download)
  *   POST   /api/flows/:id/preflight           FlowRunRequest → FlowPreflight
@@ -23,6 +27,14 @@
  *   DELETE /api/flow-runs/:id                 (a pinned run too: deleting it is explicit)
  *   POST   /api/flow-runs/:id/cancel
  *   GET    /api/flow-runs/:id/files/:name     evidence file
+ *   GET    /api/flow-batches?limit=           { running?, batches } (set runs, newest first; batches.ts)
+ *   POST   /api/flow-batches                  FlowBatchRequest → FlowBatch (202; 409 flow.batch.busy while one runs)
+ *   GET    /api/flow-batches/:id              FlowBatch
+ *   POST   /api/flow-batches/:id/cancel       → { ok } (409 flow.batch.notRunning)
+ *   DELETE /api/flow-batches/:id              → { ok } (409 flow.batch.running)
+ *   GET    /api/flow-trash                    { items: FlowTrashItem[], keepDays }
+ *   POST   /api/flow-trash/:trashId/restore   → { flow, issues } (its own id while free, else a new one)
+ *   DELETE /api/flow-trash/:trashId           remove it for good → { ok }
  *   GET|PUT /api/flow-environments            FlowEnvironments (PUT with an old `revision`: 409 env.conflict)
  *   POST   /api/packages/export               PackageExportRequest → .durbun download
  *   POST   /api/packages/inspect              { package | token, passphrase? } → PackageManifest (a token reads the kept package again)
@@ -58,7 +70,9 @@ import { isInside, sendFile, statFile } from '../http/static';
 import { contentDisposition, errorMessage, fileTimestamp, HttpError, queryString, readJson, sendJson } from '../http/util';
 import type { Hub, Logger } from '../types';
 import { buildAiPack, extractFlowDocs, previewImport, type AiPackRequest } from './aiPack';
+import { BatchService, FlowBatchError } from './batches';
 import { FlowEngine, FlowRunError } from './engine';
+import { TRASH_DAYS } from './history';
 import { EnvironmentStore } from './environments';
 import { RunPinError, RunStore } from './runs';
 import { FlowStore, FlowStoreError } from './store';
@@ -94,6 +108,7 @@ export interface FlowsModule extends ApiModule {
   runningRuns(): FlowRun[];
   readonly engine: FlowEngine;
   readonly flows: FlowStore;
+  readonly batches: BatchService;
   /** Demo mode on: add the example flows that are missing. */
   addDemoFlows(): Promise<void>;
   /** Demo mode off: remove the example flows the user did not change (nor is running). */
@@ -160,13 +175,14 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
     runEnded: () => broadcastFlows(),
   });
 
+  const batches = new BatchService({ dataDir: config.dataDir, logger: logger.child('flows'), flows, engine, now });
   const packages = new PackageService({ flows, envs, runs, config, slack: deps.slack, uiPrefs, version: deps.version, logger: logger.child('packages'), now });
   const backup = new BackupService({ dataDir: config.dataDir, logger: logger.child('backup'), build: (req) => packages.export(req), notice: deps.notice, now });
   let triggers: FlowTriggers | undefined;
   const unsubscribers: (() => void)[] = [];
 
   const ready = (async () => {
-    await Promise.all([flows.load(), envs.load(), runs.load(), backup.load()]);
+    await Promise.all([flows.load(), envs.load(), runs.load(), backup.load(), batches.load()]);
     for (const p of flows.loadProblems) {
       deps.notice({ level: 'warn', message: `The flow file ${p.file} could not be read: ${p.message}`, code: 'flow.file.unreadable', params: { file: p.file, problem: p.message } });
     }
@@ -256,7 +272,7 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
           const r = await flows.save(doc, { create: true });
           saved.push({ id: r.flow.id, name: r.flow.name, created: true });
         } else if (conflict === 'replace') {
-          const r = await flows.save(doc, { id: doc.id });
+          const r = await flows.save(doc, { id: doc.id, reason: 'import' });
           saved.push({ id: r.flow.id, name: r.flow.name, created: false });
         } else if (conflict === 'keepBoth') {
           doc = { ...doc, id: flows.freeId(doc.id), name: `${doc.name} (2)` };
@@ -348,8 +364,9 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
       }
       if (method === 'DELETE') {
         if (engine.runningCount(id) > 0) throw new HttpError(409, 'The flow is running; stop it first', 'flow.running');
-        if (!(await flows.remove(id))) throw new HttpError(404, `Flow ${id} does not exist`, 'flow.notFound');
-        return sendJson(res, 200, { ok: true });
+        const trash = await flows.trash(id);
+        if (!trash) throw new HttpError(404, `Flow ${id} does not exist`, 'flow.notFound');
+        return sendJson(res, 200, { ok: true, trash });
       }
       requireMethod(req, 'GET', 'PUT', 'DELETE');
       const flow = flows.get(id);
@@ -378,9 +395,77 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
         case 'run':
           requireMethod(req, 'POST');
           return sendJson(res, 202, await engine.start(id, runRequest(await body(req))));
+        case 'history': {
+          requireMethod(req, 'GET');
+          const flow = flows.get(id);
+          if (!flow) throw new HttpError(404, `Flow ${id} does not exist`, 'flow.notFound');
+          return sendJson(res, 200, await flows.history.list(flow));
+        }
         default:
           break;
       }
+    }
+    if (third === 'history' && (segs.length === 4 || (segs.length === 5 && segs[4] === 'restore'))) {
+      const versionId = segs[3]!;
+      if (!flows.get(id)) throw new HttpError(404, `Flow ${id} does not exist`, 'flow.notFound');
+      if (segs.length === 4) {
+        requireMethod(req, 'GET');
+        const flow = await flows.history.read(id, versionId);
+        if (!flow) throw new HttpError(404, 'This version is no longer kept', 'flow.version.notFound');
+        return sendJson(res, 200, { flow });
+      }
+      requireMethod(req, 'POST');
+      if (engine.runningCount(id) > 0) throw new HttpError(409, 'The flow is running; stop it first', 'flow.running');
+      const b = await body(req);
+      const r = await flows.restoreVersion(id, versionId, typeof b.baseUpdatedAt === 'number' ? b.baseUpdatedAt : undefined);
+      return sendJson(res, 200, { flow: r.flow, issues: r.issues, ...(r.versionId ? { versionId: r.versionId } : {}) });
+    }
+    throw notFound();
+  }
+
+  async function batchesRoute(req: IncomingMessage, res: ServerResponse, segs: string[], query: URLSearchParams): Promise<void> {
+    const [, id, third] = segs;
+    const method = req.method ?? 'GET';
+    if (!id) {
+      if (method === 'POST') return sendJson(res, 202, await batches.start((await body(req)) as never));
+      requireMethod(req, 'GET', 'POST');
+      const limit = Math.max(1, Math.min(50, Number(query.get('limit')) || 20));
+      const running = batches.running();
+      return sendJson(res, 200, { ...(running ? { running } : {}), batches: batches.list(limit) });
+    }
+    if (segs.length === 2) {
+      if (method === 'DELETE') {
+        if (!(await batches.remove(id))) throw new HttpError(404, 'No such set run', 'flow.batch.notFound');
+        return sendJson(res, 200, { ok: true });
+      }
+      requireMethod(req, 'GET', 'DELETE');
+      const b = batches.get(id);
+      if (!b) throw new HttpError(404, 'No such set run', 'flow.batch.notFound');
+      return sendJson(res, 200, b);
+    }
+    if (segs.length === 3 && third === 'cancel') {
+      requireMethod(req, 'POST');
+      if (!batches.cancel(id)) throw new HttpError(409, 'The set is not running', 'flow.batch.notRunning');
+      return sendJson(res, 200, { ok: true });
+    }
+    throw notFound();
+  }
+
+  async function trashRoute(req: IncomingMessage, res: ServerResponse, segs: string[]): Promise<void> {
+    const [, trashId, third] = segs;
+    if (!trashId) {
+      requireMethod(req, 'GET');
+      return sendJson(res, 200, { items: flows.history.trash(), keepDays: TRASH_DAYS });
+    }
+    if (segs.length === 2) {
+      requireMethod(req, 'DELETE');
+      if (!(await flows.history.purge(trashId))) throw new HttpError(404, 'This deleted flow is no longer kept', 'flow.trash.notFound');
+      return sendJson(res, 200, { ok: true });
+    }
+    if (segs.length === 3 && third === 'restore') {
+      requireMethod(req, 'POST');
+      const r = await flows.restoreTrashed(trashId);
+      return sendJson(res, 200, { flow: r.flow, issues: r.issues });
     }
     throw notFound();
   }
@@ -487,6 +572,10 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
           return await flowsRoute(req, res, segs, query);
         case 'flow-runs':
           return await runsRoute(req, res, segs, query);
+        case 'flow-batches':
+          return await batchesRoute(req, res, segs, query);
+        case 'flow-trash':
+          return await trashRoute(req, res, segs);
         case 'flow-environments':
           if (segs.length !== 1) throw notFound();
           // The answer is the saved document, as GET returns it (the UI keeps it as is).
@@ -518,6 +607,10 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
         throw new HttpError(err.status, err.message, err.code);
       }
       if (err instanceof PackageError) throw new HttpError(err.status, err.message, err.code);
+      if (err instanceof FlowBatchError) {
+        if (err.params) return sendJson(res, err.status, { error: err.message, code: err.code, params: err.params });
+        throw new HttpError(err.status, err.message, err.code);
+      }
       if (err instanceof RunPinError) {
         if (err.params) return sendJson(res, err.status, { error: err.message, code: err.code, params: err.params });
         throw new HttpError(err.status, err.message, err.code);
@@ -527,11 +620,12 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
   }
 
   return {
-    prefixes: ['flows', 'flow-runs', 'flow-environments', 'packages', 'backup', 'ui-prefs'],
+    prefixes: ['flows', 'flow-runs', 'flow-batches', 'flow-trash', 'flow-environments', 'packages', 'backup', 'ui-prefs'],
     handle,
     ready,
     engine,
     flows,
+    batches,
     summaries,
     runningRuns: () => engine.running().map((h) => engine.activeRun(h.id)!).filter(Boolean).map((r) => structuredClone(r)),
     addDemoFlows: async () => {
@@ -556,6 +650,7 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
       for (const u of unsubscribers) u();
       triggers?.dispose();
       backup.dispose();
+      await batches.dispose();
       await engine.dispose();
       await Promise.all([flows.flush(), envs.flush(), runs.flush()]);
     },

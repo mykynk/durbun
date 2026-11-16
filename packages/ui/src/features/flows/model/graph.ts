@@ -132,7 +132,8 @@ export function freeSpot(flow: FlowDoc, at: FlowPosition): FlowPosition {
   for (let i = 0; i < 40; i++) {
     const r = { x: p.x, y: p.y, w: NODE_W, h: NODE_H };
     if (!flow.nodes.some((n) => intersects(r, nodeRect(n)))) return p;
-    p = { x: p.x, y: p.y + NODE_H + 24 };
+    // A whole number of grid cells, so the step stays on the grid like a dragged one.
+    p = { x: p.x, y: p.y + snap(NODE_H + 24) };
   }
   return p;
 }

@@ -1181,6 +1181,28 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
   with a 50 ms limit per text (first 10,000 characters); running out of time counts as no match.
 - Demo mode adds two example flows against the demo Pati app (`demo-pati-start`, `demo-pati-list-error`, tag
   `demo`) when they are missing, and removes them when it stops unless the user changed them.
+- Set runs: `POST /api/flow-batches` `{ flowIds? | tag?, target?, environmentId?, onFailure?: 'continue'|'stop',
+  allowIrreversible? }` → 202 `FlowBatch`. The flows run one after another on one target (a tag picks its flows,
+  case-insensitive, by name), each as an ordinary run with `batchId`. One set at a time (`flow.batch.busy` 409), at
+  most 100 flows (`flow.batch.tooMany`). A flow that cannot start (its preflight's first error), has hard-to-undo
+  steps without `allowIrreversible` (`flow.batch.irreversible`) or no longer exists (`flow.notFound`) is `skipped`
+  with the reason; with `stop` the rest after a failure are skipped (`flow.batch.afterFailure`). Each item keeps the
+  run id, duration, step counts and the failing step. `POST /api/flow-batches/:id/cancel` stops the running flow
+  and leaves the rest `cancelled` (`flow.batch.notRun`). Sets are kept in `<dataDir>/flow-batches` (newest 50; a set
+  cut off by a quit is marked `flow.batch.interrupted`); `GET /api/flow-batches` → `{ running?, batches }`,
+  `GET|DELETE /api/flow-batches/:id`.
+- Versions: a save that replaces a flow keeps the old content in `<dataDir>/flows/.history/<id>/` when it is worth
+  it: after 5 minutes without edits or at least every 15 minutes of steady editing (autosave runs every few hundred
+  ms), and always before a restore, an import that replaces it or an unchecked overwrite. At most 30 versions and
+  4 MB per flow; a rename moves them. `GET /api/flows/:id/history` → `FlowHistory` (what each save changed:
+  steps added / removed / changed / moved, connections, settings, an old name); `GET …/history/:versionId` →
+  `{ flow }`; `POST …/history/:versionId/restore` `{ baseUpdatedAt? }` → `{ flow, issues, versionId }` where
+  `versionId` holds the content the restore replaced (restoring it undoes the restore); 409 `flow.running` while the
+  flow runs.
+- Deleting a flow moves it with its versions to `<dataDir>/flows/.trash/` for 30 days (at most 100 items):
+  `DELETE /api/flows/:id` → `{ ok, trash: FlowTrashItem }`. `GET /api/flow-trash` → `{ items, keepDays }`,
+  `POST /api/flow-trash/:trashId/restore` → `{ flow, issues }` (a free id when the old one was taken meanwhile),
+  `DELETE /api/flow-trash/:trashId` removes it for good. Backups carry flows, not their versions, trash or sets.
 
 ### 11.4 Flows with the user's own AI
 - `POST /api/flows/ai-pack` builds a Markdown pack: the task, the format and schema, every node type with its
@@ -1209,7 +1231,8 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
   none. Look and log preferences come back to the UI (`uiPrefs`), which applies the portable ones (theme,
   language, font size, density, time format, wrapping, noise and highlight rules, crash notifications).
 - The UI keeps a copy of those preferences on the server (`GET|PUT /api/ui-prefs`, `ui-prefs.json`) so backups
-  include them.
+  include them. Saved log filters travel in the same copy (`logSavedFilters`); imported ones are added to the
+  filters already there.
 
 ### 11.6 Backups (Settings → Backup)
 - `<dataDir>/backup.json` (0600): `enabled`, `folder`, `keep`, `intervalHours`, `includeRuns`, the passphrase
@@ -1222,7 +1245,9 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
 ### 11.7 UI
 - `features/flows`: list, canvas editor (own SVG graph: pan, zoom, minimap, tidy up, undo / redo, copy / paste,
   keyboard), node inspector, flow settings, run controls and run panel, history, environments, AI and import
-  dialogs. `features/transfer`: share / backup export, package import, Settings → Backup, the UI prefs sync.
+  dialogs, set runs (pick flows or a tag, see per flow what will be skipped before starting, follow the set, one
+  report with Copy / .md / Slack / share with runs, earlier sets), version history with restore and Undo, deleted
+  flows with Undo right after a delete. `features/transfer`: share / backup export, package import, Settings → Backup, the UI prefs sync.
   Import / export menu and the command palette open them; any Dürbün file can be dropped on the window.
 - Network: **Create a flow from this request…** (row menu, detail panel, palette) and the multi-select action.
 

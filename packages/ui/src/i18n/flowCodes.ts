@@ -105,6 +105,10 @@ import { registerMessages, translateOr, type Lang } from './core';
  *     package.flow.saveFailed { flow, error }, package.run.failed { run, error }, package.flow.invalid / mock.invalid { problem }
  *   REST `{ error, code }` (errorText adds `detail` = the specific part of the English message):
  *     flow.notFound|tooMany|id.invalid|id.taken|id.reserved|running|engine.closed|run.tooMany|automation.busy|preflight.failed|invalid|format|version|nodes,
+ *     flow.batch.busy { id, tag? } | noTagged { tag } | empty | tooMany { max } | running | notFound | notRunning,
+ *     flow.trash.notFound, flow.version.notFound
+ *   Set runs (FlowBatch.reason, FlowBatchItem.reason): flow.batch.cancelled|interrupted|notRun —, afterFailure { flow },
+ *     irreversible { steps }, startFailed { error }, stoppedAfterFailure { flow }; a failed flow carries its run's errorCode
  *     flow.fromRequests.empty|gone, flowRun.notFound|notRunning, env.invalid, uiPrefs.invalid|tooLarge, body.invalid,
  *     api.method, package.*, backup.*
  * Derived params (computed here, never sent): `duration` / `timeout` localized ("12,5 sn"), `result` (sawRequest),
@@ -362,6 +366,26 @@ export const FLOW_CODES = {
     'api.method',
     'flow.automation.busy',
     'flow.id.reserved',
+  ],
+  /** Set runs (FlowBatch.reason, FlowBatchItem.reason, REST), deleted flows and versions (REST). */
+  flowSets: [
+    'flow.batch.busy',
+    'flow.batch.noTagged',
+    'flow.batch.empty',
+    'flow.batch.tooMany',
+    'flow.batch.running',
+    'flow.batch.notFound',
+    'flow.batch.notRunning',
+    'flow.batch.cancelled',
+    'flow.batch.interrupted',
+    'flow.batch.notRun',
+    'flow.batch.afterFailure',
+    'flow.batch.irreversible',
+    'flow.batch.startFailed',
+    'flow.batch.runFailed',
+    'flow.batch.stoppedAfterFailure',
+    'flow.trash.notFound',
+    'flow.version.notFound',
   ],
 } as const satisfies Record<string, readonly string[]>;
 
@@ -674,6 +698,24 @@ registerMessages('code', {
     'api.method': 'Bu işleme izin verilmiyor',
     'flow.automation.busy': 'Akış zaten çalışıyor ya da aynı anda çok fazla otomatik çalıştırma var',
     'flow.id.reserved': 'Bu kimlik Dürbün’e ayrılmış; başka bir akış kimliği seçin',
+    /* ── set runs, deleted flows, versions ── */
+    'flow.batch.busy': ['“{tag}” seti çalışıyor; önce onu durdurun', 'Başka bir set çalışıyor; önce onu durdurun'],
+    'flow.batch.noTagged': ['“{tag}” etiketli akış yok', 'Bu etikette akış yok'],
+    'flow.batch.empty': 'En az bir akış seçin',
+    'flow.batch.tooMany': ['Bir sette en fazla {max, number} akış olabilir', 'Sette çok fazla akış var'],
+    'flow.batch.running': 'Set çalışıyor; önce durdurun',
+    'flow.batch.notFound': 'Set bulunamadı; geçmişten kaldırılmış olabilir',
+    'flow.batch.notRunning': 'Set zaten bitmiş',
+    'flow.batch.cancelled': 'Seti siz durdurdunuz',
+    'flow.batch.interrupted': 'Set çalışırken Dürbün kapandı',
+    'flow.batch.notRun': 'Set durdurulduğu için çalışmadı',
+    'flow.batch.afterFailure': ['“{flow}” başarısız olduğu için çalışmadı', 'Önceki bir akış başarısız olduğu için çalışmadı'],
+    'flow.batch.irreversible': ['Geri alınması zor adımları olduğu için çalışmadı: {steps}', 'Geri alınması zor adımları olduğu için çalışmadı'],
+    'flow.batch.startFailed': ['Akış başlatılamadı: {error}', 'Akış başlatılamadı'],
+    'flow.batch.runFailed': 'Akış başarısız oldu',
+    'flow.batch.stoppedAfterFailure': ['“{flow}” başarısız olunca set durdu', 'Bir akış başarısız olunca set durdu'],
+    'flow.trash.notFound': 'Bu silinen akış artık saklanmıyor',
+    'flow.version.notFound': 'Bu sürüm artık saklanmıyor',
 
     /* ── pieces of derived params ── */
     flowPart: {
@@ -1003,6 +1045,24 @@ registerMessages('code', {
     'api.method': 'Method not allowed',
     'flow.automation.busy': 'The flow is running already, or too many automatic runs are going',
     'flow.id.reserved': 'This id is reserved by Dürbün; choose another flow id',
+    /* ── set runs, deleted flows, versions ── */
+    'flow.batch.busy': ['The “{tag}” set is running; stop it first', 'Another set is running; stop it first'],
+    'flow.batch.noTagged': ['No flow has the tag “{tag}”', 'No flow has this tag'],
+    'flow.batch.empty': 'Choose at least one flow',
+    'flow.batch.tooMany': ['A set can have at most {max, number} flows', 'Too many flows in the set'],
+    'flow.batch.running': 'The set is running; stop it first',
+    'flow.batch.notFound': 'Set not found; it may have been removed from history',
+    'flow.batch.notRunning': 'The set has already ended',
+    'flow.batch.cancelled': 'You stopped the set',
+    'flow.batch.interrupted': 'Dürbün was closed while the set was running',
+    'flow.batch.notRun': 'Not run: the set was stopped',
+    'flow.batch.afterFailure': ['Not run: “{flow}” failed first', 'Not run: an earlier flow failed'],
+    'flow.batch.irreversible': ['Not run: it has steps that are hard to undo ({steps})', 'Not run: it has steps that are hard to undo'],
+    'flow.batch.startFailed': ['The flow couldn’t start: {error}', 'The flow couldn’t start'],
+    'flow.batch.runFailed': 'The flow failed',
+    'flow.batch.stoppedAfterFailure': ['The set stopped after “{flow}” failed', 'The set stopped after a flow failed'],
+    'flow.trash.notFound': 'This deleted flow is no longer kept',
+    'flow.version.notFound': 'This version is no longer kept',
 
     /* ── pieces of derived params ── */
     flowPart: {

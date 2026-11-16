@@ -24,7 +24,22 @@ interface Include {
 const SHARE_DEFAULTS: Include = { mocks: true, environments: true, settings: false, uiPrefs: false, runs: false };
 
 /** "Share your setup" (chosen items, never secrets) and "Back up everything" (one file for a new Mac). */
-export function ExportDialog({ open, mode: initialMode, flows: initialFlows, onClose }: { open: boolean; mode: PackageKind; flows?: string[]; onClose(): void }) {
+export function ExportDialog({
+  open,
+  mode: initialMode,
+  flows: initialFlows,
+  runs: presetRuns,
+  name: presetName,
+  onClose,
+}: {
+  open: boolean;
+  mode: PackageKind;
+  flows?: string[];
+  /** Exactly these runs travel (a set run's report: one run per flow); runs are on by default then. */
+  runs?: string[];
+  name?: string;
+  onClose(): void;
+}) {
   const t = useT();
   const summaries = useFlows((s) => s.summaries);
   // Rules a flow adds while it runs are not the user's own setup.
@@ -45,10 +60,10 @@ export function ExportDialog({ open, mode: initialMode, flows: initialFlows, onC
   useEffect(() => {
     if (!open) return;
     setMode(initialMode);
-    setName('');
+    setName(presetName ?? '');
     setNote('');
     setFlows(new Set(initialFlows ?? summaries.map((f) => f.id)));
-    setInc(initialFlows ? { ...SHARE_DEFAULTS, mocks: false } : SHARE_DEFAULTS);
+    setInc(initialFlows ? { ...SHARE_DEFAULTS, mocks: false, runs: !!presetRuns?.length } : SHARE_DEFAULTS);
     setPass('');
     setPass2('');
     // A share carries only the runs of the flows that go in: the dialog needs their ids (the server keeps ≤ 200).
@@ -67,7 +82,13 @@ export function ExportDialog({ open, mode: initialMode, flows: initialFlows, onC
   const sorted = useMemo(() => [...summaries].sort((a, b) => a.name.localeCompare(b.name)), [summaries]);
   const share = mode === 'share';
   // Runs of the picked flows and of the sub-flows that travel with them: never another flow's runs.
-  const shareRuns = useMemo(() => (Array.isArray(runHeaders) ? runsOfFlows(runHeaders, flowsWithCalls(summaries, flows)) : []), [runHeaders, summaries, flows]);
+  const shareRuns = useMemo(() => {
+    if (!Array.isArray(runHeaders)) return [];
+    const list = runsOfFlows(runHeaders, flowsWithCalls(summaries, flows));
+    if (!presetRuns) return list;
+    const wanted = new Set(presetRuns);
+    return list.filter((r) => wanted.has(r.id));
+  }, [runHeaders, summaries, flows, presetRuns]);
   const shareRunsOn = inc.runs && shareRuns.length > 0;
   const passProblem = !share && pass ? (pass.length < MIN_PASSPHRASE ? t('transfer.export.passphraseShort', { min: MIN_PASSPHRASE }) : pass !== pass2 ? t('transfer.export.passphraseMismatch') : null) : null;
   const nothing = share && flows.size === 0 && !(inc.mocks && mockCount) && !(inc.environments && envCount !== 0) && !inc.settings && !inc.uiPrefs && !shareRunsOn;

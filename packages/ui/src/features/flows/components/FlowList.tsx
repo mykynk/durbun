@@ -1,13 +1,18 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
-import { ChevronDown, CircleAlert, Copy, Ellipsis, FileDown, FilePen, FileUp, ListPlus, Play, Plus, Share2, Sparkles, Trash, Workflow, Zap } from 'lucide-react';
+import { ChevronDown, CircleAlert, Copy, Ellipsis, FileDown, FilePen, FileUp, CircleStop, ListChecks, ListPlus, Play, Plus, Share2, Sparkles, Tags, Trash, Trash2, Workflow, Zap } from 'lucide-react';
 import { STARTERS, type Starter, type StarterId } from '../model/starters';
 import type { FlowSummary } from '@durbun/protocol';
-import { Button, DropdownMenu, EmptyState, Highlight, SearchInput, Spinner, StatusDot, Tooltip, formatRelative, openContextMenu, type MenuItem, type Tone } from '../../../components';
+import { Button, DropdownMenu, EmptyState, Highlight, IconButton, SearchInput, Spinner, StatusDot, Tooltip, formatRelative, openContextMenu, toast, type MenuItem, type Tone } from '../../../components';
 import { useFlows } from '../../../data';
 import { useT } from '../../../i18n';
 import { transfer } from '../../transfer/store';
 import { AutomationsBar } from './AutomationsBar';
+import { batchHeadline, batchTitle, batchTone, flowsWithTag, tagCounts } from '../model/batch';
+import { refreshSet, useSets } from '../model/sets';
+import { cancelBatch } from '../model/setsApi';
+import { flowErrorText } from '../model/errors';
+import type { BatchPreset } from './BatchDialog';
 
 export type NewFlowKind = 'blank' | 'requests' | 'ai' | 'import' | `starter:${StarterId}`;
 
@@ -25,7 +30,16 @@ export interface FlowListProps {
   onExport(id: string): void;
   onAi(id: string): void;
   onDelete(id: string): void;
+  /** "Run several flows" (with a tag or flows already chosen). */
+  onRunSet(preset?: BatchPreset): void;
+  onShowSet(id: string): void;
+  /** Flows in "Deleted flows" (0 hides the link). */
+  trashCount: number;
+  onOpenTrash(): void;
 }
+
+/** Tags offered in the row menu and the set menu. */
+const TAGS_SHOWN = 6;
 
 const RUN_TONE: Record<string, Tone> = { passed: 'success', failed: 'danger', cancelled: 'neutral', running: 'accent' };
 
@@ -49,7 +63,7 @@ export function starterMenuItem(t: ReturnType<typeof useT>, s: Starter, onNew: (
 }
 
 /** Left column of the Flows tab: every saved flow with its last run, automation and problems. */
-export function FlowList({ summaries, loaded, selectedId, drafts, active, onOpen, onNew, onRun, onDuplicate, onExport, onAi, onDelete }: FlowListProps) {
+export function FlowList({ summaries, loaded, selectedId, drafts, active, onOpen, onNew, onRun, onDuplicate, onExport, onAi, onDelete, onRunSet, onShowSet, trashCount, onOpenTrash }: FlowListProps) {
   const t = useT();
   const [query, setQuery] = useState('');
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -72,9 +86,17 @@ export function FlowList({ summaries, loaded, selectedId, drafts, active, onOpen
     return m;
   }, [summaries]);
 
+  const tags = useMemo(() => tagCounts(summaries), [summaries]);
+  const recentSets = useSets((s) => s.recent);
+  const runningSet = useSets((s) => s.running);
+
   const itemMenu = (f: FlowSummary): MenuItem[] => [
     { label: t('flows.list.open'), icon: Workflow, onSelect: () => onOpen(f.id) },
     { label: t('flows.list.run'), icon: Play, onSelect: () => onRun(f.id), disabled: runningIds.has(f.id) },
+    // Its tags as sets: "Run the 4 flows tagged “smoke”…".
+    ...(f.tags ?? []).slice(0, 3).map(
+      (tag): MenuItem => ({ label: t('flows.batch.menu.runTag', { tag, count: flowsWithTag(summaries, tag).length }), icon: Tags, onSelect: () => onRunSet({ tag }) }),
+    ),
     { type: 'separator' },
     { label: t('flows.list.duplicate'), icon: Copy, onSelect: () => onDuplicate(f.id) },
     { label: t('flows.list.export'), icon: FileDown, onSelect: () => onExport(f.id) },
@@ -109,10 +131,25 @@ export function FlowList({ summaries, loaded, selectedId, drafts, active, onOpen
     }
   };
 
+  const setMenu = (): MenuItem[] => {
+    const items: MenuItem[] = [{ label: t('flows.batch.menu.pick'), icon: ListChecks, description: t('flows.batch.menu.pickHint'), onSelect: () => onRunSet() }];
+    if (tags.length) {
+      items.push({ type: 'separator' }, { type: 'label', label: t('flows.batch.menu.byTag') });
+      for (const x of tags.slice(0, TAGS_SHOWN)) items.push({ label: x.tag, icon: Tags, hint: t('flows.batch.menu.flowCount', { count: x.count }), onSelect: () => onRunSet({ tag: x.tag }) });
+    }
+    items.push({ type: 'separator' }, { type: 'label', label: t('flows.batch.menu.recent') });
+    if (!recentSets?.length) items.push({ type: 'label', label: recentSets ? t('flows.batch.menu.noneYet') : t('flows.batch.menu.loading') });
+    else for (const b of recentSets.slice(0, 5)) items.push({ label: batchTitle(b, t), description: `${batchHeadline(b, t)} · ${formatRelative(b.startedAt)}`, onSelect: () => onShowSet(b.id) });
+    return items;
+  };
+
   return (
     <div className="fl-list" aria-label={t('flows.list.label')}>
       <div className="fl-list__head">
         <SearchInput value={query} onChange={setQuery} placeholder={t('flows.list.search')} size="sm" shortcut="Mod+F" shortcutEnabled={active} className="fl-list__search" />
+        <DropdownMenu items={setMenu} minWidth={300} align="start" aria-label={t('flows.batch.menu.label')}>
+          {(p) => <IconButton icon={ListChecks} label={t('flows.batch.menu.label')} disabled={!summaries.length} {...p} />}
+        </DropdownMenu>
         <DropdownMenu items={() => newFlowMenu(t, onNew, { starters: true })} minWidth={300} aria-label={t('flows.new.title')}>
           {(p) => (
             <Button size="sm" variant="primary" icon={Plus} iconRight={ChevronDown} {...p}>
@@ -121,6 +158,7 @@ export function FlowList({ summaries, loaded, selectedId, drafts, active, onOpen
           )}
         </DropdownMenu>
       </div>
+      {runningSet ? <RunningSetBar id={runningSet.id} onShow={onShowSet} /> : null}
       <div className="fl-list__items" role="listbox" aria-label={t('flows.list.label')} ref={itemsRef}>
         {!loaded ? (
           <div className="fl-list__loading">
@@ -225,7 +263,55 @@ export function FlowList({ summaries, loaded, selectedId, drafts, active, onOpen
           })
         )}
       </div>
+      {trashCount > 0 ? (
+        <button type="button" className="fl-list__trash" onClick={onOpenTrash}>
+          <Trash2 size={13} aria-hidden />
+          <span>{t('flows.trash.link', { count: trashCount })}</span>
+        </button>
+      ) : null}
       {loaded ? <AutomationsBar summaries={summaries} onOpen={onOpen} /> : null}
+    </div>
+  );
+}
+
+/** The set running now, above the list (whichever window started it): progress, open, stop. */
+function RunningSetBar({ id, onShow }: { id: string; onShow(id: string): void }) {
+  const t = useT();
+  const b = useSets((s) => s.byId[id] ?? s.running);
+  const [stopping, setStopping] = useState(false);
+  if (!b) return null;
+  const done = b.items.filter((i) => i.status !== 'pending' && i.status !== 'running').length;
+  const current = b.items.find((i) => i.status === 'running');
+  return (
+    <div className={clsx('fl-setbar', `is-${batchTone(b)}`)}>
+      <button type="button" className="fl-setbar__main" onClick={() => onShow(b.id)} title={t('flows.batch.bar.show')}>
+        <Spinner size={12} />
+        <span className="fl-setbar__text">
+          <span className="fl-setbar__title truncate">{batchTitle(b, t)}</span>
+          <span className="fl-setbar__meta truncate tnum">{current ? t('flows.batch.bar.now', { done, total: b.counts.total, name: current.flowName }) : batchHeadline(b, t)}</span>
+        </span>
+      </button>
+      <IconButton
+        icon={CircleStop}
+        size="sm"
+        tone="danger"
+        label={t('flows.batch.view.stop')}
+        disabled={stopping}
+        onClick={async () => {
+          setStopping(true);
+          try {
+            await cancelBatch(b.id);
+            await refreshSet(b.id);
+          } catch (err) {
+            toast.error(t('flows.batch.stopFailed'), { description: flowErrorText(err) });
+          } finally {
+            setStopping(false);
+          }
+        }}
+      />
+      <span className="fl-setbar__progress" aria-hidden>
+        <span style={{ width: `${b.counts.total ? (done / b.counts.total) * 100 : 0}%` }} />
+      </span>
     </div>
   );
 }

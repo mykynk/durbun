@@ -1,4 +1,6 @@
 import { registerMessages } from '../../i18n';
+// Set runs, version history and deleted flows.
+import './i18nSets';
 
 /**
  * Flows tab ("Akışlar") dictionary. Step titles, parameter labels and outputs live in catalogText.ts (they are
@@ -580,8 +582,7 @@ registerMessages('flows', {
       editWithAi: 'Yapay zekâyla düzenle…',
       delete: 'Sil',
       deleteTitle: '“{name}” silinsin mi?',
-      deleteMessage: 'Akış ve çalıştırma geçmişi silinir. Bu geri alınamaz.',
-      deleteUsed: 'Bu akışı alt akış olarak kullananlar var: {names}. Silerseniz o akışlardaki çağrı adımları hata verir.',
+      deleteUsed: 'Bu akışı alt akış olarak kullananlar var: {names}. Silerseniz o akışlardaki çağrı adımları, akışı geri yükleyene kadar hata verir.',
       deleted: '“{name}” silindi',
       deleteFailed: 'Akış silinemedi',
     },
@@ -1348,8 +1349,7 @@ registerMessages('flows', {
       editWithAi: 'Edit with AI…',
       delete: 'Delete',
       deleteTitle: 'Delete “{name}”?',
-      deleteMessage: 'The flow and its run history are deleted. This cannot be undone.',
-      deleteUsed: 'Other flows use it as a sub-flow: {names}. Their call steps will fail if you delete it.',
+      deleteUsed: 'Other flows use it as a sub-flow: {names}. Their call steps fail until you restore it.',
       deleted: '“{name}” deleted',
       deleteFailed: 'Couldn’t delete the flow',
     },

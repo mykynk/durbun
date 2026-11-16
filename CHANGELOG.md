@@ -97,6 +97,7 @@ All notable changes to Dürbün are listed here. The format follows
   presets and the "new lines" pill keep their contrast in the light theme.
 - The top bar keeps the device name readable next to the selected app in narrow windows instead of cutting it
   to one letter; both names have a tooltip. Server messages of more than one sentence end with a full stop.
+- Flows: a step moved down to avoid an overlap stays on the grid.
 
 ### Changed
 
@@ -398,6 +399,14 @@ All notable changes to Dürbün are listed here. The format follows
   Performance that opens the line.
 - Performance: frame times have their own chart, named after the platform (Flutter build / raster, Android UI
   thread / RenderThread). An Android or Flutter app that draws nothing reads as idle, never as 0 FPS.
+- Flows: run several flows as one set, picked by hand or by tag, one after another on one device. Before it
+  starts you see which flows are ready and which will be skipped, and why; flows with hard-to-undo steps run
+  only when you tick the box. You can follow or stop the set and get one report per set: copy it, save it as
+  .md, send it to Slack or share it together with its runs.
+- Flows: version history with Restore, and Undo for a restore. A deleted flow can be undone from the toast
+  and stays under **Deleted flows** for 30 days.
+- Logs: saved filters travel with backups and packages and follow your other windows; an import adds them to
+  the filters already there.
 ## [0.2.0] - 2026-11-12
 
 ### Added

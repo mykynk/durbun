@@ -9,7 +9,9 @@ import {
   FileDown,
   FileUp,
   Globe,
+  History,
   LayoutGrid,
+  ListChecks,
   ListPlus,
   Map as MapIcon,
   Maximize2,
@@ -23,7 +25,9 @@ import {
   Share2,
   Sparkles,
   SquareDashedMousePointer,
+  Tags,
   Trash,
+  Trash2,
   Undo2,
   Workflow,
 } from 'lucide-react';
@@ -67,6 +71,13 @@ import { STARTERS, starterFlow, type StarterId } from './model/starters';
 import { ImportFlowsDialog } from './components/ImportDialog';
 import { AiPackDialog } from './components/AiDialog';
 import { FromRequestsDialog } from './components/FromRequestsDialog';
+import { BatchDialog, type BatchPreset } from './components/BatchDialog';
+import { BatchView } from './components/BatchView';
+import { TrashDialog } from './components/TrashDialog';
+import { VersionsDialog } from './components/VersionsDialog';
+import { batchHeadline, batchTitle, batchTone, tagCounts } from './model/batch';
+import { refreshSet, useSets, useSetsSync } from './model/sets';
+import { deleteFlowToTrash, listTrash, restoreTrashed } from './model/setsApi';
 import { hasPendingSave, useFlowDocument, type DraftOffer, type FlowDocument } from './model/useFlowDocument';
 import { draftIds, dropDraft } from './model/drafts';
 import { takeFlowIntent, useFlowIntent } from './intent';
@@ -100,7 +111,7 @@ import { loadEnvironments, useEnvironments } from './model/envStore';
 import './i18n';
 import './flows.css';
 
-type DialogState = { kind: 'env' } | { kind: 'import'; text: string | null } | { kind: 'ai'; flowId: string | null; fix?: boolean } | { kind: 'requests'; ids?: string[]; visibleIds?: string[]; filterLabel?: string; from?: FlowFromRequestsSource } | null;
+type DialogState = { kind: 'env' } | { kind: 'set'; preset: BatchPreset | null } | { kind: 'trash' } | { kind: 'versions' } | { kind: 'import'; text: string | null } | { kind: 'ai'; flowId: string | null; fix?: boolean } | { kind: 'requests'; ids?: string[]; visibleIds?: string[]; filterLabel?: string; from?: FlowFromRequestsSource } | null;
 
 /** Inputs typed for each flow in this window (never stored: they may hold passwords). */
 const lastInputs = new Map<string, Record<string, string>>();
@@ -184,6 +195,9 @@ export default function FlowsView() {
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [focusName, setFocusName] = useState<string | null>(null);
+  /** A set run shown in place of the editor. */
+  const [setView, setSetView] = useState<string | null>(null);
+  const [trashCount, setTrashCount] = useState(0);
   const canvasApi = useRef<CanvasApi | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const pendingRun = useRef<string | null>(null);
@@ -204,6 +218,38 @@ export default function FlowsView() {
   useEffect(() => {
     void loadEnvironments();
   }, []);
+
+  /* ── set runs, deleted flows ── */
+  useSetsSync(active);
+  const refreshTrashCount = useCallback(() => {
+    listTrash().then(
+      (r) => setTrashCount(r.items.length),
+      () => undefined,
+    );
+  }, []);
+  useEffect(() => {
+    if (active) refreshTrashCount();
+  }, [active, refreshTrashCount]);
+  // A set that ends while this window is elsewhere says how it went.
+  const runningSetId = useSets((s) => s.running?.id ?? null);
+  const lastRunningSet = useRef<string | null>(null);
+  const setViewRef = useRef(setView);
+  setViewRef.current = setView;
+  useEffect(() => {
+    const ended = lastRunningSet.current;
+    lastRunningSet.current = runningSetId;
+    if (!ended || ended === runningSetId) return;
+    void refreshSet(ended).then((b) => {
+      if (!b || b.status === 'running' || setViewRef.current === b.id) return;
+      const tone = batchTone(b);
+      const show = { label: t('flows.batch.showResult'), onClick: () => setSetView(b.id) };
+      const title = `${batchTitle(b, t)}: ${batchHeadline(b, t)}`;
+      if (tone === 'failed') toast.error(title, { action: show, duration: 0 });
+      else if (tone === 'passed') toast.success(title, { action: show, duration: 8000 });
+      else toast.warn(title, { action: show, duration: 0 });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runningSetId]);
 
   // The list normally comes with the socket's snapshot; a server (or mock) that never sends it is asked over REST.
   useEffect(() => {
@@ -579,18 +625,44 @@ export default function FlowsView() {
     async (id: string) => {
       const f = summaries.find((x) => x.id === id);
       if (!f) return;
-      const callers = summaries.filter((x) => x.calls.includes(id)).map((x) => x.name);
-      const ok = await confirm({
-        title: t('flows.list.deleteTitle', { name: f.name }),
-        message: callers.length ? t('flows.list.deleteUsed', { names: callers.join(', ') }) : t('flows.list.deleteMessage'),
-        confirmLabel: t('flows.list.delete'),
-        danger: true,
-      });
-      if (!ok) return;
+      // Deleting can be undone (the flow is kept in "Deleted flows"); only a flow other flows call asks first.
+      const callers = summaries.filter((x) => x.calls.includes(id) && x.id !== id).map((x) => x.name);
+      if (callers.length) {
+        const ok = await confirm({
+          title: t('flows.list.deleteTitle', { name: f.name }),
+          message: t('flows.list.deleteUsed', { names: callers.join(', ') }),
+          confirmLabel: t('flows.list.delete'),
+          danger: true,
+        });
+        if (!ok) return;
+      }
       try {
-        await api.deleteFlow(id);
+        const trash = await deleteFlowToTrash(id);
         if (id === selectedId) setSelectedId(null);
-        toast.success(t('flows.list.deleted', { name: f.name }));
+        setTrashCount((n) => n + (trash ? 1 : 0));
+        const toastId = `flow-deleted-${id}`;
+        toast.success(t('flows.list.deleted', { name: f.name }), {
+          id: toastId,
+          duration: 12_000,
+          ...(trash
+            ? {
+                description: t('flows.list.deletedHint', { days: Math.max(1, Math.round((trash.expiresAt - trash.deletedAt) / 86_400_000)) }),
+                action: {
+                  label: t('flows.list.undoDelete'),
+                  onClick: () =>
+                    void restoreTrashed(trash.trashId).then(
+                      (r) => {
+                        setTrashCount((n) => Math.max(0, n - 1));
+                        setSetView(null);
+                        setSelectedId(r.flow.id);
+                        toast.success(t('flows.trash.restored', { name: r.flow.name }));
+                      },
+                      (err: unknown) => toast.error(t('flows.trash.restoreFailed'), { description: flowErrorText(err) }),
+                    ),
+                },
+              }
+            : {}),
+        });
       } catch (err) {
         toast.error(t('flows.list.deleteFailed'), { description: flowErrorText(err) });
       }
@@ -699,7 +771,7 @@ export default function FlowsView() {
     const el = document.activeElement;
     return !!el && el !== document.body && !!wrapRef.current?.contains(el);
   };
-  const kb = active && !!flow && !dialog && !runDialog && !picker;
+  const kb = active && !!flow && !dialog && !runDialog && !picker && !setView;
   const onCanvas = (fn: () => void) => () => {
     if (canvasFocused()) fn();
   };
@@ -720,7 +792,7 @@ export default function FlowsView() {
   useShortcut('F', () => canvasApi.current?.fit(), { enabled: kb });
   useShortcut('A', onCanvas(() => openPickerAtCenter()), { enabled: kb });
   useShortcut('Shift+Mod+L', tidy, { enabled: kb, allowInInputs: false });
-  useShortcut('Mod+Enter', () => void (liveRun ? stopRun() : requestRun()), { enabled: active && !!flow && !dialog && !runDialog });
+  useShortcut('Mod+Enter', () => void (liveRun ? stopRun() : requestRun()), { enabled: active && !!flow && !dialog && !runDialog && !setView });
   useShortcut('Escape', () => setSelection(EMPTY_SELECTION), { enabled: kb && (liveSelection.nodes.size > 0 || liveSelection.edges.size > 0), allowInInputs: false, priority: -1 });
 
   const clipboardState = useRef({ kb, copySelection, paste, deleteSelection, hasSelection: false });
@@ -827,17 +899,33 @@ export default function FlowsView() {
 
   /* ── palette ── */
   const group = t('common.groups.flows');
+  const setTags = useMemo(() => tagCounts(summaries).slice(0, 12), [summaries]);
   useCommands([
     { id: 'flows.new', title: t('flows.commands.new'), group, icon: Plus, keywords: ['flow', 'akış', 'new', 'yeni', 'graph'], run: () => void createBlank() },
     { id: 'flows.fromRequests', title: t('flows.commands.fromRequests'), group, icon: ListPlus, keywords: ['flow', 'akış', 'request', 'istek', 'network'], run: () => setDialog({ kind: 'requests' }) },
     { id: 'flows.ai', title: t('flows.commands.ai'), group, icon: Sparkles, keywords: ['ai', 'yapay zeka', 'prompt', 'chatgpt', 'claude', 'flow'], run: () => setDialog({ kind: 'ai', flowId, fix: !!flowId && needsFix }) },
     { id: 'flows.import', title: t('flows.commands.import'), group, icon: FileUp, keywords: ['import', 'içe aktar', 'flow', 'akış', 'json'], run: () => void importFromFile() },
     { id: 'flows.environments', title: t('flows.commands.environments'), group, icon: Globe, keywords: ['env', 'ortam', 'environment', 'variables', 'değişken'], run: () => setDialog({ kind: 'env' }) },
+    ...(summaries.length
+      ? [
+          { id: 'flows.runSet', title: t('flows.commands.runSet'), group, icon: ListChecks, keywords: ['set', 'suite', 'smoke', 'toplu', 'birden çok', 'tag', 'etiket', 'run', 'çalıştır'], run: () => setDialog({ kind: 'set', preset: null }) },
+          ...setTags.map((x) => ({
+            id: `flows.runSet.${x.tag}`,
+            title: t('flows.commands.runTag', { tag: x.tag, count: x.count }),
+            group,
+            icon: Tags,
+            keywords: ['set', 'suite', 'tag', 'etiket', 'toplu', x.tag],
+            run: () => setDialog({ kind: 'set', preset: { tag: x.tag } }),
+          })),
+        ]
+      : []),
+    { id: 'flows.trash', title: t('flows.commands.trash'), group, icon: Trash2, keywords: ['trash', 'çöp', 'deleted', 'silinen', 'restore', 'geri yükle', 'undo'], run: () => setDialog({ kind: 'trash' }) },
     ...(flow
       ? [
           { id: 'flows.run', title: t('flows.commands.run', { name: flow.name }), group, icon: Play, shortcut: 'Mod+Enter', keywords: ['run', 'çalıştır', 'start', 'başlat'], run: () => void requestRun(), disabled: !!liveRun },
           { id: 'flows.tidy', title: t('flows.commands.tidy'), group, icon: LayoutGrid, shortcut: 'Shift+Mod+L', keywords: ['layout', 'düzenle', 'tidy', 'hizala'], run: tidy },
           { id: 'flows.export', title: t('flows.commands.export', { name: flow.name }), group, icon: FileDown, keywords: ['export', 'dışa aktar', 'json'], run: () => void exportFlow(flow.id) },
+          { id: 'flows.versions', title: t('flows.commands.versions', { name: flow.name }), group, icon: History, keywords: ['history', 'geçmiş', 'version', 'sürüm', 'restore', 'geri yükle', 'undo'], run: () => setDialog({ kind: 'versions' }) },
         ]
       : []),
   ]);
@@ -853,16 +941,39 @@ export default function FlowsView() {
           selectedId={selectedId}
           drafts={drafts}
           active={active && !dialog}
-          onOpen={open}
+          onOpen={(id) => {
+            setSetView(null);
+            open(id);
+          }}
           onNew={onNew}
           onRun={runFromList}
           onDuplicate={(id) => void duplicateFlow(id)}
           onExport={(id) => void exportFlow(id)}
           onAi={(id) => setDialog({ kind: 'ai', flowId: id })}
           onDelete={(id) => void deleteFlow(id)}
+          onRunSet={(preset) => setDialog({ kind: 'set', preset: preset ?? null })}
+          onShowSet={setSetView}
+          trashCount={trashCount}
+          onOpenTrash={() => setDialog({ kind: 'trash' })}
         />
         <div className="fl-main">
-          {empty ? (
+          {setView ? (
+            <BatchView
+              key={setView}
+              batchId={setView}
+              onOpenFlow={(id) => {
+                setSetView(null);
+                open(id);
+              }}
+              onOpenRun={(id, runId) => {
+                setSetView(null);
+                ui.focusFlow(id, runId);
+              }}
+              onRunAgain={(b) => setDialog({ kind: 'set', preset: { ...(b.tag ? { tag: b.tag } : { flowIds: b.items.map((i) => i.flowId) }), target: b.request.target ?? null, onFailure: b.onFailure } })}
+              onShowSet={setSetView}
+              onClose={() => setSetView(null)}
+            />
+          ) : empty ? (
             <Welcome onNew={onNew} />
           ) : !selectedId ? (
             <EmptyState size="lg" icon={Workflow} title={t('flows.empty.pickTitle')} description={t('flows.empty.pickHint')} />
@@ -920,6 +1031,7 @@ export default function FlowsView() {
                     },
                   },
                   { label: t('flows.more.duplicate'), icon: Copy, onSelect: () => void duplicateFlow(flow.id) },
+                  { label: t('flows.more.versions'), icon: History, onSelect: () => setDialog({ kind: 'versions' }) },
                   { label: t('flows.more.environments'), icon: Globe, onSelect: () => setDialog({ kind: 'env' }) },
                   { type: 'separator' },
                   { label: t('flows.more.delete'), icon: Trash, danger: true, onSelect: () => void deleteFlow(flow.id) },
@@ -988,6 +1100,7 @@ export default function FlowsView() {
                       onPickTarget={() => document.querySelector<HTMLButtonElement>('.fl-header [data-picker="target"]')?.click()}
                       onManageEnvironments={() => setDialog({ kind: 'env' })}
                       onAskAi={() => setDialog({ kind: 'ai', flowId: flow.id, fix: true })}
+                      onShowSet={setSetView}
                       // Closed, the canvas and "last run" follow the newest run again, not the one shown here.
                       onClose={() => setPanel({ runId: null, open: false })}
                     />
@@ -1063,6 +1176,42 @@ export default function FlowsView() {
         </div>
       </SplitPane>
       <EnvironmentsDialog open={dialog?.kind === 'env'} onClose={() => setDialog(null)} usedKeys={usedKeys} />
+      <BatchDialog
+        open={dialog?.kind === 'set'}
+        preset={dialog?.kind === 'set' ? dialog.preset : null}
+        summaries={summaries}
+        onClose={() => setDialog(null)}
+        beforeStart={async () => {
+          if (flow) await doc.flush();
+        }}
+        onStarted={(b) => {
+          setDialog(null);
+          setSetView(b.id);
+        }}
+        onShowSet={(id) => {
+          setDialog(null);
+          setSetView(id);
+        }}
+        onManageEnvironments={() => setDialog({ kind: 'env' })}
+      />
+      <TrashDialog
+        open={dialog?.kind === 'trash'}
+        onClose={() => setDialog(null)}
+        onCount={setTrashCount}
+        onRestored={(id) => {
+          setDialog(null);
+          setSetView(null);
+          setSelectedId(id);
+        }}
+      />
+      <VersionsDialog
+        open={dialog?.kind === 'versions' && !!flow}
+        flowId={flowId}
+        flowName={flow?.name ?? ''}
+        onClose={() => setDialog(null)}
+        beforeRestore={() => doc.flush()}
+        onRestored={() => doc.reload()}
+      />
       <ImportFlowsDialog
         open={dialog?.kind === 'import'}
         text={dialog?.kind === 'import' ? dialog.text : null}

@@ -16,7 +16,14 @@ export function TransferHost() {
   const dialog = useTransfer((s) => s.dialog);
   return (
     <DialogBoundary name="packages" resetKey={dialog}>
-      <ExportDialog open={dialog?.kind === 'export'} mode={dialog?.kind === 'export' ? dialog.mode : 'share'} flows={dialog?.kind === 'export' ? dialog.flows : undefined} onClose={transfer.close} />
+      <ExportDialog
+        open={dialog?.kind === 'export'}
+        mode={dialog?.kind === 'export' ? dialog.mode : 'share'}
+        flows={dialog?.kind === 'export' ? dialog.flows : undefined}
+        runs={dialog?.kind === 'export' ? dialog.runs : undefined}
+        name={dialog?.kind === 'export' ? dialog.name : undefined}
+        onClose={transfer.close}
+      />
       <DataExportDialog
         open={dialog?.kind === 'data'}
         format={dialog?.kind === 'data' ? dialog.format : 'session'}

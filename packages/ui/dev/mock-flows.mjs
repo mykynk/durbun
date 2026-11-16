@@ -1,12 +1,29 @@
 /**
  * Flows, packages and backups for the UI mock: an in-memory store that answers the same REST shapes as the real
  * server, enough to design the Flows tab, the package dialogs and Settings → Backup without a device. It does not
- * validate flows; a run is pretend (see `startRun`).
+ * validate flows; a run is pretend (see `startRun`), and so is a set run (`startBatch`). The shapes are checked
+ * against the real handlers by `packages/server/test/flows/mockContract.test.ts`.
  */
+import { readFileSync } from 'node:fs';
 
 const now = () => Date.now();
 
 const flows = new Map();
+/** Earlier versions per flow id, newest first: `{ id, recordedAt, reason, flow }` (server: flows/history.ts). */
+const versions = new Map();
+/** Deleted flows, newest first: `{ trashId, deletedAt, flow, versions }`. */
+const trash = [];
+/** Set runs, newest first (server: flows/batches.ts). */
+const batches = [];
+let activeBatch = null;
+let histSeq = 0;
+const MAX_VERSIONS = 30;
+const IDLE_MS = 5 * 60_000;
+const CHECKPOINT_MS = 15 * 60_000;
+const TRASH_DAYS = 30;
+const TRASH_MS = TRASH_DAYS * 86_400_000;
+/** Ids shaped like the server's (`<time base 36>-<6 hex>`). */
+const histId = (at) => `${Math.floor(at).toString(36)}-${(++histSeq).toString(16).padStart(6, '0')}`;
 /** Newest first, with their steps. */
 const runs = [];
 let runSeq = 0;
@@ -98,11 +115,108 @@ function seed() {
     createdAt: at,
     updatedAt: at,
   });
+  // More of the smoke set: one that fails on purpose and one with a step that is hard to undo.
+  flows.set('profile-photo', {
+    format: 'durbun-flow',
+    version: 1,
+    id: 'profile-photo',
+    name: 'Profile photo upload',
+    tags: ['smoke'],
+    nodes: [
+      { id: 'start', type: 'trigger.manual', position: { x: 0, y: 0 } },
+      { id: 'upload', type: 'http.request', label: 'Upload fails on purpose', params: { method: 'POST', url: '{{env.baseUrl}}/me/photo' }, position: { x: 260, y: 0 } },
+    ],
+    edges: [{ from: 'start', to: 'upload' }],
+    createdAt: at,
+    updatedAt: at,
+  });
+  flows.set('fresh-install', {
+    format: 'durbun-flow',
+    version: 1,
+    id: 'fresh-install',
+    name: 'First launch after a clean install',
+    tags: ['smoke', 'onboarding'],
+    target: { appId: 'com.example.pati' },
+    nodes: [
+      { id: 'start', type: 'trigger.manual', position: { x: 0, y: 0 } },
+      { id: 'wipe', type: 'device.clearData', label: 'Clear app data', position: { x: 260, y: 0 } },
+      { id: 'launch', type: 'device.launchApp', position: { x: 520, y: 0 } },
+    ],
+    edges: [
+      { from: 'start', to: 'wipe' },
+      { from: 'wipe', to: 'launch' },
+    ],
+    createdAt: at,
+    updatedAt: at,
+  });
 }
+
+/** Earlier versions of "Log in" and one deleted flow, so the history and the trash have something to show. */
+function seedHistory() {
+  const login = flows.get('login');
+  const day = 86_400_000;
+  const v1 = { ...login, name: 'Sign in', nodes: login.nodes.slice(0, 2), edges: login.edges.slice(0, 1), updatedAt: now() - 6 * day };
+  const v2 = { ...login, name: 'Sign in', updatedAt: now() - 2 * day };
+  const v3 = { ...login, nodes: login.nodes.map((n) => (n.id === 'signIn' ? { ...n, position: { x: 280, y: 20 } } : n)), updatedAt: now() - 3 * 3_600_000 };
+  versions.set('login', [
+    { id: histId(now() - 2 * 3_600_000), recordedAt: now() - 2 * 3_600_000, reason: 'edit', flow: v3 },
+    { id: histId(now() - 4 * 3_600_000), recordedAt: now() - 4 * 3_600_000, reason: 'import', flow: v2 },
+    { id: histId(now() - 5 * day), recordedAt: now() - 5 * day, reason: 'edit', flow: v1 },
+  ]);
+  const deletedAt = now() - 3 * day;
+  trash.push({
+    trashId: histId(deletedAt),
+    deletedAt,
+    versions: [],
+    flow: {
+      format: 'durbun-flow',
+      version: 1,
+      id: 'old-onboarding',
+      name: 'Old onboarding',
+      tags: ['onboarding'],
+      nodes: [
+        { id: 'start', type: 'trigger.manual', position: { x: 0, y: 0 } },
+        { id: 'open', type: 'device.openUrl', params: { url: 'pati://welcome' }, position: { x: 260, y: 0 } },
+      ],
+      edges: [{ from: 'start', to: 'open' }],
+      createdAt: deletedAt - 20 * day,
+      updatedAt: deletedAt - day,
+    },
+  });
+}
+
+/** One finished smoke set in the history: the report view has something to show before anything ran. */
+function seedBatches() {
+  const at = now() - 25 * 60_000;
+  const checkout = runs.find((r) => r.flowId === 'checkout');
+  const login = runs.find((r) => r.flowId === 'login');
+  const items = [
+    { flowId: 'checkout', flowName: 'Checkout smoke', status: 'failed', runId: checkout?.id, startedAt: at + 2_600, durationMs: 3_100, counts: { passed: 2, failed: 1, skipped: 0, total: 3 }, failedStep: { nodeId: 'cart', type: 'http.request', label: 'Get cart', flowId: 'checkout', error: checkout?.error, errorCode: 'flow.http.status', params: checkout?.errorParams }, reason: { code: 'flow.http.status', message: checkout?.error ?? '', params: checkout?.errorParams } },
+    { flowId: 'fresh-install', flowName: 'First launch after a clean install', status: 'skipped', reason: { code: 'flow.batch.irreversible', message: 'Not run: it has steps that are hard to undo (Clear app data)', params: { steps: 'Clear app data' } } },
+    { flowId: 'login', flowName: 'Log in', status: 'passed', runId: login?.id, startedAt: at, durationMs: 2_400, counts: { passed: 3, failed: 0, skipped: 0, total: 3 } },
+  ];
+  batches.push({
+    id: histId(at),
+    tag: 'smoke',
+    status: 'failed',
+    startedAt: at,
+    endedAt: at + 6_100,
+    durationMs: 6_100,
+    request: {},
+    target: { deviceId: 'android:R5CT20XK9QM', deviceName: 'Pixel 8', platform: 'android', osVersion: '15', appId: 'com.example.pati', appName: 'Pati' },
+    environment: { id: 'staging', name: 'Staging' },
+    onFailure: 'continue',
+    items,
+    counts: batchCounts(items),
+  });
+}
+
 // `--no-flows`: an empty Flows tab, to see its welcome page and starter flows.
 if (!process.argv.includes('--no-flows')) {
   seed();
   seedRuns();
+  seedHistory();
+  seedBatches();
 }
 
 /** One finished run in the history against the self-signed QA server (TLS chip "unverified"). */
@@ -294,6 +408,232 @@ function previewItem(raw) {
   return { flow, issues, exists: !!current, differs: !!current && comparable(current) !== comparable(flow), nodes: flow.nodes.length };
 }
 
+/* ───────────── versions and deleted flows (like server/src/flows/history.ts) ───────────── */
+
+const contentSig = ({ updatedAt: _u, createdAt: _c, $schema: _s, ...rest }) => JSON.stringify(rest);
+const SETTINGS_KEYS = ['description', 'tags', 'inputs', 'outputs', 'target', 'settings', 'automation'];
+
+function versionChanges(prev, next) {
+  const before = new Map(prev.nodes.map((n) => [n.id, n]));
+  const after = new Map(next.nodes.map((n) => [n.id, n]));
+  const out = { stepsAdded: 0, stepsRemoved: 0, stepsChanged: 0, stepsMoved: 0, connections: 0, settings: false };
+  for (const [id, n] of after) {
+    const o = before.get(id);
+    if (!o) {
+      out.stepsAdded++;
+      continue;
+    }
+    const { position: p1, ...a } = o;
+    const { position: p2, ...b } = n;
+    if (JSON.stringify(a) !== JSON.stringify(b)) out.stepsChanged++;
+    else if (JSON.stringify(p1 ?? null) !== JSON.stringify(p2 ?? null)) out.stepsMoved++;
+  }
+  for (const id of before.keys()) if (!after.has(id)) out.stepsRemoved++;
+  const edge = (e) => `${e.from}|${e.port ?? 'out'}|${e.to}`;
+  const e1 = new Set(prev.edges.map(edge));
+  const e2 = new Set(next.edges.map(edge));
+  for (const e of e1) if (!e2.has(e)) out.connections++;
+  for (const e of e2) if (!e1.has(e)) out.connections++;
+  if (prev.name !== next.name) out.renamedFrom = prev.name;
+  out.settings = SETTINGS_KEYS.some((k) => JSON.stringify(prev[k] ?? null) !== JSON.stringify(next[k] ?? null));
+  return out;
+}
+
+/** The content a save replaces becomes a version by the server's rules; returns its id. */
+function keepVersion(prev, next, { reason = 'edit', checked = false } = {}) {
+  if (!prev || contentSig(prev) === contentSig(next)) return undefined;
+  const list = versions.get(prev.id) ?? [];
+  const newest = list[0];
+  if (newest && contentSig(newest.flow) === contentSig(prev)) return undefined;
+  const at = now();
+  if (reason === 'edit' && checked && newest && at - (prev.updatedAt ?? 0) < IDLE_MS && at - newest.recordedAt < CHECKPOINT_MS) return undefined;
+  const id = histId(at);
+  list.unshift({ id, recordedAt: at, reason, flow: prev });
+  versions.set(prev.id, list.slice(0, MAX_VERSIONS));
+  return id;
+}
+
+function historyOf(flow) {
+  const list = versions.get(flow.id) ?? [];
+  return {
+    versions: list.map((v, i) => ({
+      id: v.id,
+      savedAt: v.flow.updatedAt ?? v.recordedAt,
+      replacedAt: v.recordedAt,
+      reason: v.reason,
+      name: v.flow.name,
+      nodeCount: v.flow.nodes.length,
+      ...(list[i + 1] ? { changes: versionChanges(list[i + 1].flow, v.flow) } : {}),
+    })),
+    current: { ...(flow.updatedAt !== undefined ? { savedAt: flow.updatedAt } : {}), ...(list[0] ? { changes: versionChanges(list[0].flow, flow) } : {}) },
+    maxVersions: MAX_VERSIONS,
+  };
+}
+
+const trashItem = (t) => ({
+  trashId: t.trashId,
+  id: t.flow.id,
+  name: t.flow.name,
+  nodeCount: t.flow.nodes.length,
+  ...(t.flow.tags?.length ? { tags: t.flow.tags } : {}),
+  deletedAt: t.deletedAt,
+  expiresAt: t.deletedAt + TRASH_MS,
+  versions: t.versions.length,
+});
+
+/* ───────────── set runs (like server/src/flows/batches.ts) ───────────── */
+
+function batchCounts(items) {
+  const c = { passed: 0, failed: 0, skipped: 0, cancelled: 0, total: items.length };
+  for (const i of items) if (i.status in c && i.status !== 'total') c[i.status]++;
+  return c;
+}
+
+const IRREVERSIBLE = new Set(['device.clearData', 'device.installApp', 'device.uninstallApp']);
+const notRun = { code: 'flow.batch.notRun', message: 'Not run: the set was stopped' };
+
+/** A pretend set run: each flow is a pretend run (`startRun`), one after another; same rules as the server. */
+function startBatch(req, broadcast) {
+  if (activeBatch) return [409, { error: 'Another set of flows is running; stop it first', code: 'flow.batch.busy', params: { id: activeBatch.batch.id, ...(activeBatch.batch.tag ? { tag: activeBatch.batch.tag } : {}) } }];
+  const flowIds = Array.isArray(req.flowIds) ? [...new Set(req.flowIds.filter((x) => typeof x === 'string' && x))] : [];
+  const tag = typeof req.tag === 'string' && req.tag.trim() ? req.tag.trim() : undefined;
+  let ids = flowIds;
+  if (!ids.length && tag) {
+    ids = [...flows.values()].filter((f) => f.tags?.some((x) => x.trim().toLowerCase() === tag.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name)).map((f) => f.id);
+    if (!ids.length) return [400, { error: `No flow has the tag "${tag}"`, code: 'flow.batch.noTagged', params: { tag } }];
+  }
+  if (!ids.length) return [400, { error: 'Choose at least one flow', code: 'flow.batch.empty' }];
+  if (ids.length > 100) return [400, { error: 'At most 100 flows in one set', code: 'flow.batch.tooMany', params: { max: 100 } }];
+  const target = req.target && (req.target.deviceId || req.target.appId) ? req.target : undefined;
+  const batch = {
+    id: histId(now()),
+    ...(tag && !flowIds.length ? { tag } : {}),
+    status: 'running',
+    startedAt: now(),
+    request: { ...(target ? { target } : {}), ...(req.environmentId !== undefined ? { environmentId: req.environmentId } : {}) },
+    onFailure: req.onFailure === 'stop' ? 'stop' : 'continue',
+    items: ids.map((id) => (flows.has(id) ? { flowId: id, flowName: flows.get(id).name, status: 'pending' } : { flowId: id, flowName: id, status: 'skipped', reason: { code: 'flow.notFound', message: `Flow ${id} does not exist`, params: { id } } })),
+  };
+  batch.counts = batchCounts(batch.items);
+  batches.unshift(batch);
+  activeBatch = { batch, cancel: null, runId: null };
+  // Like the server, the answer comes before the first flow starts.
+  const active = activeBatch;
+  setTimeout(() => void runBatch(active, req, broadcast), 0);
+  return [202, structuredClone(batch)];
+}
+
+async function runBatch(active, req, broadcast) {
+  const { batch } = active;
+  let stoppedBy = null;
+  for (const item of batch.items) {
+    if (item.status !== 'pending') continue;
+    if (active.cancel) {
+      Object.assign(item, { status: 'cancelled', reason: notRun });
+      continue;
+    }
+    if (stoppedBy) {
+      Object.assign(item, { status: 'skipped', reason: { code: 'flow.batch.afterFailure', message: `Not run: ${stoppedBy.flowName} failed first`, params: { flow: stoppedBy.flowName } } });
+      continue;
+    }
+    const flow = flows.get(item.flowId);
+    const hard = flow?.nodes.filter((n) => IRREVERSIBLE.has(n.type)) ?? [];
+    if (!flow || (hard.length && !req.allowIrreversible)) {
+      const steps = hard.map((n) => n.label ?? n.id).join(', ');
+      item.status = 'skipped';
+      item.reason = flow ? { code: 'flow.batch.irreversible', message: `Not run: it has steps that are hard to undo (${steps})`, params: { steps } } : { code: 'flow.notFound', message: `Flow ${item.flowId} does not exist`, params: { id: item.flowId } };
+      batch.counts = batchCounts(batch.items);
+      continue;
+    }
+    const run = startRun(flow, { ...(req.target ? { target: req.target } : {}), ...(req.environmentId !== undefined ? { environmentId: req.environmentId } : {}) }, broadcast);
+    run.batchId = batch.id;
+    if (!batch.environment && run.environment) batch.environment = { id: run.environment.id, name: run.environment.name };
+    Object.assign(item, { status: 'running', runId: run.id, startedAt: run.startedAt });
+    active.runId = run.id;
+    while (run.status === 'running') await new Promise((r) => setTimeout(r, 150));
+    active.runId = null;
+    item.status = run.status === 'passed' ? 'passed' : run.status === 'failed' ? 'failed' : 'cancelled';
+    item.durationMs = run.durationMs ?? now() - run.startedAt;
+    item.counts = { ...run.counts };
+    if (run.status !== 'passed' && run.error) item.reason = { code: run.errorCode ?? 'flow.batch.runFailed', message: run.error, ...(run.errorParams ? { params: run.errorParams } : {}) };
+    const failed = run.steps.find((st) => st.status === 'failed' && !st.handled);
+    if (failed) item.failedStep = { nodeId: failed.nodeId, type: failed.type, flowId: failed.flowId, ...(failed.label ? { label: failed.label } : {}), ...(failed.error ? { error: failed.error } : {}), ...(failed.errorCode ? { errorCode: failed.errorCode } : {}), ...(failed.params ? { params: failed.params } : {}) };
+    batch.counts = batchCounts(batch.items);
+    if (item.status === 'failed' && batch.onFailure === 'stop') stoppedBy = item;
+  }
+  for (const i of batch.items) if (i.status === 'pending' || i.status === 'running') Object.assign(i, { status: 'cancelled', reason: i.reason ?? notRun });
+  batch.counts = batchCounts(batch.items);
+  const reason = active.cancel ?? (stoppedBy ? { code: 'flow.batch.stoppedAfterFailure', message: `Stopped after ${stoppedBy.flowName} failed`, params: { flow: stoppedBy.flowName } } : null);
+  batch.status = active.cancel ? 'cancelled' : batch.counts.failed ? 'failed' : 'passed';
+  if (reason) batch.reason = reason;
+  batch.endedAt = now();
+  batch.durationMs = batch.endedAt - batch.startedAt;
+  activeBatch = null;
+  batches.splice(50);
+  broadcast?.({ type: 'flows', flows: flowSummaries() });
+}
+
+/** The flow JSON Schema the server generates (kept in the repo, a server test keeps it current). */
+let schemaText = null;
+function flowSchema() {
+  schemaText ??= readFileSync(new URL('../../../docs/flows/durbun-flow.schema.json', import.meta.url), 'utf8');
+  return JSON.parse(schemaText);
+}
+
+/**
+ * A flow made of captured requests, shaped like the server's (`flowFromRequests`): one HTTP step per request in the
+ * order they happened, the common origin as {{env.baseUrl}} (saved to the active environment unless `saveEnv: false`).
+ * The mock reads the requests from its own `GET /api/network/:id`.
+ */
+async function fromRequests(req, b) {
+  const ids = Array.isArray(b.ids) ? b.ids.filter((x) => typeof x === 'string').slice(0, 200) : [];
+  if (!ids.length) return [400, { error: 'Choose at least one request', code: 'flow.fromRequests.empty' }];
+  const picked = [];
+  for (const id of ids) {
+    try {
+      const r = await fetch(`http://${req.headers.host}/api/network/${encodeURIComponent(id)}`);
+      if (!r.ok) continue;
+      const d = await r.json();
+      if (d && d.method && d.method !== '?') picked.push(d);
+    } catch {
+      /* gone */
+    }
+  }
+  if (!picked.length) return [400, { error: 'The chosen requests are no longer available', code: 'flow.fromRequests.gone' }];
+  picked.sort((x, y) => x.startTs - y.startTs);
+  const origins = picked.map((d) => {
+    try {
+      return new URL(d.url).origin;
+    } catch {
+      return '';
+    }
+  });
+  const origin = origins.filter(Boolean).sort((a, z) => origins.filter((o) => o === z).length - origins.filter((o) => o === a).length)[0] ?? '';
+  const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim() : 'Requests';
+  const id = freeId(name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'requests');
+  const nodes = [{ id: 'start', type: 'trigger.manual', position: { x: 0, y: 0 } }];
+  const edges = [];
+  picked.forEach((d, i) => {
+    let path = d.url;
+    try {
+      const u = new URL(d.url);
+      path = u.origin === origin ? `{{env.baseUrl}}${u.pathname}${u.search}` : d.url;
+    } catch {
+      /* keep */
+    }
+    const nodeId = `req${i + 1}`;
+    nodes.push({ id: nodeId, type: 'http.request', label: `${d.method} ${path.replace('{{env.baseUrl}}', '')}`, params: { method: d.method, url: path, ...(d.status ? { expectStatus: String(d.status) } : {}) }, position: { x: (i + 1) * 260, y: 0 } });
+    edges.push({ from: i ? `req${i}` : 'start', to: nodeId });
+  });
+  const saved = saveFlow({ format: 'durbun-flow', version: 1, id, name, nodes, edges }, id);
+  const envVars = origin ? [{ key: 'baseUrl', secret: false }] : [];
+  if (origin && b.saveEnv !== false) {
+    const env = environments.environments.find((e) => e.id === (b.environmentId ?? environments.activeId)) ?? environments.environments[0];
+    if (env && !env.vars.some((v) => v.key === 'baseUrl')) env.vars.push({ key: 'baseUrl', value: origin });
+  }
+  return [201, { ...saved, envVars, links: 0 }];
+}
+
 /** Summaries for the WS snapshot and the `flows` message (the Flows tab lists them from there). */
 export function flowSummaries() {
   return [...flows.values()].map(summary);
@@ -402,7 +742,7 @@ function importPackage(req) {
  */
 export async function handleFlowsApi(req, res, p, { json, readBody, broadcast }) {
   const handled = await route(req, res, p, { json, readBody, broadcast });
-  const changed = req.method !== 'GET' && (/^\/api\/flows(\/|$)/.test(p) || p === '/api/packages/import') && !/\/(preflight|run|import\/preview|ai-pack)$/.test(p);
+  const changed = req.method !== 'GET' && (/^\/api\/flows(\/|$)/.test(p) || /^\/api\/flow-trash\/[^/]+\/restore$/.test(p) || p === '/api/packages/import') && !/\/(preflight|run|import\/preview|ai-pack)$/.test(p);
   if (handled && changed) broadcast?.({ type: 'flows', flows: flowSummaries() });
   return handled;
 }
@@ -429,13 +769,81 @@ async function route(req, res, p, { json, readBody, broadcast }) {
     for (const doc of Array.isArray(b.flows) ? b.flows : []) {
       if (!doc?.id) continue;
       if (!flows.has(doc.id)) saved.push({ id: saveFlow(doc, doc.id).flow.id, name: doc.name, created: true });
-      else if (conflict === 'replace') saved.push({ id: saveFlow(doc, doc.id).flow.id, name: doc.name, created: false });
+      else if (conflict === 'replace') {
+        keepVersion(flows.get(doc.id), { ...doc }, { reason: 'import' });
+        saved.push({ id: saveFlow(doc, doc.id).flow.id, name: doc.name, created: false });
+      }
       else if (conflict === 'keepBoth') {
         const id = freeId(doc.id);
         saved.push({ id: saveFlow({ ...doc, name: `${doc.name} (2)` }, id).flow.id, name: `${doc.name} (2)`, created: true });
       } else skipped++;
     }
     return json(res, 200, { saved, skipped, problems: [] }), true;
+  }
+  if (p === '/api/flows/schema' && m === 'GET') {
+    const download = new URL(req.url, 'http://mock').searchParams.get('download') === '1';
+    return json(res, 200, flowSchema(), download ? { 'Content-Disposition': 'attachment; filename="durbun-flow.schema.json"' } : {}), true;
+  }
+  if (p === '/api/flows/from-requests' && m === 'POST') {
+    const [status, out] = await fromRequests(req, await body());
+    return json(res, status, out), true;
+  }
+  if (p === '/api/flow-batches') {
+    if (m === 'POST') {
+      const [status, out] = startBatch(await body(), broadcast);
+      return json(res, status, out), true;
+    }
+    const limit = Math.max(1, Math.min(50, Number(new URL(req.url, 'http://mock').searchParams.get('limit')) || 20));
+    return json(res, 200, { ...(activeBatch ? { running: structuredClone(activeBatch.batch) } : {}), batches: batches.slice(0, limit) }), true;
+  }
+  const batchRoute = /^\/api\/flow-batches\/([^/]+)(\/cancel)?$/.exec(p);
+  if (batchRoute) {
+    const batch = batches.find((b) => b.id === decodeURIComponent(batchRoute[1]));
+    if (batchRoute[2] && m === 'POST') {
+      if (!batch || activeBatch?.batch !== batch) return json(res, 409, { error: 'The set is not running', code: 'flow.batch.notRunning' }), true;
+      activeBatch.cancel ??= { code: 'flow.batch.cancelled', message: 'Stopped' };
+      const run = runs.find((r) => r.id === activeBatch.runId);
+      if (run && run.status === 'running') {
+        Object.assign(run, { status: 'cancelled', endedAt: now(), durationMs: now() - run.startedAt, error: 'Stopped', errorCode: 'flow.run.cancelled' });
+        broadcast?.({ type: 'flowRun', run: runHeader(run), steps: [] });
+      }
+      return json(res, 200, { ok: true }), true;
+    }
+    if (!batch) return json(res, 404, { error: 'No such set run', code: 'flow.batch.notFound' }), true;
+    if (m === 'DELETE') {
+      if (activeBatch?.batch === batch) return json(res, 409, { error: 'The set is running; stop it first', code: 'flow.batch.running' }), true;
+      batches.splice(batches.indexOf(batch), 1);
+      return json(res, 200, { ok: true }), true;
+    }
+    return json(res, 200, batch), true;
+  }
+  if (p === '/api/flow-trash' && m === 'GET') return json(res, 200, { items: trash.filter((t) => t.deletedAt + TRASH_MS > now()).map(trashItem), keepDays: TRASH_DAYS }), true;
+  const trashRoute = /^\/api\/flow-trash\/([^/]+)(\/restore)?$/.exec(p);
+  if (trashRoute) {
+    const i = trash.findIndex((t) => t.trashId === decodeURIComponent(trashRoute[1]));
+    if (i < 0) return json(res, 404, { error: 'This deleted flow is no longer kept', code: 'flow.trash.notFound' }), true;
+    const [t] = trash.splice(i, 1);
+    if (!trashRoute[2]) return json(res, 200, { ok: true }), true;
+    const id = freeId(t.flow.id);
+    const out = saveFlow({ ...t.flow, id }, id);
+    if (t.versions.length) versions.set(id, t.versions);
+    return json(res, 200, out), true;
+  }
+  const historyRoute = /^\/api\/flows\/([^/]+)\/history(?:\/([^/]+)(\/restore)?)?$/.exec(p);
+  if (historyRoute) {
+    const id = decodeURIComponent(historyRoute[1]);
+    const flow = flows.get(id);
+    if (!flow) return json(res, 404, { error: `Flow ${id} does not exist`, code: 'flow.notFound' }), true;
+    if (!historyRoute[2]) return json(res, 200, historyOf(flow)), true;
+    const v = (versions.get(id) ?? []).find((x) => x.id === historyRoute[2]);
+    if (!v) return json(res, 404, { error: 'This version is no longer kept', code: 'flow.version.notFound' }), true;
+    if (!historyRoute[3]) return json(res, 200, { flow: { ...v.flow, id } }), true;
+    const b = await body();
+    if (typeof b.baseUpdatedAt === 'number' && b.baseUpdatedAt !== flow.updatedAt) return json(res, 409, { error: `Flow ${id} was changed elsewhere; reload it or save again to overwrite`, code: 'flow.conflict' }), true;
+    const { createdAt: _c, updatedAt: _u, ...content } = v.flow;
+    const versionId = keepVersion(flow, { ...content, id }, { reason: 'restore' });
+    const out = saveFlow({ ...content, id }, id);
+    return json(res, 200, { ...out, ...(versionId ? { versionId } : {}) }), true;
   }
   if (p === '/api/flows/ai-pack' && m === 'POST') {
     // The real server writes the whole pack; the mock echoes what decides its "What is wrong now" part.
@@ -459,16 +867,24 @@ async function route(req, res, p, { json, readBody, broadcast }) {
       if (typeof req.baseUpdatedAt === 'number' && (flow.updatedAt ?? 0) > req.baseUpdatedAt + 1) {
         return json(res, 409, { error: 'This flow was changed in another window', code: 'flow.conflict' }), true;
       }
+      keepVersion(flow, { ...req.flow, id }, { checked: typeof req.baseUpdatedAt === 'number' });
       return json(res, 200, saveFlow(req.flow, id)), true;
     }
-    if (!action && m === 'DELETE') return flows.delete(id), res.writeHead(204).end(), true;
+    if (!action && m === 'DELETE') {
+      // Like the server: kept in the trash with its versions (30 days), not gone.
+      flows.delete(id);
+      const t = { trashId: histId(now()), deletedAt: now(), flow, versions: versions.get(id) ?? [] };
+      versions.delete(id);
+      trash.unshift(t);
+      return json(res, 200, { ok: true, trash: trashItem(t) }), true;
+    }
     if (action === 'duplicate') {
       const { name } = await body();
       return json(res, 201, saveFlow({ ...flow, name: name || `${flow.name} (copy)` }, freeId(`${id}-copy`))), true;
     }
-    if (action === 'preflight') return json(res, 200, { ok: true, issues: tlsIssues(flow, await body()), irreversible: [], skipped: [] }), true;
-    if (action === 'run' && m === 'POST') return json(res, 201, { ...startRun(flow, await body(), broadcast), steps: [] }), true;
-    if (action === 'export') return json(res, 200, flow, { 'Content-Disposition': `attachment; filename="${id}.flow.json"` }), true;
+    if (action === 'preflight') return json(res, 200, { ok: true, issues: tlsIssues(flow, await body()), irreversible: flow.nodes.filter((n) => IRREVERSIBLE.has(n.type) && !n.disabled).map((n) => n.id), skipped: [] }), true;
+    if (action === 'run' && m === 'POST') return json(res, 202, { ...startRun(flow, await body(), broadcast), steps: [] }), true;
+    if (action === 'export') return json(res, 200, flow, { 'Content-Disposition': `attachment; filename="${id}.durbun-flow.json"` }), true;
   }
   if (p.startsWith('/api/flow-runs')) {
     const url = new URL(req.url, 'http://mock');

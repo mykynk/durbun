@@ -87,6 +87,8 @@ export interface StartOptions {
   /** What templates read as {{trigger.…}}. */
   triggerData?: Record<string, unknown>;
   automatic?: boolean;
+  /** The set run this run belongs to (FlowRun.batchId). */
+  batchId?: string;
 }
 
 interface Token {
@@ -310,6 +312,7 @@ export class FlowEngine {
       steps: [],
       counts: { passed: 0, failed: 0, skipped: 0, total: 0 },
     };
+    if (opts.batchId) run.batchId = opts.batchId;
     if (prepared.target.info.deviceId || prepared.target.info.appId) run.target = prepared.target.info;
     if (prepared.environment) {
       run.environment = { id: prepared.environment.id, name: prepared.environment.name };

@@ -3,7 +3,8 @@ import type { PackageKind } from '@durbun/protocol';
 
 /** Which package dialog is open (they live outside the tabs: the top bar, the settings and a drop open them). */
 export type TransferDialog =
-  | { kind: 'export'; mode: PackageKind; flows?: string[] }
+  /** `runs`: exactly these runs go with the flows (a set run's report); `name`: the package name to start with. */
+  | { kind: 'export'; mode: PackageKind; flows?: string[]; runs?: string[]; name?: string }
   /** `text`: a package already read (a dropped file, a backup from the folder); null lets the user pick one. */
   | { kind: 'import'; text: string | null; fileName?: string }
   /** Session recording / HAR export: what goes in, masked or not. `ids`: fixed requests (the Network tab's HAR). */
@@ -15,8 +16,8 @@ export type DataExportFormat = 'session' | 'har';
 export const useTransfer = create<{ dialog: TransferDialog }>()(() => ({ dialog: null }));
 
 export const transfer = {
-  openExport(mode: PackageKind = 'share', flows?: string[]): void {
-    useTransfer.setState({ dialog: { kind: 'export', mode, ...(flows ? { flows } : {}) } });
+  openExport(mode: PackageKind = 'share', flows?: string[], preset: { runs?: string[]; name?: string } = {}): void {
+    useTransfer.setState({ dialog: { kind: 'export', mode, ...(flows ? { flows } : {}), ...(preset.runs ? { runs: preset.runs } : {}), ...(preset.name ? { name: preset.name } : {}) } });
   },
   openImport(text: string | null = null, fileName?: string): void {
     useTransfer.setState({ dialog: { kind: 'import', text, ...(fileName ? { fileName } : {}) } });

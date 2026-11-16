@@ -16,8 +16,11 @@ import {
   type FlowDoc,
   type FlowIssue,
   type FlowSummary,
+  type FlowTrashItem,
+  type FlowVersionReason,
 } from '@durbun/protocol';
 import type { Logger } from '../types';
+import { FlowHistoryStore } from './history';
 import { Queue, readJsonFile, writeJsonFile } from './util';
 
 export const FLOWS_DIR = 'flows';
@@ -46,6 +49,8 @@ export interface SaveResult {
   flow: FlowDoc;
   issues: FlowIssue[];
   created: boolean;
+  /** The version this save kept of the content it replaced (history.ts), if it kept one. */
+  versionId?: string;
 }
 
 export class FlowStore {
@@ -59,6 +64,8 @@ export class FlowStore {
   private readonly stamps = new Map<string, number>();
   /** Problems found while loading (file → message). */
   readonly loadProblems: { file: string; message: string }[] = [];
+  /** Earlier versions and deleted flows (`.history`, `.trash`; see history.ts). */
+  readonly history: FlowHistoryStore;
 
   constructor(
     dataDir: string,
@@ -66,9 +73,11 @@ export class FlowStore {
     private readonly now: () => number = Date.now,
   ) {
     this.dir = path.join(dataDir, FLOWS_DIR);
+    this.history = new FlowHistoryStore(this.dir, logger, now);
   }
 
   async load(): Promise<void> {
+    await this.history.load();
     let names: string[];
     try {
       names = await fsp.readdir(this.dir);
@@ -182,6 +191,8 @@ export class FlowStore {
        * of a flow it calls), the save is refused with 409 `flow.conflict` instead of overwriting that change.
        */
       baseUpdatedAt?: number;
+      /** Why the content it replaces is kept as a version ('restore', 'import'; default: the editing rules). */
+      reason?: FlowVersionReason;
     } = {},
   ): Promise<SaveResult> {
     const existing = opts.id ? this.entries.get(opts.id) : undefined;
@@ -219,10 +230,23 @@ export class FlowStore {
     // Taken now, before the write: a second save in the same moment gets another id.
     const reservedId = opts.create || oldId ? flow.id : undefined;
     if (reservedId) this.reserved.add(reservedId);
+    let versionId: string | undefined;
     try {
       await this.queue.run(async () => {
+        // The content this save replaces may become a version (history.ts); a failure there never stops the save.
+        if (existing) {
+          versionId = await this.history
+            .record(existing.flow, flow, { reason: opts.reason, checked: opts.baseUpdatedAt !== undefined })
+            .catch((err: unknown) => {
+              this.logger.warn(`could not keep a version of ${existing.flow.id}: ${(err as Error).message}`);
+              return undefined;
+            });
+        }
         await writeJsonFile(path.join(this.dir, `${flow.id}.json`), flow, 0o644);
-        if (oldId) await fsp.rm(path.join(this.dir, `${oldId}.json`), { force: true });
+        if (oldId) {
+          await fsp.rm(path.join(this.dir, `${oldId}.json`), { force: true });
+          await this.history.rename(oldId, flow.id);
+        }
       });
       this.entries.set(flow.id, { flow, issues });
       if (oldId) {
@@ -234,7 +258,7 @@ export class FlowStore {
     }
     this.revalidate();
     this.changed();
-    return { flow, issues: this.entries.get(flow.id)!.issues, created: !!opts.create };
+    return { flow, issues: this.entries.get(flow.id)!.issues, created: !!opts.create, ...(versionId ? { versionId } : {}) };
   }
 
   /** The newest `updatedAt` given to a flow, also while its write is still queued. */
@@ -268,14 +292,54 @@ export class FlowStore {
     }
   }
 
+  /** Remove a flow for good, with its versions (the demo's example flows; the user's deletes go to the trash). */
   async remove(id: string): Promise<boolean> {
     if (!this.entries.has(id)) return false;
-    await this.queue.run(() => fsp.rm(path.join(this.dir, `${id}.json`), { force: true }));
+    await this.queue.run(async () => {
+      await fsp.rm(path.join(this.dir, `${id}.json`), { force: true });
+      await this.history.drop(id);
+    });
     this.entries.delete(id);
     this.stamps.delete(id);
     this.revalidate();
     this.changed();
     return true;
+  }
+
+  /** Delete a flow, keeping it (and its versions) in the trash for a while; undefined when it does not exist. */
+  async trash(id: string): Promise<FlowTrashItem | undefined> {
+    const entry = this.entries.get(id);
+    if (!entry) return undefined;
+    const item = await this.queue.run(async () => {
+      const kept = await this.history.put(entry.flow);
+      await fsp.rm(path.join(this.dir, `${id}.json`), { force: true });
+      return kept;
+    });
+    this.entries.delete(id);
+    this.stamps.delete(id);
+    this.revalidate();
+    this.changed();
+    return item;
+  }
+
+  /** Bring a deleted flow back: under its own id while that is free, else a free one. */
+  async restoreTrashed(trashId: string): Promise<SaveResult> {
+    const flow = this.history.trashed(trashId);
+    if (!flow) throw new FlowStoreError('This deleted flow is no longer kept', 'flow.trash.notFound', 404);
+    const r = await this.save(structuredClone(flow), { create: true });
+    await this.queue.run(() => this.history.release(trashId, r.flow.id));
+    return r;
+  }
+
+  /** Put an earlier version back as the current content (the content it replaces is kept as a version first). */
+  async restoreVersion(id: string, versionId: string, baseUpdatedAt?: number): Promise<SaveResult> {
+    const cur = this.entries.get(id);
+    if (!cur) throw new FlowStoreError(`Flow ${id} does not exist`, 'flow.notFound', 404);
+    const version = await this.history.read(id, versionId);
+    if (!version) throw new FlowStoreError('This version is no longer kept', 'flow.version.notFound', 404);
+    // The id stays (sub-flow calls and the run history use it); everything else is the version's.
+    const { createdAt: _c, updatedAt: _u, ...content } = version;
+    return this.save({ ...content, id }, { id, reason: 'restore', ...(baseUpdatedAt !== undefined ? { baseUpdatedAt } : {}) });
   }
 
   /** A copy under a new id and name ("… (copy)"). */

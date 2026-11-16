@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
-import { ArrowLeft, Ban, ChevronDown, CircleAlert, CircleCheck, CircleSlash, CircleX, Clock, Copy, ExternalLink, FileDown, Globe, Pin, PinOff, Play, RotateCcw, Smartphone, Square, Trash, X } from 'lucide-react';
+import { ArrowLeft, Ban, ChevronDown, CircleAlert, CircleCheck, CircleSlash, CircleX, Clock, Copy, ExternalLink, FileDown, Globe, ListChecks, Pin, PinOff, Play, RotateCcw, Smartphone, Square, Trash, X } from 'lucide-react';
 import type { FlowDoc, FlowRun, FlowRunHeader, FlowRunStep } from '@durbun/protocol';
 import { Button, Callout, CopyButton, IconButton, JsonTree, Popover, SlackButton, Spinner, Tooltip, confirm, copyText, downloadText, formatDuration, formatRelative, toast } from '../../../components';
 import { api, rememberFlowRun, ui, useFlows, useNow } from '../../../data';
@@ -25,10 +25,12 @@ export interface RunPanelProps {
   onManageEnvironments?(): void;
   /** Opens the AI pack for this flow (a failed run: the pack carries what failed). */
   onAskAi?(): void;
+  /** Opens the set run this run was part of. */
+  onShowSet?(batchId: string): void;
 }
 
 /** The run under the canvas: live steps, the selected step's details, the report and the history of this flow. */
-export function RunPanel({ flow, runId, onRunId, onSelectNode, onRerun, onClose, onPickTarget, onManageEnvironments, onAskAi }: RunPanelProps) {
+export function RunPanel({ flow, runId, onRunId, onSelectNode, onRerun, onClose, onPickTarget, onManageEnvironments, onAskAi, onShowSet }: RunPanelProps) {
   const t = useT();
   const lang = useLanguage();
   const run = useFlows((s) => (runId ? s.runs[runId] : undefined));
@@ -94,7 +96,7 @@ export function RunPanel({ flow, runId, onRunId, onSelectNode, onRerun, onClose,
 
   return (
     <div className="fl-runpanel" aria-label={t('flows.runPanel.label')}>
-      <RunHeader run={run} flow={flow} onRunId={onRunId} onRerun={onRerun} onClose={onClose} report={report} />
+      <RunHeader run={run} flow={flow} onRunId={onRunId} onRerun={onRerun} onClose={onClose} report={report} onShowSet={onShowSet} />
       {beforeFirst ? (
         <BeforeFirstStep run={run} onRerun={onRerun} onPickTarget={onPickTarget} onManageEnvironments={onManageEnvironments} />
       ) : run.status === 'failed' || run.status === 'cancelled' ? (
@@ -149,7 +151,7 @@ function StatusIcon({ status, handled, size = 14 }: { status: FlowRunStep['statu
   return <Ban size={size} className="fl-status is-cancelled" aria-hidden />;
 }
 
-function RunHeader({ run, flow, onRunId, onRerun, onClose, report }: { run: FlowRun; flow: FlowDoc; onRunId(id: string | null): void; onRerun(): void; onClose(): void; report(): string }) {
+function RunHeader({ run, flow, onRunId, onRerun, onClose, report, onShowSet }: { run: FlowRun; flow: FlowDoc; onRunId(id: string | null): void; onRerun(): void; onClose(): void; report(): string; onShowSet?(batchId: string): void }) {
   const t = useT();
   const now = useNow(run.status === 'running' ? 1000 : 60_000);
   const duration = run.durationMs ?? (run.status === 'running' ? now - run.startedAt : undefined);
@@ -181,6 +183,12 @@ function RunHeader({ run, flow, onRunId, onRerun, onClose, report }: { run: Flow
           </span>
         ) : null}
         {run.trigger.kind === 'event' ? <span className="fl-chip is-accent">{t('flows.runPanel.automatic')}</span> : null}
+        {run.batchId && onShowSet ? (
+          <button type="button" className="fl-chip is-accent fl-chip--button" onClick={() => onShowSet(run.batchId!)} title={t('flows.batch.partOfHint')}>
+            <ListChecks size={11} aria-hidden />
+            {t('flows.batch.partOf')}
+          </button>
+        ) : null}
         {run.pinned ? (
           <Tooltip content={t('flows.pin.doneHint')}>
             <span className="fl-chip is-accent fl-chip--pin" tabIndex={0}>

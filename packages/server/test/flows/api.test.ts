@@ -67,10 +67,13 @@ describe('flows API', () => {
       const history = await call<{ runs: { id: string }[] }>('GET', '/api/flow-runs?flowId=hello');
       expect(history.data.runs.map((r) => r.id)).toEqual([started.data.id]);
 
-      expect((await call('DELETE', '/api/flows/hello')).status).toBe(200);
+      const deleted = await call<{ ok: boolean; trash: { trashId: string; id: string } }>('DELETE', '/api/flows/hello');
+      expect(deleted.status).toBe(200);
+      expect(deleted.data.trash.id).toBe('hello');
       expect((await call('GET', '/api/flows/hello')).status).toBe(404);
+      // The flow file is gone; the deleted flow is kept in the trash (a dot folder the loader skips).
       const files = await readdir(path.join(t.config.dataDir, 'flows'));
-      expect(files).toEqual([]);
+      expect(files).toEqual(['.trash']);
     } finally {
       ui.close();
     }

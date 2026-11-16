@@ -338,6 +338,8 @@ export interface FlowRun {
    * cleared (PATCH /api/flow-runs/:id { pinned }). Absent = not pinned.
    */
   pinned?: boolean;
+  /** The set run (POST /api/flow-batches) this run was part of. Absent = started on its own. */
+  batchId?: string;
 }
 
 /** A run without its steps (history lists). */
@@ -401,6 +403,133 @@ export interface FlowRunRequest {
 export interface FlowRunDelta {
   run: FlowRunHeader;
   steps: FlowRunStep[];
+}
+
+/* ────────────────────────────── Set runs (several flows, one report) ────────────────────────────── */
+
+export type FlowBatchStatus = 'running' | 'passed' | 'failed' | 'cancelled';
+/** `skipped`: the flow could not start (its preflight, irreversible steps, a stop after a failure). */
+export type FlowBatchItemStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'cancelled';
+
+/** A coded reason (`code` + `params` for the UI, `message` in English). */
+export interface FlowBatchReason {
+  code: string;
+  message: string;
+  params?: I18nParams;
+}
+
+export interface FlowBatchItem {
+  flowId: string;
+  flowName: string;
+  status: FlowBatchItemStatus;
+  /** The run of this flow (absent while pending, or when it never started). */
+  runId?: string;
+  startedAt?: number;
+  durationMs?: number;
+  counts?: FlowRunCounts;
+  /** The first failed step of a failed run (handled failures do not count). */
+  failedStep?: { nodeId: string; type: string; label?: string; flowId: string; error?: string; errorCode?: string; params?: I18nParams };
+  /** Why the run failed (its own error) or why the flow did not run (skipped, cancelled). */
+  reason?: FlowBatchReason;
+}
+
+export interface FlowBatchCounts {
+  passed: number;
+  failed: number;
+  skipped: number;
+  cancelled: number;
+  total: number;
+}
+
+export interface FlowBatch {
+  id: string;
+  /** Started from a tag: every flow with it (the UI names the set after it). */
+  tag?: string;
+  status: FlowBatchStatus;
+  startedAt: number;
+  endedAt?: number;
+  durationMs?: number;
+  /** What was asked for; `target` / `environment` below are what the first run resolved. */
+  request: { target?: { deviceId?: string; appId?: string }; environmentId?: string | null };
+  target?: FlowRunTarget;
+  environment?: { id: string; name: string };
+  /** 'stop': the first failure ends the set; the flows after it are skipped. */
+  onFailure: 'continue' | 'stop';
+  items: FlowBatchItem[];
+  counts: FlowBatchCounts;
+  /** Why the set ended early (stopped, interrupted). */
+  reason?: FlowBatchReason;
+}
+
+/** POST /api/flow-batches: the flows (in this order) or a tag, run one after another on one target. */
+export interface FlowBatchRequest {
+  flowIds?: string[];
+  tag?: string;
+  target?: { deviceId?: string; appId?: string };
+  environmentId?: string | null;
+  onFailure?: 'continue' | 'stop';
+  /** The person confirmed steps that are hard to undo (clear data, uninstall, install); without it such flows are skipped. */
+  allowIrreversible?: boolean;
+}
+
+/* ────────────────────────────── Version history and deleted flows ────────────────────────────── */
+
+/** What one version changed against the version before it (counts of steps by id). */
+export interface FlowVersionChanges {
+  stepsAdded: number;
+  stepsRemoved: number;
+  /** Parameters, labels or switches of a step changed. */
+  stepsChanged: number;
+  /** Only the position on the canvas changed. */
+  stepsMoved: number;
+  /** Connections added or removed. */
+  connections: number;
+  /** The flow had another name before. */
+  renamedFrom?: string;
+  /** Description, tags, inputs, outputs, target, settings or automation changed. */
+  settings: boolean;
+}
+
+/** Why a version was kept: a pause in editing (`edit`), or the save that replaced it was a restore or an import. */
+export type FlowVersionReason = 'edit' | 'restore' | 'import';
+
+export interface FlowVersionInfo {
+  /** Opaque id (GET /api/flows/:id/history/:versionId). */
+  id: string;
+  /** When this content was saved (its `updatedAt`). */
+  savedAt: number;
+  /** When a newer save replaced it. */
+  replacedAt: number;
+  reason: FlowVersionReason;
+  name: string;
+  nodeCount: number;
+  /** Against the next older version; absent for the oldest kept one. */
+  changes?: FlowVersionChanges;
+}
+
+/** GET /api/flows/:id/history */
+export interface FlowHistory {
+  /** Newest first. */
+  versions: FlowVersionInfo[];
+  /** The flow as it is now: what changed since the newest kept version. */
+  current: { savedAt?: number; changes?: FlowVersionChanges };
+  /** How many versions a flow keeps. */
+  maxVersions: number;
+}
+
+/** A deleted flow kept for a while (GET /api/flow-trash). */
+export interface FlowTrashItem {
+  trashId: string;
+  /** The id it had (a restore keeps it when it is still free). */
+  id: string;
+  name: string;
+  nodeCount: number;
+  tags?: string[];
+  deletedAt: number;
+  /** When it is removed for good. */
+  expiresAt: number;
+  /** Kept versions that come back with it. */
+  versions: number;
 }
 
 /** What GET /api/flows/catalog and the AI pack describe for one URL match type. */
