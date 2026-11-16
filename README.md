@@ -30,7 +30,8 @@ does in one readable, live window. *Dürbün* is Turkish for binoculars.
   events. Multi-line output, stack traces and JSON fold; repeated lines collapse into ×N; crashes stand out.
 - **Network.** HTTP(S) requests with headers, bodies and timings, from the clients each SDK hooks into (see
   [What gets captured](#what-gets-captured)). Copy as cURL, fetch, Dio, Swift or OkHttp, resend or edit and
-  send, compare two requests, export HAR.
+  send, compare two requests, export HAR. A WebSocket connection or a Server-Sent Events stream is one row
+  with its messages in the order the app saw them.
 
   ![Dürbün's network view: captured requests with status, timing and device, and the JSON response of the selected request](docs/images/network.webp)
 - **Mocks.** Answer matching requests with a canned response, add latency or simulate a failure. The SDK
@@ -141,15 +142,25 @@ Every guide, sorted by reader, is listed in [the docs index](docs/README.md).
 | Android with `durbun` | Adds `Durbun.log` (Timber too) and crashes | `OkHttpClient`s with `DurbunInterceptor`: Retrofit, Coil, Ktor's OkHttp engine | CPU, memory, Java heap, threads, FPS, jank | Yes |
 | React Native with `@durbun/react-native` | Adds `console.*` and JS errors | `XMLHttpRequest`: `fetch`, axios | JS heap, JS-thread FPS | Yes |
 
+WebSocket messages and Server-Sent Events need an SDK: Flutter (dart:io WebSockets and event streams), iOS
+(`URLSessionWebSocketTask` and event streams over URLSession), Android (event streams with
+`DurbunInterceptor`; WebSockets opened through `DurbunWebSocketFactory`) and React Native (the global
+`WebSocket`, event streams from `XMLHttpRequest`-based libraries). Without an SDK a connection shows its
+handshake only.
+
 Not captured:
 
-- **Flutter:** gRPC and raw sockets, WebSocket messages (the handshake shows), `print` in background isolates
-  and their requests until they call `Durbun.attachIsolate()`, and on Android package:http's `CronetClient` and
-  `package:ok_http`. Dio's `NativeAdapter` needs [`durbun_dio`](https://pub.dev/packages/durbun_dio).
-- **iOS:** background URLSessions, WKWebView and AVPlayer traffic.
+- **Flutter:** gRPC and raw sockets, WebSockets that do not run on dart:io (report them with
+  `DurbunNetwork.webSocket`), `print` in background isolates and their requests until they call
+  `Durbun.attachIsolate()`, and on Android package:http's `CronetClient` and `package:ok_http`. Dio's
+  `NativeAdapter` needs [`durbun_dio`](https://pub.dev/packages/durbun_dio).
+- **iOS:** background URLSessions, WKWebView and AVPlayer traffic, WebSocket libraries that do not use
+  URLSession (Starscream's own engine, SocketRocket).
 - **Android:** `HttpURLConnection` (Volley, Media3's default data source, Ktor's CIO engine), Cronet, WebView
-  and native code. WebSocket, gRPC and SSE streams show their size only.
-- **React Native:** `<Image>` downloads and requests made by native modules.
+  and native code. gRPC streams show their size only; a WebSocket opened with `client.newWebSocket` shows its
+  handshake only.
+- **React Native:** `<Image>` downloads, requests made by native modules and WebSocket classes that come from
+  a package instead of the global `WebSocket`.
 
 Each SDK guide has the details, and shows how to report other clients yourself.
 

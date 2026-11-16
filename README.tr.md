@@ -31,7 +31,8 @@ ve canlı bir pencerede gösterir.
   çökmeler göze batar.
 - **Ağ.** Her SDK'nın bağlandığı istemcilerden gelen HTTP(S) istekleri, başlıkları, gövdeleri ve
   zamanlamalarıyla (bkz. [Ne yakalanır](#ne-yakalanır)). cURL, fetch, Dio, Swift veya OkHttp olarak kopyalama,
-  yeniden ya da düzenleyip gönderme, iki isteği karşılaştırma, HAR olarak dışa aktarma.
+  yeniden ya da düzenleyip gönderme, iki isteği karşılaştırma, HAR olarak dışa aktarma. Bir WebSocket
+  bağlantısı ya da Server-Sent Events akışı tek satırdır; mesajları uygulamanın gördüğü sırayla altında durur.
 
   ![Dürbün'ün ağ ekranı: durumu, süresi ve cihazıyla yakalanan istekler ve seçili isteğin JSON yanıtı](docs/images/network.tr.webp)
 - **Mock'lar.** Eşleşen isteklere hazır yanıt verme, gecikme ekleme veya hata simüle etme. Kuralları SDK
@@ -144,17 +145,26 @@ Kılavuzlar şimdilik yalnızca İngilizce. Okura göre sıralanmış tüm kıla
 | `durbun` eklenmiş Android | Ek olarak `Durbun.log` (Timber da) ve çökmeler | `DurbunInterceptor` eklenmiş `OkHttpClient`'lar: Retrofit, Coil, Ktor'un OkHttp motoru | CPU, bellek, Java heap, thread'ler, FPS, takılmalar | Evet |
 | `@durbun/react-native` eklenmiş React Native | Ek olarak `console.*` ve JS hataları | `XMLHttpRequest`: `fetch`, axios | JS heap, JS thread FPS'i | Evet |
 
+WebSocket mesajları ve Server-Sent Events için SDK gerekir: Flutter (dart:io WebSocket'leri ve olay
+akışları), iOS (`URLSessionWebSocketTask` ve URLSession üzerinden olay akışları), Android (olay akışları
+`DurbunInterceptor` ile; WebSocket'ler `DurbunWebSocketFactory` ile açılınca) ve React Native (global
+`WebSocket`, `XMLHttpRequest` tabanlı kütüphanelerin olay akışları). SDK yoksa bağlantının yalnızca el
+sıkışması görünür.
+
 Yakalanmayanlar:
 
-- **Flutter:** gRPC ve doğrudan socket kullanan kod, WebSocket mesajları (el sıkışma görünür), arka plan
-  isolate'lerindeki `print` çıktısı ve bu isolate'lerin `Durbun.attachIsolate()` çağrılana kadarki istekleri,
-  Android'de package:http'nin `CronetClient`'ı
-  ve `package:ok_http`. Dio'nun `NativeAdapter`'ı için [`durbun_dio`](https://pub.dev/packages/durbun_dio)
-  gerekir.
-- **iOS:** arka plan URLSession'ları, WKWebView ve AVPlayer trafiği.
+- **Flutter:** gRPC ve doğrudan socket kullanan kod, dart:io üzerinde çalışmayan WebSocket'ler (bunları
+  `DurbunNetwork.webSocket` ile bildirebilirsiniz), arka plan isolate'lerindeki `print` çıktısı ve bu
+  isolate'lerin `Durbun.attachIsolate()` çağrılana kadarki istekleri, Android'de package:http'nin
+  `CronetClient`'ı ve `package:ok_http`. Dio'nun `NativeAdapter`'ı için
+  [`durbun_dio`](https://pub.dev/packages/durbun_dio) gerekir.
+- **iOS:** arka plan URLSession'ları, WKWebView ve AVPlayer trafiği, URLSession kullanmayan WebSocket
+  kütüphaneleri (Starscream'in kendi motoru, SocketRocket).
 - **Android:** `HttpURLConnection` (Volley, Media3'ün varsayılan veri kaynağı, Ktor'un CIO motoru), Cronet,
-  WebView ve native kod. WebSocket, gRPC ve SSE akışlarının yalnızca boyutu görünür.
-- **React Native:** `<Image>` indirmeleri ve native modüllerin yaptığı istekler.
+  WebView ve native kod. gRPC akışlarının yalnızca boyutu görünür; `client.newWebSocket` ile açılan bir
+  WebSocket'in yalnızca el sıkışması görünür.
+- **React Native:** `<Image>` indirmeleri, native modüllerin yaptığı istekler ve global `WebSocket` yerine bir
+  paketten gelen WebSocket sınıfları.
 
 Ayrıntılar ve diğer istemcileri kendiniz nasıl bildireceğiniz her SDK'nın kılavuzunda.
 
