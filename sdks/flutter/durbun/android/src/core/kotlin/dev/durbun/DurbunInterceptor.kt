@@ -30,6 +30,12 @@ class DurbunInterceptor @JvmOverloads constructor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val core = Durbun.coreOrNull()
         if (core == null || !core.options.captureNetwork) return chain.proceed(chain.request())
+        val ignored = try {
+            core.ignoresHost(chain.request().url.host)
+        } catch (_: Throwable) {
+            false
+        }
+        if (ignored) return chain.proceed(chain.request())
         return capture.intercept(core, chain)
     }
 }

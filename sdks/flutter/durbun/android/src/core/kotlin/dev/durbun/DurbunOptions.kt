@@ -41,6 +41,17 @@ data class DurbunOptions @JvmOverloads constructor(
      * interceptor a plain pass-through and leaves network and mocks out of what the app announces.
      */
     val captureNetwork: Boolean = true,
+    /**
+     * Header names (case-insensitive) whose values are shown as `••••` in every captured request and response,
+     * for example `setOf("Authorization", "Cookie")`. The real request is unchanged. Adds to the names given to a
+     * [DurbunInterceptor], so one list covers every OkHttp client.
+     */
+    val redactHeaders: Set<String> = emptySet(),
+    /**
+     * Hosts that are never captured, for example `listOf("analytics.example.com")`; subdomains match too. Their
+     * calls pass [DurbunInterceptor] untouched, and mock rules do not apply to them.
+     */
+    val ignoredHosts: List<String> = emptyList(),
 ) {
     companion object {
         /** Default desktop SDK port (raw TCP, newline-delimited JSON). */

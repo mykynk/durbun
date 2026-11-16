@@ -272,6 +272,45 @@ class CoreTransportTest {
     }
 
     @Test
+    fun platformToolsAreListedRunAndReportTheirNewValue() {
+        val desktop = desktop()
+        var mode = "system"
+        val tools = object : dev.durbun.internal.AppTools {
+            override fun descriptors(): List<Map<String, Any?>> =
+                listOf(linkedMapOf("id" to "android.appearance", "kind" to "select", "label" to "Appearance", "group" to "android", "value" to mode))
+
+            override fun run(name: String, params: Map<String, Any?>, done: (Any?, String?, Boolean) -> Unit): Boolean {
+                if (name != "android.appearance") return false
+                val value = params["value"] as String
+                if (value == "sepia") {
+                    done(null, "Unknown appearance 'sepia'", false)
+                } else {
+                    Thread { mode = value; done(value, null, true) }.start()
+                }
+                return true
+            }
+        }
+        val core = core(desktop) { it.appTools = tools }
+        waitUntil { core.isConnected }
+        val ids = desktop.await("hello").listAt("actions").map { (it as Map<*, *>)["id"] }
+        assertEquals(listOf("android.dumpThreads", "android.gc", "android.appearance"), ids)
+
+        desktop.send(mapOf("type" to "command", "id" to "a1", "name" to "android.appearance", "params" to mapOf("value" to "dark")))
+        val result = desktop.await("command.result") { it["id"] == "a1" }
+        assertEquals(true, result["ok"])
+        assertEquals("dark", result["data"])
+        desktop.await("actions") { msg -> msg.listAt("actions").any { (it as Map<*, *>)["value"] == "dark" } }
+
+        desktop.send(mapOf("type" to "command", "id" to "a2", "name" to "android.appearance", "params" to mapOf("value" to "sepia")))
+        val failed = desktop.await("command.result") { it["id"] == "a2" }
+        assertEquals(false, failed["ok"])
+        assertEquals("Unknown appearance 'sepia'", failed["error"])
+
+        desktop.send(mapOf("type" to "command", "id" to "a3", "name" to "app.nothing"))
+        assertEquals(false, desktop.await("command.result") { it["id"] == "a3" }["ok"])
+    }
+
+    @Test
     fun builtInThreadDumpAndGcCommands() {
         val desktop = desktop()
         val core = core(desktop)

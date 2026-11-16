@@ -3,6 +3,13 @@ package dev.durbun.internal
 import dev.durbun.DurbunAction
 import java.io.File
 
+/** Whether any `DurbunInterceptor` was created in this process (kept apart from OkHttp-typed classes). */
+internal object InterceptorUse {
+    @Volatile
+    @JvmStatic
+    var created = false
+}
+
 /** App actions advertised in `hello.actions` / `{type:'actions'}`: built-ins first, then the app's own. */
 internal class ActionRegistry {
     private val actions = LinkedHashMap<String, DurbunAction>()
@@ -18,8 +25,10 @@ internal class ActionRegistry {
     @Synchronized
     fun get(id: String): DurbunAction? = actions[id]
 
+    /** Dürbün's built-ins, then the platform's [extra] tools, then the app's own. */
     @Synchronized
-    fun descriptors(): List<Map<String, Any?>> = BUILT_IN + actions.values.map(::describe)
+    fun descriptors(extra: List<Map<String, Any?>> = emptyList()): List<Map<String, Any?>> =
+        BUILT_IN + extra + actions.values.map(::describe)
 
     companion object {
         const val DUMP_THREADS = "android.dumpThreads"

@@ -72,9 +72,23 @@ internal class DurbunCore(
     /** True when another SDK (the Flutter plugin) owns the desktop connection. */
     val isHosted: Boolean get() = host != null
 
-    /** Header names (lower case) redacted in every captured request, on top of the interceptor's own. */
+    /**
+     * Header names (lower case) redacted in every captured request, on top of the interceptor's own:
+     * [DurbunOptions.redactHeaders], plus Flutter's `redactHeaders` in hosted mode.
+     */
     @Volatile
-    var redactedHeaders: Set<String> = emptySet()
+    var redactedHeaders: Set<String> = options.redactHeaders.mapTo(HashSet()) { it.lowercase() }
+
+    /** [DurbunOptions.ignoredHosts], lower case, without a leading dot. */
+    private val ignoredHosts: List<String> =
+        options.ignoredHosts.map { it.trim().trimStart('.').lowercase() }.filter { it.isNotEmpty() }
+
+    /** True for hosts the app asked never to capture ([DurbunOptions.ignoredHosts]; subdomains included). */
+    fun ignoresHost(host: String): Boolean {
+        if (ignoredHosts.isEmpty()) return false
+        val lower = host.lowercase()
+        return ignoredHosts.any { lower == it || lower.endsWith(".$it") }
+    }
     private val actions = ActionRegistry()
     private val requestSeq = AtomicLong()
     private val recentLogs = RecentLogs()
@@ -104,6 +118,10 @@ internal class DurbunCore(
 
     @Volatile
     var crashStore: PendingCrashStore? = null
+
+    /** Platform tools listed after Dürbün's built-ins (standalone Android: preferences, views, appearance). */
+    @Volatile
+    var appTools: AppTools? = null
 
     /** Earlier launches that ended without the app noticing (ANR, native crash, killed by the system). */
     @Volatile
@@ -151,6 +169,20 @@ internal class DurbunCore(
 
     /** Tests shorten it. */
     internal var consoleHintAfterMs = CONSOLE_HINT_AFTER_MS
+
+    /** How long after start a missing [dev.durbun.DurbunInterceptor] is mentioned on the desktop. Tests shorten it. */
+    internal var networkHintAfterMs = NETWORK_HINT_AFTER_MS
+    private val networkHintScheduled = AtomicBoolean(false)
+
+    /** Whether OkHttp is part of the app. Tests replace it. */
+    internal var okHttpPresent: () -> Boolean = {
+        try {
+            Class.forName("okhttp3.OkHttpClient", false, DurbunCore::class.java.classLoader)
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
 
     private val exitLock = Any()
     private var pendingExits: PendingExits? = null
@@ -200,6 +232,11 @@ internal class DurbunCore(
             logcat?.stop()
         } catch (t: Throwable) {
             logger.warn("Could not stop logcat forwarding", t)
+        }
+        try {
+            appTools?.stop()
+        } catch (t: Throwable) {
+            logger.warn("Could not stop the app tools", t)
         }
     }
 
@@ -331,7 +368,7 @@ internal class DurbunCore(
     }
 
     /** Native action descriptors (JSON array) — what the host merges into its own `hello.actions`. */
-    fun describeActionsJson(): String = Json.encode(actions.descriptors())
+    fun describeActionsJson(): String = Json.encode(actionDescriptors())
 
     /** `hello.app` as this platform reports it. */
     fun appInfo(): Map<String, Any?> = env.appInfo()
@@ -599,6 +636,7 @@ internal class DurbunCore(
         failedRounds = 0
         everConnected = true
         sendExitReports()
+        scheduleNetworkHint()
         notifyStatus()
     }
 
@@ -667,6 +705,7 @@ internal class DurbunCore(
             ActionRegistry.DUMP_THREADS -> reply(id) { dumpThreads() }
             ActionRegistry.GC -> reply(id) { runGc() }
             else -> {
+                if (runAppTool(id, name, params)) return
                 val action = actions.get(name)
                 if (action == null) {
                     send(Wire.commandResult(id, ok = false, data = null, error = "Unknown command: $name"))
@@ -685,6 +724,24 @@ internal class DurbunCore(
         }
     }
 
+    private fun runAppTool(id: String, name: String, params: Map<String, Any?>): Boolean {
+        val tools = appTools ?: return false
+        val replied = AtomicBoolean(false)
+        return try {
+            tools.run(name, params) { data, error, changed ->
+                if (replied.compareAndSet(false, true)) {
+                    send(Wire.commandResult(id, ok = error == null, data = if (error == null) data else null, error = error))
+                    if (changed) sendActions()
+                }
+            }
+        } catch (t: Throwable) {
+            if (replied.compareAndSet(false, true)) {
+                send(Wire.commandResult(id, ok = false, data = null, error = describe(t)))
+            }
+            true
+        }
+    }
+
     private inline fun reply(id: String, block: () -> Any?) {
         try {
             send(Wire.commandResult(id, ok = true, data = block(), error = null))
@@ -694,6 +751,16 @@ internal class DurbunCore(
     }
 
     private fun describe(t: Throwable): String = t.message?.takeIf { it.isNotBlank() } ?: t.javaClass.simpleName
+
+    private fun actionDescriptors(): List<Map<String, Any?>> {
+        val extra = try {
+            appTools?.descriptors().orEmpty()
+        } catch (t: Throwable) {
+            logger.warn("Could not list the app tools", t)
+            emptyList()
+        }
+        return actions.descriptors(extra)
+    }
 
     private fun sendActions() {
         val link = host
@@ -705,7 +772,7 @@ internal class DurbunCore(
                 logger.warn("Could not hand the action list to Flutter", t)
             }
         } else {
-            send(Wire.actions(actions.descriptors()))
+            send(Wire.actions(actionDescriptors()))
         }
     }
 
@@ -781,12 +848,7 @@ internal class DurbunCore(
             if (stopped.get()) return
             if (metricsTask != null && metricsIntervalMs == interval) return
             metricsTask?.cancel(false)
-            val executor = metricsExecutor ?: Executors.newSingleThreadScheduledExecutor { runnable ->
-                Thread(runnable, "durbun-metrics").apply {
-                    isDaemon = true
-                    priority = Thread.NORM_PRIORITY - 1
-                }
-            }.also { metricsExecutor = it }
+            val executor = schedulerLocked()
             metricsIntervalMs = interval
             metricsTask = executor.scheduleWithFixedDelay(
                 { sampleMetrics(sampler) },
@@ -794,6 +856,56 @@ internal class DurbunCore(
                 interval,
                 TimeUnit.MILLISECONDS,
             )
+        }
+    }
+
+    /** Dürbün's one low-priority timer thread (metrics, delayed notes); created on first use. Under [metricsLock]. */
+    private fun schedulerLocked(): ScheduledExecutorService =
+        metricsExecutor ?: Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "durbun-metrics").apply {
+                isDaemon = true
+                priority = Thread.NORM_PRIORITY - 1
+            }
+        }.also { metricsExecutor = it }
+
+    /**
+     * Some time after start, when OkHttp is in the app but no client got [dev.durbun.DurbunInterceptor], one line
+     * on the desktop says why the network list stays empty (standalone only: Flutter apps report through Dart).
+     */
+    private fun scheduleNetworkHint() {
+        if (host != null || !options.captureNetwork || networkHintScheduled.getAndSet(true)) return
+        val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000
+        val delayMs = (networkHintAfterMs - elapsedMs).coerceAtLeast(0L)
+        try {
+            synchronized(metricsLock) {
+                if (stopped.get()) return
+                schedulerLocked().schedule({ networkHintIfNeeded() }, delayMs, TimeUnit.MILLISECONDS)
+            }
+        } catch (t: Throwable) {
+            logger.warn("Could not schedule the network note", t)
+        }
+    }
+
+    private fun networkHintIfNeeded() {
+        try {
+            if (stopped.get() || InterceptorUse.created || !okHttpPresent()) return
+            val message = "No OkHttp client in this app has DurbunInterceptor yet, so its HTTP calls do not show up in " +
+                "Dürbün. Add .addInterceptor(DurbunInterceptor()) to every OkHttpClient.Builder, including the ones " +
+                "Retrofit, Coil, Glide or Ktor use. HttpURLConnection, Cronet and WebView traffic is not captured."
+            logger.info(message)
+            send(
+                Wire.log(
+                    ts = env.nowMs(),
+                    level = Level.INFO.wireName,
+                    tag = SDK_TAG,
+                    message = message,
+                    // Stable for the desktop, which can word the line in the viewer's language.
+                    data = linkedMapOf("reason" to "noInterceptor", "afterMs" to networkHintAfterMs),
+                    kind = "text",
+                ),
+            )
+        } catch (t: Throwable) {
+            logger.warn("Could not check the network capture", t)
         }
     }
 
@@ -847,7 +959,7 @@ internal class DurbunCore(
         device = env.deviceHints(),
         session = sessionId,
         capabilities = capabilities(),
-        actions = actions.descriptors(),
+        actions = actionDescriptors(),
         ts = env.nowMs(),
     )
 
@@ -873,6 +985,9 @@ internal class DurbunCore(
 
         /** After this long without a first connection, logcat gets one line saying why and what to do. */
         const val CONSOLE_HINT_AFTER_MS = 10_000L
+
+        /** Clients are usually built by the first screen; later than this, a missing interceptor is likely. */
+        const val NETWORK_HINT_AFTER_MS = 30_000L
 
         private const val HOSTED_HINT =
             "The Flutter SDK owns the connection: its in-app panel explains it under Tools → Mac connection."

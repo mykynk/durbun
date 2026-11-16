@@ -320,6 +320,15 @@ class InterceptorTest {
         // Network position sees the wire: OkHttp's own headers and the socket address.
         assertEquals("gzip", headerValue(requestFor(url), "Accept-Encoding"))
         assertEquals("127.0.0.1:${server.port}", response["remoteAddress"])
+        // The desktop is told why, once per rule, with the call's id.
+        val note = desktop.await("log") { (it["message"] as String).startsWith("Mock \"m\" was not applied") }
+        assertEquals("warn", note["level"])
+        assertEquals(response["id"], note.objAt("data")["requestId"])
+        assertEquals("m", note.objAt("data")["mockRuleId"])
+        assertEquals("networkInterceptor", note.objAt("data")["reason"])
+        client.newCall(Request.Builder().url(url).build()).execute().close()
+        desktop.awaitCount("net.response", 2)
+        assertEquals(1, desktop.messages("log").count { (it["message"] as String).startsWith("Mock \"m\"") })
     }
 
     @Test
@@ -537,6 +546,134 @@ class InterceptorTest {
         assertEquals("t-1", headerValue(request, "X-Trace"))
         assertEquals("••••", headerValue(responseFor(request), "X-Request-Id"))
         assertEquals("Bearer secret-token", server.requests.last().header("Authorization"))
+    }
+
+    @Test
+    fun redactHeadersOptionCoversEveryClient() {
+        connect(DurbunOptions(redactHeaders = setOf("AUTHORIZATION")))
+        val url = server.url("/users")
+        client().newCall(Request.Builder().url(url).header("Authorization", "Bearer secret-token").build()).execute().close()
+        assertEquals("••••", headerValue(requestFor(url), "Authorization"))
+        assertEquals("the real request is unchanged", "Bearer secret-token", server.requests.last().header("Authorization"))
+    }
+
+    @Test
+    fun ignoredHostsPassThroughWithoutCaptureOrMocks() {
+        desktop.mocks = listOf(mockRule("m", "/users", mapOf("type" to "respond", "status" to 299, "body" to "mock")))
+        val core = connect(DurbunOptions(ignoredHosts = listOf(".0.0.1")))
+        assertTrue(core.ignoresHost("127.0.0.1"))
+        assertTrue(core.ignoresHost("api.0.0.1"))
+        assertFalse(core.ignoresHost("10.0.0.10"))
+        client().newCall(Request.Builder().url(server.url("/users")).build()).execute().use {
+            assertEquals("the real server answered", 200, it.code)
+        }
+        core.log(Level.INFO, "test", "after the call", null, null)
+        desktop.await("log") { it["message"] == "after the call" }
+        assertFalse(desktop.messages().any { it["type"] == "net.request" })
+    }
+
+    @Test
+    fun eventListenerAddsConnectionPhasesAndKeepsTheAppsListener() {
+        connect()
+        val seen = java.util.Collections.synchronizedList(ArrayList<String>())
+        val appListener = object : okhttp3.EventListener() {
+            override fun callStart(call: okhttp3.Call) { seen += "callStart" }
+            override fun connectStart(call: okhttp3.Call, inetSocketAddress: java.net.InetSocketAddress, proxy: Proxy) { seen += "connectStart" }
+            override fun requestHeadersEnd(call: okhttp3.Call, request: Request) { seen += "requestHeadersEnd" }
+            override fun responseHeadersEnd(call: okhttp3.Call, response: okhttp3.Response) { seen += "responseHeadersEnd" }
+            override fun callEnd(call: okhttp3.Call) { seen += "callEnd" }
+        }
+        val client = OkHttpClient.Builder()
+            .proxy(Proxy.NO_PROXY)
+            .addInterceptor(DurbunInterceptor())
+            .eventListenerFactory(DurbunEventListenerFactory(appListener))
+            .build()
+        val url = server.url("/echo")
+        client.newCall(Request.Builder().url(url).post("{\"a\":1}".toRequestBody("application/json".toMediaType())).build())
+            .execute().use { it.body!!.string() }
+        val timings = responseFor(finalRequestFor(url)).objAt("timings")
+        for (phase in listOf("connect", "send", "wait", "receive")) assertTrue("$phase in $timings", timings.containsKey(phase))
+        assertNull("plain HTTP has no TLS phase", timings["tls"])
+        assertEquals(listOf("callStart", "connectStart", "requestHeadersEnd", "responseHeadersEnd", "callEnd"), seen.toList())
+
+        assertEquals("finished calls are let go", 0, dev.durbun.internal.CallPhases.trackedCount())
+    }
+
+    @Test
+    fun aFollowUpOnTheSameConnectionHasOnlyItsOwnPhases() {
+        connect()
+        val call = OkHttpClient().newCall(Request.Builder().url(server.url("/users")).build())
+        val connection = object : okhttp3.Connection {
+            override fun route() = throw UnsupportedOperationException()
+            override fun socket() = throw UnsupportedOperationException()
+            override fun handshake(): okhttp3.Handshake? = null
+            override fun protocol() = okhttp3.Protocol.HTTP_1_1
+        }
+        val listener = DurbunEventListenerFactory().create(call)
+        val address = java.net.InetSocketAddress("127.0.0.1", 1)
+        listener.callStart(call)
+        listener.dnsStart(call, "example.com")
+        listener.dnsEnd(call, "example.com", emptyList())
+        listener.connectStart(call, address, Proxy.NO_PROXY)
+        Thread.sleep(2)
+        listener.secureConnectStart(call)
+        Thread.sleep(2)
+        listener.secureConnectEnd(call, null)
+        listener.connectEnd(call, address, Proxy.NO_PROXY, okhttp3.Protocol.HTTP_1_1)
+        listener.connectionAcquired(call, connection)
+        listener.requestHeadersStart(call)
+        listener.requestHeadersEnd(call, call.request())
+        listener.responseHeadersEnd(call, okhttp3.Response.Builder().request(call.request()).protocol(okhttp3.Protocol.HTTP_1_1).code(302).message("Found").build())
+        val first = dev.durbun.internal.CallPhases.timings(call)!!
+        assertEquals(setOf("dns", "connect", "tls", "send", "wait"), first.keys)
+        assertTrue(first.getValue("tls") >= 1.0)
+
+        // The redirect is sent on the same connection: its own phases only.
+        listener.connectionAcquired(call, connection)
+        listener.requestHeadersStart(call)
+        listener.requestHeadersEnd(call, call.request())
+        listener.responseHeadersEnd(call, okhttp3.Response.Builder().request(call.request()).protocol(okhttp3.Protocol.HTTP_1_1).code(200).message("OK").build())
+        assertEquals(setOf("send", "wait"), dev.durbun.internal.CallPhases.timings(call)!!.keys)
+        listener.callEnd(call)
+        assertNull(dev.durbun.internal.CallPhases.timings(call))
+    }
+
+    @Test
+    fun eventListenerFactoryIsOnlyTheAppsWhileDurbunIsOff() {
+        Durbun.installForTesting(null)
+        val appFactory = okhttp3.EventListener.Factory { okhttp3.EventListener.NONE }
+        val call = OkHttpClient().newCall(Request.Builder().url(server.url("/users")).build())
+        assertTrue(DurbunEventListenerFactory(appFactory).create(call) === okhttp3.EventListener.NONE)
+        assertTrue(DurbunEventListenerFactory().create(call) === okhttp3.EventListener.NONE)
+    }
+
+    @Test
+    fun missingInterceptorIsMentionedOnceOnTheDesktop() {
+        dev.durbun.internal.InterceptorUse.created = false
+        val core = startCore(desktop) {
+            it.networkHintAfterMs = 0
+            it.okHttpPresent = { true }
+        }
+        this.core = core
+        Durbun.installForTesting(core)
+        val note = desktop.await("log") { (it["message"] as String).startsWith("No OkHttp client in this app has DurbunInterceptor") }
+        assertEquals("info", note["level"])
+        assertEquals("noInterceptor", note.objAt("data")["reason"])
+        assertEquals(0L, note.objAt("data")["afterMs"])
+    }
+
+    @Test
+    fun noNoteOnceAnInterceptorExists() {
+        DurbunInterceptor()
+        val core = startCore(desktop) {
+            it.networkHintAfterMs = 0
+            it.okHttpPresent = { true }
+        }
+        this.core = core
+        core.log(Level.INFO, "test", "marker", null, null)
+        desktop.await("log") { it["message"] == "marker" }
+        Thread.sleep(200)
+        assertFalse(desktop.messages("log").any { (it["message"] as String).startsWith("No OkHttp client") })
     }
 
     @Test

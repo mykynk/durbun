@@ -70,3 +70,18 @@ internal interface LogcatController {
 
     fun stop()
 }
+
+/** Platform tools shown with Dürbün's own built-ins (Android: preferences, view hierarchy, appearance). */
+internal interface AppTools {
+    /** Descriptors (`hello.actions` entries) of these tools, with their current values. */
+    fun descriptors(): List<Map<String, Any?>>
+
+    /**
+     * Runs tool [name] when it is one of these and returns true; [done] is called once, on any thread, with the
+     * result data or an error, and whether the tool's shown value changed.
+     */
+    fun run(name: String, params: Map<String, Any?>, done: (data: Any?, error: String?, changed: Boolean) -> Unit): Boolean
+
+    /** The session ended: release platform hooks. */
+    fun stop() {}
+}

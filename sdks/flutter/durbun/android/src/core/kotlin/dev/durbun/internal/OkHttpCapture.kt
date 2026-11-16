@@ -38,6 +38,11 @@ import javax.net.ssl.SSLHandshakeException
 internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
     private val warned = AtomicBoolean(false)
     private val networkMockWarned = AtomicBoolean(false)
+    private val skippedRules = HashSet<String>()
+
+    init {
+        InterceptorUse.created = true
+    }
 
     fun intercept(core: DurbunCore, chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -50,12 +55,7 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         val found = guard(core) { core.findMock(method, url) }
         // A network interceptor must call proceed() exactly once, so it cannot answer from a mock.
         val mock = if (found != null && found.action is MockAction.Respond && isNetworkInterceptor(chain)) {
-            if (networkMockWarned.compareAndSet(false, true)) {
-                core.logger.warn(
-                    "Mock '${found.id}' was not applied: respond mocks need DurbunInterceptor as an application " +
-                        "interceptor (OkHttpClient.Builder().addInterceptor(...)).",
-                )
-            }
+            guard(core) { reportSkippedMock(core, found, id, method, url) }
             null
         } else {
             found
@@ -105,6 +105,29 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
     }
 
     /* ───────────── mocks ───────────── */
+
+    /**
+     * A `respond` rule matched a call seen by a network interceptor, which cannot answer without the network: the
+     * real response is reported, and the desktop gets one line per rule saying why (with the call's id).
+     */
+    private fun reportSkippedMock(core: DurbunCore, rule: MockRule, id: String, method: String, url: String) {
+        val first = synchronized(skippedRules) { skippedRules.size < MAX_SKIPPED_RULES && skippedRules.add(rule.id) }
+        if (!first) return
+        val message = "Mock \"${rule.name?.takeIf { it.isNotBlank() } ?: rule.id}\" was not applied to $method $url: this client has " +
+            "DurbunInterceptor as a network interceptor, which cannot answer a call without the network. Add it with " +
+            "addInterceptor(...) for respond mocks (delay and fail mocks work in both places)."
+        if (networkMockWarned.compareAndSet(false, true)) core.logger.warn(message)
+        core.send(
+            Wire.log(
+                ts = System.currentTimeMillis(),
+                level = "warn",
+                tag = DurbunCore.SDK_TAG,
+                message = message,
+                data = linkedMapOf("mockRuleId" to rule.id, "requestId" to id, "reason" to "networkInterceptor"),
+                kind = "text",
+            ),
+        )
+    }
 
     /** Synthesizes the response of a `respond` mock (the network is never touched) and its decoded body. */
     private fun mockResponse(request: Request, action: MockAction.Respond, startWall: Long): Pair<Response, ByteArray> {
@@ -257,6 +280,8 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         val headers = headerList(core, response.headers)
         val protocol = response.protocol.toString()
         val remote = remoteAddress(chain)
+        // Read now: the call's listener lets go of it when the body ends, before the body's report goes out.
+        val phases = phasesOf(chain)
         val send = { body: WireBody?, receiveMs: Double? ->
             core.send(
                 Wire.netResponse(
@@ -268,7 +293,7 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
                     body = body,
                     protocol = protocol,
                     remoteAddress = remote,
-                    timings = timings(response, startWall, receiveMs),
+                    timings = timings(response, startWall, receiveMs, phases),
                     mocked = mock != null,
                     mockRuleId = mock?.id,
                 ),
@@ -474,19 +499,31 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         null
     }
 
+    /** Phases `DurbunEventListenerFactory` recorded for this call, when the client has it. */
+    private fun phasesOf(chain: Interceptor.Chain): Map<String, Double>? = try {
+        CallPhases.timings(chain.call())
+    } catch (_: Throwable) {
+        null // OkHttp without EventListener (< 3.11) or no call on this chain
+    }
+
     /**
-     * Without an EventListener only coarse phases are known: `connect` = time before the request was sent
-     * (DNS + TCP + TLS on a new connection), `wait` = request sent → response headers, `receive` = time to
-     * read the captured body.
+     * With `DurbunEventListenerFactory`: `dns`, `connect`, `tls`, `send`, `wait` of the last attempt as OkHttp
+     * reported them. Without it only coarse phases are known: `connect` = time before the request was sent
+     * (DNS + TCP + TLS on a new connection), `wait` = request sent → response headers. `receive` = time to read
+     * the captured body.
      */
-    private fun timings(response: Response, startWall: Long, receiveMs: Double?): Map<String, Any?>? {
+    private fun timings(response: Response, startWall: Long, receiveMs: Double?, phases: Map<String, Double>?): Map<String, Any?>? {
         val map = LinkedHashMap<String, Any?>()
-        val sent = response.sentRequestAtMillis
-        val received = response.receivedResponseAtMillis
         val fromCache = response.networkResponse == null && response.cacheResponse != null
-        if (!fromCache && sent >= startWall && received >= sent) {
-            if (response.priorResponse == null && sent - startWall >= 1) map["connect"] = sent - startWall
-            map["wait"] = received - sent
+        if (!fromCache && phases != null && phases.containsKey("wait")) {
+            map.putAll(phases)
+        } else {
+            val sent = response.sentRequestAtMillis
+            val received = response.receivedResponseAtMillis
+            if (!fromCache && sent >= startWall && received >= sent) {
+                if (response.priorResponse == null && sent - startWall >= 1) map["connect"] = sent - startWall
+                map["wait"] = received - sent
+            }
         }
         if (receiveMs != null) map["receive"] = Math.round(receiveMs * 10.0) / 10.0
         return map.ifEmpty { null }
@@ -719,6 +756,7 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
 
     companion object {
         const val SOURCE = "okhttp"
+        private const val MAX_SKIPPED_RULES = 64
         /** Same marker as the Dart (dart:io) and Swift (URLSession) layers. */
         private const val REDACTED = "••••"
 

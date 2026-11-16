@@ -33,6 +33,7 @@ PUBLIC_CLASSES = [
     "dev.durbun.DurbunAction$ToggleHandler",
     "dev.durbun.DurbunAction$SelectHandler",
     "dev.durbun.DurbunInterceptor",
+    "dev.durbun.DurbunEventListenerFactory",
     "dev.durbun.DurbunConnectionStatus",
     "dev.durbun.DurbunConnectionListener",
 ]
@@ -127,11 +128,22 @@ def members(cp, owner, cache={}):
     return found
 
 
+# EventListener callbacks that OkHttp 4 added. The SDK's listener forwards them to the app's own listener; only
+# OkHttp 4+ ever calls them, so the forwarding code never runs (and never links) on OkHttp 3.
+NEWER_CALLBACKS = {
+    ("okhttp3/EventListener", name)
+    for name in ("proxySelectStart", "proxySelectEnd", "canceled", "satisfactionFailure", "cacheHit", "cacheMiss",
+                 "cacheConditionalHit")
+}
+
+
 def check_linkage(okhttp_jar, okio_jar):
     refs = references(classes_dir("durbun", "debug")) | references(os.path.join(ROOT, "durbun", "build", "intermediates", "javac", "debug", "compileDebugJavaWithJavac", "classes"))
     cp = os.pathsep.join([okhttp_jar, okio_jar])
     missing = []
     for owner, name, desc in sorted(refs):
+        if (owner, name) in NEWER_CALLBACKS:
+            continue
         found = members(cp, owner)
         constructor_ok = name == "<init>" and found is not None and any(n == "<init>" and d == desc for n, d in found)
         if found is None or not ((name, desc) in found or constructor_ok):

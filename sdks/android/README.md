@@ -17,7 +17,7 @@ trigger buttons that run code inside the app.
 | Device logs (logcat, all processes) | Read by the desktop over USB or wireless adb; no SDK needed |
 | `Durbun.log(...)`, Timber | Sent by the SDK as structured entries: tag, level, JSON data and full stack trace |
 | The app's own logcat over Wi-Fi (no adb) | Read and forwarded by the SDK (multi-line messages are merged back) |
-| Network (OkHttp) | `DurbunInterceptor` |
+| Network (OkHttp) | `DurbunInterceptor`; DNS / connect / TLS times with `DurbunEventListenerFactory` |
 | Crashes | Uncaught exceptions; a crash that cannot reach the desktop is sent on the next launch |
 | How earlier launches ended | ANRs, native crashes and kills by the system, on the next launch (Android 11+, see [Earlier launches](#earlier-launches-anrs-native-crashes-system-kills)) |
 
@@ -109,6 +109,24 @@ class App : Application() {
 }
 ```
 
+### Start without code (optional)
+
+An app that should not carry any Dürbün call (or has no `Application` class) can let the SDK start itself right
+after `Application.onCreate`, with one line inside `<application>` in its `AndroidManifest.xml`:
+
+```xml
+<meta-data android:name="dev.durbun.autoStart" android:value="true" />
+```
+
+- Without the entry, or with `"false"`, nothing starts by itself.
+- It starts with the default options; over Wi-Fi the Mac's address comes from the
+  [`dev.durbun.host` manifest entry](#giving-the-app-the-macs-address) or `Durbun.setDesktopHost`.
+- A `Durbun.start(...)` or `Durbun.stop()` in `Application.onCreate` still decides. A later `Durbun.start` with
+  options (for example from the first `Activity`) restarts the session with them; one without options keeps it.
+- The entry is read on Dürbün's own thread, like `dev.durbun.host`. It is part of `durbun` only: with
+  `durbun-noop`, nothing starts. It runs in the app's main process; other processes (`android:process=":sync"`)
+  start Dürbün only with `Durbun.start`.
+
 `start()` never blocks the main thread; all networking and disk work happens on Dürbün's low-priority
 background threads. The SDK never crashes your app: internal errors are swallowed and every queue is bounded.
 
@@ -116,16 +134,25 @@ background threads. The SDK never crashes your app: internal errors are swallowe
 
 ```kotlin
 val client = OkHttpClient.Builder()
-    .addInterceptor(DurbunInterceptor())   // hand the same client to Retrofit
+    .addInterceptor(DurbunInterceptor())                    // hand the same client to Retrofit
+    .eventListenerFactory(DurbunEventListenerFactory())     // optional: DNS, connect, TLS, send and wait times
     .build()
 ```
+
+- Without the listener factory, a call shows `connect` (everything before the request was sent), `wait` and
+  `receive`. With it, the same phases as on iOS: `dns`, `connect`, `tls`, `send`, `wait`, `receive` of the last
+  attempt (after a redirect or retry, its own phases; a reused connection has no DNS, connect or TLS time).
+- OkHttp takes one listener factory per client. If the app has its own, pass it in:
+  `DurbunEventListenerFactory(myFactory)` (or `DurbunEventListenerFactory(myListener)` for `eventListener(...)`).
+  Your listener still gets every callback first, in the same order, on the same threads. Callbacks newer than
+  OkHttp 4.12 are not passed on to it. In `durbun-noop` the factory returns your own listener untouched.
 
 - Add it as the **last** application interceptor to see headers your own interceptors add (for example
   `Authorization`).
 - Use `addNetworkInterceptor(DurbunInterceptor())` to see every redirect and retry separately (gzip and deflate
   bodies are decoded automatically, and the remote IP address is shown). OkHttp does not let network
   interceptors short-circuit a request, so `respond` mocks are skipped there (delay and failure mocks still
-  work).
+  work); the desktop gets one warning line per skipped rule, with the call's id.
 - Bodies are captured without touching the app's streams. A request body is copied while OkHttp writes it to
   the server (no body is ever written twice, so `InputStream` and file streams, progress-reporting bodies and
   one-shot bodies are safe). A response body is copied as the app reads it: Dürbün never reads ahead, and
@@ -139,8 +166,10 @@ val client = OkHttpClient.Builder()
   down the chain in a thin wrapper (content type, length, and one-shot / duplex flags are forwarded). If your
   own interceptors check body classes (for example `body is MultipartBody`), add `DurbunInterceptor` after
   them.
-- Mask secrets with `DurbunInterceptor(redactHeaders = setOf("Authorization", "Cookie"))`; values show as
-  `••••`.
+- Mask secrets for every client at once with `DurbunOptions(redactHeaders = setOf("Authorization", "Cookie"))`,
+  or per client with `DurbunInterceptor(redactHeaders = setOf(...))`; values show as `••••` and the real request
+  is unchanged. `DurbunOptions(ignoredHosts = listOf("analytics.example.com"))` leaves hosts (and their
+  subdomains) out: their calls pass the interceptor untouched and mock rules do not apply to them.
 - Desktop mock rules apply here ([how to write them](../../docs/guides/mocks.md)). `respond` synthesizes the
   response without touching the network (the request body is then written once, to a side buffer), `delay`
   waits and then performs the real call, and `fail` throws the platform's real exception
@@ -150,7 +179,8 @@ val client = OkHttpClient.Builder()
 Add it to the clients that Retrofit, Coil, Glide's OkHttp integration (`okhttp3-integration`) and Ktor's
 OkHttp engine build for themselves. Traffic over `HttpURLConnection` is not seen: Volley (`HurlStack`),
 ExoPlayer / Media3 `DefaultHttpDataSource`, Glide's default loader, Ktor's CIO and Android engines, Cronet,
-WebView and native (C/C++) code.
+WebView and native (C/C++) code. When OkHttp is in the app but no `DurbunInterceptor` was created 30 seconds
+after start, the desktop shows one line saying so, so an empty network list has a reason.
 
 ## 4. Logs and events
 
@@ -196,8 +226,15 @@ Durbun.addAction(
 )
 ```
 
-Handlers run on the main thread. Two buttons are built in: **Dump threads** (every thread's stack, written as
-a log entry) and **Run garbage collection**.
+Handlers run on the main thread. Built in:
+
+| Tool | What it does |
+|---|---|
+| Dump threads | Every thread's stack, written as a log entry |
+| Run garbage collection | Java heap before and after |
+| Appearance | System / Light / Dark for this app (Android 12+; Android keeps the choice for the app until it is set back to System) |
+| Dump view hierarchy | The view tree of the visible activities (class, frame, visibility, id, text), at most 5,000 views; dialogs and popups are separate windows and not included |
+| Dump SharedPreferences | Every preferences file of the app with its keys and values (read off the main thread) |
 
 ## How the connection works
 
@@ -299,7 +336,9 @@ process to free memory. On Android 11 (API 30) and newer, the SDK reads how earl
 
 ## Permissions, cleartext and release safety
 
-- The `durbun` module's manifest adds the `INTERNET` permission (it is merged into debug builds only).
+- The `durbun` module's manifest adds the `INTERNET` permission and a small start-up provider
+  (`exported="false"`; it starts nothing unless `dev.durbun.autoStart` is `true`); with `debugImplementation`
+  both are merged into debug builds only.
 - Dürbün uses a **plain TCP socket, not HTTP**: no `usesCleartextTraffic` or network security config changes
   are needed.
 - A build with `durbun-noop` contains no Dürbün code, threads or sockets. In a non-debuggable build with
@@ -380,6 +419,18 @@ The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, iOS and 
 | `captureLogcat` | `true` | Forward the app's own logcat when the desktop cannot read device logs |
 | `appName` | `null` | Name shown on the desktop (default: the app label) |
 | `captureNetwork` | `true` | OkHttp capture and mocks through `DurbunInterceptor` (`false` makes the interceptor a pass-through: no capture, no mocks) |
+| `redactHeaders` | `emptySet()` | Header names (case-insensitive) shown as `••••` in every client's captured calls; the real request is unchanged |
+| `ignoredHosts` | `emptyList()` | Hosts never captured (subdomains included); mock rules do not apply to them |
+
+The iOS SDK has the same options; a few names differ:
+
+| Android | iOS |
+|---|---|
+| `captureMetrics` | `collectMetrics` |
+| `forceInRelease` | `allowInReleaseBuilds` |
+| `captureLogcat` | `captureOSLog` |
+| `Durbun.isStarted` | `Durbun.isRunning` |
+| `Durbun.addAction(...)` | `Durbun.registerAction(...)` |
 
 ## Development
 

@@ -3,7 +3,10 @@
 # Keep in sync with the SDK's references (javap -v over the compiled classes).
 -dontwarn okhttp3.Call
 -dontwarn okhttp3.Connection
+-dontwarn okhttp3.EventListener
+-dontwarn okhttp3.EventListener$Factory
 -dontwarn okhttp3.FormBody
+-dontwarn okhttp3.Handshake
 -dontwarn okhttp3.Headers
 -dontwarn okhttp3.Headers$Builder
 -dontwarn okhttp3.HttpUrl

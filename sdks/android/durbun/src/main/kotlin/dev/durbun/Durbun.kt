@@ -26,7 +26,9 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Durbun.event("purchase", mapOf("amount" to 49.9))
  * ```
  *
- * Every method is safe to call from any thread, before or after [start], and never throws. Release builds
+ * Apps without code can opt in to a start right after `Application.onCreate` with the `dev.durbun.autoStart`
+ * manifest entry (see [DurbunInitProvider]). Every method is safe to call from any thread, before or after [start],
+ * and never throws. Release builds
  * (not debuggable) stay silent unless [DurbunOptions.forceInRelease] is set; a build that depends on
  * `durbun-noop` instead carries no Dürbün code at all.
  */
@@ -45,6 +47,12 @@ object Durbun {
     @Volatile
     private var core: DurbunCore? = null
     private val lock = Any()
+
+    /** [start] or [stop] was called by the app: the automatic start leaves the decision to it. */
+    private var appDecided = false
+
+    /** The running core was started automatically ([DurbunInitProvider]), with default options. */
+    private var autoStarted = false
     private val actions = LinkedHashMap<String, DurbunAction>()
     private val connectionListeners = CopyOnWriteArrayList<DurbunConnectionListener>()
 
@@ -78,15 +86,74 @@ object Durbun {
     @JvmStatic
     @JvmOverloads
     fun start(context: Context, options: DurbunOptions = DurbunOptions()) {
+        start(context, options, automatic = false)
+    }
+
+    /**
+     * Posted by [DurbunInitProvider] to run once `Application.onCreate` has returned. Unless the app called [start]
+     * or [stop] itself by then, the `dev.durbun.autoStart` manifest entry is read on a Dürbün thread (like
+     * `dev.durbun.host`; [DurbunInitProvider.AUTO_START_DEFAULT] without one) and, when on, Dürbün starts with the
+     * default options.
+     */
+    internal fun startAutomatically(context: Context) {
+        synchronized(lock) { if (appDecided) return }
+        autoStartRunner(
+            Runnable {
+                try {
+                    val entry = try {
+                        autoStartEntry(context)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Could not read ${DurbunInitProvider.AUTO_START_META_DATA}; using the default.", t)
+                        null
+                    }
+                    if (entry ?: DurbunInitProvider.AUTO_START_DEFAULT) start(context, DurbunOptions(), automatic = true)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Dürbün could not start automatically; the app continues without it.", t)
+                }
+            },
+        )
+    }
+
+    /** The `dev.durbun.autoStart` manifest entry: true / false, or null when there is none. Tests replace it. */
+    @Volatile
+    internal var autoStartEntry: (Context) -> Boolean? = { context ->
+        DurbunInitProvider.parseAutoStart(AndroidEnvironment.manifestEntry(context, DurbunInitProvider.AUTO_START_META_DATA))
+    }
+
+    /** Runs the automatic start off the main thread (the manifest read is a binder call). Tests run it inline. */
+    @Volatile
+    internal var autoStartRunner: (Runnable) -> Unit = { task ->
+        Thread(task, "durbun-autostart").apply {
+            isDaemon = true
+            priority = Thread.NORM_PRIORITY - 1
+        }.start()
+    }
+
+    private fun start(context: Context, options: DurbunOptions, automatic: Boolean) {
         synchronized(lock) {
+            if (automatic && appDecided) return
+            if (!automatic) appDecided = true
             val existing = core
             if (existing != null) {
                 if (existing.isHosted) {
                     Log.i(TAG, FLUTTER_START_NOTE)
-                } else {
-                    Log.w(TAG, "Durbun.start() was already called; ignoring the second call.")
+                    return
                 }
-                return
+                if (automatic || !autoStarted) {
+                    if (!automatic) Log.w(TAG, "Durbun.start() was already called; ignoring the second call.")
+                    return
+                }
+                // Started automatically before the app's own call (for example from an Activity): the app's
+                // options win, so the session is started again with them.
+                autoStarted = false
+                if (options == DurbunOptions()) return
+                core = null
+                Log.i(TAG, "Restarting Dürbün with the options given to Durbun.start() (it had started automatically).")
+                try {
+                    AndroidRuntime.stop(existing)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Dürbün did not stop cleanly.", t)
+                }
             }
             if (!options.enabled) return
             try {
@@ -104,6 +171,7 @@ object Durbun {
                 val started = runtimeStarter(appContext, options, actions.values.toList())
                 watchStatus(started)
                 core = started
+                autoStarted = automatic
             } catch (t: Throwable) {
                 Log.w(TAG, "Dürbün could not start; the app continues without it.", t)
             }
@@ -114,6 +182,8 @@ object Durbun {
     @JvmStatic
     fun stop() {
         val current = synchronized(lock) {
+            appDecided = true
+            autoStarted = false
             val c = core
             core = null
             c
@@ -312,9 +382,13 @@ object Durbun {
         }
     }
 
-    /** Unit tests install a plain-JVM core without Android. */
+    /** Unit tests install a plain-JVM core without Android (and forget whether the app decided). */
     internal fun installForTesting(testCore: DurbunCore?) {
-        synchronized(lock) { core = testCore }
+        synchronized(lock) {
+            core = testCore
+            appDecided = false
+            autoStarted = false
+        }
     }
 
     private fun classPresent(name: String): Boolean = try {

@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import dev.durbun.DurbunAction
 import dev.durbun.DurbunOptions
+import dev.durbun.Level
 import dev.durbun.internal.CrashHandler
 import dev.durbun.internal.DesktopHostStore
 import dev.durbun.internal.DurbunCore
@@ -33,6 +34,11 @@ internal object AndroidRuntime {
                 core.onStopped = { app.unregisterActivityLifecycleCallbacks(watcher) }
             } catch (t: Throwable) {
                 env.logger.warn("Could not watch for the durbun.host launch extra", t)
+            }
+            try {
+                core.appTools = AndroidAppTools(app) { message, tag, data -> core.log(Level.INFO, tag, message, data, null) }
+            } catch (t: Throwable) {
+                env.logger.warn("The Android tools are unavailable", t)
             }
         }
         if (options.captureMetrics) {
@@ -77,7 +83,7 @@ internal object AndroidRuntime {
         // batch was handed to Dart, so the relay keeps at most one batch queued on a stalled main thread.
         val main = Handler(Looper.getMainLooper())
         val core = DurbunCore(hostedOptions, env, host = link, hostBarrier = { marker -> main.post(marker) })
-        core.redactedHeaders = redactedHeaders
+        core.redactedHeaders = core.redactedHeaders + redactedHeaders.map { it.lowercase() }
         core.crashStore = PendingCrashStore { env.storageDir }
         if (hostedOptions.captureCrashes) core.exitReasons = AndroidExitReasons(context) { env.settingsDir }
         actions.forEach(core::addAction)

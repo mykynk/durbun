@@ -8,6 +8,7 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 /** The no-op module compiles against the same calls as the real one and does nothing. */
@@ -32,6 +33,17 @@ class NoopApiTest {
         assertEquals(Level.ERROR, Level.fromPriority(6))
         assertEquals(9751, DurbunOptions().port)
         assertNull(DurbunOptions().host)
+        assertEquals(setOf("Authorization"), DurbunOptions(redactHeaders = setOf("Authorization")).redactHeaders)
+        assertEquals(listOf("analytics.example.com"), DurbunOptions(ignoredHosts = listOf("analytics.example.com")).ignoredHosts)
+    }
+
+    @Test
+    fun eventListenerFactoryHandsOutTheAppsOwnListener() {
+        val call = OkHttpClient().newCall(Request.Builder().url("http://localhost/ping").build())
+        val own = object : okhttp3.EventListener() {}
+        assertSame(own, DurbunEventListenerFactory(own).create(call))
+        assertSame(own, DurbunEventListenerFactory(okhttp3.EventListener.Factory { own }).create(call))
+        assertSame(okhttp3.EventListener.NONE, DurbunEventListenerFactory().create(call))
     }
 
     @Test

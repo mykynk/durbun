@@ -42,18 +42,8 @@ internal class AndroidEnvironment(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /** The `dev.durbun.host` meta-data of the app's manifest (a binder call: Dürbün's I/O thread). */
-    fun manifestHost(): String? {
-        val info = if (Build.VERSION.SDK_INT >= 33) {
-            context.packageManager.getApplicationInfo(
-                appId,
-                PackageManager.ApplicationInfoFlags.of(PackageManager.GET_META_DATA.toLong()),
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            context.packageManager.getApplicationInfo(appId, PackageManager.GET_META_DATA)
-        }
-        return info.metaData?.get(HOST_META_DATA)?.toString()?.trim()?.ifEmpty { null }
-    }
+    fun manifestHost(): String? =
+        manifestEntry(context, HOST_META_DATA)?.toString()?.trim()?.ifEmpty { null }
     private val app: Map<String, Any?> by lazy { buildAppInfo() }
     private val device: Map<String, Any?> by lazy { buildDeviceHints() }
 
@@ -170,6 +160,20 @@ internal class AndroidEnvironment(
 
     companion object {
         const val HOST_META_DATA = "dev.durbun.host"
+
+        /** One `<meta-data>` value of the app's `<application>` (a binder call: never on the main thread). */
+        fun manifestEntry(context: Context, name: String): Any? {
+            val info = if (Build.VERSION.SDK_INT >= 33) {
+                context.packageManager.getApplicationInfo(
+                    context.packageName,
+                    PackageManager.ApplicationInfoFlags.of(PackageManager.GET_META_DATA.toLong()),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getApplicationInfo(context.packageName, PackageManager.GET_META_DATA)
+            }
+            return info.metaData?.get(name)
+        }
 
         fun settingsDirOf(context: Context): File? = try {
             File(context.noBackupFilesDir, "durbun")

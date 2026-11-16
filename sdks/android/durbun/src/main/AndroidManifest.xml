@@ -2,4 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- The SDK talks to the Dürbün desktop over a plain TCP socket (127.0.0.1 via adb reverse, or Wi-Fi). -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <application>
+        <!-- Starts Dürbün right after Application.onCreate for apps that opt in with
+             <meta-data android:name="dev.durbun.autoStart" android:value="true" /> (off without it), unless the
+             app calls Durbun.start/stop itself. It only posts one task to the main thread. -->
+        <provider
+            android:name="dev.durbun.DurbunInitProvider"
+            android:authorities="${applicationId}.durbun-init"
+            android:exported="false" />
+    </application>
 </manifest>
