@@ -1,9 +1,12 @@
 import type { NetworkEntry } from '@durbun/protocol';
+import { connectionKind } from '../../../data/explain';
+import { isLiveStream } from './streams';
 
 /**
  * Network filters: toolbar chips/toggles plus a small token query language for the search field:
  *   status:4xx  status:404  status:>=500  status:fail  method:post,put  host:api  path:/v1/pets
- *   type:json|graphql|image|…  is:failed|error|pending|mocked|slow|graphql|replay|cancelled
+ *   type:json|graphql|image|stream|…  is:failed|error|pending|mocked|slow|graphql|replay|cancelled
+ *   is:stream|ws|sse|open (WebSocket / SSE connections; `open` = still open)
  *   op:GetUser  source:dio  dur:>1s  size:>100kb  app:pati   "quoted phrase"   -negated
  * Free words match URL, method, status, GraphQL operation and error text (case-insensitive, plain
  * toLowerCase — SPEC §7.1). With "body search" the free words go to the server instead.
@@ -12,8 +15,8 @@ import type { NetworkEntry } from '@durbun/protocol';
 export type StatusClass = '2xx' | '3xx' | '4xx' | '5xx' | 'fail';
 export const STATUS_CLASSES: readonly StatusClass[] = ['2xx', '3xx', '4xx', '5xx', 'fail'];
 
-export type TypeCategory = 'json' | 'graphql' | 'html' | 'image' | 'media' | 'font' | 'script' | 'other';
-export const TYPE_CATEGORIES: readonly TypeCategory[] = ['json', 'graphql', 'html', 'image', 'media', 'font', 'script', 'other'];
+export type TypeCategory = 'json' | 'graphql' | 'html' | 'image' | 'media' | 'font' | 'script' | 'stream' | 'other';
+export const TYPE_CATEGORIES: readonly TypeCategory[] = ['json', 'graphql', 'html', 'image', 'media', 'font', 'script', 'stream', 'other'];
 
 export const METHOD_CHIPS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OTHER'] as const;
 export type MethodChip = (typeof METHOD_CHIPS)[number];
@@ -166,8 +169,11 @@ function categoryOfContentType(ct: string): TypeCategory | null {
   return null;
 }
 
-/** Content-type category of an entry (GraphQL wins; falls back to the URL extension). */
-export function typeCategoryOf(e: Pick<NetworkEntry, 'graphql' | 'responseContentType' | 'requestContentType' | 'path'>): TypeCategory {
+/** Content-type category of an entry (a WebSocket / SSE connection first, then GraphQL; falls back to the URL extension). */
+export function typeCategoryOf(
+  e: Pick<NetworkEntry, 'graphql' | 'responseContentType' | 'requestContentType' | 'path'> & Partial<Pick<NetworkEntry, 'stream' | 'status' | 'hasResponseBody'>>,
+): TypeCategory {
+  if (connectionKind(e)) return 'stream';
   if (e.graphql) return 'graphql';
   if (e.responseContentType) {
     const c = categoryOfContentType(e.responseContentType);
@@ -177,8 +183,10 @@ export function typeCategoryOf(e: Pick<NetworkEntry, 'graphql' | 'responseConten
   return EXT_CATEGORY[extensionOf(e.path)] ?? 'other';
 }
 
-/** Short type label for the "Tür" column: json, graphql, png, html, form, multipart, text, binary… */
-export function shortTypeLabel(e: Pick<NetworkEntry, 'graphql' | 'responseContentType' | 'path' | 'state'>): string {
+/** Short type label for the "Tür" column: websocket, sse, json, graphql, png, html, form, multipart, text, binary… */
+export function shortTypeLabel(e: Pick<NetworkEntry, 'graphql' | 'responseContentType' | 'path' | 'state'> & Partial<Pick<NetworkEntry, 'stream' | 'status' | 'hasResponseBody'>>): string {
+  const kind = connectionKind(e);
+  if (kind) return kind;
   if (e.graphql) return 'graphql';
   const ct = (e.responseContentType ?? '').toLowerCase().split(';')[0]!.trim();
   if (!ct) {
@@ -300,7 +308,10 @@ function compare(v: number, cmp: NonNullable<QueryClause['cmp']>): boolean {
   }
 }
 
-const IS_VALUES = new Set(['failed', 'fail', 'error', 'errors', 'hata', 'pending', 'mocked', 'mock', 'slow', 'yavaş', 'yavas', 'graphql', 'gql', 'replay', 'cancelled', 'canceled', 'iptal', 'complete', 'ok']);
+const IS_VALUES = new Set([
+  'failed', 'fail', 'error', 'errors', 'hata', 'pending', 'mocked', 'mock', 'slow', 'yavaş', 'yavas', 'graphql', 'gql', 'replay', 'cancelled', 'canceled', 'iptal', 'complete', 'ok',
+  'stream', 'streams', 'akış', 'akis', 'ws', 'websocket', 'socket', 'sse', 'eventsource', 'open', 'açık', 'acik', 'live', 'canlı', 'canli',
+]);
 const TYPE_VALUES: Record<string, TypeCategory> = {
   json: 'json',
   graphql: 'graphql',
@@ -312,6 +323,9 @@ const TYPE_VALUES: Record<string, TypeCategory> = {
   gorsel: 'image',
   media: 'media',
   medya: 'media',
+  stream: 'stream',
+  akış: 'stream',
+  akis: 'stream',
   video: 'media',
   audio: 'media',
   font: 'font',
@@ -464,6 +478,25 @@ function clauseMatches(e: NetworkEntry, c: QueryClause, ctx: FilterContext): boo
         case 'complete':
         case 'ok':
           return e.state === 'complete';
+        case 'stream':
+        case 'streams':
+        case 'akış':
+        case 'akis':
+          return connectionKind(e) !== null;
+        case 'ws':
+        case 'websocket':
+        case 'socket':
+          return connectionKind(e) === 'websocket';
+        case 'sse':
+        case 'eventsource':
+          return connectionKind(e) === 'sse';
+        case 'open':
+        case 'açık':
+        case 'acik':
+        case 'live':
+        case 'canlı':
+        case 'canli':
+          return isLiveStream(e);
         default:
           return false;
       }

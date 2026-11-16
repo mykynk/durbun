@@ -350,7 +350,13 @@ All notable changes to Dürbün are listed here. The format follows
 - Wire protocol and server: WebSocket messages and Server-Sent Events have a contract (`net.ws`, `net.sse`,
   capability `streams`, asked for by the server's `captureStreams`). The server keeps them per connection
   within limits and counts what it drops; session export / import and HAR files (`_webSocketMessages`,
-  `_eventSourceMessages`) carry them, masked like bodies. The Network tab does not show them yet.
+  `_eventSourceMessages`) carry them, masked like bodies.
+- Network: WebSocket and SSE connections. The list shows each connection's state, message count and how long
+  it has been open; a Messages tab shows every message with its direction, time since the connection opened,
+  type and size, with search, a ping / pong switch, follow-live, JSON / text / hex payloads, close codes by
+  name and a note where the memory limit removed messages. A connection whose messages were not captured says
+  why. Replay, edit and send, mock, compare and flows say that they do not apply to connections.
+- Settings → Network: a switch to capture WebSocket and SSE messages (on by default).
 - React Native / JavaScript SDK: WebSocket messages and server-sent events. Each connection is one entry in
   Network with its messages in the order the app saw them (both directions, text and binary, close codes and
   reasons); SSE from `XMLHttpRequest`-based libraries such as `react-native-sse`, from `fetch` streams and from

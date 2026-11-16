@@ -4,6 +4,7 @@ import { Filter, ListChecks, ListPlus, RefreshCw, SearchX, X } from 'lucide-reac
 import type { NetworkEntry } from '@durbun/protocol';
 import { Button, Checkbox, Dialog, EmptyState, IconButton, Input, MethodBadge, SearchInput, StatusBadge, Toggle, formatClock, toast } from '../../../components';
 import { api, networkStore, useCompiledScope, useHub, useNetworkVersion, type FlowFromRequestsSource } from '../../../data';
+import { networkActionAvailability } from '../../../data/explain';
 import { deviceDisplayName, errorText, useT } from '../../../i18n';
 
 export interface FromRequestsDialogProps {
@@ -36,6 +37,14 @@ const CHOSEN_SHOWN = 6;
 const MAX_ROWS = 400;
 /** The server builds a flow from at most this many requests (it drops the rest). */
 const MAX_PICK = 200;
+/**
+ * A captured request that can become a step: not a flow's own request, and one a flow can send again
+ * (`networkActionAvailability`: not a WebSocket / SSE connection, not a response without its request).
+ */
+export function canBecomeStep(e: Pick<NetworkEntry, 'method' | 'source' | 'stream' | 'status' | 'responseContentType' | 'hasResponseBody'> | undefined): boolean {
+  return !!e && e.source !== 'flow' && networkActionAvailability(e, 'flow').ok;
+}
+
 /** "Select the N visible" is offered up to this many: a longer list is better narrowed where it was filtered. */
 const PICK_VISIBLE_MAX = 50;
 const ASSET_RE = /\.(png|jpe?g|gif|webp|svg|ico|css|js|mjs|map|woff2?|ttf|otf|mp4|mp3|webm)(\?|$)/i;
@@ -68,7 +77,7 @@ export function FromRequestsDialog({ open, initialIds, visibleIds, filterLabel, 
 
   useEffect(() => {
     if (!open) return;
-    setPicked(new Set(initialIds ?? []));
+    setPicked(new Set((initialIds ?? []).filter((id) => canBecomeStep(networkStore.get(id)))));
     setQuery('');
     setName('');
     takeSnapshot();
@@ -87,7 +96,7 @@ export function FromRequestsDialog({ open, initialIds, visibleIds, filterLabel, 
     const out: string[] = [];
     for (const id of visibleIds) {
       const e = networkStore.get(id);
-      if (e && e.method !== '?' && e.source !== 'flow' && scope.network(e)) out.push(id);
+      if (e && canBecomeStep(e) && scope.network(e)) out.push(id);
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,7 +132,7 @@ export function FromRequestsDialog({ open, initialIds, visibleIds, filterLabel, 
     const list = networkStore.list();
     for (let i = list.length - 1; i >= 0 && out.length < MAX_ROWS; i--) {
       const e = list[i]!;
-      if (!snapshot.has(e.id) || e.method === '?' || e.source === 'flow' || !scope.network(e)) continue;
+      if (!snapshot.has(e.id) || !canBecomeStep(e) || !scope.network(e)) continue;
       if (filterVisible && !visibleSet.has(e.id) && !picked.has(e.id)) continue;
       if (!filterVisible && filterSource && !sameSource(e, filterSource) && !picked.has(e.id)) continue;
       if (hideAssets && isAsset(e) && !picked.has(e.id)) continue;
@@ -137,7 +146,7 @@ export function FromRequestsDialog({ open, initialIds, visibleIds, filterLabel, 
   /** Something was captured at all (in scope): an empty list then comes from the search or the asset filter. */
   const hasAny = useMemo(() => {
     if (!open) return false;
-    for (const e of networkStore.list()) if (snapshot.has(e.id) && e.method !== '?' && e.source !== 'flow' && scope.network(e)) return true;
+    for (const e of networkStore.list()) if (snapshot.has(e.id) && canBecomeStep(e) && scope.network(e)) return true;
     return false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, version, scope, snapshot]);
@@ -150,7 +159,7 @@ export function FromRequestsDialog({ open, initialIds, visibleIds, filterLabel, 
     for (let i = list.length - 1; i >= 0; i--) {
       const e = list[i]!;
       if (snapshot.has(e.id)) break;
-      if (e.method !== '?' && e.source !== 'flow' && scope.network(e)) n++;
+      if (canBecomeStep(e) && scope.network(e)) n++;
     }
     return n;
   }, [open, version, scope, snapshot]);

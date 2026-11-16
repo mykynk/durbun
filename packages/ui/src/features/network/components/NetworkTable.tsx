@@ -5,10 +5,12 @@ import { ArrowDown, ArrowDownNarrowWide, ArrowUpWideNarrow, CircleAlert, Drama, 
 import type { NetworkEntry } from '@durbun/protocol';
 import { networkStore } from '../../../data';
 import { MethodBadge, StatusBadge, Tooltip, formatBytes, formatClock, formatDuration, formatNumber, useElementSize } from '../../../components';
-import { t, type Lang } from '../../../i18n';
+import { getLanguage, t, type Lang } from '../../../i18n';
 import { columnWidth, fitColumns, gridTemplate, minTableWidth, type ColumnDef, type ColumnId, type ColumnPrefs, type SortKey, type SortState } from '../model/columns';
 import { shortTypeLabel } from '../model/filters';
 import { tooLargeMessage } from '../model/errors';
+import { compactAge, isLiveStream, streamAge } from '../model/streams';
+import { StreamChip } from './StreamBadge';
 
 /** Where a row menu opens: the pointer, or the selected row for the keyboard. */
 export interface MenuPoint {
@@ -193,7 +195,8 @@ export const NetworkTable = memo(function NetworkTable(props: NetworkTableProps)
   // ── waterfall range over the rows in view ──
   const items = virtualizer.getVirtualItems();
   const visible = items.map((it) => networkStore.get(rowIds[it.index] ?? ''));
-  const anyPending = visible.some((e) => e?.state === 'pending');
+  // Pending requests (waterfall) and open streams (their duration) tick.
+  const anyPending = visible.some((e) => e?.state === 'pending' || (e !== undefined && isLiveStream(e)));
   const now = useTicker(1000, props.active && anyPending);
   const range = useMemo(() => rangeOf(visible, now), [visible.map((e) => (e ? `${e.id}:${e.endTs ?? ''}` : '')).join('|'), now]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -411,6 +414,7 @@ const Row = memo(
     a.index === b.index &&
     a.onClick === b.onClick &&
     a.onContextMenu === b.onContextMenu &&
+    (a.entry.stream?.state !== 'open' || !a.colIds.includes('duration') || a.now === b.now) &&
     (!a.colIds.includes('waterfall') || (a.range?.start === b.range?.start && a.range?.end === b.range?.end && (a.entry.state !== 'pending' || a.now === b.now))),
 );
 
@@ -468,6 +472,7 @@ function PathCell({ e }: { e: NetworkEntry }) {
           {e.graphql.operationName ? ` ${e.graphql.operationName}` : ''}
         </span>
       ) : null}
+      {e.stream ? <StreamChip stream={e.stream} /> : null}
       {e.mocked ? (
         <span className="net-mockbadge" title={t('network.table.mockedHint')}>
           <Drama size={11} aria-hidden />
@@ -484,6 +489,16 @@ function PathCell({ e }: { e: NetworkEntry }) {
 }
 
 function SizeCell({ e }: { e: NetworkEntry }) {
+  if (e.stream) {
+    // A connection: the payload bytes of its messages, both ways.
+    const s = e.stream;
+    const title = [t('network.table.streamReceived', { size: formatBytes(s.bytesIn) }), s.kind === 'websocket' ? t('network.table.streamSent', { size: formatBytes(s.bytesOut) }) : null].filter(Boolean).join(' · ');
+    return (
+      <span className="tnum" title={title}>
+        {formatBytes(s.bytesIn + s.bytesOut)}
+      </span>
+    );
+  }
   const res = e.responseBodySize;
   const req = e.requestBodySize;
   const title = [req !== undefined ? t('network.table.requestSize', { size: formatBytes(req) }) : null, res !== undefined ? t('network.table.responseSize', { size: formatBytes(res) }) : null]
@@ -496,7 +511,18 @@ function SizeCell({ e }: { e: NetworkEntry }) {
   );
 }
 
-function DurationCell({ e, slowMs }: { e: NetworkEntry; slowMs: number }) {
+function DurationCell({ e, slowMs, now }: { e: NetworkEntry; slowMs: number; now: number }) {
+  if (e.stream) {
+    // How long the connection is / was open (the handshake's own time on hover); not "slow".
+    const age = streamAge(e, Math.max(now, Date.now())) ?? 0;
+    const open = isLiveStream(e);
+    const handshake = e.duration !== undefined ? formatDuration(e.duration) : '—';
+    return (
+      <span className={clsx('tnum', open && 'net-dur--live')} title={`${formatDuration(age)} · ${t(open ? 'network.streams.durationOpenTitle' : 'network.streams.durationTitle', { handshake })}`}>
+        {compactAge(age, getLanguage() === 'tr', (ms) => formatDuration(ms))}
+      </span>
+    );
+  }
   if (e.duration === undefined) return <span className="net-dim">{e.state === 'pending' ? '…' : '—'}</span>;
   const cls = e.duration >= slowMs * 3 ? 'net-dur--veryslow' : e.duration >= slowMs ? 'net-dur--slow' : undefined;
   return <span className={clsx('tnum', cls)}>{formatDuration(e.duration)}</span>;
@@ -538,7 +564,7 @@ function renderCell(c: ColumnId, e: NetworkEntry, range: TimeRange | null, now: 
     case 'size':
       return <SizeCell e={e} />;
     case 'duration':
-      return <DurationCell e={e} slowMs={slowMs} />;
+      return <DurationCell e={e} slowMs={slowMs} now={now} />;
     case 'start':
       return <span className="net-dim tnum">{formatClock(e.startTs)}</span>;
     case 'waterfall':

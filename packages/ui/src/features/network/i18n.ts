@@ -1,4 +1,5 @@
 import { hasMessage, registerMessages } from '../../i18n';
+import './streamsI18n';
 
 /** Network tab ("Ağ") dictionary. Technical tokens (GET, 2xx, JSON, cURL…) stay literal. */
 registerMessages('network', {

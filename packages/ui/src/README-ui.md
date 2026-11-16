@@ -41,6 +41,42 @@ import { registerMessages, useT } from '../../i18n';
   install on the Device tab), put `data-dropzone` on the element; the global handler then ignores drops
   inside it and you handle `dragover`/`drop` yourself.
 
+### 1.1 Network: stream entries (WebSocket, SSE)
+
+- One `NetworkEntry` per connection, with `entry.stream` (`StreamInfo`: kind, state, counts, bytes, `dropped`,
+  close / failure) once the server opened a stream for it; `entry.duration` stays the handshake's time. The server
+  opens one only for an app that sends messages and was asked to (SPEC §6.1.1); any other 101 or bodiless
+  `text/event-stream` response stays plain. `connectionKind(entry)` (`data/explain.ts`) recognises both, so filters,
+  the type column, the actions and the flow picker treat a plain handshake as a connection too. Helpers live in
+  `features/network/model/streams.ts`: `isStreamEntry`, `isLiveStream` (open and not an imported recording: an
+  imported "open" connection does not run on), `streamAge` (live: until now; else until close / last message),
+  `closeCodeKey` (RFC 6455 names, 3000–3999 library, 4000–4999 app), `buildMessageRows` (seq order, filters, a gap
+  row wherever `seq` jumps; `head` when the gap follows the `STREAM_HEAD_KEPT` kept first messages).
+- List: `StreamChip` (state icon + WS / SSE + growing count) next to the path (stream entries only); Size = message bytes; Time = how
+  long the connection is / was open (ticks while live; handshake time in the tooltip). `is:stream|ws|sse|open`
+  (TR `akış`, `açık`, `canlı`) and `type:stream` filter them.
+- Detail: the **Messages** tab (`components/StreamMessages.tsx`) is the default for stream entries (own saved tab
+  key `network.detailTab.stream`). Messages come only from `useStreamMessages(id)` (`data/streamMessages.ts`, paged
+  after the newest seq held); the entry row's `stream` is the live truth for counts. Every state has its own
+  text: loading, fetch failed (retry), SDK without the `streams` capability, capture off in Settings (button to
+  Settings → Network), open with nothing yet, closed / failed without messages, all removed by limits, imported,
+  request removed from memory, filters hide everything / only ping/pong so far. Messages removed by the limits are
+  one quiet item on the counts line (the sentence and the why in its tooltip) and a gap row in place; the header
+  keeps at least 12 message rows in view at 920 × 760.
+- `ConnectionNote` replaces the request actions with one line: for a stream, that replay / edit / mock work on
+  one-off requests (full reason in the tooltip); for a plain handshake, why it has no messages
+  (`streamCaptureState`): the SDK does not capture them, capture is off (Settings), or the SDK captures them but had
+  no hook on this socket (`net.response.noStream`, e.g. an Android socket opened without `DurbunWebSocketFactory`;
+  the SDK's `noWebSocketFactory` line, `sdkNoteOf`, opens with "Show in Logs"). ping/pong are hidden by default
+  (counted), the direction filter and the hide-ping/pong choice persist (`network.streamFilter`), the search does
+  not (the list's body search seeds it).
+- Availability: `networkActionAvailability(entry, action)` and `streamCaptureState(...)` in `data/explain.ts` are
+  the only place deciding whether replay / edit and send / mock / compare / flow work and whether messages can
+  arrive (the Flows "from requests" dialog lists only `canBecomeStep` entries); `features/network/actions.ts` (`canRun`, `actionBlockText`, `actionBlockHint`) turns them into
+  disabled controls with a reason. Streams show one note in place of the action buttons, not dead buttons.
+- Settings → Network → "Capture WebSocket and SSE messages" (`captureStreams`, absent = on) is shown only when
+  the server reports the key.
+
 ## 2. Running
 
 ```bash

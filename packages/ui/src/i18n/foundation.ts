@@ -431,6 +431,9 @@ registerMessages('shell', {
       networkDesc: 'Gövde yakalama ve bellek sınırları.',
       captureBodies: 'İstek ve yanıt gövdelerini yakala',
       captureBodiesHint: 'Kapalıyken yalnızca başlıklar ve zamanlamalar kaydedilir.',
+      captureStreams: 'WebSocket ve SSE mesajlarını yakala',
+      captureStreamsHint:
+        'Mesaj gövdeleri gövde yakalama ayarına ve gövde başına sınıra uyar; mesajlar bellek sınırları içinde tutulur. Kapalıyken bağlantılar yine listelenir.',
       maxBodyBytes: 'Gövde başına sınır',
       maxBodyBytesHint: 'Daha büyük gövdeler kırpılır; gerçek boyut yine gösterilir.',
       maxBodyStoreMB: 'Toplam gövde belleği',
@@ -1196,6 +1199,9 @@ registerMessages('shell', {
       networkDesc: 'Body capture and memory limits.',
       captureBodies: 'Capture request and response bodies',
       captureBodiesHint: 'When off, only headers and timings are recorded.',
+      captureStreams: 'Capture WebSocket and SSE messages',
+      captureStreamsHint:
+        'Payloads follow the body capture setting and the per-body limit; messages are kept within the memory limits. When off, the connections are still listed.',
       maxBodyBytes: 'Limit per body',
       maxBodyBytesHint: 'Larger bodies are truncated; the real size is still shown.',
       maxBodyStoreMB: 'Total body memory',

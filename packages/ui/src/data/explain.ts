@@ -6,7 +6,7 @@
  * the sidebar badges, the "Neler görünüyor?" panel and the Network / Performance / Mocks empty states all
  * render from it so they can never disagree.
  */
-import type { AppInstallSource, AppSession, DeviceActionId, DeviceApp, DeviceInfo, DeviceReaderState, DeviceUnavailableAction, SdkLayer, SdkPlatform } from '@durbun/protocol';
+import type { AppInstallSource, AppSession, DeviceActionId, DeviceApp, DeviceInfo, DeviceReaderState, DeviceUnavailableAction, NetworkEntry, SdkLayer, SdkPlatform } from '@durbun/protocol';
 
 /** One row of the matrix. */
 export type ExplainCapability = 'logs' | 'network' | 'metrics' | 'crashes' | 'mocks' | 'tools';
@@ -715,4 +715,61 @@ export function hiddenDeviceActions(
     } else groups.set(key, { code: u.code, ...(u.params ? { params: u.params } : {}), actions: [u.action] });
   }
   return [...groups.values()];
+}
+
+/* ───────────── Network tab: actions on one request, messages of a stream entry ───────────── */
+
+/** Actions on a captured request that need an HTTP exchange to work with. */
+export type NetworkEntryAction = 'replay' | 'editReplay' | 'mock' | 'compare' | 'flow';
+/**
+ * Why an action is unavailable: a WebSocket / SSE entry is a long-lived connection (sending its handshake again
+ * opens a new connection without the app's messages, a mock answers one response, a body compare has no bodies);
+ * `noRequest`: only the response arrived (method `?`), so there is nothing to send again.
+ */
+export type NetworkActionBlock = 'websocket' | 'sse' | 'noRequest';
+export type NetworkActionAvailability = { ok: true } | { ok: false; reason: NetworkActionBlock };
+
+/**
+ * The kind of long-lived connection an entry is: its `stream`, else what its handshake says. Since the server opens
+ * a stream only for an app that was asked for messages (SPEC §6.1.1), a 101 or a bodiless `text/event-stream`
+ * response from any other app is a plain entry without `stream`; it is still a connection, not a request.
+ */
+export function connectionKind(
+  entry: Pick<NetworkEntry, 'stream' | 'status'> & Partial<Pick<NetworkEntry, 'responseContentType' | 'hasResponseBody'>>,
+): 'websocket' | 'sse' | null {
+  if (entry.stream) return entry.stream.kind;
+  if (entry.status === 101) return 'websocket';
+  if (!entry.hasResponseBody && entry.responseContentType?.toLowerCase().startsWith('text/event-stream')) return 'sse';
+  return null;
+}
+
+export function networkActionAvailability(
+  entry: Pick<NetworkEntry, 'method' | 'stream'> & Partial<Pick<NetworkEntry, 'status' | 'responseContentType' | 'hasResponseBody'>>,
+  action: NetworkEntryAction,
+): NetworkActionAvailability {
+  const kind = connectionKind(entry);
+  if (kind) return { ok: false, reason: kind };
+  if (entry.method === '?' && (action === 'replay' || action === 'editReplay' || action === 'flow')) return { ok: false, reason: 'noRequest' };
+  return { ok: true };
+}
+
+/**
+ * Whether the messages of a stream entry can arrive, and if not why (the Messages tab's empty states and notes):
+ * `imported` a recording (what the file holds, nothing more comes) · `noCapability` the app's SDK does not send
+ * messages (no `streams` capability: the handshake alone is known) · `captureOff` Settings → Network turned the
+ * capture off (`captureStreams: false`) · `ok`.
+ */
+export type StreamCaptureState = 'ok' | 'imported' | 'noCapability' | 'captureOff';
+
+export function streamCaptureState(input: {
+  deviceId: string;
+  /** The entry's app session, when the window still knows it. */
+  session?: Pick<AppSession, 'capabilities'>;
+  /** ServerSettings.captureStreams (absent = on). */
+  captureStreams?: boolean;
+}): StreamCaptureState {
+  if (input.deviceId.startsWith('import:')) return 'imported';
+  if (input.session && !input.session.capabilities.includes('streams')) return 'noCapability';
+  if (input.captureStreams === false) return 'captureOff';
+  return 'ok';
 }

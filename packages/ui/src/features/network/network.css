@@ -578,14 +578,14 @@
   height: 28px;
   padding: 0 12px;
   border-radius: var(--radius-pill);
-  background: var(--accent);
+  background: var(--accent-fill);
   color: var(--text-on-accent);
   font-size: var(--fs-sm);
   font-weight: 500;
   box-shadow: var(--shadow-pop);
 }
 .net-newpill:hover {
-  background: var(--accent-hover);
+  background: var(--accent-fill-hover);
 }
 .net-newpill--top {
   top: 40px;
@@ -1468,5 +1468,379 @@
 /* The list narrowed to one mock rule's answers ("12 hits" on a rule). */
 .net-fchip--rule {
   max-width: 240px;
+  gap: 4px;
+}
+
+/* ───────────── Stream entries (WebSocket, SSE) ───────────── */
+/* List chip: state by icon shape (broadcast / stop / unplugged) plus the kind and a live message count. */
+.net-strm {
+  --c: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+}
+.net-strm--open {
+  --c: var(--success);
+}
+.net-strm--failed {
+  --c: var(--danger);
+}
+.net-strm__kind {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+.net-strm__count {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.net-strm--label {
+  height: 20px;
+  padding: 0 7px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+.net-dur--live {
+  color: var(--success);
+}
+.net-detail__noactions {
+  margin: 0;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: nowrap;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  cursor: default;
+}
+.net-detail__noactions > svg {
+  flex: none;
+}
+.net-detail__noactions > span:not(.sr-only) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Messages tab */
+.net-msgs__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 14px 6px;
+  flex-shrink: 0;
+}
+.net-msgs__dropped {
+  gap: 3px;
+  color: var(--text-muted);
+}
+.net-msgs__info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: help;
+}
+.net-msgs__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 20px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+.net-msgs__link:hover,
+.net-msgs__link:focus-visible {
+  background: var(--bg-hover);
+}
+.net-msgs__info:hover,
+.net-msgs__info:focus-visible {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.net-msgs__line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: var(--fs-sm);
+}
+.net-msgs__age {
+  gap: 6px;
+  font-weight: 500;
+}
+.net-msgs__age--open > svg {
+  color: var(--success);
+}
+.net-msgs__age--failed > svg {
+  color: var(--danger);
+}
+.net-msgs__age--closed > svg {
+  color: var(--text-muted);
+}
+.net-msgs__close {
+  color: var(--text-muted);
+}
+.net-msgs__code {
+  color: var(--text);
+}
+.net-msgs__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 16px;
+}
+.net-msgs__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: var(--fs-xs);
+  color: var(--text);
+}
+.net-msgs__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.net-msgs__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 14px 6px;
+  flex-shrink: 0;
+}
+.net-msgs__note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.net-msgs__note > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.net-msgs__tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 14px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.net-msgs__search {
+  flex: 1 1 180px;
+  min-width: 150px;
+}
+.net-msgs__matches {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding-right: 4px;
+}
+.net-msgs__body {
+  position: relative;
+}
+.net-msgs__body > .empty {
+  margin: auto 0;
+}
+.net-msgs__listwrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.net-msgs__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.net-msgs__item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+.net-msgs__gap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-bottom: 1px dashed var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.net-msg {
+  border-bottom: 1px solid var(--border);
+}
+.net-msg.is-open {
+  background: var(--bg-sunken);
+}
+.net-msg__head {
+  display: grid;
+  grid-template-columns: 12px auto 64px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 25px;
+  padding: 0 14px 0 6px;
+  text-align: left;
+  color: var(--text);
+}
+.net-msgs--sse .net-msg__head {
+  grid-template-columns: 12px 64px auto minmax(0, 1fr) auto;
+}
+.net-msg__head:hover {
+  background: var(--bg-hover);
+}
+.net-msg__chev {
+  color: var(--text-subtle);
+  transition: transform var(--dur) var(--ease);
+}
+.net-msg.is-open .net-msg__chev {
+  transform: rotate(90deg);
+}
+.net-msg__dir {
+  display: inline-flex;
+  align-items: center;
+}
+.net-msg__dir--out {
+  color: var(--accent);
+}
+.net-msg__dir--in {
+  color: var(--success);
+}
+.net-msg__time {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  text-align: right;
+}
+.net-msg__type {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+}
+.net-msg__type--event {
+  color: var(--info);
+  background: var(--info-soft);
+}
+.net-msg__type--binary {
+  color: var(--m-patch);
+  background: color-mix(in srgb, var(--m-patch) 13%, transparent);
+}
+.net-msg__type--close {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+.net-msg__preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--log-fs);
+}
+.net-msg--control .net-msg__preview,
+.net-msg--control .net-msg__type {
+  color: var(--text-subtle);
+}
+.net-msg__size {
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+  text-align: right;
+}
+.net-msg__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 14px 12px 24px;
+}
+.net-msg__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px 14px;
+  margin: 0;
+}
+.net-msg__field {
+  min-width: 0;
+}
+.net-msg__field dt {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.net-msg__field dd {
+  margin: 0;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+.net-msg__payload {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.net-msg__pre,
+.net-msg__json {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+}
+.net-msg__pre {
+  font-size: var(--log-fs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.net-msg__pre--hex {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.net-msg__actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
 }

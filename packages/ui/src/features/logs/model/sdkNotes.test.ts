@@ -15,6 +15,12 @@ describe('sdk notes', () => {
     expect(sdkNoteOf({ ...base, data: 'noInterceptor' })).toBeUndefined();
   });
 
+  it('a WebSocket without the SDK factory: recognised, worded by the SDK message itself', () => {
+    const line = { ...base, message: 'A WebSocket was opened without DurbunWebSocketFactory: …', data: { reason: 'noWebSocketFactory' } };
+    expect(sdkNoteOf(line)).toEqual({ kind: 'noWebSocketFactory' });
+    expect(sdkNoteText(line)).toBeUndefined();
+  });
+
   it('words them in the interface language', () => {
     setLanguage('tr');
     expect(sdkNoteText({ ...base, data: { reason: 'noInterceptor', afterMs: 30000 } })).toContain('DurbunInterceptor yok');

@@ -165,3 +165,37 @@ describe('query language', () => {
     expect(parseQuery('pamuk method:post -cdn').freeText).toBe('pamuk');
   });
 });
+
+describe('stream entries (WebSocket / SSE)', () => {
+  const stream = (kind: 'websocket' | 'sse', state: 'open' | 'closed' | 'failed') =>
+    ({ kind, state, openTs: 1000, count: 3, in: 2, out: 1, control: 0, bytesIn: 10, bytesOut: 5, dropped: 0, lastSeq: 3 }) as NonNullable<NetworkEntry['stream']>;
+  const all = [
+    entry({ id: 'plain' }),
+    entry({ id: 'ws', status: 101, stream: stream('websocket', 'open') }),
+    entry({ id: 'wsClosed', status: 101, stream: stream('websocket', 'closed') }),
+    entry({ id: 'sse', responseContentType: 'text/event-stream', stream: stream('sse', 'open') }),
+    entry({ id: 'imported', deviceId: 'import:1', status: 101, stream: stream('websocket', 'open') }),
+    // A handshake kept without a stream (the app sends no messages): still a WebSocket, never "open".
+    entry({ id: 'plain101', status: 101, hasResponseBody: false }),
+  ];
+
+  it('is: terms find connections by kind and live state (an imported recording is not live)', () => {
+    expect(run(all, 'is:stream')).toEqual(['ws', 'wsClosed', 'sse', 'imported', 'plain101']);
+    expect(run(all, 'is:akış')).toEqual(['ws', 'wsClosed', 'sse', 'imported', 'plain101']);
+    expect(run(all, 'is:ws')).toEqual(['ws', 'wsClosed', 'imported', 'plain101']);
+    expect(run(all, 'is:sse')).toEqual(['sse']);
+    expect(run(all, 'is:open')).toEqual(['ws', 'sse']);
+    expect(run(all, 'is:açık is:ws')).toEqual(['ws']);
+    expect(run(all, '-is:stream')).toEqual(['plain']);
+    expect(parseQuery('is:websocket is:canlı is:eventsource').invalid).toEqual([]);
+  });
+
+  it('type category and short label', () => {
+    expect(typeCategoryOf(all[1]!)).toBe('stream');
+    expect(typeCategoryOf(all[3]!)).toBe('stream');
+    expect(run(all, 'type:stream')).toEqual(['ws', 'wsClosed', 'sse', 'imported', 'plain101']);
+    expect(shortTypeLabel(all[5]!)).toBe('websocket');
+    expect(shortTypeLabel(all[1]!)).toBe('websocket');
+    expect(shortTypeLabel(all[3]!)).toBe('sse');
+  });
+});

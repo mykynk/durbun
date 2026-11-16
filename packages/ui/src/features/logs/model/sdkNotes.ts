@@ -12,7 +12,12 @@ export type SdkNote =
   /** No HTTP client carries the SDK's interceptor some time after start: the Network tab stays empty for this app. */
   | { kind: 'noInterceptor'; afterMs?: number }
   /** A respond mock matched a call the interceptor could not answer (it sits in the network chain). */
-  | { kind: 'networkInterceptor'; ruleId: string; netId?: string };
+  | { kind: 'networkInterceptor'; ruleId: string; netId?: string }
+  /**
+   * A WebSocket was opened without the SDK's factory (Android: `OkHttpClient.newWebSocket` instead of
+   * `DurbunWebSocketFactory`): its handshake is captured, its messages are not (once per process).
+   */
+  | { kind: 'noWebSocketFactory' };
 
 export function sdkNoteOf(e: Pick<LogEntry, 'source' | 'data' | 'appId'>): SdkNote | undefined {
   if (e.source !== 'app') return undefined;
@@ -20,6 +25,7 @@ export function sdkNoteOf(e: Pick<LogEntry, 'source' | 'data' | 'appId'>): SdkNo
   if (!d || typeof d !== 'object' || Array.isArray(d)) return undefined;
   const r = d as { reason?: unknown; afterMs?: unknown; mockRuleId?: unknown; requestId?: unknown };
   if (r.reason === 'noInterceptor') return { kind: 'noInterceptor', afterMs: typeof r.afterMs === 'number' && r.afterMs > 0 ? r.afterMs : undefined };
+  if (r.reason === 'noWebSocketFactory') return { kind: 'noWebSocketFactory' };
   if (r.reason === 'networkInterceptor' && typeof r.mockRuleId === 'string' && r.mockRuleId) {
     // The server keys an SDK request as `<appId>:<request id>`.
     const netId = typeof r.requestId === 'string' && r.requestId && e.appId ? `${e.appId}:${r.requestId}` : undefined;
@@ -31,7 +37,8 @@ export function sdkNoteOf(e: Pick<LogEntry, 'source' | 'data' | 'appId'>): SdkNo
 /** The line in the interface language, or undefined when it is not such a line (callers fall back to `message`). */
 export function sdkNoteText(e: Pick<LogEntry, 'source' | 'data' | 'appId' | 'message'>): string | undefined {
   const note = sdkNoteOf(e);
-  if (!note) return undefined;
+  // No wording of its own yet: the SDK's message stays (the Network tab says it for the connection it concerns).
+  if (!note || note.kind === 'noWebSocketFactory') return undefined;
   if (note.kind === 'noInterceptor') {
     const ms = note.afterMs ?? 30_000;
     // A whole wait the SDK chose ("30 sn", not "30,0 sn").

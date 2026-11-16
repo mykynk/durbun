@@ -9,6 +9,7 @@ import '../mocks/i18n';
 import { COLUMNS } from './model/columns';
 import { STATUS_CLASSES, TYPE_CATEGORIES } from './model/filters';
 import { COPY_FORMATS } from './model/copyAs';
+import { CLOSE_CODE_KEYS } from './model/streams';
 import { TIMING_PHASES } from './model/waterfall';
 import { SHARE_REPORT_KEYS } from './share';
 import { MATCH_TYPES, FAIL_ERRORS, ACTION_TYPES } from '../mocks/model/rules';
@@ -58,7 +59,16 @@ describe('network + mocks dictionaries', () => {
       'network.errors': ['timeout', 'dns', 'refused', 'tls', 'reset', 'offline', 'disconnected', 'cancelled', 'generic'],
       'network.body.kinds': ['empty', 'notCaptured', 'json', 'image', 'svg', 'html', 'xml', 'javascript', 'css', 'text', 'form', 'multipart', 'binary'],
       'network.body.modes': ['preview', 'code', 'hex'],
-      'network.detail.tabs': ['general', 'request', 'response', 'timing'],
+      'network.detail.tabs': ['messages', 'general', 'request', 'response', 'timing'],
+      'network.streams': ['openSince', 'openFor', 'openWhenSaved'],
+      'network.streams.state': ['open', 'closed', 'failed'],
+      'network.streams.stateTitle': ['open', 'closed', 'failed'],
+      'network.streams.closeNames': CLOSE_CODE_KEYS,
+      'network.streams.dir': ['all', 'in', 'out'],
+      'network.streams.dirName': ['in', 'out'],
+      'network.streams.dirTitle': ['in', 'out'],
+      'network.streams.typeTitle': ['text', 'binary', 'ping', 'pong', 'close', 'event'],
+      'network.unavailable.stream': ['replay', 'editReplay', 'mock', 'compare', 'flow'],
       'network.share.report': SHARE_REPORT_KEYS,
       'network.sections': ['body', 'headers', 'query', 'cookies'],
       'network.compare.tabs': ['general', 'headers', 'response', 'request'],

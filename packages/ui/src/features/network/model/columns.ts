@@ -1,5 +1,6 @@
 import type { NetworkEntry } from '@durbun/protocol';
 import { shortTypeLabel } from './filters';
+import { isLiveStream, streamAge } from './streams';
 
 /** Table columns, persisted column preferences and sorting. */
 
@@ -166,6 +167,18 @@ function statusRank(e: NetworkEntry): number {
 
 const str = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+/** Size for sorting: a stream entry by the payload bytes of its messages (as its cell shows). */
+function sizeRank(e: NetworkEntry): number {
+  if (e.stream) return e.stream.bytesIn + e.stream.bytesOut;
+  return e.responseBodySize ?? -1;
+}
+
+/** Duration for sorting: a stream entry by how long it was open (still open = longest, like pending requests). */
+function durationRank(e: NetworkEntry): number {
+  if (e.stream) return isLiveStream(e) ? Number.MAX_SAFE_INTEGER : (streamAge(e, 0) ?? -1);
+  return e.duration ?? (e.state === 'pending' ? Number.MAX_SAFE_INTEGER : -1);
+}
+
 /** Display names for the app and device columns (sorting by what the user reads, not by ids). */
 export interface ColumnNames {
   app: (e: NetworkEntry) => string;
@@ -190,9 +203,9 @@ export function comparatorFor(key: SortKey, names: ColumnNames = ID_NAMES): ((a:
     case 'type':
       return (a, b) => str(shortTypeLabel(a), shortTypeLabel(b));
     case 'size':
-      return (a, b) => (a.responseBodySize ?? -1) - (b.responseBodySize ?? -1);
+      return (a, b) => sizeRank(a) - sizeRank(b);
     case 'duration':
-      return (a, b) => (a.duration ?? (a.state === 'pending' ? Number.MAX_SAFE_INTEGER : -1)) - (b.duration ?? (b.state === 'pending' ? Number.MAX_SAFE_INTEGER : -1));
+      return (a, b) => durationRank(a) - durationRank(b);
     case 'start':
       return (a, b) => a.startTs - b.startTs;
     case 'source':

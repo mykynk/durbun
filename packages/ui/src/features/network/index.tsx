@@ -74,7 +74,7 @@ import { PartialCaptureNote } from './components/PartialCaptureNote';
 import { ruleLabel } from '../mocks/model/rules';
 import { startHitLedger } from '../mocks/model/hitLedger';
 import { bugReport } from '../report/store';
-import { copyEntryAs, copyUrl, createMockFrom, exportHarFor, harFileName, harLabel, replayRequest, showInLogs } from './actions';
+import { actionBlockHint, actionBlockText, canRun, copyEntryAs, copyUrl, createMockFrom, exportHarFor, harFileName, harLabel, replayRequest, showInLogs } from './actions';
 import { harFileStamp } from '../transfer/dataExport';
 import { useBodySearch } from './useBodySearch';
 import { ExplainEmpty, guideTabFor, useScopeExplain } from '../../sources';
@@ -301,6 +301,13 @@ export default function NetworkView() {
         toast.warn(t('network.compare.unavailable'));
         return;
       }
+      const blocked = actionBlockText(a, 'compare') ?? actionBlockText(b, 'compare');
+      if (blocked) {
+        toast.info(blocked);
+        setCompareBase(null);
+        setMarks([]);
+        return;
+      }
       setComparePair([a, b]);
       // The "pick the second request" bar ends with the comparison, however the second one was picked.
       setCompareBase(null);
@@ -344,16 +351,16 @@ export default function NetworkView() {
       { label: t('network.menu.copyUrl'), icon: Link2, onSelect: () => void copyUrl(e) },
       ...COPY_FORMATS.map((f): MenuItem => ({ label: t(`network.menu.copyAs.${f}`), icon: f === 'curl' ? Copy : undefined, onSelect: () => void copyEntryAs(e, f) })),
       { type: 'separator' },
-      { label: t('network.menu.replay'), icon: RotateCw, disabled: e.method === '?', onSelect: () => void doReplay(e) },
-      { label: t('network.menu.editReplayEllipsis'), icon: PencilLine, disabled: e.method === '?', onSelect: () => setReplayEntry(e) },
-      { label: t('network.menu.createMock'), icon: Drama, onSelect: () => void createMockFrom(e) },
-      { label: t('network.menu.createFlow'), icon: Workflow, disabled: e.method === '?', onSelect: () => flowFrom([e.id]) },
+      { label: t('network.menu.replay'), icon: RotateCw, disabled: !canRun(e, 'replay'), hint: actionBlockHint(e, 'replay'), onSelect: () => void doReplay(e) },
+      { label: t('network.menu.editReplayEllipsis'), icon: PencilLine, disabled: !canRun(e, 'editReplay'), hint: actionBlockHint(e, 'editReplay'), onSelect: () => setReplayEntry(e) },
+      { label: t('network.menu.createMock'), icon: Drama, disabled: !canRun(e, 'mock'), hint: actionBlockHint(e, 'mock'), onSelect: () => void createMockFrom(e) },
+      { label: t('network.menu.createFlow'), icon: Workflow, disabled: !canRun(e, 'flow'), hint: actionBlockHint(e, 'flow'), onSelect: () => flowFrom([e.id]) },
       { type: 'separator' },
       { label: t('network.menu.showInLogs'), icon: ScrollText, onSelect: () => showInLogs(e) },
       { label: t('network.menu.har'), icon: FileDown, onSelect: () => exportHarFor([e.id], harLabel(e), harFileName(e)) },
       base
         ? { label: t('network.menu.compareWith', { name: `${base.method} ${base.path}` }), icon: ArrowLeftRight, onSelect: () => openCompare(base.id, e.id) }
-        : { label: t('network.menu.compareEllipsis'), icon: ArrowLeftRight, hint: t('network.menu.compareHint'), onSelect: () => setCompareBase(e.id) },
+        : { label: t('network.menu.compareEllipsis'), icon: ArrowLeftRight, disabled: !canRun(e, 'compare'), hint: actionBlockHint(e, 'compare') ?? t('network.menu.compareHint'), onSelect: () => setCompareBase(e.id) },
     ];
   };
 
@@ -602,12 +609,12 @@ export default function NetworkView() {
           { id: 'network.sel.share', title: t('network.share.title'), group, icon: Share2, keywords: ['share', 'paylaş', 'report', 'rapor', 'markdown'], run: () => setShareEntry(sel) },
           { id: 'network.sel.report', title: t('network.commands.reportRequest'), group, icon: Bug, keywords: ['bug', 'hata', 'report', 'rapor', 'zip', 'jira'], run: () => bugReport.open({ kind: 'request', netId: sel.id }) },
           { id: 'network.sel.curl', title: t('network.menu.copyAs.curl'), group, icon: Copy, keywords: ['curl', 'copy', 'kopyala'], run: () => void copyEntryAs(sel, 'curl') },
-          { id: 'network.sel.replay', title: t('network.menu.replay'), group, icon: RotateCw, keywords: ['replay', 'tekrar', 'gönder'], run: () => void doReplay(sel) },
-          { id: 'network.sel.edit', title: t('network.menu.editReplayEllipsis'), group, icon: PencilLine, keywords: ['edit', 'düzenle', 'replay'], run: () => setReplayEntry(sel) },
-          { id: 'network.sel.mock', title: t('network.menu.createMock'), group, icon: Drama, keywords: ['mock', 'oluştur'], run: () => void createMockFrom(sel) },
-          { id: 'network.sel.flow', title: t('network.menu.createFlow'), group, icon: Workflow, keywords: ['flow', 'akış', 'test', 'senaryo', 'scenario'], run: () => flowFrom([sel.id]), disabled: sel.method === '?' },
+          { id: 'network.sel.replay', title: t('network.menu.replay'), group, icon: RotateCw, keywords: ['replay', 'tekrar', 'gönder'], run: () => void doReplay(sel), disabled: !canRun(sel, 'replay') },
+          { id: 'network.sel.edit', title: t('network.menu.editReplayEllipsis'), group, icon: PencilLine, keywords: ['edit', 'düzenle', 'replay'], run: () => setReplayEntry(sel), disabled: !canRun(sel, 'editReplay') },
+          { id: 'network.sel.mock', title: t('network.menu.createMock'), group, icon: Drama, keywords: ['mock', 'oluştur'], run: () => void createMockFrom(sel), disabled: !canRun(sel, 'mock') },
+          { id: 'network.sel.flow', title: t('network.menu.createFlow'), group, icon: Workflow, keywords: ['flow', 'akış', 'test', 'senaryo', 'scenario'], run: () => flowFrom([sel.id]), disabled: !canRun(sel, 'flow') },
           { id: 'network.sel.logs', title: t('network.menu.showInLogs'), group, icon: ScrollText, keywords: ['logs', 'loglar'], run: () => showInLogs(sel) },
-          { id: 'network.sel.compare', title: t('network.menu.compareEllipsis'), group, icon: ArrowLeftRight, keywords: ['compare', 'karşılaştır', 'diff'], run: () => setCompareBase(sel.id) },
+          { id: 'network.sel.compare', title: t('network.menu.compareEllipsis'), group, icon: ArrowLeftRight, keywords: ['compare', 'karşılaştır', 'diff'], run: () => setCompareBase(sel.id), disabled: !canRun(sel, 'compare') },
         ]
       : []),
   ]);

@@ -6,7 +6,7 @@
  *   node packages/ui/dev/mock-server.mjs [--port 9799] [--empty] [--no-flows] [--rate 30]
  *   DURBUN_SERVER=http://127.0.0.1:9799 npx vite --port 5179     (from packages/ui)
  *
- * WS /ui: hello → snapshot (3 devices, 3 apps + an older session, device apps, mocks, drivers) → ~2000
+ * WS /ui: hello → snapshot (4 devices, 4 apps + an older session, device apps, mocks, drivers) → ~2000
  * history logs → live batches (logs, network, metrics, device apps, occasional device/app changes). Every
  * command gets {ok: true} with plausible data. REST: /api/health, /api/doctor, /api/network/:id (+ bodies),
  * /api/network/search, /api/export, /api/import, /api/har, /api/bug-report, /api/upload, /api/files/crash/:udid/:name,
@@ -17,8 +17,19 @@
  * device readers (frame stats without data on the Pixel, dropbox refused on the Galaxy) and SDK layers.
  * `--empty` starts with no devices (onboarding); `demo.set {enabled:true}` then fills everything.
  * `--no-flows` starts the Flows tab empty (its welcome page with the starter flows).
+ * Stream entries (SPEC §6.1.1): Pati's vet chat over a WebSocket (open, growing, 2 000+ messages with a gap after
+ * the first 100, a binary presence frame, ping / pong, a cut history payload), a socket closed with 1001, one that
+ * broke, a clinic queue over SSE (named events, ids, retry; ends now and then and reconnects), an open socket with
+ * no messages yet, and two plain 101s without `stream`, as the server keeps a handshake it opens no stream for: Kasa
+ * on iOS (no `streams` capability) and Kasa on Android (captures streams, but its socket was opened without
+ * DurbunWebSocketFactory: `noStream`, with the SDK's `noWebSocketFactory` line). `captureStreams` off does the same
+ * for new connections. GET /api/network/:id/messages pages them.
+ * Launch reports (`durbun.launch`): a cold start when Kasa (Android) connects, a prewarmed one from Kasa on iOS
+ * (Jane's iPhone). Metrics: frame times for Flutter and native Android only; native Android drops `fps` and the
+ * frame times while its screen is idle.
  */
 import http from 'node:http';
+import zlib from 'node:zlib';
 import { WebSocketServer } from 'ws';
 import { flowSummaries, handleFlowsApi } from './mock-flows.mjs';
 
@@ -49,6 +60,7 @@ let settings = {
   maxBodyBytes: 1048576,
   maxBodyStoreMB: 256,
   captureBodies: true,
+  captureStreams: true,
   logcatTail: 2000,
   iosSimLogScope: 'apps',
   iosSimLogLevel: 'info',
@@ -179,7 +191,7 @@ const FLUTTER_ACTIONS = [
 ];
 
 function baseApps() {
-  const caps = ['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands'];
+  const caps = ['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands', 'streams'];
   return [
     {
       id: 'app:1',
@@ -216,19 +228,34 @@ function baseApps() {
       id: 'app:3',
       sessionKey: 's-kasa',
       deviceId: PIXEL,
-      sdk: { name: 'durbun-android', version: '0.2.0', platform: 'android' },
+      sdk: { name: 'durbun-android', version: '0.4.0', platform: 'android' },
       app: { name: 'Kasa', id: 'com.mykynk.kasa', version: '2.0.1', build: '201', pid: 13002, processName: 'com.mykynk.kasa', debug: true },
       transport: 'adb-reverse',
       connected: true,
       connectedAt: startedAt - 200_000,
-      capabilities: ['logs', 'network', 'mocks', 'metrics', 'events', 'crash'],
+      // Captures streams, but its balance socket is opened with OkHttpClient.newWebSocket (no hook: `noStream`).
+      capabilities: ['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'streams'],
       actions: [],
       stats: { logs: 0, requests: 0, errors: 0 },
-      // A newer SDK build than this Dürbün: the server reports what to update.
+      // A newer SDK build than this Dürbün (protocol 1): the server reports what to update (the app.sdkNewer line).
       sdkProtocol: 2,
       protocolMismatch: 'sdk-newer',
       clockOffsetMs: 320,
       clockOffsetAccuracyMs: 40,
+    },
+    {
+      // Kasa's native iOS build (Swift SDK): reports its launch (prewarmed here), no frame times.
+      id: 'app:5',
+      sessionKey: 's-kasa-ios',
+      deviceId: IPHONE,
+      sdk: { name: 'durbun-ios', version: '0.4.0', platform: 'ios' },
+      app: { name: 'Kasa', id: 'com.mykynk.kasa', version: '2.0.1', build: '201', pid: 902, processName: 'Kasa', debug: true },
+      transport: 'usbmux',
+      connected: true,
+      connectedAt: startedAt - 100_000,
+      capabilities: ['logs', 'network', 'metrics', 'events', 'crash'],
+      actions: [],
+      stats: { logs: 0, requests: 0, errors: 0 },
     },
     {
       id: 'app:4',
@@ -268,6 +295,7 @@ function baseDeviceApps() {
     da(SIM, 'com.mykynk.pati', { name: 'Pati', version: '1.4.2', build: '42', buildType: 'debug', install: { source: 'simulator' }, processName: 'Runner', pids: [48211], running: true }),
     // Two Flutter apps on one iPhone, both "Runner": a TestFlight build and an Xcode build.
     da(IPHONE, 'com.mykynk.kumbara', { name: 'Kumbara', version: '3.1.0', build: '412', buildType: 'release', install: { source: 'store-or-testflight' }, processName: 'Runner', pids: [811], running: true, crashReports: 1 }),
+    da(IPHONE, 'com.mykynk.kasa', { name: 'Kasa', version: '2.0.1', build: '201', buildType: 'debug', install: { source: 'xcode' }, processName: 'Kasa', pids: [902], running: true }),
     da(IPHONE, 'com.mykynk.pati', { name: 'Pati', version: '1.5.0', build: '58', buildType: 'debug', install: { source: 'xcode' }, processName: 'Runner', lastActivity: Date.now() - 9 * 60_000 }),
   ];
 }
@@ -695,17 +723,44 @@ function seedHistory() {
       logs.push(logEntry({ ts: ts + 10, deviceId: PIXEL, source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'process.died', params: { process: 'com.mykynk.pati', pid: 11873 }, message: 'Process died: com.mykynk.pati (pid 11873)' }));
       logs.push(logEntry({ ts: ts + 1500, deviceId: PIXEL, appId: 'app:2', source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'app.connected', params: { app: 'Pati', bundleId: 'com.mykynk.pati', version: '1.4.2', sdk: 'flutter', transport: 'adb-reverse', device: 'Pixel 8' }, message: 'Pati 1.4.2 connected (flutter SDK via adb-reverse)' }));
     }
+    if (i === 1470) logs.push(...kasaConnected(ts));
+    if (i === 1840) logs.push(...kasaIosConnected(ts));
     if (i === 1500) logs.push(logEntry({ ts, deviceId: PIXEL, source: 'system', level: 'info', tag: 'durbun', kind: 'marker', code: 'marker', params: { label: 'Payment flow test', n: 1 }, message: 'Payment flow test' }));
     if (i === 1200) logs.push(...kumbaraCrash(ts));
     if (i === 1700) logs.push(kumbaraIpsCrash(ts));
     if (i === 1850) logs.push(...showcaseLines(ts));
   }
   showcaseRequests();
+  streamMsgs.clear();
+  seedStreams();
+  seedMetrics();
   for (let i = 0; i < 60; i++) {
     const r = makeRequest(pick(['app:2', 'app:3', 'app:4']));
     const d = network.get(r.id);
     d.startTs = Date.now() - int(5_000, 500_000);
   }
+}
+
+/** Kasa (Kotlin SDK) connects after a cold start: its `durbun.launch` event follows the connect line (Android LaunchTimer). */
+function kasaConnected(ts, ms = 1243) {
+  const k = { app: 'Kasa', bundleId: 'com.mykynk.kasa', version: '2.0.1', sdk: 'android', transport: 'adb-reverse', device: 'Pixel 8' };
+  return [
+    logEntry({ ts, deviceId: PIXEL, appId: 'app:3', source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'app.connected', params: k, message: 'Kasa 2.0.1 connected (android SDK via adb-reverse)' }),
+    logEntry({ ts: ts + 20, deviceId: PIXEL, appId: 'app:3', source: 'app', level: 'info', tag: 'event', kind: 'event', message: 'durbun.launch', data: { kind: 'cold', ms, to: 'firstFrame', from: 'launchRequest', screen: 'MainActivity' } }),
+    // Android SDK, once per process: a socket opened without its factory (handshake only, net.response.noStream).
+    logEntry({ ts: ts + 2_400, deviceId: PIXEL, appId: 'app:3', source: 'app', level: 'info', tag: 'durbun', kind: 'text',
+      message: 'A WebSocket was opened with OkHttpClient.newWebSocket, so Dürbün sees its handshake but not its messages. Open sockets through DurbunWebSocketFactory to capture them.',
+      data: { reason: 'noWebSocketFactory' } }),
+  ];
+}
+
+/** Kasa's iOS build (Swift SDK) on Jane's iPhone: iOS prewarmed the process, so the launch has no time (LaunchTiming). */
+function kasaIosConnected(ts) {
+  const k = { app: 'Kasa', bundleId: 'com.mykynk.kasa', version: '2.0.1', sdk: 'ios', transport: 'usbmux', device: 'Jane’s iPhone' };
+  return [
+    logEntry({ ts, deviceId: IPHONE, appId: 'app:5', source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'app.connected', params: k, message: 'Kasa 2.0.1 connected (ios SDK via usbmux)' }),
+    logEntry({ ts: ts + 15, deviceId: IPHONE, appId: 'app:5', source: 'app', level: 'info', tag: 'event', kind: 'event', message: 'durbun.launch', data: { kind: 'prewarmed', to: 'firstFrame', screen: 'BalanceViewController' } }),
+  ];
 }
 
 /**
@@ -749,10 +804,10 @@ function showcaseLines(ts) {
       params: { app: 'Kasa', bundleId: 'com.mykynk.kasa', type: 'trace.span', count: 12 },
       message: 'Dürbün does not know the "trace.span" messages Kasa sends and skipped them: its SDK is newer than this Dürbün; update Dürbün (12 messages since the last note)' }),
     logEntry({ ts: at(9), deviceId: PIXEL, appId: 'app:3', source: 'system', level: 'warn', tag: 'durbun', code: 'app.sdkNewer',
-      params: { app: 'Kasa', bundleId: 'com.mykynk.kasa', sdk: 'durbun-android', sdkVersion: '0.4.0', protocol: 3, serverProtocol: 2, minProtocol: 1 },
-      message: 'Kasa uses durbun-android 0.4.0 (protocol 3), newer than this Dürbün understands (protocol 2): some data may be missing. Update Dürbün.' }),
+      params: { app: 'Kasa', bundleId: 'com.mykynk.kasa', sdk: 'durbun-android', sdkVersion: '0.4.0', protocol: 2, serverProtocol: 1, minProtocol: 1 },
+      message: 'Kasa uses durbun-android 0.4.0 (protocol 2), newer than this Dürbün understands (protocol 1): some data may be missing. Update Dürbün.' }),
     logEntry({ ts: at(10), deviceId: SIM, appId: 'app:4', source: 'system', level: 'warn', tag: 'durbun', code: 'app.sdkOlder',
-      params: { ...pati, sdk: 'durbun', sdkVersion: '0.0.9', protocol: 0, serverProtocol: 2, minProtocol: 1 },
+      params: { ...pati, sdk: 'durbun', sdkVersion: '0.0.9', protocol: 0, serverProtocol: 1, minProtocol: 1 },
       message: 'Pati uses durbun 0.0.9 (protocol 0), older than this Dürbün supports (protocol 1 or later): some data may be missing. Update the Dürbün SDK in the app.' }),
     logEntry({ ts: at(11), deviceId: PIXEL, appId: 'app:2', source: 'system', level: 'warn', tag: 'durbun', code: 'app.clockBehind',
       params: { ...pati, device: 'Pixel 8', seconds: 42, offsetMs: 42_310, accuracyMs: 180 },
@@ -809,6 +864,359 @@ function showcaseRequests() {
   });
 }
 
+/* ───────────── stream entries: WebSocket messages, SSE events (SPEC §6.1.1) ───────────── */
+// Same limits as the server (hub/streams.ts): the first STREAM_HEAD_KEPT of a connection are kept longest, then the
+// newest up to MAX_STREAM_MESSAGES; every message removed counts into stream.dropped (a gap in seq).
+const STREAM_HEAD_KEPT = 100;
+const MAX_STREAM_MESSAGES = 2000;
+const STREAM_MESSAGE_CAP = 64 * 1024;
+const STREAM_APP_GONE = 'The app disconnected';
+const streamMsgs = new Map(); // entry id → StreamMessage[] (held, seq order)
+const streamDirty = new Set(); // entry ids whose counts changed since the last flush
+const unhooked = new Set(); // handshakes the SDK sent with `noStream` (it has no hook on that socket)
+
+function streamInfo(kind, openTs) {
+  return { kind, state: 'open', openTs, count: 0, in: 0, out: 0, control: 0, bytesIn: 0, bytesOut: 0, dropped: 0, lastSeq: 0 };
+}
+
+/** A payload as the SDK sends it: none while body capture is off, cut at min(maxBodyBytes, 64 KiB). */
+function streamBody(payload) {
+  if (payload === undefined) return { size: 0 };
+  const bytes = typeof payload === 'string' ? Buffer.from(payload, 'utf8') : payload;
+  const size = bytes.length;
+  if (!settings.captureBodies) return { size };
+  const cap = Math.min(settings.maxBodyBytes, STREAM_MESSAGE_CAP);
+  if (typeof payload === 'string') {
+    const data = payload.length > cap ? payload.slice(0, cap) : payload;
+    return { size, body: data === payload ? { encoding: 'utf8', data, size } : { encoding: 'utf8', data, size, truncated: true } };
+  }
+  const kept = bytes.subarray(0, cap);
+  return { size, body: { encoding: 'base64', data: kept.toString('base64'), size, ...(kept.length < size ? { truncated: true } : {}) } };
+}
+
+/** The app sends stream messages (`streams` capability) and its config asks for them (`captureStreams`). */
+function streamsAsked(app) {
+  return !!app?.capabilities.includes('streams') && settings.captureStreams !== false;
+}
+
+/**
+ * Opens a connection: its handshake request and response (101 / SSE headers). Like the server (SPEC §6.1.1), the
+ * entry gets its `stream` only when `streamsAsked`; otherwise it is a plain 101 / event-stream response, and a stream
+ * appears with a first message.
+ */
+function openStream({ appId, kind, url, startTs, headers = [], source, noHook = false }) {
+  const app = apps.find((a) => a.id === appId);
+  const u = new URL(url);
+  const id = `${appId}:${netSeq++}`;
+  const ws = kind === 'websocket';
+  const handshake = int(90, 260);
+  const entry = {
+    id,
+    appId,
+    deviceId: app?.deviceId ?? PIXEL,
+    source: source ?? (app?.sdk.platform === 'android' ? 'okhttp' : 'dart:io'),
+    method: 'GET',
+    url,
+    host: u.host,
+    path: u.pathname + u.search,
+    startTs,
+    endTs: startTs + handshake,
+    duration: handshake,
+    state: 'complete',
+    status: ws ? 101 : 200,
+    statusText: ws ? 'Switching Protocols' : 'OK',
+    requestHeaders: ws
+      ? [['Connection', 'Upgrade'], ['Upgrade', 'websocket'], ['Sec-WebSocket-Key', 'dGhlIHNhbXBsZSBub25jZQ=='], ['Sec-WebSocket-Version', '13'], ['Sec-WebSocket-Protocol', 'pati-chat.v2'], ...headers]
+      : [['Accept', 'text/event-stream'], ['Cache-Control', 'no-cache'], ...headers],
+    responseHeaders: ws
+      ? [['Connection', 'Upgrade'], ['Upgrade', 'websocket'], ['Sec-WebSocket-Accept', 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='], ['Sec-WebSocket-Protocol', 'pati-chat.v2']]
+      : [['Content-Type', 'text/event-stream; charset=utf-8'], ['Cache-Control', 'no-cache'], ['X-Accel-Buffering', 'no']],
+    responseContentType: ws ? undefined : 'text/event-stream; charset=utf-8',
+    protocol: ws ? 'http/1.1' : 'h2',
+    hasRequestBody: false,
+    hasResponseBody: false,
+  };
+  // `noHook`: the SDK saw the handshake but has no hook on the socket (net.response.noStream): plain, no messages ever.
+  if (noHook) unhooked.add(id);
+  else if (streamsAsked(app)) {
+    entry.stream = streamInfo(kind, startTs + handshake);
+    streamMsgs.set(id, []);
+  }
+  network.set(id, entry);
+  streamDirty.add(id);
+  return entry;
+}
+
+/** One message (the server numbers it): counts, limits, close frames. `payload`: string (text) or Buffer (binary). */
+function streamMessage(id, { ts, dir = 'in', type, payload, closeCode, closeReason, event, eventId, retry }) {
+  const entry = network.get(id);
+  if (!entry) return;
+  if (!entry.stream) {
+    if (unhooked.has(id)) return;
+    // Capture was turned on after the handshake: the stream starts with this message (server hub/network.ts).
+    if (!streamsAsked(apps.find((a) => a.id === entry.appId))) return;
+    entry.stream = streamInfo(entry.status === 101 ? 'websocket' : 'sse', entry.endTs);
+    streamMsgs.set(id, []);
+  }
+  const info = { ...entry.stream };
+  const part = streamBody(payload);
+  const m = { seq: info.lastSeq + 1, ts, dir, type, size: part.size };
+  if (part.body) m.body = part.body;
+  if (closeCode !== undefined) m.closeCode = closeCode;
+  if (closeReason) m.closeReason = closeReason;
+  if (event) m.event = event;
+  if (eventId !== undefined) m.eventId = eventId;
+  if (retry !== undefined) m.retry = retry;
+  info.lastSeq = m.seq;
+  info.lastTs = ts;
+  info.count++;
+  if (dir === 'in') {
+    info.in++;
+    info.bytesIn += m.size;
+  } else {
+    info.out++;
+    info.bytesOut += m.size;
+  }
+  if (type === 'ping' || type === 'pong') info.control++;
+  if (type === 'close' && info.state === 'open') Object.assign(info, { state: 'closed', closedTs: ts, closedBy: dir, ...(closeCode !== undefined ? { closeCode } : {}), ...(closeReason ? { closeReason } : {}) });
+  const held = streamMsgs.get(id);
+  held.push(m);
+  while (held.length > MAX_STREAM_MESSAGES) {
+    held.splice(STREAM_HEAD_KEPT, 1);
+    info.dropped++;
+  }
+  entry.stream = info;
+  streamDirty.add(id);
+}
+
+function endStream(id, patch) {
+  const entry = network.get(id);
+  if (!entry?.stream || entry.stream.state !== 'open') return;
+  entry.stream = { ...entry.stream, ...patch };
+  streamDirty.add(id);
+}
+
+/** The app left: its open streams fail (server STREAM_APP_GONE). */
+function endStreamsOf(appId, ts) {
+  for (const e of network.values()) if (e.appId === appId && e.stream?.state === 'open') endStream(e.id, { state: 'failed', closedTs: ts, error: STREAM_APP_GONE });
+}
+
+const VET_LINES = ['Merhaba, Pamuk bugün nasıl?', 'Aşı randevusu yarın 10:30’da.', 'İlacını günde iki kez, yemekten sonra verin.', 'Fotoğrafı aldım, yara iyileşiyor görünüyor 👍', 'Kontrol için cuma uygun mu?', 'Tahlil sonuçları normal çıktı.'];
+const OWNER_LINES = ['Teşekkürler!', 'Biraz halsiz, iştahı az', 'Cuma olur', 'Mamasını değiştirmeli miyiz?', 'Tamam, öyle yapıyorum'];
+// Presence as MessagePack: {"user": 1042, "online": true}.
+const PRESENCE = Buffer.from([0x82, 0xa4, 0x75, 0x73, 0x65, 0x72, 0xcd, 0x04, 0x12, 0xa6, 0x6f, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0xc3]);
+let chatId = '';
+let chatPingAt = 0;
+
+/** One step of the vet chat at `ts` (history and live use the same mix). */
+function chatStep(id, ts) {
+  const roll = rnd();
+  if (roll < 0.28) {
+    streamMessage(id, { ts, dir: 'in', type: 'text', payload: JSON.stringify({ type: 'typing', room: 'vet-1042', from: 'vet', on: true }) });
+    streamMessage(id, { ts: ts + int(60, 240), dir: 'in', type: 'text', payload: JSON.stringify({ type: 'message', room: 'vet-1042', from: 'vet', id: `m${int(10_000, 99_999)}`, text: pick(VET_LINES), sentAt: new Date(ts).toISOString() }) });
+  } else if (roll < 0.45) streamMessage(id, { ts, dir: 'out', type: 'text', payload: JSON.stringify({ type: 'message', room: 'vet-1042', text: pick(OWNER_LINES), clientId: `c${int(1000, 9999)}` }) });
+  else if (roll < 0.58) streamMessage(id, { ts, dir: 'out', type: 'text', payload: JSON.stringify({ type: 'read', room: 'vet-1042', upTo: 'latest' }) });
+  else if (roll < 0.7) streamMessage(id, { ts, dir: 'in', type: 'binary', payload: PRESENCE });
+  else if (roll < 0.82) streamMessage(id, { ts, dir: 'in', type: 'text', payload: JSON.stringify({ type: 'appointment.status', appointmentId: 5521, status: pick(['confirmed', 'waiting', 'in_room']), etaMin: int(2, 20) }) });
+  else {
+    streamMessage(id, { ts, dir: 'out', type: 'ping' });
+    streamMessage(id, { ts: ts + int(30, 90), dir: 'in', type: 'pong' });
+  }
+}
+
+let queueId = '';
+let queueEventId = 0;
+let queuePosition = 5;
+let queueLeft = 12;
+
+function queueEvent(id, ts) {
+  if (chance(0.25)) {
+    streamMessage(id, { ts, type: 'event', payload: JSON.stringify({ type: 'notice', text: 'Dr. Ayşe Demir 5 dakika gecikiyor' }), eventId: String(++queueEventId) });
+    return;
+  }
+  if (queuePosition > 1 && chance(0.6)) queuePosition--;
+  else if (queuePosition <= 1) queuePosition = int(4, 7);
+  streamMessage(id, { ts, type: 'event', event: 'queue', payload: JSON.stringify({ position: queuePosition, etaMin: queuePosition * 6 }), eventId: String(++queueEventId) });
+  if (queuePosition === 1) streamMessage(id, { ts: ts + 5, type: 'event', event: 'called', payload: JSON.stringify({ room: 'Muayene 2', pet: 'Pamuk' }), eventId: String(++queueEventId) });
+}
+
+function openQueue(startTs) {
+  const headers = queueEventId > 0 ? [['Last-Event-ID', String(queueEventId)]] : [];
+  const e = openStream({ appId: 'app:4', kind: 'sse', url: 'https://api.pati.app/v1/clinic/queue/stream?clinic=12', startTs, headers });
+  queueId = e.id;
+  queueLeft = int(10, 14);
+  streamMessage(e.id, { ts: (e.stream?.openTs ?? e.endTs) + 5, type: 'event', event: 'queue', payload: JSON.stringify({ position: queuePosition, etaMin: queuePosition * 6 }), eventId: String(++queueEventId), retry: 5000 });
+}
+
+function seedStreams() {
+  const now = Date.now();
+  // 1. Pati's vet chat: open for 9 minutes, 2 000+ messages (a gap after the first 100), still growing.
+  const chat = openStream({ appId: 'app:2', kind: 'websocket', url: 'wss://chat.pati.app/v2/socket?room=vet-1042', startTs: now - 9 * 60_000, headers: [['Authorization', `Bearer ${mockJwt(now)}`]] });
+  chatId = chat.id;
+  let ts = chat.stream.openTs + 20;
+  streamMessage(chatId, { ts, dir: 'out', type: 'text', payload: JSON.stringify({ type: 'auth', token: mockJwt(now), device: 'android', app: '1.4.2' }) });
+  streamMessage(chatId, { ts: (ts += 60), dir: 'in', type: 'text', payload: JSON.stringify({ type: 'auth.ok', userId: 48_213, unread: 2 }) });
+  streamMessage(chatId, { ts: (ts += 120), dir: 'out', type: 'text', payload: JSON.stringify({ type: 'subscribe', rooms: ['vet-1042', 'appointments'] }) });
+  streamMessage(chatId, { ts: (ts += 90), dir: 'in', type: 'text', payload: JSON.stringify({ type: 'subscribed', rooms: ['vet-1042', 'appointments'] }) });
+  // The room's history: bigger than one payload keeps (cut at 64 KiB, the full size stays).
+  const history = { type: 'history', room: 'vet-1042', messages: Array.from({ length: 900 }, (_, i) => ({ id: `m${10_000 + i}`, from: i % 3 ? 'vet' : 'owner', text: i % 3 ? pick(VET_LINES) : pick(OWNER_LINES), sentAt: new Date(now - 86_400_000 + i * 60_000).toISOString(), attachments: [] })) };
+  streamMessage(chatId, { ts: (ts += 200), dir: 'in', type: 'text', payload: JSON.stringify(history) });
+  const span = now - 4_000 - ts;
+  for (let i = 0; i < 1700; i++) chatStep(chatId, ts + Math.round(((i + 1) * span) / 1700));
+  chatPingAt = now;
+  // 2. An earlier chat socket the server restarted: close 1001 from the server, the app answers.
+  const old = openStream({ appId: 'app:2', kind: 'websocket', url: 'wss://chat.pati.app/v2/socket?room=vet-1042', startTs: now - 16 * 60_000 });
+  ts = old.stream.openTs + 15;
+  streamMessage(old.id, { ts, dir: 'out', type: 'text', payload: JSON.stringify({ type: 'auth', token: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0ODIxMyJ9.c2ln', device: 'android', app: '1.4.2' }) });
+  streamMessage(old.id, { ts: (ts += 70), dir: 'in', type: 'text', payload: JSON.stringify({ type: 'auth.ok', userId: 48_213, unread: 0 }) });
+  for (let i = 0; i < 34; i++) chatStep(old.id, (ts += int(3_000, 9_000)));
+  streamMessage(old.id, { ts: (ts += 2_000), dir: 'in', type: 'close', closeCode: 1001, closeReason: 'Server restarting' });
+  streamMessage(old.id, { ts: ts + 12, dir: 'out', type: 'close', closeCode: 1001 });
+  // 3. The iPhone simulator's live feed that broke (the network went away).
+  const feed = openStream({ appId: 'app:4', kind: 'websocket', url: 'wss://live.pati.app/v1/feed', startTs: now - 7 * 60_000 });
+  ts = feed.stream.openTs + 30;
+  streamMessage(feed.id, { ts, dir: 'out', type: 'text', payload: JSON.stringify({ type: 'subscribe', topics: ['feed.nearby', 'feed.friends'] }) });
+  for (let i = 0; i < 11; i++) streamMessage(feed.id, { ts: (ts += int(4_000, 12_000)), dir: 'in', type: 'text', payload: JSON.stringify({ type: 'post', id: 9000 + i, author: pick(['Boncuk', 'Duman', 'Zeytin']), likes: int(0, 40) }) });
+  endStream(feed.id, { state: 'failed', closedTs: ts + 3_000, error: 'The network connection was lost. (NSURLErrorDomain -1005)' });
+  // 4. The clinic queue over SSE (named events, ids, retry); it ends now and then and reconnects with Last-Event-ID.
+  openQueue(now - 5 * 60_000);
+  ts = network.get(queueId).stream.openTs + 10;
+  for (let i = 0; i < 9; i++) queueEvent(queueId, (ts += int(4_000, 9_000)));
+  // 5. A notifications socket open with nothing sent yet.
+  openStream({ appId: 'app:4', kind: 'websocket', url: 'wss://push.pati.app/v1/live', startTs: now - 60_000 });
+  // 6. Kasa's balance socket (Android): its SDK captures streams but the socket was opened without
+  //    DurbunWebSocketFactory, so the server keeps it a plain 101 (the SDK's noWebSocketFactory line is in Logs).
+  openStream({ appId: 'app:3', kind: 'websocket', url: 'wss://rt.kasa.app/v2/balance', startTs: now - 3 * 60_000, noHook: true });
+  // 7. Kasa on iOS: its SDK has no `streams` capability, so the handshake stays a plain 101.
+  openStream({ appId: 'app:5', kind: 'websocket', url: 'wss://rt.kasa.app/v2/balance', startTs: now - 90_000, source: 'URLSession' });
+}
+
+/** Live: the chat grows, pings now and then; the queue gets events, ends and reconnects. */
+function simulateStreams(now) {
+  if (!settings.captureStreams) return;
+  if (chatId && tick % 20 === 0 && chance(0.6)) chatStep(chatId, now);
+  if (chatId && now - chatPingAt > 15_000) {
+    chatPingAt = now;
+    streamMessage(chatId, { ts: now, dir: 'out', type: 'ping' });
+    streamMessage(chatId, { ts: now + int(30, 90), dir: 'in', type: 'pong' });
+  }
+  if (queueId && tick % 60 === 30) {
+    if (--queueLeft <= 0) {
+      endStream(queueId, { state: 'closed', closedTs: now });
+      openQueue(now + int(1_000, 2_500));
+    } else queueEvent(queueId, now);
+  }
+}
+
+/** GET /api/network/:id/messages?after=<seq>&limit=<n> (StreamMessagesPage). */
+function streamPage(id, after, limit) {
+  const entry = network.get(id);
+  if (!entry) return null;
+  const held = streamMsgs.get(id) ?? [];
+  const out = [];
+  let more = false;
+  for (const m of held) {
+    if (m.seq <= after) continue;
+    if (out.length >= limit) {
+      more = true;
+      break;
+    }
+    out.push(m);
+  }
+  return entry.stream ? { messages: out, stream: entry.stream, more } : { messages: out, more };
+}
+
+/* ───────────── a device screenshot (Device → Take screenshot) ───────────── */
+let shotPng = null;
+/** A small phone-shaped PNG (the mock keeps no real screenshots). */
+function screenshotPng() {
+  if (shotPng) return shotPng;
+  const w = 270;
+  const h = 585;
+  const crc = (buf) => {
+    let c = 0xffffffff;
+    for (const b of buf) {
+      c ^= b;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const sum = Buffer.alloc(4);
+    sum.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, sum]);
+  };
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[y * (w * 3 + 1)] = 0;
+    for (let x = 0; x < w; x++) {
+      let rgb = [246, 244, 239]; // background
+      if (y < 28) rgb = [30, 30, 36]; // status bar
+      else if (y < 84) rgb = [106, 91, 236]; // app bar
+      else {
+        const card = Math.floor((y - 100) / 92);
+        const inCard = y >= 100 && (y - 100) % 92 < 78 && x >= 14 && x < w - 14 && card < 5;
+        if (inCard) rgb = (y - 100) % 92 < 22 && x < 120 ? [210, 206, 245] : [255, 255, 255];
+      }
+      if (y > h - 60 && y < h - 54 && x > 95 && x < 175) rgb = [60, 60, 70]; // home indicator
+      raw.set(rgb, y * (w * 3 + 1) + 1 + x * 3);
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  shotPng = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+  return shotPng;
+}
+
+/* ───────────── metrics history (a reloaded window gets its charts back) ───────────── */
+const METRICS_KEPT = 600 * 5; // ~10 minutes of five connected apps
+const metricsHistory = [];
+/**
+ * One metrics sample. Frame times only where the SDK measures them: Flutter (build / raster) and native Android
+ * (FrameMetrics: UI thread / RenderThread). Native Android counts only drawn frames: while its screen is idle
+ * (about a third of the time here) the sample has no `fps`, janky frames or frame times. iOS: no frame times.
+ */
+function metricSample(a, ts, burst = false) {
+  const platform = a.sdk.platform;
+  const sample = {
+    ts,
+    deviceId: a.deviceId,
+    appId: a.id,
+    source: 'sdk',
+    cpu: Math.round((8 + rnd() * 35 + (burst ? 30 : 0)) * 10) / 10,
+    memoryMB: Math.round(190 + Math.sin(ts / 4000) * 20 + rnd() * 8),
+    heapMB: Math.round(62 + rnd() * 18),
+  };
+  const drawing = platform !== 'android' || Math.floor(ts / 9_000) % 3 !== 0;
+  if (!drawing) return sample;
+  sample.fps = chance(0.1) ? int(38, 52) : int(57, 60);
+  sample.jankyFrames = chance(0.15) ? int(1, 6) : 0;
+  if (platform === 'flutter' || platform === 'dart-vm') {
+    sample.frameBuildMs = Math.round(rnd() * 9 * 10) / 10;
+    sample.frameRasterMs = Math.round(rnd() * 7 * 10) / 10;
+  } else if (platform === 'android') {
+    sample.frameBuildMs = Math.round((2 + rnd() * 6 + (chance(0.08) ? 12 : 0)) * 10) / 10;
+    sample.frameRasterMs = Math.round((1.5 + rnd() * 4.5) * 10) / 10;
+  }
+  return sample;
+}
+function keepMetric(sample) {
+  metricsHistory.push(sample);
+  if (metricsHistory.length > METRICS_KEPT) metricsHistory.splice(0, metricsHistory.length - METRICS_KEPT);
+}
+function seedMetrics() {
+  metricsHistory.length = 0;
+  if (empty) return;
+  const now = Date.now();
+  for (let ts = now - 5 * 60_000; ts < now; ts += 1000) for (const a of apps.filter((x) => x.connected)) keepMetric(metricSample(a, ts));
+}
+
 /* ───────────── broadcasting ───────────── */
 const clients = new Set();
 const queue = { logs: [], network: [], devices: [], apps: [], metrics: [], processes: [], removedDevices: [], deviceApps: [], removedDeviceApps: [] };
@@ -838,7 +1246,7 @@ function snapshot() {
     mockHits: mockHitsWire(),
     drivers: drivers(),
     processes: [...processes.values()],
-    metrics: [],
+    metrics: metricsHistory,
     deviceApps,
     logCount: logs.length,
     flows: flowSummaries(),
@@ -849,6 +1257,11 @@ function snapshot() {
 function flush() {
   const msg = { type: 'batch' };
   let any = false;
+  for (const id of streamDirty) {
+    const e = network.get(id);
+    if (e) queue.network.push(strip(e));
+  }
+  streamDirty.clear();
   for (const e of queue.network) countMockHit(e);
   if (mockHitsChanged) {
     // The whole map, only when a count changed (it replaces the previous one).
@@ -884,22 +1297,13 @@ function simulate() {
     batch.push(logEntry({ ts: now, deviceId: req.deviceId, appId, source: 'app', level: 'info', tag: 'network', kind: 'network', netId: req.id, message: `${req.method} ${req.url}` }));
   }
   pushLogs(batch);
-  // metrics every second
+  simulateStreams(now);
+  // metrics every second (kept for the next snapshot, so a reloaded window has its charts)
   if (tick % 10 === 0) {
     for (const a of apps.filter((x) => x.connected)) {
-      queue.metrics.push({
-        ts: now,
-        deviceId: a.deviceId,
-        appId: a.id,
-        source: 'sdk',
-        cpu: Math.round((8 + rnd() * 35 + (burst ? 30 : 0)) * 10) / 10,
-        memoryMB: Math.round(190 + Math.sin(tick / 40) * 20 + rnd() * 8),
-        heapMB: Math.round(62 + rnd() * 18),
-        fps: chance(0.1) ? int(38, 52) : int(57, 60),
-        jankyFrames: chance(0.15) ? int(1, 6) : 0,
-        frameBuildMs: Math.round(rnd() * 9 * 10) / 10,
-        frameRasterMs: Math.round(rnd() * 7 * 10) / 10,
-      });
+      const sample = metricSample(a, now, burst);
+      keepMetric(sample);
+      queue.metrics.push(sample);
     }
   }
   // Activity of the apps without the SDK (lastActivity only: the UI coalesces these), now and then a crash.
@@ -1001,9 +1405,17 @@ function simulate() {
       if (!k.connected) k.disconnectedAt = now;
       else k.connectedAt = now;
       queue.apps.push(k);
+      // Same params as the real server (hub/lifecycle.ts appParams): the session's own app, SDK platform and transport.
+      const params = { app: k.app.name, bundleId: k.app.id, version: k.app.version ?? '', sdk: k.sdk.platform, transport: k.transport, device: 'Pixel 8' };
       pushLogs([
-        logEntry({ ts: now, deviceId: PIXEL, appId: 'app:3', source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: k.connected ? 'app.reconnected' : 'app.disconnected', params: { app: 'Kasa', bundleId: 'com.example.kasa', version: '3.1.0', sdk: 'react-native', transport: 'websocket', device: 'Pixel 8', ...(k.connected ? {} : { failedRequests: 0 }) }, message: `Kasa ${k.connected ? 'reconnected (websocket)' : 'disconnected'}` }),
+        logEntry({ ts: now, deviceId: PIXEL, appId: 'app:3', source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: k.connected ? 'app.reconnected' : 'app.disconnected', params: k.connected ? params : { ...params, failedRequests: 0 }, message: k.connected ? `Kasa reconnected (${k.transport})` : 'Kasa disconnected' }),
       ]);
+      // An app that leaves ends its open streams (server hub/network.ts endStreams); back, it opens its socket again.
+      if (!k.connected) endStreamsOf('app:3', now);
+      else {
+        pushLogs([logEntry({ ts: now + 20, deviceId: PIXEL, appId: 'app:3', source: 'app', level: 'info', tag: 'event', kind: 'event', message: 'durbun.launch', data: { kind: 'cold', ms: int(980, 1600), to: 'firstFrame', from: 'launchRequest', screen: 'MainActivity' } })]);
+        openStream({ appId: 'app:3', kind: 'websocket', url: 'wss://rt.kasa.app/v2/balance', startTs: now, noHook: true });
+      }
     }
   }
 }
@@ -1019,6 +1431,9 @@ function enableDemo(on) {
     apps = [];
     deviceApps = [];
     network.clear();
+    streamMsgs.clear();
+    chatId = '';
+    queueId = '';
   }
   seedHistory();
   for (const ws of clients) syncClient(ws);
@@ -1211,7 +1626,13 @@ function handleCommand(ws, { requestId, command }) {
       const { target, deviceId, appId } = command;
       const match = (e) => (!deviceId || e.deviceId === deviceId) && (!appId || e.appId === appId);
       if (target === 'logs' || target === 'all') logs = logs.filter((e) => !match(e));
-      if (target === 'network' || target === 'all') for (const [id, e] of network) if (match(e)) network.delete(id);
+      if (target === 'network' || target === 'all') {
+        for (const [id, e] of network) {
+          if (!match(e)) continue;
+          network.delete(id);
+          streamMsgs.delete(id);
+        }
+      }
       broadcast({ type: 'cleared', target, deviceId, appId });
       return reply(null);
     }
@@ -1248,7 +1669,7 @@ function handleCommand(ws, { requestId, command }) {
       enableDemo(Boolean(command.enabled));
       return;
     case 'device.action':
-      if (command.action === 'screenshot') return reply({ url: '/api/files/shot.png', file: '/tmp/shot.png', width: 1080, height: 2400 });
+      if (command.action === 'screenshot') return reply({ url: `/api/files/shot.png?t=${now}`, file: '/tmp/shot.png', width: 270, height: 585 });
       if (command.action === 'screen-record' || command.action === 'screen-record-stop') return screenRecord(command, reply);
       if (command.action === 'list-apps') return reply([{ id: 'com.mykynk.pati', name: 'Pati', version: '1.4.2', debuggable: true }, { id: 'com.mykynk.kasa', name: 'Kasa', version: '2.0.1' }]);
       return testerAction(command, reply);
@@ -1425,7 +1846,7 @@ const httpServer = http.createServer(async (req, res) => {
       const { text = '', ids } = JSON.parse((await readBody(req)).toString() || '{}');
       const q = String(text).toLowerCase();
       const out = [...network.values()]
-        .filter((d) => (!ids || ids.includes(d.id)) && (d.url.toLowerCase().includes(q) || (d.responseBody?.data ?? '').toLowerCase().includes(q)))
+        .filter((d) => (!ids || ids.includes(d.id)) && (d.url.toLowerCase().includes(q) || (d.responseBody?.data ?? '').toLowerCase().includes(q) || (streamMsgs.get(d.id) ?? []).some((m) => (m.body?.encoding === 'utf8' && m.body.data.toLowerCase().includes(q)) || (m.closeReason ?? '').toLowerCase().includes(q) || (m.event ?? '').toLowerCase().includes(q))))
         .map((d) => d.id);
       return json(res, 200, { ids: out });
     }
@@ -1436,6 +1857,13 @@ const httpServer = http.createServer(async (req, res) => {
       if (!d || !b) return json(res, 404, { error: 'No body' });
       res.writeHead(200, { 'Content-Type': (body[2] === 'request' ? d.requestContentType : d.responseContentType) ?? 'application/octet-stream' });
       return res.end(b.encoding === 'base64' ? Buffer.from(b.data, 'base64') : b.data);
+    }
+    const messages = /^\/api\/network\/(.+)\/messages$/.exec(p);
+    if (messages && req.method === 'GET') {
+      const after = Math.max(0, Math.floor(Number(url.searchParams.get('after') ?? 0)) || 0);
+      const limit = Math.min(2000, Math.max(1, Math.floor(Number(url.searchParams.get('limit') ?? 500)) || 500));
+      const page = streamPage(decodeURIComponent(messages[1]), after, limit);
+      return page ? setTimeout(() => json(res, 200, page), 120) : json(res, 404, { error: 'Unknown network entry', code: 'api.notFound' });
     }
     const detail = /^\/api\/network\/(.+)$/.exec(p);
     if (detail && req.method === 'GET') {
@@ -1461,12 +1889,12 @@ const httpServer = http.createServer(async (req, res) => {
         devices: deviceId ? devices.filter((d) => d.id === deviceId) : devices,
         apps: apps.filter((a) => appIds.has(a.id)),
         logs: logs.filter(inScope).slice(-5000),
-        network: [...network.values()].filter((n) => (!deviceId || n.deviceId === deviceId) && (!appId && !bundleId ? true : appIds.has(n.appId))),
+        network: [...network.values()].filter((n) => (!deviceId || n.deviceId === deviceId) && (!appId && !bundleId ? true : appIds.has(n.appId))).map((n) => (streamMsgs.get(n.id)?.length ? { ...n, streamMessages: streamMsgs.get(n.id) } : n)),
         deviceApps: deviceApps.filter((d) => (!deviceId || d.deviceId === deviceId) && (!bundleId || d.id === bundleId)),
       };
       // Masked by default (the last member of the file says so); `mask=0` exports the raw values.
       if (maskParam(url.searchParams.get('mask'))) {
-        exp.network = exp.network.map(maskDetail);
+        exp.network = exp.network.map((d) => ({ ...maskDetail(d), ...(d.streamMessages ? { streamMessages: d.streamMessages.map((m) => (m.body ? { ...m, body: maskBody(m.body) } : m)) } : {}) }));
         exp.logs = exp.logs.map((e) => (e.kind === 'network' ? { ...e, message: e.message.replace(/\S+:\/\/\S+/g, maskUrl) } : e));
         exp.masked = true;
       }
@@ -1486,7 +1914,20 @@ const httpServer = http.createServer(async (req, res) => {
       const dev = { ...(data.devices?.[0] ?? baseDevices()[0]), id, name: `📁 ${data.devices?.[0]?.name ?? 'Session'}`, state: 'disconnected', logs: { status: 'stopped' }, actions: [], firstSeen: Date.now(), lastSeen: Date.now() };
       devices.push(dev);
       queue.devices.push(dev);
+      // Its requests: ids `import:<n>:<id>`, no app session; stream entries keep their messages (history, not live).
+      for (const n of Array.isArray(data.network) ? data.network : []) {
+        if (!n || typeof n.id !== 'string') continue;
+        const { streamMessages, ...rest } = n;
+        const e = { ...rest, id: `${id}:${n.id}`, deviceId: id, appId: undefined };
+        network.set(e.id, e);
+        if (e.stream) streamMsgs.set(e.id, Array.isArray(streamMessages) ? streamMessages : []);
+        queue.network.push(strip(e));
+      }
       return json(res, 200, { deviceIds: [id] });
+    }
+    if (p === '/api/files/shot.png' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+      return res.end(screenshotPng());
     }
     const ips = /^\/api\/files\/crash\/([^/]+)\/([^/]+\.ips)$/.exec(p);
     if (ips && req.method === 'GET') {

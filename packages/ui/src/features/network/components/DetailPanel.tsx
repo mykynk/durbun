@@ -32,6 +32,7 @@ import {
   formatBytes,
   formatDateTime,
   formatDuration,
+  formatNumber,
   usePersistentState,
   type KeyValueRow,
   type MenuItem,
@@ -41,7 +42,11 @@ import { queryParams, reasonPhrase, requestCookies, responseCookies, type SetCoo
 import { COPY_FORMATS, type CopyFormat } from '../model/copyAs';
 import { shortErrorKey, splitError, tooLargeMessage } from '../model/errors';
 import { timingBreakdown, type Phase } from '../model/waterfall';
-import { FORMAT_LABEL, copyEntryAs, copyUrl, createMockFrom, downloadBody, exportHarFor, harFileName, harLabel, showInLogs } from '../actions';
+import { FORMAT_LABEL, actionBlockHint, canRun, copyEntryAs, copyUrl, createMockFrom, downloadBody, exportHarFor, harFileName, harLabel, showInLogs } from '../actions';
+import { StreamMessagesTab } from './StreamMessages';
+import { ConnectionNote } from './ConnectionNote';
+import { connectionKind } from '../../../data/explain';
+import { StreamStateLabel } from './StreamBadge';
 import { useNetworkDetail } from '../detailCache';
 import { BodyViewer } from './BodyViewer';
 import { ruleLabel } from '../../mocks/model/rules';
@@ -49,8 +54,10 @@ import { findMatchPlace, type MatchPlace } from '../model/findMatch';
 import { useFindHighlight } from '../useFindHighlight';
 import { JwtNotes } from './JwtView';
 
-export type DetailTab = 'general' | 'request' | 'response' | 'timing';
+export type DetailTab = 'messages' | 'general' | 'request' | 'response' | 'timing';
 const DETAIL_TABS: readonly DetailTab[] = ['general', 'request', 'response', 'timing'];
+/** A stream entry (WebSocket, SSE) opens on its messages; the user's choice for stream entries is kept apart. */
+const STREAM_TABS: readonly DetailTab[] = ['messages', 'general', 'request', 'response', 'timing'];
 
 export interface DetailPanelProps {
   entry: NetworkEntry;
@@ -71,7 +78,12 @@ export interface DetailPanelProps {
 
 export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCompare, onShare, onReport, onCreateFlow, find }: DetailPanelProps) {
   const t = useT();
-  const [savedTab, setSavedTab] = usePersistentState<DetailTab>('network.detailTab', 'response');
+  const isStream = !!entry.stream;
+  const [savedHttpTab, setSavedHttpTab] = usePersistentState<DetailTab>('network.detailTab', 'response');
+  const [savedStreamTab, setSavedStreamTab] = usePersistentState<DetailTab>('network.detailTab.stream', 'messages');
+  const savedTab = isStream ? savedStreamTab : savedHttpTab;
+  const setSavedTab = isStream ? setSavedStreamTab : setSavedHttpTab;
+  const tabs = isStream ? STREAM_TABS : DETAIL_TABS;
   const { detail, loading, error, reload } = useNetworkDetail(gone ? null : entry);
   // Body search: open the tab / section holding the match once (the saved tab stays the user's choice), mark it.
   const [findOn, setFindOn] = useState(true);
@@ -86,7 +98,8 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
     jumped.current = true;
     setJump(place);
   }, [place, detail, loading, entry.hasRequestBody, entry.hasResponseBody]);
-  const tab: DetailTab = jump ? jump.tab : DETAIL_TABS.includes(savedTab) ? savedTab : 'response';
+  // A stream's match of the body search is mostly in its messages: those open with the search (not a header).
+  const tab: DetailTab = jump && !isStream ? jump.tab : tabs.includes(savedTab) ? savedTab : isStream ? 'messages' : 'response';
   const setTab = (next: DetailTab) => {
     setJump(null);
     setSavedTab(next);
@@ -101,8 +114,8 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
   ];
   const moreItems: MenuItem[] = [
     { label: t('network.menu.showInLogs'), icon: ScrollText, onSelect: () => showInLogs(entry) },
-    { label: t('network.menu.compare'), icon: ArrowLeftRight, onSelect: onCompare },
-    { label: t('network.menu.createFlow'), icon: Workflow, disabled: gone || entry.method === '?', onSelect: () => (onCreateFlow ? onCreateFlow() : ui.newFlowFromRequests([entry.id], { from: 'network' })) },
+    { label: t('network.menu.compare'), icon: ArrowLeftRight, disabled: !canRun(entry, 'compare'), hint: actionBlockHint(entry, 'compare'), onSelect: onCompare },
+    { label: t('network.menu.createFlow'), icon: Workflow, disabled: gone || !canRun(entry, 'flow'), hint: actionBlockHint(entry, 'flow'), onSelect: () => (onCreateFlow ? onCreateFlow() : ui.newFlowFromRequests([entry.id], { from: 'network' })) },
     { type: 'separator' },
     { label: t('network.menu.har'), icon: FileDown, disabled: gone, onSelect: () => exportHarFor([entry.id], harLabel(entry), harFileName(entry)) },
     { label: t('network.menu.downloadResponse'), icon: FileDown, disabled: gone || !entry.hasResponseBody, onSelect: () => downloadBody(entry, 'response') },
@@ -136,17 +149,22 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
           </>
         }
       />
-      <div className="net-detail__actions">
-        <Button size="sm" icon={RotateCw} onClick={onReplay} disabled={gone || entry.method === '?'} title={t('network.detail.replayHint')}>
-          {t('network.menu.replay')}
-        </Button>
-        <Button size="sm" variant="ghost" icon={PencilLine} onClick={onEditReplay} disabled={gone || entry.method === '?'} aria-label={t('network.menu.editReplay')} title={t('network.menu.editReplay')} className="net-detail__collapsible">
-          {t('network.menu.editReplay')}
-        </Button>
-        <Button size="sm" variant="ghost" icon={Drama} onClick={() => void createMockFrom(entry)} disabled={gone} aria-label={t('network.menu.createMock')} title={t('network.menu.createMock')} className="net-detail__collapsible">
-          {t('network.menu.createMock')}
-        </Button>
-      </div>
+      {connectionKind(entry) ? (
+        // A long-lived connection: the request actions do not apply, said once instead of three dead buttons.
+        <ConnectionNote entry={entry} />
+      ) : (
+        <div className="net-detail__actions">
+          <Button size="sm" icon={RotateCw} onClick={onReplay} disabled={gone || !canRun(entry, 'replay')} title={t('network.detail.replayHint')}>
+            {t('network.menu.replay')}
+          </Button>
+          <Button size="sm" variant="ghost" icon={PencilLine} onClick={onEditReplay} disabled={gone || !canRun(entry, 'editReplay')} aria-label={t('network.menu.editReplay')} title={t('network.menu.editReplay')} className="net-detail__collapsible">
+            {t('network.menu.editReplay')}
+          </Button>
+          <Button size="sm" variant="ghost" icon={Drama} onClick={() => void createMockFrom(entry)} disabled={gone} aria-label={t('network.menu.createMock')} title={t('network.menu.createMock')} className="net-detail__collapsible">
+            {t('network.menu.createMock')}
+          </Button>
+        </div>
+      )}
       {gone ? (
         <div className="net-pad net-pad--b0">
           <Callout tone="warn" compact>
@@ -154,7 +172,7 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
           </Callout>
         </div>
       ) : null}
-      {needle ? (
+      {needle && !isStream ? (
         <div className="net-findnote" role="status">
           <Search size={13} aria-hidden />
           <span className="truncate">
@@ -172,6 +190,7 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
         className="net-detail__tabs"
         aria-label={t('network.detail.tabsLabel')}
         items={[
+          ...(isStream ? [{ value: 'messages' as const, label: t('network.detail.tabs.messages'), badge: <span className="tab__count tnum">{formatNumber(entry.stream!.count)}</span> }] : []),
           { value: 'general', label: t('network.detail.tabs.general') },
           { value: 'request', label: t('network.detail.tabs.request'), badge: reqHeaders ? <span className="tab__count tnum">{reqHeaders}</span> : null },
           { value: 'response', label: t('network.detail.tabs.response'), badge: resHeaders ? <span className="tab__count tnum">{resHeaders}</span> : null },
@@ -179,6 +198,7 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
         ]}
       />
       <div ref={bodyRef} className="net-detail__body" role="tabpanel" id={`net-detail-panel-${tab}`} aria-labelledby={`net-detail-tab-${tab}`}>
+        {tab === 'messages' && entry.stream ? <StreamMessagesTab entry={entry} gone={gone} find={find?.trim() || undefined} /> : null}
         {tab === 'general' ? <GeneralTab entry={entry} /> : null}
         {tab === 'request' ? (
           <MessageTab entry={entry} which="request" detail={detail} loading={loading} error={error} onRetry={reload} find={needle} forced={jump?.tab === 'request' ? jump.section : undefined} onPicked={() => setJump(null)} />
@@ -229,7 +249,8 @@ function DetailHeader({ entry, onClose, tools }: { entry: NetworkEntry; onClose:
   const rule = useMocks((s) => (entry.mockRuleId ? s.rules.find((r) => r.id === entry.mockRuleId) : undefined));
   const deviceName = entry.deviceId === 'desktop' ? t('network.detail.desktop') : device?.name;
   const meta: ReactNode[] = [];
-  if (entry.duration !== undefined) meta.push(<span key="d" className="tnum">{formatDuration(entry.duration)}</span>);
+  // A stream's own time is its open time (Messages tab); the handshake's duration is in Timing.
+  if (entry.duration !== undefined && !entry.stream) meta.push(<span key="d" className="tnum">{formatDuration(entry.duration)}</span>);
   if (entry.responseBodySize !== undefined) meta.push(<span key="s" className="tnum">{formatBytes(entry.responseBodySize)}</span>);
   if (app) meta.push(<span key="a">{[app.app.name, app.app.version].filter(Boolean).join(' ')}</span>);
   if (deviceName) meta.push(<span key="v">{deviceName}</span>);
@@ -243,6 +264,7 @@ function DetailHeader({ entry, onClose, tools }: { entry: NetworkEntry; onClose:
       <div className="net-detail__title">
         <MethodBadge method={entry.method} className="net-detail__method" />
         <StatusLine entry={entry} />
+        {entry.stream ? <StreamStateLabel stream={entry.stream} /> : null}
         <span className="grow" />
         {tools}
         <IconButton icon={X} size="sm" label={t('network.detail.close')} shortcut="Escape" onClick={onClose} />

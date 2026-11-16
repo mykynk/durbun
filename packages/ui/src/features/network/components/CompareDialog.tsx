@@ -254,6 +254,7 @@ function DiffView({ a, b, onlyChanges, onShowAll }: { a: string[]; b: string[]; 
     return (
       <EmptyState
         size="sm"
+        tone="success"
         icon={Equal}
         title={t('network.compare.identical')}
         description={t('network.compare.identicalLines', { count: a.length })}

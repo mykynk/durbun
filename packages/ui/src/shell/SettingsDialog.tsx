@@ -441,6 +441,8 @@ function LogsSection() {
 function NetworkSection() {
   const t = useT();
   const s = useServerSettings((x) => x.settings);
+  const loaded = useServerSettings((x) => x.loaded);
+  const reported = useServerSettings((x) => x.reported);
   const connected = isConnected(useConnection((x) => x.status));
   const { save, savedKey } = useServerPatch();
   return (
@@ -451,6 +453,17 @@ function NetworkSection() {
         <Row label={t('shell.settings.captureBodies')} hint={t('shell.settings.captureBodiesHint')} saved={savedKey === 'captureBodies'}>
           <Toggle checked={s.captureBodies} disabled={!connected} onChange={(v) => void save('captureBodies', { captureBodies: v })} aria-label={t('shell.settings.captureBodies')} />
         </Row>
+        {/* An older server that does not send the key does not know the setting either. */}
+        {(!loaded || reported?.has('captureStreams')) && (
+          <Row label={t('shell.settings.captureStreams')} hint={t('shell.settings.captureStreamsHint')} saved={savedKey === 'captureStreams'}>
+            <Toggle
+              checked={s.captureStreams !== false}
+              disabled={!connected}
+              onChange={(v) => void save('captureStreams', { captureStreams: v })}
+              aria-label={t('shell.settings.captureStreams')}
+            />
+          </Row>
+        )}
         <Row label={t('shell.settings.maxBodyBytes')} hint={t('shell.settings.maxBodyBytesHint')} range={[LIMITS.maxBodyKB[0], LIMITS.maxBodyKB[1], 'KB']} saved={savedKey === 'maxBodyBytes'}>
           <NumberField
             label={t('shell.settings.maxBodyBytes')}

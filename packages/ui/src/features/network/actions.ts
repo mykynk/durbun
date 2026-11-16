@@ -7,7 +7,29 @@ import { safeFileStem } from './model/http';
 import { cachedDetail, loadDetail } from './detailCache';
 import { draftFromRequest, type DraftNote } from '../mocks/model/draft';
 import { transfer } from '../transfer/store';
+import { networkActionAvailability, type NetworkEntryAction } from '../../data/explain';
+import { streamKindLabel } from './model/streams';
 import './i18n';
+
+/** Why an action cannot run on this request (null: it can); the rule itself is `networkActionAvailability`. */
+export function actionBlockText(e: Pick<NetworkEntry, 'method' | 'stream'>, action: NetworkEntryAction): string | null {
+  const a = networkActionAvailability(e, action);
+  if (a.ok) return null;
+  if (a.reason === 'noRequest') return t('network.unavailable.noRequest');
+  return t(`network.unavailable.stream.${action}`, { kind: streamKindLabel(a.reason === 'sse' ? 'sse' : 'websocket') });
+}
+
+/** Short menu hint for an unavailable action ("not for WebSocket"), or undefined. */
+export function actionBlockHint(e: Pick<NetworkEntry, 'method' | 'stream'>, action: NetworkEntryAction): string | undefined {
+  const a = networkActionAvailability(e, action);
+  if (a.ok || a.reason === 'noRequest') return undefined;
+  return t('network.unavailable.short', { kind: streamKindLabel(a.reason === 'sse' ? 'sse' : 'websocket') });
+}
+
+/** Whether an action can run on this request. */
+export function canRun(e: Pick<NetworkEntry, 'method' | 'stream'>, action: NetworkEntryAction): boolean {
+  return networkActionAvailability(e, action).ok;
+}
 
 /** Actions on a captured request, shared by the table's context menu, the detail panel and the palette. */
 
@@ -72,6 +94,11 @@ export async function copyEntryAs(e: NetworkEntry, format: CopyFormat): Promise<
 
 /** `net.replay` (optionally edited). Resolves with the new entry (state may be 'failed'), or null on error. */
 export async function replayRequest(e: NetworkEntry, overrides?: ReplayOverrides): Promise<NetworkEntry | null> {
+  const blocked = actionBlockText(e, overrides ? 'editReplay' : 'replay');
+  if (blocked) {
+    toast.info(blocked);
+    return null;
+  }
   const toastId = toast({ kind: 'info', title: t('network.replay.sending', { method: overrides?.method ?? e.method, host: e.host }), duration: 0 });
   // The server says before its reply when the certificate was refused (a test server with its own CA).
   let tlsRejected = false;
@@ -137,6 +164,11 @@ function draftNoteText(n: DraftNote): string | null {
 
 /** Open the Mocks editor with a rule prefilled from this request/response (not saved yet). */
 export async function createMockFrom(e: NetworkEntry): Promise<void> {
+  const blocked = actionBlockText(e, 'mock');
+  if (blocked) {
+    toast.info(blocked);
+    return;
+  }
   let detail = cachedDetail(e) ?? null;
   if (!detail && (e.hasResponseBody || e.hasRequestBody)) {
     try {
