@@ -17,7 +17,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:durbun/durbun.dart';
-import 'package:durbun/src/core/protocol.dart' show buildErrorInfo, buildLog;
+import 'package:durbun/src/core/protocol.dart' show buildErrorInfo, buildLog, buildNetWs;
 import 'package:durbun/src/flutter/durbun.dart' show durbunBackend;
 import 'package:durbun/src/inspector/bug_report_view.dart';
 import 'package:durbun/src/inspector/filter_ui.dart' show FilterButton;
@@ -573,6 +573,182 @@ void main() {
       await back(tester);
     });
   });
+
+  /* WebSocket and event stream messages */
+
+  gallery('streams', (tester) async {
+    final store = await openPanel(tester, store: streamsStore());
+    await shot(tester, 's01-streams-list');
+    await step(tester, 'chat messages', () async {
+      await openRow(tester, '/v2/chat');
+      await shot(tester, 's02-ws-messages');
+    });
+    await step(tester, 'new messages pill', () async {
+      final list = find
+          .ancestor(of: find.textContaining('appointment.confirmed', findRichText: true), matching: find.byType(Scrollable))
+          .first;
+      await tester.drag(list, const Offset(0, 260));
+      await tester.pump();
+      final now = DateTime.now().millisecondsSinceEpoch.toDouble();
+      for (var i = 0; i < 3; i++) {
+        final body = textBody('{"type":"typing","from":"Dr. Elif Kaya","n":$i}');
+        store.ingest(buildNetWs(id: '30', ts: now + i * 400, dir: 'in', opcode: 'text', size: body.size, body: body));
+      }
+      await settle(tester);
+      await shot(tester, 's03-ws-new-messages-pill');
+      await tapText(tester, tr.newMessages(3));
+    });
+    await step(tester, 'ping pong', () async {
+      await tester.tap(find.textContaining(tr.controlHidden(6)).first);
+      await settle(tester);
+      await shot(tester, 's04-ws-ping-pong-shown');
+      await tester.tap(find.text(tr.controlLabel).first);
+      await settle(tester);
+    });
+    await step(tester, 'search', () async {
+      await tester.enterText(find.byType(TextField).hitTestable().first, 'apt_91');
+      await settle(tester);
+      await shot(tester, 's05-ws-search');
+      await tester.tap(find.byTooltip(tr.clearSearch).first);
+      await settle(tester);
+    });
+    await step(tester, 'json message', () async {
+      await tester.tap(find.textContaining('appointment.proposed', findRichText: true).first);
+      await settle(tester);
+      await shot(tester, 's06-ws-message-json');
+      await back(tester);
+    });
+    await step(tester, 'binary message', () async {
+      await tester.enterText(find.byType(TextField).hitTestable().first, 'ff d8');
+      await settle(tester);
+      await tester.tap(find.textContaining('ff d8 ff e0', findRichText: true).first);
+      await settle(tester);
+      await shot(tester, 's07-ws-message-binary');
+      await back(tester);
+    });
+    await step(tester, 'share message', () async {
+      await tester.enterText(find.byType(TextField).hitTestable().first, 'auth');
+      await settle(tester);
+      await tester.tap(find.textContaining('"token"', findRichText: true).first);
+      await settle(tester);
+      await shot(tester, 's08-ws-message-auth');
+      await tester.tap(find.byTooltip(tr.share).first);
+      await settle(tester);
+      await shot(tester, 's09-ws-message-share-masked');
+      await back(tester);
+      await back(tester);
+      await back(tester);
+    });
+    await step(tester, 'closed', () async {
+      await openRow(tester, '/v2/tracking');
+      await shot(tester, 's10-ws-closed-by-server');
+      await tester.tap(find.textContaining('server restart', findRichText: true).first);
+      await settle(tester);
+      await shot(tester, 's11-ws-close-frame');
+      await back(tester);
+      await back(tester);
+    });
+    await step(tester, 'failed', () async {
+      await openRow(tester, '/v2/notifications');
+      await shot(tester, 's12-ws-broke');
+      await back(tester);
+    });
+    await step(tester, 'open empty', () async {
+      await openRow(tester, '/v2/live/vet-queue');
+      await shot(tester, 's13-ws-open-no-messages');
+      await back(tester);
+    });
+    await step(tester, 'not followed', () async {
+      await openRow(tester, '/v1/stream');
+      await shot(tester, 's14-ws-okhttp-mac-only');
+      await back(tester);
+    });
+    await step(tester, 'event stream', () async {
+      await openRow(tester, '/v2/live/adoptions');
+      await shot(tester, 's15-sse-events');
+      await tester.tap(find.textContaining('Badem', findRichText: true).first);
+      await settle(tester);
+      await shot(tester, 's16-sse-event');
+      await back(tester);
+      await back(tester);
+    });
+    await step(tester, 'dropped', () async {
+      await openRow(tester, '/v2/shop/ticker');
+      await shot(tester, 's17-ws-ring-full');
+      final list = find
+          .ancestor(of: find.textContaining('MAMA-KEDI', findRichText: true).first, matching: find.byType(Scrollable))
+          .first;
+      final gap = find.textContaining(tr.streamGapHead(20, 180));
+      for (var i = 0; i < 30 && gap.hitTestable().evaluate().isEmpty; i++) {
+        await tester.drag(list, const Offset(0, 400));
+        await tester.pump();
+      }
+      await settle(tester);
+      // The gap in the middle of the card.
+      await tester.drag(list, const Offset(0, -120));
+      await shot(tester, 's18-ws-dropped-gap');
+      await back(tester);
+    });
+    await step(tester, 'general', () async {
+      await openRow(tester, '/v2/chat');
+      await tapLabel(tester, tr.general);
+      await shot(tester, 's19-ws-general');
+      await tapLabel(tester, tr.response);
+      await shot(tester, 's20-ws-response');
+      await back(tester);
+    });
+  });
+
+  for (final (name, scale) in <(String, double)>[('text130', 1.3), ('text200', 2)]) {
+    gallery('streams $name', (tester) async {
+      await openPanel(tester, store: streamsStore());
+      await shot(tester, 's30-$name-streams-list');
+      await step(tester, 'messages', () async {
+        await openRow(tester, '/v2/chat');
+        await shot(tester, 's31-$name-ws-messages');
+        await tester.tap(find.textContaining('appointment.confirmed', findRichText: true).hitTestable().first);
+        await settle(tester);
+        await shot(tester, 's32-$name-ws-message-json');
+        await back(tester);
+        await back(tester);
+      });
+      await step(tester, 'closed', () async {
+        await openPanel(tester, store: streamsStore());
+        await openRow(tester, '/v2/tracking');
+        await shot(tester, 's33-$name-ws-closed');
+        await back(tester);
+      });
+    }, textScale: scale);
+  }
+
+  gallery('streams landscape', (tester) async {
+    await openPanel(tester, store: streamsStore());
+    await step(tester, 'messages', () async {
+      await openRow(tester, '/v2/chat');
+      await shot(tester, 's40-landscape-ws-messages');
+      await tester.tap(find.textContaining('appointment.confirmed', findRichText: true).hitTestable().first);
+      await settle(tester);
+      await shot(tester, 's41-landscape-ws-message-json');
+      await back(tester);
+      await back(tester);
+    });
+    await step(tester, 'events', () async {
+      await openPanel(tester, store: streamsStore());
+      await openRow(tester, '/v2/live/adoptions');
+      await shot(tester, 's42-landscape-sse-events');
+    });
+  }, size: kLandscape);
+
+  gallery('streams landscape text200', (tester) async {
+    await openPanel(tester, store: streamsStore());
+    await step(tester, 'messages', () async {
+      await openRow(tester, '/v2/chat');
+      await shot(tester, 's43-landscape-text200-ws-messages');
+      await tester.tap(find.text('text').hitTestable().last);
+      await settle(tester);
+      await shot(tester, 's44-landscape-text200-ws-message');
+    });
+  }, size: kLandscape, textScale: 2);
 
   gallery('share', (tester) async {
     await openPanel(tester);

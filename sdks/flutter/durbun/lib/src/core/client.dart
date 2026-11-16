@@ -39,7 +39,7 @@ typedef DurbunCommandHandler =
 /// await client.flush(const Duration(seconds: 2));
 /// await client.dispose();
 /// ```
-class DurbunClient implements HttpCaptureHost, StreamCaptureHost {
+class DurbunClient implements HttpCaptureHost, StreamCaptureHost, LocalStreamHost {
   DurbunClient._({
     required this.options,
     required this.sdkPlatform,
@@ -947,6 +947,12 @@ class DurbunClient implements HttpCaptureHost, StreamCaptureHost {
 
   @override
   void sendNetMessage(Map<String, Object?> message) => _send(message);
+
+  /// The in-app panel's own record of stream messages (set by the Flutter
+  /// layer while the panel is on); messages the desktop does not take go
+  /// there instead of [outgoingTap].
+  @override
+  LocalStreamSink? localStreams;
 
   /* ───────────────────────────── hello ───────────────────────────── */
 

@@ -1,4 +1,4 @@
-/// "Share request" and "Share log line": the share report with its options,
+/// "Share request", "Share log line" and "Share message": the share report with its options,
 /// a preview, Copy, the system share sheet (through the plugin's own channel,
 /// no extra package) and Send to Slack when the app set a webhook.
 library;
@@ -184,6 +184,55 @@ Future<void> showLogShareSheet(BuildContext context, InspectorLog log, DurbunIns
       store: store,
       onBug: log.isError && !store.readOnly ? () => openBugReport(context, store, BugAnchor.log(log)) : null,
     ));
+
+/// "Share message": one WebSocket message or event-stream event, masked by
+/// default (the switch is the one every share of the run uses).
+Future<void> showStreamMessageShareSheet(
+        BuildContext context, InspectorCall call, InspectorStreamMessage message, DurbunInspectorStore store) =>
+    _showSheet(context, _MessageShareSheet(call: call, message: message, store: store));
+
+class _MessageShareSheet extends StatefulWidget {
+  const _MessageShareSheet({required this.call, required this.message, required this.store});
+
+  final InspectorCall call;
+  final InspectorStreamMessage message;
+  final DurbunInspectorStore store;
+
+  @override
+  State<_MessageShareSheet> createState() => _MessageShareSheetState();
+}
+
+class _MessageShareSheetState extends State<_MessageShareSheet> {
+  late ShareOptions _options = shareOptionsOf(widget.store);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = InspectorStrings.of(context);
+    final m = widget.message;
+    final sse = (widget.call.connectionKind ?? StreamKind.webSocket) == StreamKind.sse;
+    final path = widget.call.uri?.path ?? widget.call.url;
+    return _ReportSheet(
+      title: sse ? t.shareEventTitle : t.shareMessageTitle,
+      description: t.shareMessageDescription,
+      report: buildStreamMessageReport(widget.call, m, t,
+          mask: _options.mask, app: hostAppLabel(widget.store), device: hostDeviceLabel(widget.store)),
+      subject: '${sse ? 'SSE' : 'WebSocket'} ${path.isEmpty ? '/' : path} · ${sse ? t.eventTitle(m.seq) : t.messageTitle(m.seq)}',
+      store: widget.store,
+      options: <Widget>[
+        SheetSwitch(
+            label: t.shareMask,
+            hint: t.shareMessageMaskHint,
+            icon: Icons.visibility_off_outlined,
+            value: _options.mask,
+            onChanged: (v) {
+              final o = _options.copyWith(mask: v);
+              _lastOptions[widget.store] = o;
+              setState(() => _options = o);
+            }),
+      ],
+    );
+  }
+}
 
 class _ShareSheet extends StatefulWidget {
   const _ShareSheet({required this.call, required this.store, this.onBug});

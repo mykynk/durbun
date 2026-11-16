@@ -146,7 +146,7 @@ WebSocket messages and Server-Sent Events need an SDK: Flutter (dart:io WebSocke
 (`URLSessionWebSocketTask` and event streams over URLSession), Android (event streams with
 `DurbunInterceptor`; WebSockets opened through `DurbunWebSocketFactory`) and React Native (the global
 `WebSocket`, event streams from `XMLHttpRequest`-based libraries). Without an SDK a connection shows its
-handshake only.
+handshake only. The Flutter in-app panel shows the messages on the phone too, without the Mac.
 
 Not captured:
 

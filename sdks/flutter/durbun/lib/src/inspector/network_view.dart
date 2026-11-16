@@ -24,6 +24,7 @@ import 'network_model.dart';
 import 'replay.dart';
 import 'share_sheet.dart';
 import 'stats_view.dart';
+import 'stream_view.dart';
 import 'tools.dart' show ToolPage;
 import 'store.dart';
 import 'strings.dart';
@@ -947,6 +948,7 @@ class CallRow extends StatelessWidget {
     final timeStyle =
         DurbunType.monoStyle(size: DurbunType.monoRow, color: durationColor, weight: slow || failed ? FontWeight.w600 : FontWeight.w500, height: 1.3);
     final gql = graphqlLabel(call);
+    final connection = call.connectionKind != null;
     final scaler = MediaQuery.textScalerOf(context);
     double widthOf(String text, TextStyle style) =>
         (TextPainter(text: TextSpan(text: text, style: style), textDirection: TextDirection.ltr, textScaler: scaler, maxLines: 1)..layout()).width;
@@ -955,6 +957,8 @@ class CallRow extends StatelessWidget {
     final badgeMono = DurbunType.monoStyle(size: DurbunType.monoSm, weight: FontWeight.w600, height: 1.2);
     // Each tag with its drawn width (text and 6 pt padding each side).
     final tags = <(Widget, double)>[
+      // A WebSocket or an event stream: its state and message count first.
+      if (connection) (StreamChip(call: call), StreamChip.widthOf(call, (s) => widthOf(s, badgeMono))),
       // On its red card: outlined, not a red tint on red.
       if (failed)
         (
@@ -968,8 +972,10 @@ class CallRow extends StatelessWidget {
       else if (call.source != 'dart:io')
         (_SourceBadge(call), widthOf(call.source, DurbunType.monoStyle(size: DurbunType.caption, weight: FontWeight.w600, height: 1.2)) + 12),
     ];
-    // The size without decoding the body (rows build while scrolling).
-    final size = call.responseSize;
+    // The size without decoding the body (rows build while scrolling); a
+    // connection's: its messages'.
+    final stream = call.stream;
+    final size = stream != null && stream.count > 0 ? stream.bytesIn + stream.bytesOut : call.responseSize;
     final pathStyle = DurbunType.monoStyle(size: DurbunType.monoMd, color: c.text, height: 1.35, weight: FontWeight.w500);
     final meta = DurbunType.monoStyle(size: DurbunType.monoSm, color: c.textMuted, height: 1.3);
     final host = uri?.host ?? '';
@@ -1227,6 +1233,9 @@ class _SourceBadge extends StatelessWidget {
 /// where the last one was read.
 class _DetailMemory {
   int tab = 0;
+
+  /// The tab of a WebSocket or event stream (its messages first).
+  int streamTab = 0;
   String requestPart = 'body';
   String responsePart = 'body';
   int bodyMode = 0;
@@ -1262,13 +1271,15 @@ class _CallDetailPageState extends State<CallDetailPage> {
   late String? _bodyQuery = widget.bodyQuery;
   bool _replaying = false;
 
-  /// The summary card is folded away while the user reads down a page.
-  bool _folded = false;
+  /// The summary card is folded away while the user reads down a page; a
+  /// connection's starts folded (its messages need the height).
+  late bool _folded = widget.call.connectionKind != null;
 
   InspectorCall get call => _call;
 
   int _firstTab() {
     final q = widget.bodyQuery;
+    if (widget.call.connectionKind != null) return _memory.streamTab;
     if (q == null || q.isEmpty) return _memory.tab;
     bool has(InspectorBody? b) => bodyContains(b, q);
     if (has(widget.call.responseBody)) return 2;
@@ -1298,7 +1309,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
       _watch = CallWatch(widget.store, next);
       _bodyQuery = null;
       _replaying = false;
-      _folded = false;
+      _folded = next.connectionKind != null;
     });
     // The builder lets go of the old watch in this frame.
     WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
@@ -1374,11 +1385,21 @@ class _CallDetailPageState extends State<CallDetailPage> {
             ? (call.cancelled ? t.cancelledShort : t.failShort)
             : (call.status?.toString() ?? '···');
         final statusColor = call.cancelled ? c.textSubtle : c.status(call.status, failed: failed);
+        final kind = call.connectionKind;
+        final streamWord = streamStateWord(t, call);
         final statusWord = call.error != null
             ? (call.cancelled ? t.cancelled : t.shortError(shortErrorKey(call.error)))
-            : call.status != null
-                ? reason
-                : t.pending;
+            : kind != null && streamWord != null
+                // The pill says 101 / 200 and the tab WebSocket or SSE: the
+                // title says how the connection is.
+                ? '${streamWord.substring(0, 1).toUpperCase()}${streamWord.substring(1)}'
+                // Its messages are not here (only the Mac gets them): what it is.
+                : kind != null
+                    ? streamKindName(kind)
+                    : call.status != null
+                    ? reason
+                    : t.pending;
+        final streamFailed = call.stream?.state == StreamState.failed;
         final (prev, next) = _neighbours();
         // The summary needs the height: not with the keyboard up, in
         // landscape or with very large text.
@@ -1393,7 +1414,9 @@ class _CallDetailPageState extends State<CallDetailPage> {
         // Narrow phones: Replay goes into the menu so the title keeps room.
         // Share stays in the bar; on phones Replay moves into the menu.
         // A saved run's request is not sent again (its secrets are masked).
-        final replayInMenu = canReplay && !widget.store.readOnly && mq.size.width < 420;
+        // A connection is not sent again (replay sends one-off requests).
+        final replayable = canReplay && kind == null;
+        final replayInMenu = replayable && !widget.store.readOnly && mq.size.width < 420;
         return Scaffold(
           backgroundColor: c.bgApp,
           appBar: AppBar(
@@ -1425,7 +1448,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
                         child: Text(statusWord,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: failed ? c.danger : c.text)),
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: failed || streamFailed ? c.danger : c.text)),
                       ),
                     ],
                   ),
@@ -1447,7 +1470,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
                   icon: Theme.of(context).platform == TargetPlatform.iOS ? Icons.ios_share_rounded : Icons.share_rounded,
                   tooltip: t.share,
                   onTap: () => unawaited(showShareSheet(context, call, widget.store))),
-              if (canReplay && !replayInMenu && !widget.store.readOnly)
+              if (replayable && !replayInMenu && !widget.store.readOnly)
                 _replaying
                     ? const SizedBox(width: kMinTapTarget, child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))))
                     : DIconButton(icon: Icons.replay_rounded, tooltip: t.replay, onTap: _replay),
@@ -1498,15 +1521,19 @@ class _CallDetailPageState extends State<CallDetailPage> {
                 child: NotificationListener<ScrollNotification>(
                   onNotification: _onScroll,
                   child: SwipeTabs(
-                    initialIndex: _initialTab,
-                    onChanged: (i) => _memory.tab = i,
+                    // A connection has one more tab (its messages, first).
+                    key: ValueKey<bool>(kind != null),
+                    initialIndex: kind != null ? _memory.streamTab : (identical(call, widget.call) ? _initialTab : _memory.tab),
+                    onChanged: (i) => kind != null ? _memory.streamTab = i : _memory.tab = i,
                     tabs: <DTab>[
+                      if (kind != null) DTab(kind == StreamKind.sse ? t.eventsTab : t.messagesTab, alert: streamFailed),
                       DTab(t.general),
                       DTab(t.request),
                       DTab(t.response, alert: failed),
                       DTab(t.timing),
                     ],
                     pages: <Widget>[
+                      if (kind != null) StreamMessagesTab(key: ValueKey<String>('m$k'), call: call, store: widget.store),
                       _GeneralTab(key: ValueKey<String>('g$k'), call: call, store: widget.store),
                       _HttpTab(key: ValueKey<String>('q$k'), call: call, request: true, memory: _memory, bodyQuery: _bodyQuery),
                       call.state == InspectorCallState.pending
@@ -1922,7 +1949,7 @@ class _HttpTabState extends State<_HttpTab> {
         hasBody: widget.request ? call.hasRequestBody : call.hasResponseBody,
         contentType: widget.request ? call.requestContentType : call.responseContentType,
         dropped: call.bodiesDropped,
-        webSocket: !widget.request && call.status == 101 && call.url.startsWith('ws'),
+        webSocket: !widget.request && call.connectionKind == StreamKind.webSocket,
         initialQuery: widget.bodyQuery ?? '',
         initialMode: widget.memory.bodyMode,
         onModeChanged: (m) => widget.memory.bodyMode = m,

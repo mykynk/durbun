@@ -77,22 +77,42 @@ class RequestTracker {
     if (_requestSent) return;
     _requestSent = true;
     _closedUs ??= _nowUs;
+    recorder.sendNetMessage(requestMessage());
+  }
+
+  /// The `net.request` [sendRequest] sends, without sending it (the in-app
+  /// panel's own copy of a handshake the desktop does not get).
+  Map<String, Object?> requestMessage() {
     HeaderPairs headers = const <List<String>>[];
     String? contentType;
     try {
       headers = headersSnapshot?.call() ?? const <List<String>>[];
       contentType = contentTypeSnapshot?.call();
     } catch (_) {}
-    recorder.sendNetMessage(
-      buildNetRequest(
-        id: id,
-        ts: startEpochMs,
-        method: method,
-        url: reportedUrl ?? url,
-        headers: headers,
-        body: requestBody.toPending(contentType: contentType),
-        source: source,
-      ),
+    return buildNetRequest(
+      id: id,
+      ts: startEpochMs,
+      method: method,
+      url: reportedUrl ?? url,
+      headers: headers,
+      body: requestBody.toPending(contentType: contentType),
+      source: source,
+    );
+  }
+
+  /// A `net.response` without a body at this moment, without sending it or
+  /// finishing the tracker (see [requestMessage]).
+  Map<String, Object?> responseMessage({required int status, String? statusText, required HeaderPairs headers}) {
+    final endUs = _nowUs;
+    return buildNetResponse(
+      id: id,
+      ts: _epochAt(endUs),
+      status: status,
+      statusText: statusText,
+      headers: headers,
+      timings: _timings(endUs),
+      mocked: mockRule != null,
+      mockRuleId: mockRule?.id,
     );
   }
 

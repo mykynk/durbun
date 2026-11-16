@@ -39,7 +39,7 @@ void main() {
     await tester.pumpAndSettle();
     final list = find.byType(Scrollable).last;
     await tester.dragUntilVisible(find.text('What is not captured?'), list, const Offset(0, -300));
-    for (final title in <String>['Background isolates', 'dart:developer log()', 'WebView', 'WebSocket and event stream messages']) {
+    for (final title in <String>['Background isolates', 'dart:developer log()', 'WebView', 'Some WebSocket and event stream messages']) {
       await tester.dragUntilVisible(find.text(title), list, const Offset(0, -200));
       expect(find.text(title), findsOneWidget);
     }

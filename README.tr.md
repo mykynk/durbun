@@ -149,7 +149,7 @@ WebSocket mesajları ve Server-Sent Events için SDK gerekir: Flutter (dart:io W
 akışları), iOS (`URLSessionWebSocketTask` ve URLSession üzerinden olay akışları), Android (olay akışları
 `DurbunInterceptor` ile; WebSocket'ler `DurbunWebSocketFactory` ile açılınca) ve React Native (global
 `WebSocket`, `XMLHttpRequest` tabanlı kütüphanelerin olay akışları). SDK yoksa bağlantının yalnızca el
-sıkışması görünür.
+sıkışması görünür. Flutter uygulama içi paneli mesajları Mac olmadan telefonda da gösterir.
 
 Yakalanmayanlar:
 

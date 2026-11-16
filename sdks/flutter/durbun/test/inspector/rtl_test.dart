@@ -1,5 +1,9 @@
 // The panel in a right-to-left app: English text, laid out left to right.
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:durbun/durbun.dart';
+import 'package:durbun/src/core/protocol.dart';
 import 'package:durbun/src/inspector/store.dart';
 import 'package:flutter/cupertino.dart' show CupertinoLocalizations, DefaultCupertinoLocalizations;
 import 'package:flutter/foundation.dart' show SynchronousFuture;
@@ -97,5 +101,41 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Ağ'), findsWidgets);
     expect(Directionality.of(tester.element(find.text('Ağ').first)), TextDirection.ltr);
+  });
+
+  testWidgets('WebSocket messages in an RTL app: left to right, sent and received arrows the same way', (tester) async {
+    final store = DurbunInspectorStore(notifyDelay: Duration.zero)..attached = true;
+    store
+      ..ingest(buildNetRequest(id: 'w', ts: 1000, method: 'GET', url: 'wss://api.example.com/chat', headers: const <List<String>>[]))
+      ..ingest(buildNetResponse(id: 'w', ts: 1040, status: 101, headers: const <List<String>>[]))
+      ..streamOpened('w', kind: 'ws', ts: 1040);
+    final hello = Uint8List.fromList(utf8.encode('{"type":"hello"}'));
+    store
+      ..streamWs('w', 1100, 'out', 'text', hello.length, hello, null, null)
+      ..streamWs('w', 1200, 'in', 'text', hello.length, hello, null, null);
+    await tester.pumpWidget(MaterialApp(
+      locale: const Locale('ar'),
+      supportedLocales: const <Locale>[Locale('ar')],
+      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+        _Any<WidgetsLocalizations>(_RtlWidgets()),
+        _Any<MaterialLocalizations>(DefaultMaterialLocalizations()),
+        _Any<CupertinoLocalizations>(DefaultCupertinoLocalizations()),
+      ],
+      builder: (c, child) => DurbunInspector(store: store, child: child!),
+      home: const Scaffold(body: Text('app')),
+    ));
+    Durbun.showInspector();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Network').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('/chat').first);
+    await tester.pumpAndSettle();
+    final rows = find.textContaining('"hello"');
+    expect(rows, findsNWidgets(2));
+    expect(Directionality.of(tester.element(rows.first)), TextDirection.ltr);
+    final page = tester.getTopLeft(find.ancestor(of: rows.first, matching: find.byType(Scaffold)).first).dx;
+    expect(tester.getTopLeft(rows.first).dx - page, lessThan(80), reason: 'the text starts on the left');
+    expect(find.byIcon(Icons.north_east_rounded), findsWidgets);
+    expect(find.byIcon(Icons.south_west_rounded), findsWidgets);
   });
 }

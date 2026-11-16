@@ -147,7 +147,7 @@ DurbunInspectorStore patiStore({double? now, bool withMetrics = true}) {
   s.ingest(buildLog(level: 'info', message: 'Kullanıcı girişi tamam (id 8812)', tag: 'auth', ts: next(30)));
   call('2', 'GET', '$api/v2/pets?owner=8812&page=1', status: 200, start: 120, took: 340, resBody: petsPage(1));
   // Long-lived connections: a chat WebSocket (101) and a live feed of
-  // Server-Sent Events (headers only); their messages are on the desktop.
+  // Server-Sent Events, both still open, with their messages.
   final wsAt = next(80);
   s.ingest(buildNetRequest(id: '20', ts: wsAt, method: 'GET', url: 'wss://api.pati.app/v2/chat?room=8812', headers: <List<String>>[
     ...auth,
@@ -188,6 +188,8 @@ DurbunInspectorStore patiStore({double? now, bool withMetrics = true}) {
     remoteAddress: '104.21.48.17:443',
     timings: <String, Object?>{'connect': 0, 'send': 1, 'wait': 70, 'receive': 0},
   ));
+  addChatMessages(s, '20', wsAt + 96, end);
+  addAdoptionEvents(s, '21', sseAt + 74, end);
   for (var i = 0; i < 3; i++) {
     s.ingest(buildLog(level: 'verbose', message: 'Konum izni zaten verilmiş', tag: 'location', ts: next(15)));
   }
@@ -285,5 +287,226 @@ DurbunInspectorStore patiStore({double? now, bool withMetrics = true}) {
       ));
     }
   }
+  return s;
+}
+
+PendingBody textBody(String text) => jsonBody(text, contentType: 'text/plain; charset=utf-8');
+
+/// A JPEG's first bytes and filler (a photo sent in chunks).
+Uint8List jpegChunk(int size) {
+  final b = Uint8List(size);
+  const head = <int>[0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x48];
+  for (var i = 0; i < size; i++) {
+    b[i] = i < head.length ? head[i] : (i * 31 + 7) & 0xff;
+  }
+  return b;
+}
+
+/// A vet chat over the WebSocket of request [id], opened at [openTs]: sign
+/// in, subscribe, history, messages both ways, a photo, keep-alives. The
+/// last message arrives a few seconds before [end].
+void addChatMessages(DurbunInspectorStore s, String id, double openTs, double end) {
+  var at = openTs;
+  void ws(String dir, double after, Object value, {String opcode = 'text'}) {
+    at += after;
+    final text = value is String ? value : jsonEncode(value);
+    final body = textBody(text);
+    s.ingest(buildNetWs(id: id, ts: at, dir: dir, opcode: opcode, size: body.size, body: body));
+  }
+
+  void control(String dir, double after, String opcode) {
+    at += after;
+    s.ingest(buildNetWs(id: id, ts: at, dir: dir, opcode: opcode, size: 0));
+  }
+
+  void binary(String dir, double after, int size) {
+    at += after;
+    final bytes = jpegChunk(size);
+    s.ingest(buildNetWs(
+        id: id,
+        ts: at,
+        dir: dir,
+        opcode: 'binary',
+        size: size,
+        body: PendingBody(bytes: bytes, size: size, truncated: false, limit: 1 << 16, capture: true, contentType: 'application/octet-stream')));
+  }
+
+  ws('out', 38, <String, Object?>{'type': 'auth', 'token': 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI4ODEyIn0.c2lnbmF0dXJl'});
+  ws('in', 61, <String, Object?>{'type': 'auth.ok', 'userId': 8812, 'session': 'ws_5d1e'});
+  ws('out', 12, <String, Object?>{'type': 'subscribe', 'room': '8812', 'since': '2026-11-16T14:00:00Z'});
+  ws('in', 84, <String, Object?>{
+    'type': 'history',
+    'room': '8812',
+    'messages': <Object?>[
+      <String, Object?>{'id': 'm_17', 'from': 'Dr. Elif Kaya', 'text': 'Merhaba Ayşe Hanım, Luna nasıl?', 'at': '2026-11-16T14:02:10+03:00'},
+      <String, Object?>{'id': 'm_18', 'from': 'Ayşe Demir', 'text': 'İştahı yerinde, aşı sonrası biraz uyudu.', 'at': '2026-11-16T14:03:41+03:00'},
+    ],
+  });
+  ws('in', 2400, <String, Object?>{'type': 'typing', 'from': 'Dr. Elif Kaya'});
+  ws('in', 1900, <String, Object?>{
+    'type': 'message',
+    'id': 'm_19',
+    'from': 'Dr. Elif Kaya',
+    'text': 'Luna’nın aşı kartının fotoğrafını gönderebilir misiniz?',
+    'at': '2026-11-16T14:31:02+03:00',
+  });
+  ws('out', 5200, <String, Object?>{'type': 'message', 'clientId': 'c_7', 'text': 'Tabii, hemen gönderiyorum.'});
+  ws('in', 140, <String, Object?>{'type': 'ack', 'clientId': 'c_7', 'id': 'm_20'});
+  binary('out', 3100, 18842);
+  ws('in', 690, <String, Object?>{'type': 'upload.ok', 'fileId': 'f_311', 'size': 18842, 'mime': 'image/jpeg'});
+  control('in', 9000, 'ping');
+  control('out', 2, 'pong');
+  ws('in', 4100, <String, Object?>{'type': 'presence', 'user': 'Dr. Elif Kaya', 'status': 'online'});
+  ws('in', 6400, <String, Object?>{
+    'type': 'message',
+    'id': 'm_21',
+    'from': 'Dr. Elif Kaya',
+    'text': 'Teşekkürler, kart güncel. Bir sonraki karma aşı 21 Kasım’da.',
+    'at': '2026-11-16T14:31:48+03:00',
+  });
+  ws('out', 3800, <String, Object?>{'type': 'typing', 'room': '8812'});
+  ws('out', 2100, <String, Object?>{'type': 'message', 'clientId': 'c_8', 'text': 'Randevuyu 10:30’a alabilir miyiz?'});
+  ws('in', 160, <String, Object?>{'type': 'ack', 'clientId': 'c_8', 'id': 'm_22'});
+  control('in', 30000, 'ping');
+  control('out', 2, 'pong');
+  ws('in', 8200, <String, Object?>{'type': 'appointment.proposed', 'id': 'apt_91', 'date': '2026-11-21T10:30:00+03:00', 'clinic': 'Moda Veteriner'});
+  ws('out', 4400, <String, Object?>{'type': 'appointment.accept', 'id': 'apt_91'});
+  ws('in', 210, <String, Object?>{'type': 'appointment.confirmed', 'id': 'apt_91', 'reminder': '2026-11-20T18:00:00+03:00'});
+  control('in', 30000, 'ping');
+  control('out', 2, 'pong');
+  ws('in', 1200, <String, Object?>{'type': 'read', 'upTo': 'm_22', 'by': 'Dr. Elif Kaya'});
+  ws('in', (end - 6000 - at).clamp(500, 120000).toDouble(), <String, Object?>{'type': 'typing', 'from': 'Dr. Elif Kaya'});
+}
+
+/// A live feed of adoptions over the event stream of request [id].
+void addAdoptionEvents(DurbunInspectorStore s, String id, double openTs, double end) {
+  var at = openTs;
+  void ev(double after, Object value, {String? event, String? eventId, int? retry}) {
+    at += after;
+    final text = value is String ? value : jsonEncode(value);
+    final body = textBody(text);
+    s.ingest(buildNetSse(id: id, ts: at, event: event, eventId: eventId, retry: retry, size: body.size, body: body));
+  }
+
+  ev(12, <String, Object?>{'listening': 'adoptions', 'region': 'istanbul'}, event: 'hello', retry: 3000);
+  const pets = <(String, String, String)>[
+    ('Boncuk', 'Kadıköy Barınağı', 'cat'),
+    ('Karamel', 'Beşiktaş Hayvan Evi', 'dog'),
+    ('Fıstık', 'Kadıköy Barınağı', 'cat'),
+    ('Paşa', 'Üsküdar Barınağı', 'dog'),
+    ('Maya', 'Moda Pati Evi', 'cat'),
+    ('Leo', 'Beşiktaş Hayvan Evi', 'dog'),
+  ];
+  for (var i = 0; i < pets.length; i++) {
+    final (name, shelter, species) = pets[i];
+    ev(14000 + i * 3100, <String, Object?>{'petId': 512 + i * 7, 'name': name, 'species': species, 'shelter': shelter, 'status': 'adopted'},
+        event: 'adoption', eventId: '${1041 + i}');
+    if (i == 2) ev(15000, <String, Object?>{'adoptedToday': 14, 'waiting': 236}, event: 'stats', eventId: '1044s');
+  }
+}
+
+/// Connections in every state, for the messages tab's renders: an open chat,
+/// a tracking socket the server closed, a notification socket that broke, an
+/// open socket without messages yet, an OkHttp socket this panel cannot
+/// follow, a finished event stream and a busy ticker past the ring's size.
+DurbunInspectorStore streamsStore({double? now}) {
+  final end = now ?? DateTime.now().millisecondsSinceEpoch.toDouble();
+  final s = DurbunInspectorStore(notifyDelay: Duration.zero, maxStreamMessages: 80)
+    ..bodyResolver = wireBodyFromPending
+    ..attached = true;
+  s.ingest(patiHello());
+  const api = 'https://api.pati.app';
+  const upgrade = <List<String>>[
+    <String>['Upgrade', 'websocket'],
+    <String>['Connection', 'Upgrade'],
+    <String>['Sec-WebSocket-Version', '13'],
+  ];
+  const switched = <List<String>>[
+    <String>['Upgrade', 'websocket'],
+    <String>['Connection', 'Upgrade'],
+    <String>['Sec-WebSocket-Accept', 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='],
+  ];
+  Uint8List utf(Object v) => Uint8List.fromList(utf8.encode(v is String ? v : jsonEncode(v)));
+
+  /// A WebSocket handshake the SDK follows (or not), opened at [at].
+  double open(String id, String url, double at, {bool follow = true, String source = 'dart:io'}) {
+    s.ingest(buildNetRequest(id: id, ts: at, method: 'GET', url: url, headers: upgrade, source: source));
+    s.ingest(buildNetResponse(
+        id: id,
+        ts: at + 88,
+        status: 101,
+        statusText: 'Switching Protocols',
+        headers: switched,
+        protocol: 'HTTP/1.1',
+        timings: <String, Object?>{'connect': 36, 'send': 1, 'wait': 51, 'receive': 0}));
+    if (follow) s.streamOpened(id, kind: 'ws', ts: at + 88);
+    return at + 88;
+  }
+
+  void get(String id, String path, double at) {
+    s.ingest(buildNetRequest(id: id, ts: at, method: 'GET', url: '$api$path', headers: const <List<String>>[]));
+    s.ingest(buildNetResponse(id: id, ts: at + 142, status: 200, headers: const <List<String>>[], body: jsonBody(<String, Object?>{'ok': true})));
+  }
+
+  final t0 = end - 6 * 60 * 1000;
+  get('1', '/v2/pets?owner=8812', t0);
+
+  // A courier's location, every 2 s, until the server restarts.
+  var at = open('31', 'wss://api.pati.app/v2/tracking/order-7731', t0 + 900);
+  for (var i = 0; i < 18; i++) {
+    at += 2000;
+    final v = utf(<String, Object?>{'orderId': 7731, 'lat': 41.0422 + i * 0.0004, 'lng': 29.0083 - i * 0.0003, 'etaMin': 14 - i ~/ 2});
+    s.streamWs('31', at, 'in', 'text', v.length, v, null, null);
+  }
+  s.streamWs('31', at + 1400, 'in', 'close', 16, null, 1001, 'server restart');
+  s.streamWs('31', at + 1403, 'out', 'close', 16, null, 1001, 'server restart');
+
+  // Notifications: a few messages, then the connection resets.
+  at = open('32', 'wss://api.pati.app/v2/notifications', t0 + 2100);
+  for (final n in <Object>[
+    <String, Object?>{'type': 'hello', 'unread': 3},
+    <String, Object?>{'type': 'notification', 'id': 'n_88', 'title': 'Aşı hatırlatması', 'body': 'Luna’nın karma aşısı 5 gün sonra'},
+    <String, Object?>{'type': 'notification', 'id': 'n_89', 'title': 'Sipariş yolda', 'body': '12 kg kedi maması'},
+  ]) {
+    at += 4300;
+    final v = utf(n);
+    s.streamWs('32', at, 'in', 'text', v.length, v, null, null);
+  }
+  s.streamEnded('32', at + 61000, error: 'SocketException: Connection reset by peer (OS Error: Connection reset by peer, errno = 104), address = api.pati.app, port = 51824');
+
+  // A socket the SDK cannot follow (OkHttp, the Mac not recording).
+  open('34', 'wss://events.pati.app/v1/stream', t0 + 2600, follow: false, source: 'okhttp');
+
+  // An event stream the server finished.
+  s.ingest(buildNetRequest(id: '35', ts: t0 + 3000, method: 'GET', url: '$api/v2/live/adoptions?region=istanbul', headers: const <List<String>>[
+    <String>['Accept', 'text/event-stream'],
+  ]));
+  s.ingest(buildNetResponse(id: '35', ts: t0 + 3074, status: 200, headers: const <List<String>>[
+    <String>['Content-Type', 'text/event-stream; charset=utf-8'],
+  ]));
+  s.streamOpened('35', kind: 'sse', ts: t0 + 3074);
+  at = t0 + 3074;
+  const pets = <String>['Boncuk', 'Karamel', 'Fıstık', 'Paşa', 'Maya', 'Leo', 'Zeytin', 'Duman', 'Kuki', 'Badem', 'Tarçın'];
+  for (var i = 0; i < pets.length; i++) {
+    at += 4200 + i * 900;
+    final v = utf(<String, Object?>{'petId': 512 + i * 7, 'name': pets[i], 'shelter': i.isEven ? 'Kadıköy Barınağı' : 'Moda Pati Evi', 'status': 'adopted'});
+    s.streamSse('35', at, 'adoption', '${1041 + i}', i == 0 ? 3000 : null, v.length, v);
+  }
+  s.streamEnded('35', at + 1200);
+
+  // A price ticker: past the ring's 80 messages, the middle goes.
+  at = open('36', 'wss://api.pati.app/v2/shop/ticker', t0 + 4000);
+  for (var i = 0; i < 260; i++) {
+    at += 650;
+    final v = utf(<String, Object?>{'sku': 'MAMA-KEDI-12KG', 'price': 649.9 - (i % 7) * 2.5, 'stock': 120 - i ~/ 4, 'seq': i + 1});
+    s.streamWs('36', at, 'in', 'text', v.length, v, null, null);
+  }
+
+  // Open, nothing sent yet.
+  open('33', 'wss://api.pati.app/v2/live/vet-queue?clinic=moda', end - 20000);
+
+  // The vet chat, still open.
+  final chatAt = open('30', 'wss://api.pati.app/v2/chat?room=8812', end - 3 * 60 * 1000);
+  addChatMessages(s, '30', chatAt, end);
   return s;
 }

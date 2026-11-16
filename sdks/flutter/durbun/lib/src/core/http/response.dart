@@ -81,6 +81,11 @@ class DurbunHttpClientResponse extends Stream<List<int>>
   StreamReporter? _sse;
   SseParser? _sseParser;
 
+  /// An event stream reported the usual way (the desktop does not take
+  /// stream messages), followed for the in-app panel alone.
+  StreamReporter? _localSse;
+  SseParser? _localSseParser;
+
   /// Reports an event stream's headers now; false when this response is
   /// reported the usual way.
   bool _startEventStream() {
@@ -90,7 +95,10 @@ class DurbunHttpClientResponse extends Stream<List<int>>
       final reporter = StreamReporter(_tracker.recorder, _tracker.id, mockRuleId: _tracker.mockRule?.id);
       // Only while the desktop takes stream messages; otherwise the response
       // is reported as it always was (with its body, at its end).
-      if (!reporter.sending) return false;
+      if (!reporter.sending) {
+        _followForPanel();
+        return false;
+      }
       reporter.markStarted();
       _finished = true;
       _sse = reporter;
@@ -102,10 +110,48 @@ class DurbunHttpClientResponse extends Stream<List<int>>
         remoteAddress: remoteAddressOf(_inner.connectionInfo),
         protocol: 'HTTP/1.1',
       );
+      reporter.announce('sse');
       return true;
     } catch (_) {
       return false;
     }
+  }
+
+  /// While the in-app panel records: the event stream the desktop gets the
+  /// usual way is parsed for the panel too (the desktop's copy is unchanged).
+  void _followForPanel() {
+    try {
+      final local = StreamReporter(_tracker.recorder, _tracker.id, mockRuleId: _tracker.mockRule?.id, localOnly: true);
+      if (local.localSink == null) return;
+      _localSse = local;
+      _localSseParser = SseParser(local.sseEvent);
+      local.announce(
+        'sse',
+        status: _inner.statusCode,
+        statusText: _inner.reasonPhrase,
+        headers: headerPairs(_inner.headers, _tracker.recorder),
+      );
+    } catch (_) {
+      _localSse = null;
+      _localSseParser = null;
+    }
+  }
+
+  /// The panel's copy of the event stream ends with the response.
+  void _endLocalEventStream({Object? error, bool incomplete = false}) {
+    final sse = _localSse;
+    if (sse == null) return;
+    _localSse = null;
+    try {
+      _localSseParser?.close();
+      if (error != null) {
+        sse.fail(error);
+      } else if (incomplete) {
+        sse.fail(const HttpException('The app stopped reading the event stream'), cancelled: true);
+      } else {
+        sse.sseEnd();
+      }
+    } catch (_) {}
   }
 
   /// The app aborted the request while reading the event stream.
@@ -195,12 +241,20 @@ class DurbunHttpClientResponse extends Stream<List<int>>
     try {
       _capture.add(chunk);
     } catch (_) {}
+    final local = _localSse;
+    if (local == null) return;
+    try {
+      _localSseParser!
+        ..keepBytes = local.cap
+        ..add(chunk);
+    } catch (_) {}
   }
 
   void _finish({Object? error, bool incomplete = false, bool bodyUnread = false}) {
     if (_finished) return;
     _finished = true;
     _unconsumedTimer?.cancel();
+    _endLocalEventStream(error: error, incomplete: incomplete || bodyUnread);
     try {
       final contentType = _inner.headers[HttpHeaders.contentTypeHeader]?.first;
       final body = _capture.toPending(
@@ -324,6 +378,13 @@ class DurbunHttpClientResponse extends Stream<List<int>>
     final capture = _webSocketCapture();
     _framesFollowed = capture != null && _tracker.recorder is StreamCaptureHost;
     _finish();
+    if (capture != null) {
+      try {
+        final u = Uri.parse(_tracker.url);
+        capture.reporter.announce('ws',
+            url: u.scheme == 'http' || u.scheme == 'https' ? u.replace(scheme: u.scheme == 'https' ? 'wss' : 'ws').toString() : null);
+      } catch (_) {}
+    }
     final socket = _inner.detachSocket();
     if (capture == null) return socket;
     return socket.then<Socket>((s) {

@@ -428,14 +428,167 @@ class InspectorStrings {
   String get noBodyHint => _('Bu istekte gövde gönderilmedi ya da boş geldi', 'No body was sent, or it was empty');
   String get webSocketBody => _('WebSocket bağlantısı', 'WebSocket connection');
   String get webSocketBodyHint => _(
-    'Bağlantı WebSocket’e geçti. Gidip gelen mesajlar bu panelde değil, Mac’teki Dürbün’de görünür.',
-    'The connection switched to WebSocket. Its messages show in Dürbün on the Mac, not in this panel.',
+    'Bağlantı WebSocket’e geçti. Gidip gelen mesajlar Mesajlar sekmesinde.',
+    'The connection switched to WebSocket. Its messages are on the Messages tab.',
   );
   String get eventStreamBody => _('Olay akışı', 'Event stream');
   String get eventStreamBodyHint => _(
-    'Yanıt bir olay akışı (text/event-stream). Olaylar bu panelde değil, Mac’teki Dürbün’de görünür.',
-    'The response is an event stream (text/event-stream). Its events show in Dürbün on the Mac, not in this panel.',
+    'Yanıt bir olay akışı (text/event-stream). Olaylar Olaylar sekmesinde.',
+    'The response is an event stream (text/event-stream). Its events are on the Events tab.',
   );
+
+  /* WebSocket and event stream messages (worded like the desktop's network.streams.*) */
+  String get messagesTab => _('Mesajlar', 'Messages');
+  String get eventsTab => _('Olaylar', 'Events');
+  String streamState(String state) => switch (state) {
+        'open' => _('açık', 'open'),
+        'closed' => _('kapandı', 'closed'),
+        _ => _('koptu', 'broke'),
+      };
+  String streamStateTitle(String state) => switch (state) {
+        'open' => _('Bağlantı açık', 'Connection open'),
+        'closed' => _('Bağlantı kapandı', 'Connection closed'),
+        _ => _('Bağlantı koptu', 'Connection broke'),
+      };
+  String streamChipTitle(String kind, String state, int n) =>
+      _('$kind · $state · $n mesaj', n == 1 ? '$kind · $state · 1 message' : '$kind · $state · $n messages');
+  String get closedByServer => _('Sunucu kapattı', 'Closed by the server');
+  String get closedByApp => _('Uygulama kapattı', 'Closed by the app');
+  String get connectionClosed => _('Bağlantı kapandı', 'Connection closed');
+  String get sseEndedByServer => _('Sunucu akışı bitirdi', 'The server ended the stream');
+  String get sseClosedByApp => _('Uygulama akışı kapattı', 'The app closed the stream');
+  String openFor(String time) => _('$time açık kaldı', 'Was open for $time');
+  String openSince(String time) => _('$time süredir açık', 'Open for $time');
+
+  /// How long a connection was open: "850 ms", "42 sn", "4 dk 12 sn", "2 sa 5 dk".
+  String span(double ms) {
+    final v = ms < 0 ? 0 : ms.round();
+    if (v < 1000) return '$v ms';
+    final s = v ~/ 1000;
+    if (s < 60) return _('$s sn', '${s}s');
+    final m = s ~/ 60;
+    if (m < 60) return _('$m dk ${s % 60} sn', '${m}m ${s % 60}s');
+    return _('${m ~/ 60} sa ${m % 60} dk', '${m ~/ 60}h ${m % 60}m');
+  }
+  String? closeCodeName(int? code) {
+    if (code == null) return null;
+    return switch (code) {
+      1000 => _('normal kapanış', 'normal closure'),
+      1001 => _('uzaklaşıyor', 'going away'),
+      1002 => _('protokol hatası', 'protocol error'),
+      1003 => _('desteklenmeyen veri türü', 'unsupported data type'),
+      1005 => _('kapanış kodu gönderilmedi', 'no close code sent'),
+      1006 => _('anormal kapanış', 'abnormal closure'),
+      1007 => _('geçersiz veri', 'invalid data'),
+      1008 => _('kural ihlali', 'policy violation'),
+      1009 => _('mesaj çok büyük', 'message too big'),
+      1010 => _('gerekli uzantı yok', 'required extension missing'),
+      1011 => _('sunucu hatası', 'server error'),
+      1012 => _('sunucu yeniden başlıyor', 'server restarting'),
+      1013 => _('daha sonra yeniden deneyin', 'try again later'),
+      1014 => _('ağ geçidi hatası', 'bad gateway'),
+      1015 => _('TLS el sıkışması başarısız', 'TLS handshake failed'),
+      >= 3000 && <= 3999 => _('kütüphanenin tanımladığı kod', 'code defined by a library'),
+      >= 4000 && <= 4999 => _('uygulamanın kendi kodu', 'the app’s own code'),
+      _ => null,
+    };
+  }
+
+  String streamReceived(int n) => _('$n alındı', '$n received');
+  String streamSent(int n) => _('$n gönderildi', '$n sent');
+  String streamEvents(int n) => _('$n olay', n == 1 ? '1 event' : '$n events');
+  String streamDroppedShort(int n) => _('$n silindi', '$n removed');
+  String streamGap(int n) => _('$n mesaj bellek sınırı nedeniyle silindi',
+      n == 1 ? '1 message removed by the memory limit' : '$n messages removed by the memory limit');
+  String streamGapHead(int head, int n) => _('İlk $head mesajdan sonraki $n mesaj bellek sınırı nedeniyle silindi',
+      n == 1 ? '1 message after the first $head removed by the memory limit' : '$n messages after the first $head removed by the memory limit');
+  String streamDroppedHint(int head, int max) => _(
+        'Bu panel her bağlantının ilk $head mesajını (oturum açma, abonelik gibi) en uzun tutar, ardından en yeni $max mesajı saklar; aradakiler önce silinir.',
+        'This panel keeps the first $head messages of every connection (sign-in, subscriptions) longest, then the newest $max; the ones in between go first.',
+      );
+  String controlHidden(int n) => _('$n ping/pong gizli', '$n ping/pong hidden');
+  String get controlLabel => 'ping/pong';
+  String get controlShow => _('Ping/pong mesajlarını göster', 'Show ping/pong messages');
+  String get controlHide => _('Ping/pong mesajlarını gizle', 'Hide ping/pong messages');
+  String get searchMessages => _('Mesajlarda ara…', 'Search messages…');
+  String get searchEvents => _('Olaylarda ara…', 'Search events…');
+  String newMessages(int n) => _('$n yeni mesaj', n == 1 ? '1 new message' : '$n new messages');
+  String newEvents(int n) => _('$n yeni olay', n == 1 ? '1 new event' : '$n new events');
+  String streamDirName(bool out) => out ? _('Gönderildi', 'Sent') : _('Alındı', 'Received');
+  String streamDirTitle(bool out) => out ? _('Uygulama gönderdi', 'The app sent it') : _('Uygulama aldı', 'The app received it');
+  String streamTypeTitle(String type) => switch (type) {
+        'text' => _('Metin mesajı', 'Text message'),
+        'binary' => _('İkili (binary) mesaj', 'Binary message'),
+        'close' => _('Kapanış çerçevesi', 'Close frame'),
+        'ping' => _('Ping: bağlantıyı canlı tutma', 'Ping: keeps the connection alive'),
+        'pong' => _('Pong: ping yanıtı', 'Pong: the reply to a ping'),
+        _ => _('SSE olayı', 'SSE event'),
+      };
+  String get fieldSeq => _('Sıra', 'Order');
+  String get fieldTime => _('Zaman', 'Time');
+  String get fieldSinceOpen => _('Açılıştan sonra', 'Since open');
+  String get fieldSize => _('Boyut', 'Size');
+  String get fieldDirection => _('Yön', 'Direction');
+  String get fieldType => _('Tür', 'Type');
+  String get fieldEvent => _('Olay', 'Event');
+  String get fieldEventId => _('Olay kimliği (id)', 'Event ID (id)');
+  String get fieldRetry => _('Yeniden bağlanma (retry)', 'Reconnect (retry)');
+  String get fieldCloseCode => _('Kapanış kodu', 'Close code');
+  String get fieldCloseReason => _('Gerekçe', 'Reason');
+  String get payloadNone => _('Bu mesajın gövdesi yok.', 'This message has no body.');
+  String get payloadNotCaptured => _('Gövde kaydedilmedi; yalnızca boyutu biliniyor.', 'The body was not captured; only its size is known.');
+  String get payloadBodiesOff => _(
+        'Gövde kaydedilmedi: gövde yakalama kapalı. Yalnızca boyutu biliniyor.',
+        'The body was not captured: body capture is off. Only its size is known.',
+      );
+  String payloadTruncated(String held, String size) =>
+      _('Gövdenin $held kadarı kaydedildi; tamamı $size.', '$held of the body was captured; all of it is $size.');
+  String get streamBodiesOffNote => _(
+        'Gövde yakalama kapalı: mesajların yalnızca boyutları kaydediliyor.',
+        'Body capture is off: only the sizes of messages are recorded.',
+      );
+  String get openNoneTitle => _('Bağlantı açık, henüz mesaj yok', 'Connection open, no messages yet');
+  String get openNoneBody => _(
+        'Uygulama ya da sunucu bir mesaj gönderdiğinde burada görünür.',
+        'When the app or the server sends a message, it shows here.',
+      );
+  String get openNoneEventsTitle => _('Akış açık, henüz olay yok', 'Stream open, no events yet');
+  String get openNoneEventsBody => _('Sunucu bir olay gönderdiğinde burada görünür.', 'When the server sends an event, it shows here.');
+  String get closedNoneTitle => _('Bağlantı mesaj gönderilmeden kapandı', 'The connection closed before any message');
+  String get failedNoneTitle => _('Bağlantı mesaj gelmeden koptu', 'The connection broke before any message');
+  String get allDroppedTitle => _('Bu bağlantının mesajları silindi', 'This connection’s messages were removed');
+  String get streamNoMatchTitle => _('Aramaya uyan mesaj yok', 'No message matches the search');
+  String get onlyControlTitle => _('Yalnızca ping/pong mesajları var', 'Only ping/pong messages so far');
+  String get showControl => _('Ping/pong göster', 'Show ping/pong');
+  String get noHookTitle => _('SDK bu bağlantının mesajlarını göremedi', 'The SDK could not see this connection’s messages');
+  String get noHookBody => _(
+        'Uygulamanın SDK’sı mesajları yakalayabiliyor ama bu bağlantıyı açan koda bağlı değil; bunu uygulamanın kurulumu belirler.',
+        'The app’s SDK can capture messages but is not hooked into the code that opened this connection; the app’s setup decides this.',
+      );
+  String get macOnlyTitle => _('Mesajlar bu panelde yok', 'Messages are not in this panel');
+  String get macOnlyBody => _(
+        'Bu bağlantının mesajları bu panele yalnızca Mac’teki Dürbün mesajları kaydederken gelir.',
+        'This connection’s messages reach this panel only while Dürbün on the Mac records them.',
+      );
+  String get previousRunNoMessages => _(
+        'Önceki çalıştırmanın kaydı mesajları içermez; yalnızca bağlantının açılışı var.',
+        'The previous run’s record has no messages, only the opening of the connection.',
+      );
+  String messageTitle(int seq) => _('Mesaj $seq', 'Message $seq');
+  String eventTitle(int seq) => _('Olay $seq', 'Event $seq');
+  String get prevMessage => _('Önceki mesaj', 'Previous message');
+  String get nextMessage => _('Sonraki mesaj', 'Next message');
+  String get messageGone => _('Bu mesaj bellek sınırı nedeniyle silindi', 'This message was removed by the memory limit');
+  String get shareMessageTitle => _('Mesajı paylaş', 'Share message');
+  String get shareEventTitle => _('Olayı paylaş', 'Share event');
+  String get shareMessageDescription => _(
+        'Ekibinizin Dürbün olmadan okuyabileceği bir rapor: bağlantı, zaman, yön, tür ve gövde',
+        'A report your team can read without Dürbün: the connection, time, direction, type and body',
+      );
+  String get shareMessageMaskHint => _(
+        'Gövdedeki token, parola ve çerez değerleri ile URL’deki gizli parametreler •••• olur',
+        'Tokens, passwords and cookies in the body and secret URL parameters become ••••',
+      );
   String get bodyNotCaptured => _('Gövde kaydedilmedi', 'Body not captured');
   String get bodyNotCapturedHint => _(
     'Masaüstünde gövde kaydı kapalı ya da gövde boyut sınırını aştı; yalnızca boyutu biliniyor',
@@ -788,10 +941,10 @@ class InspectorStrings {
     'WebView içindeki sayfanın istekleri ve konsol satırları yakalanmaz.',
     'Requests and console lines of the page inside a WebView are not captured.',
   );
-  String get ncWebSocket => _('WebSocket ve olay akışı mesajları', 'WebSocket and event stream messages');
+  String get ncWebSocket => _('Bazı WebSocket ve olay akışı mesajları', 'Some WebSocket and event stream messages');
   String get ncWebSocketWhy => _(
-    'Bu panel yalnızca bağlantının açılışını gösterir. Mesajlar ve olaylar Mac’teki Dürbün’de görünür.',
-    'This panel shows only the opening of the connection. Messages and events show in Dürbün on the Mac.',
+    'dart:io ve DurbunNetwork.webSocket ile açılan bağlantıların mesajları bu panelde de görünür. OkHttp, URLSession, DurbunHttpCall.eventStream ve arka plan isolate’larındaki bağlantıların mesajları buraya yalnızca Mac’teki Dürbün kaydederken gelir.',
+    'Messages of connections opened through dart:io and DurbunNetwork.webSocket show in this panel too. Those of OkHttp, URLSession, DurbunHttpCall.eventStream and background isolates reach it only while Dürbün on the Mac records them.',
   );
   String get ncEarlyClients => _('SDK’dan önce açılan istemciler', 'Clients opened before the SDK');
   String get ncEarlyClientsWhy => _(

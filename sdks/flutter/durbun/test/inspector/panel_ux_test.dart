@@ -81,6 +81,28 @@ class _Routes extends NavigatorObserver {
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) => names.add(route.settings.name);
 }
 
+/// A WebSocket the SDK follows, with a sign-in, a reply, a ping and its
+/// pong, and one more text.
+DurbunInspectorStore _chatStore() {
+  final s = _newStore()..attached = true;
+  s.ingest(buildNetRequest(id: 'ws', ts: 1000, method: 'GET', url: 'https://api.example.com/chat', headers: const <List<String>>[
+    <String>['Upgrade', 'websocket'],
+  ]));
+  s.ingest(buildNetResponse(id: 'ws', ts: 1050, status: 101, headers: const <List<String>>[]));
+  s.streamOpened('ws', kind: 'ws', ts: 1050);
+  void add(String dir, String type, [String? text]) {
+    final b = text == null ? null : Uint8List.fromList(utf8.encode(text));
+    s.streamWs('ws', 1100, dir, type, b?.length ?? 0, b, null, null);
+  }
+
+  add('out', 'text', '{"type":"auth","token":"abc.secret.xyz"}');
+  add('in', 'text', '{"type":"welcome","user":"Ayşe"}');
+  add('in', 'ping');
+  add('out', 'pong');
+  add('in', 'text', 'needle here');
+  return s;
+}
+
 void main() {
   setUp(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_shake, (_) async => true));
   tearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_shake, null));
@@ -466,5 +488,89 @@ void main() {
       expect(find.ancestor(of: find.textContaining('forty-two'), matching: find.byType(SelectionArea)), findsOneWidget,
           reason: 'the body can be selected');
     }, variant: const TargetPlatformVariant(<TargetPlatform>{TargetPlatform.android, TargetPlatform.iOS}));
+  });
+
+  group('connections', () {
+    Finder searchField(String hint) => find.ancestor(of: find.text(hint), matching: find.byType(TextField));
+
+    testWidgets('a WebSocket opens on its Messages; ping/pong hidden until switched on; search', (tester) async {
+      await _phone(tester);
+      final s = _chatStore();
+      await _open(tester, s);
+      expect(find.textContaining('WS 5'), findsOneWidget, reason: 'the row says what it is and how many');
+      await tester.tap(find.textContaining('/chat').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Messages'), findsWidgets);
+      expect(find.textContaining('welcome').hitTestable(), findsOneWidget, reason: 'the Messages tab is the first one shown');
+      expect(find.text('2 ping/pong hidden'), findsOneWidget);
+      await tester.tap(find.text('2 ping/pong hidden'));
+      await tester.pumpAndSettle();
+      expect(find.text('ping/pong'), findsOneWidget);
+      await tester.enterText(searchField('Search messages…'), 'needle');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('welcome'), findsNothing);
+      expect(find.textContaining('needle here'), findsOneWidget);
+    });
+
+    testWidgets('a message opens on its own page; its share is masked by default', (tester) async {
+      await _phone(tester);
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String?;
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      final s = _chatStore();
+      await _open(tester, s);
+      await tester.tap(find.textContaining('/chat').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('"auth"').hitTestable().first);
+      await tester.pumpAndSettle();
+      expect(find.text('Message 1'), findsOneWidget);
+      await tester.tap(find.byTooltip('Next message'));
+      await tester.pumpAndSettle();
+      expect(find.text('Message 2'), findsOneWidget);
+      await tester.tap(find.byTooltip('Previous message'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Share').hitTestable());
+      await tester.pumpAndSettle();
+      expect(find.text('Share message'), findsOneWidget);
+      await tester.tap(find.text('Copy').hitTestable());
+      await tester.pumpAndSettle();
+      expect(copied, isNotNull);
+      expect(copied, contains('wss://api.example.com/chat'));
+      expect(copied, isNot(contains('abc.secret.xyz')));
+      expect(copied, contains('••••'));
+    });
+
+    testWidgets('a native connection whose messages only the Mac gets says so in one line', (tester) async {
+      await _phone(tester);
+      final s = _newStore()..attached = true;
+      s.ingest(<String, Object?>{
+        kEncodedLineKey: jsonEncode(<String, Object?>{
+          'type': 'net.request', 'id': 'k1', 'ts': 1000, 'method': 'GET', 'url': 'wss://n.example.com/live', //
+          'headers': <Object?>[], 'source': 'okhttp',
+        }),
+      });
+      s.ingest(<String, Object?>{
+        kEncodedLineKey: jsonEncode(<String, Object?>{'type': 'net.response', 'id': 'k1', 'ts': 1040, 'status': 101, 'headers': <Object?>[]}),
+      });
+      await _open(tester, s);
+      await tester.tap(find.textContaining('/live').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Messages are not in this panel'), findsOneWidget);
+    });
+
+    testWidgets('an open connection with no messages has an empty state', (tester) async {
+      await _phone(tester);
+      final s = _newStore()..attached = true;
+      s.ingest(buildNetRequest(id: 'e', ts: 1000, method: 'GET', url: 'wss://api.example.com/quiet', headers: const <List<String>>[]));
+      s.ingest(buildNetResponse(id: 'e', ts: 1050, status: 101, headers: const <List<String>>[]));
+      s.streamOpened('e', kind: 'ws', ts: 1050);
+      await _open(tester, s);
+      await tester.tap(find.textContaining('/quiet').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Connection open, no messages yet'), findsOneWidget);
+    });
   });
 }

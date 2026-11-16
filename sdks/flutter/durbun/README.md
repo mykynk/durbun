@@ -245,6 +245,18 @@ under the same entry. Messages are sent only while the Mac app asks for them;
 otherwise the entry looks as it always did (a `101`, or an event stream with
 its body when it ends).
 
+The [in-app panel](#in-app-panel) keeps its own copy of the messages, apart
+from what goes to the Mac: connections opened through dart:io and
+`DurbunNetwork.webSocket` show their messages on the phone whether or not the
+Mac app records them. Native clients (OkHttp, URLSession),
+`call.eventStream` and background isolates reach the panel only while the Mac
+app records messages. The panel keeps at most 500 messages per connection
+(the first 20 stay, then the newest), the first 16 KB of each payload (the
+size shown is always the full one; sizes only while bodies are off), and
+8 MB or 5,000 messages across all connections, removing the oldest finished
+connection's messages first. The list marks where messages were removed and
+how many.
+
 - **Automatic (dart:io):** `WebSocket.connect`, `IOWebSocketChannel` and
   `WebSocketChannel.connect` on Android and iOS, and every `text/event-stream`
   response read through `HttpClient`, `package:http` or Dio's default adapter.
@@ -663,6 +675,14 @@ Device & SDK, Export session, Previous run and Clear:
   tabs: a searchable JSON tree for bodies, Code and Hex views, image preview,
   headers, cookies and query parameters, DNS / connect / TLS / TTFB bars, and
   **Replay** and **Copy as** (cURL, fetch, Dart dio, Swift, Kotlin).
+  A WebSocket or event stream row says WS or SSE, whether the connection is
+  open, closed or broken, and how many messages it has; its detail opens on
+  **Messages** (**Events** for SSE): direction (an arrow and a word, not colour
+  alone), time since the connection opened, type and size per row, the event
+  name, `id` and `retry` for SSE, a search, ping/pong hidden until you switch
+  them on, live follow with "↓ N new", and who ended the connection with the
+  close code and reason as the last line. A message opens on its own page
+  (JSON tree, text or hex) with a masked **Share**.
   **Share** turns a request into a report your team can read without Dürbün
   (URL, status, trace IDs, headers, bodies, cURL; secret values in headers,
   query parameters, JSON and form bodies are masked as `••••` by default, and
@@ -687,7 +707,7 @@ Device & SDK, Export session, Previous run and Clear:
   "What is captured?" (whether each data source is on and, if not, why) and
   "What is not captured?" (`print` and HTTP of background isolates that are not attached, `dart:developer` `log()`,
   clients with their own network stack, other native libraries on Android,
-  WebView, WebSocket and event stream messages (they show on the Mac), clients created before the SDK).
+  WebView, WebSocket and event stream messages of native clients and background isolates (they reach the panel only while the Mac app records them), clients created before the SDK).
 - **Statistics** (under Tools), in scrollable tabs: *Summary* (request count;
   successful, 4xx, 5xx, connection errors (timeouts included) and pending
   requests; methods), *Duration* (average, median (p50), p95, longest), *Data*
@@ -721,20 +741,24 @@ Device & SDK, Export session, Previous run and Clear:
   (`durbun-export`) and sent as a file through the system share sheet. Exports
   older than a day are deleted on the next export. If the share sheet cannot be
   opened, an export smaller than 512 KB is copied to the clipboard.
+  WebSocket and event stream messages are not part of an export.
 - **Previous run** (opt-in, off by default; while off, Tools lists it as *Off*
   and shows what it does and the line to add): with
   `DurbunInspector(keepPreviousRun: true, child: child!)`, requests (headers and
   the first 16 KB of each body) and logs are written, masked as in an export, to
   the app's cache folder (`durbun-run`) at most once a second; a crash is written
   immediately. On the next launch, Tools shows **Previous run**: the Network and
-  Logs tabs of that run, read-only. If it crashed, this is stated at the top and
+  Logs tabs of that run, read-only (without WebSocket and event stream
+  messages). If it crashed, this is stated at the top and
   the crash opens with one tap. Only the last run is kept (at most 2 × 4 MB).
   File errors never reach the app, startup is not delayed (the file is read when
   the page opens), and nothing is written on the web. It stays off by default
   because it writes captured traffic to the phone's storage in every build that
   runs Dürbün; turn it on where that is fine for your app.
 
-The panel shows the same messages the Mac app receives. When the Mac app is
+The panel shows the same messages the Mac app receives (WebSocket and event
+stream messages as described in
+[WebSockets and Server-Sent Events](#websockets-and-server-sent-events)). When the Mac app is
 connected, both work side by side. The app's own native logs (Android logcat,
 iOS 15+ `os_log` / `Logger` / `NSLog`) appear in the panel even without a Mac
 connection, and the host app needs no setup. The Mac app reads these from the

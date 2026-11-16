@@ -380,7 +380,13 @@ All notable changes to Dürbün are listed here. The format follows
   isolates included. `DurbunNetwork.webSocket(...)` and `DurbunHttpCall.eventStream(...)` report sockets and
   streams that dart:io does not carry. `durbun_dio` shows event streams read with `ResponseType.stream`. On
   Android and iOS the native cores in the plugin report OkHttp and URLSession streams too.
-- Flutter in-app panel: a WebSocket or event-stream response says that its messages show on the Mac.
+- Flutter in-app panel: WebSocket messages and Server-Sent Events show on the phone, without the Mac. A
+  connection's row carries WS or SSE, its state and the message count; its detail opens on **Messages**
+  (**Events**) with direction, time since open, kind and size, search, a ping/pong switch and how the
+  connection ended. A message opens as JSON, text or hex and shares with secrets masked. The phone keeps the
+  first 20 and the newest messages of a connection (500 in all, 16 KB of each) and says where it dropped
+  some. OkHttp, URLSession and background-isolate connections show their messages there while the Mac app
+  records them.
 - Flutter in-app panel: **Report a bug** sends what just happened from the phone alone, without the Mac: the
   log lines and failed requests around a crash, an error, a failed request or the moment the panel opened, a
   screenshot of the app as it was before the panel covered it, the device and app facts and your note. The

@@ -34,7 +34,9 @@ class LiveList<T> extends StatefulWidget {
       this.epoch,
       this.fromTop = false,
       this.onScrolledAway,
-      this.topPadding = 10});
+      this.topPadding = 10,
+      this.bottomPadding,
+      this.shrinkWrap = false});
 
   /// Oldest first.
   final List<T> items;
@@ -65,6 +67,12 @@ class LiveList<T> extends StatefulWidget {
 
   /// Space above the first row.
   final double topPadding;
+
+  /// Space under the last row; null: the bottom inset and 8 pt.
+  final double? bottomPadding;
+
+  /// The list is only as tall as its rows (a short list inside a card).
+  final bool shrinkWrap;
 
   @override
   State<LiveList<T>> createState() => _LiveListState<T>();
@@ -197,7 +205,7 @@ class _LiveListState<T> extends State<LiveList<T>> {
     }
   }
 
-  void _scheduleJump() {
+  void _scheduleJump([int attempt = 0]) {
     if (_jumpScheduled) return;
     _jumpScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -206,7 +214,12 @@ class _LiveListState<T> extends State<LiveList<T>> {
       final end = widget.fromTop
           ? _scroll.position.minScrollExtent
           : _scroll.position.maxScrollExtent;
-      if (_scroll.offset != end) _scroll.jumpTo(end);
+      if (_scroll.offset != end) {
+        _scroll.jumpTo(end);
+        // The end was estimated from the rows built so far; rows of other
+        // heights laid out by the jump move it: follow it a few times.
+        if (attempt < 3) _scheduleJump(attempt + 1);
+      }
     });
   }
 
@@ -246,7 +259,8 @@ class _LiveListState<T> extends State<LiveList<T>> {
       children: <Widget>[
         ListView.builder(
           controller: _scroll,
-          padding: EdgeInsets.only(top: widget.topPadding, bottom: MediaQuery.paddingOf(context).bottom + 8),
+          shrinkWrap: widget.shrinkWrap,
+          padding: EdgeInsets.only(top: widget.topPadding, bottom: widget.bottomPadding ?? MediaQuery.paddingOf(context).bottom + 8),
           itemCount: shown.length,
           itemBuilder: (context, i) => KeyedSubtree(
               key: ValueKey<Object>(widget.keyOf(shown[i])),

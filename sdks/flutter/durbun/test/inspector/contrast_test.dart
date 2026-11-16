@@ -255,5 +255,22 @@ void main() {
         expectAtLeast('json on body', fg, body, 4.5);
       }
     });
+
+    test('$theme: connections (the WS/SSE chip, message rows, the dropped line)', () {
+      // The chip on a request card: open, broken, ended.
+      expectAtLeast('success on successSoft', c.success, over(c.successSoft, c.cardBg), 4.5);
+      expectAtLeast('danger on dangerSoft', c.danger, over(c.dangerSoft, c.cardBg), 4.5);
+      expectAtLeast('textMuted on bgActive (ended chip)', c.textMuted, over(c.bgActive, c.cardBg), 4.5);
+      // Direction arrows and the event name, on the messages card.
+      expectAtLeast('accentInk (sent) on cardBg', c.accentInk, c.cardBg, 4.5);
+      expectAtLeast('info (received) on cardBg', c.info, c.cardBg, 4.5);
+      expectAtLeast('warning (close frame) on cardBg', c.warning, c.cardBg, 4.5);
+      expectAtLeast('textSubtle (ping/pong) on cardBg', c.textSubtle, c.cardBg, 4.5);
+      // The dropped-messages line, plain and pressed.
+      expectAtLeast('textMuted on bgSunken', c.textMuted, over(c.bgSunken, c.cardBg), 4.5);
+      expectAtLeast('textMuted on bgActive (pressed)', c.textMuted, over(c.bgActive, c.cardBg), 4.5);
+      // A search match.
+      expectAtLeast('text on hlMark', c.text, over(c.hlMark, c.cardBg), 4.5);
+    });
   }
 }

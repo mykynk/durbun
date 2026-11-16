@@ -756,3 +756,63 @@ LogShareInput logShareInputFor(InspectorLog log, InspectorStrings t, {String? ap
     stack: text(e?['stack']),
   );
 }
+
+/* ───────────── stream messages ───────────── */
+
+/// The share report of one WebSocket message or event-stream event: the
+/// connection, when (and how long after it opened), the direction, the
+/// type and the kept body. With [mask], secret-looking values in the URL,
+/// a JSON body (by key) and a text body (tokens, `password=…`) become
+/// `••••` and a closing line says so.
+String buildStreamMessageReport(
+  InspectorCall call,
+  InspectorStreamMessage message,
+  InspectorStrings t, {
+  bool mask = true,
+  String? app,
+  String? device,
+}) {
+  final m = ShareMasker(mask);
+  final s = call.stream;
+  final sse = (call.connectionKind ?? StreamKind.webSocket) == StreamKind.sse;
+  final kind = sse ? 'SSE' : 'WebSocket';
+  final what = <String>[
+    if (!sse) t.streamDirName(message.out),
+    sse ? (message.event ?? 'message') : message.type,
+    shareBytes(message.size),
+  ].join(' · ');
+  final out = <String>['$kind ${m.url(call.url)}', '→ $what', ''];
+  out.add('- ${t.reportTime}: ${shareTime(message.ts)}');
+  final since = message.ts - (s?.openTs ?? call.ts);
+  out.add('- ${t.fieldSinceOpen}: ${since < 0 ? 0 : since.round()} ms');
+  out.add('- ${t.fieldSeq}: ${message.seq}');
+  if (message.eventId != null) out.add('- ${t.fieldEventId}: ${message.eventId}');
+  if (message.retry != null) out.add('- ${t.fieldRetry}: ${message.retry} ms');
+  if (message.closeCode != null) {
+    final name = t.closeCodeName(message.closeCode);
+    out.add('- ${t.fieldCloseCode}: ${message.closeCode}${name == null ? '' : ' · $name'}');
+  }
+  if (message.closeReason?.isNotEmpty == true) out.add('- ${t.fieldCloseReason}: ${m.text(message.closeReason!)}');
+  if (app != null) out.add('- ${t.reportApp}: $app');
+  if (device != null) out.add('- ${t.reportDevice}: $device');
+  out.add('');
+
+  final body = message.body();
+  if (body == null || body.data.isEmpty) {
+    if (message.size > 0 && !message.isClose) out.addAll(<String>['${t.body}: ${t.reportNotCaptured}', '']);
+  } else {
+    final kept = message.keptBytes;
+    final size = message.truncated ? t.reportCaptured(shareBytes(kept), shareBytes(message.size)) : shareBytes(message.size);
+    if (!body.isText) {
+      out.addAll(<String>['${t.body} ($size): ${t.reportBinary}', '']);
+    } else {
+      final json = looksJson('', body.data);
+      var text = json ? m.body(body.data, 'application/json', true) : m.text(body.data);
+      if (json) text = reindentJson(text);
+      out.add('${t.body} ($size):');
+      _capped(out, text, t, json ? 'json' : '');
+    }
+  }
+  if (m.count > 0) out.add(t.reportMasked);
+  return out.join('\n').trimRight();
+}

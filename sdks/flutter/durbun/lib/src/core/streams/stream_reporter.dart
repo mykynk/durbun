@@ -6,6 +6,10 @@
 /// (its close frames, the SSE end, or `net.error`), also after the setting
 /// turned off; one that never started stays the plain entry it was before
 /// streams existed.
+///
+/// The in-app panel keeps its own record ([LocalStreamSink]): a message the
+/// desktop does not take goes to the panel alone, so what the desktop gets
+/// is exactly as above, with or without the panel.
 library;
 
 import 'dart:convert';
@@ -22,7 +26,7 @@ const String _textType = 'text/plain; charset=utf-8';
 const String _binaryType = 'application/octet-stream';
 
 class StreamReporter {
-  StreamReporter(this.recorder, this.id, {this.mockRuleId});
+  StreamReporter(this.recorder, this.id, {this.mockRuleId, this.localOnly = false});
 
   final NetworkRecorder recorder;
 
@@ -31,6 +35,10 @@ class StreamReporter {
 
   /// Set when the handshake was answered by a mock rule.
   final String? mockRuleId;
+
+  /// Nothing goes to the desktop: an event stream it gets the usual way (as
+  /// a body at its end) is followed for the in-app panel only.
+  final bool localOnly;
 
   bool _ended = false;
   bool _started = false;
@@ -47,7 +55,7 @@ class StreamReporter {
 
   /// Close frames, the SSE end and failures go out while messages do, and
   /// always once the stream started.
-  bool get _mayFinish => _networkOn() && (_started || sending);
+  bool get _mayFinish => !localOnly && _networkOn() && (_started || sending);
 
   StreamCaptureHost? get _host {
     final r = recorder;
@@ -64,6 +72,7 @@ class StreamReporter {
 
   /// Stream messages go out right now.
   bool get sending {
+    if (localOnly) return false;
     try {
       return _networkOn() && (_host?.captureStreams ?? false);
     } catch (_) {
@@ -71,17 +80,32 @@ class StreamReporter {
     }
   }
 
-  /// Stream messages are, or may soon be, wanted: keep decoding.
+  /// The in-app panel while it records stream messages, else null.
+  LocalStreamSink? get localSink {
+    try {
+      final r = recorder;
+      if (r is! LocalStreamHost || !_networkOn()) return null;
+      final sink = (r as LocalStreamHost).localStreams;
+      return sink != null && sink.recordsStreams ? sink : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Stream messages are, or may soon be, wanted (by the desktop or the
+  /// panel): keep decoding.
   bool get wanted {
     try {
-      return _networkOn() && (_host?.streamsWanted ?? false);
+      if (!_networkOn()) return false;
+      return (!localOnly && (_host?.streamsWanted ?? false)) || localSink != null;
     } catch (_) {
       return false;
     }
   }
 
-  /// Payload bytes kept per message right now.
-  int get cap {
+  /// The desktop's payload cap per message right now.
+  int get _hostCap {
+    if (localOnly) return 0;
     try {
       final c = _host?.streamMessageCap ?? 0;
       return c < 0 ? 0 : c;
@@ -90,9 +114,29 @@ class StreamReporter {
     }
   }
 
+  /// The panel's payload cap per message (0 while bodies are not captured).
+  int _localCap(LocalStreamSink sink) {
+    try {
+      if (!recorder.captureBodies) return 0;
+      final c = sink.localStreamCap;
+      return c < 0 ? 0 : c;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Payload bytes kept per message right now: enough for whichever of the
+  /// desktop and the panel takes it.
+  int get cap {
+    final host = _hostCap;
+    final sink = localSink;
+    final local = sink == null ? 0 : _localCap(sink);
+    return host > local ? host : local;
+  }
+
   PendingBody? _body(Uint8List? data, int size, {required bool text}) {
     if (data == null || size <= 0) return null;
-    final limit = cap;
+    final limit = _hostCap;
     if (limit <= 0) return null;
     final kept = data.length > limit ? Uint8List.sublistView(data, 0, limit) : data;
     return PendingBody(
@@ -105,73 +149,112 @@ class StreamReporter {
     );
   }
 
+  /// The start of [data] the panel keeps (a view; the panel copies what it
+  /// keeps when the view holds on to more).
+  static Uint8List? _localBytes(Uint8List? data, int size, int limit) {
+    if (data == null || size <= 0 || limit <= 0) return null;
+    return data.length > limit ? Uint8List.sublistView(data, 0, limit) : data;
+  }
+
+  /// Tells the panel that the SDK follows this connection's messages
+  /// ([kind] `ws` or `sse`; see [LocalStreamSink.streamOpened]).
+  void announce(String kind, {String? url, int? status, String? statusText, HeaderPairs? headers}) {
+    final sink = localSink;
+    if (sink == null) return;
+    try {
+      sink.streamOpened(id,
+          kind: kind, ts: nowEpochMs(), url: url, status: status, statusText: statusText, headers: headers);
+    } catch (_) {}
+  }
+
   /// A WebSocket message or control frame read off the wire.
   void wsFrame(String dir, WsMessage message) {
-    if (message.opcode == 'close' ? !_mayFinish : !sending) return;
-    _started = true;
+    final close = message.opcode == 'close';
+    if (close ? _mayFinish : sending) {
+      _started = true;
+      try {
+        recorder.sendNetMessage(buildNetWs(
+          id: id,
+          ts: nowEpochMs(),
+          dir: dir,
+          opcode: message.opcode,
+          size: message.size,
+          body: close ? null : _body(message.data, message.size, text: message.opcode == 'text'),
+          closeCode: message.closeCode,
+          closeReason: _cut(message.closeReason),
+        ));
+      } catch (_) {}
+      return;
+    }
+    final sink = localSink;
+    if (sink == null) return;
     try {
-      recorder.sendNetMessage(buildNetWs(
-        id: id,
-        ts: nowEpochMs(),
-        dir: dir,
-        opcode: message.opcode,
-        size: message.size,
-        body: message.opcode == 'close' ? null : _body(message.data, message.size, text: message.opcode == 'text'),
-        closeCode: message.closeCode,
-        closeReason: _cut(message.closeReason),
-      ));
+      sink.streamWs(id, nowEpochMs(), dir, message.opcode, message.size,
+          close ? null : _localBytes(message.data, message.size, _localCap(sink)), message.closeCode, _cut(message.closeReason));
     } catch (_) {}
   }
 
   /// A WebSocket message seen through an app-level wrapper: [data] is a
   /// String (text) or a list of bytes (binary).
   void wsData(String dir, Object? data) {
-    if (!sending) return;
-    _started = true;
+    final desktop = sending;
+    final sink = desktop ? null : localSink;
+    if (!desktop && sink == null) return;
+    if (desktop) _started = true;
     try {
-      final limit = cap;
+      final limit = desktop ? _hostCap : _localCap(sink!);
+      final String opcode;
+      final int size;
+      Uint8List? bytes;
       if (data is String) {
-        final bytes = limit > 0 ? _utf8Prefix(data, limit) : null;
-        final size = utf8Length(data);
-        recorder.sendNetMessage(buildNetWs(
-          id: id,
-          ts: nowEpochMs(),
-          dir: dir,
-          opcode: 'text',
-          size: size,
-          body: _body(bytes, size, text: true),
-        ));
+        opcode = 'text';
+        size = utf8Length(data);
+        if (limit > 0) bytes = _utf8Prefix(data, limit);
       } else if (data is List<int>) {
-        final size = data.length;
-        Uint8List? bytes;
+        opcode = 'binary';
+        size = data.length;
         if (limit > 0) {
           final end = size < limit ? size : limit;
           bytes = data is Uint8List ? Uint8List.sublistView(data, 0, end) : Uint8List.fromList(data.sublist(0, end));
         }
+      } else {
+        return;
+      }
+      final ts = nowEpochMs();
+      if (desktop) {
         recorder.sendNetMessage(buildNetWs(
           id: id,
-          ts: nowEpochMs(),
+          ts: ts,
           dir: dir,
-          opcode: 'binary',
+          opcode: opcode,
           size: size,
-          body: _body(bytes, size, text: false),
+          body: _body(bytes, size, text: opcode == 'text'),
         ));
+      } else {
+        sink!.streamWs(id, ts, dir, opcode, size, _localBytes(bytes, size, limit), null, null);
       }
     } catch (_) {}
   }
 
   /// A close frame seen through an app-level wrapper.
   void wsClose(String dir, {int? code, String? reason}) {
-    if (!_mayFinish) return;
-    _started = true;
+    final desktop = _mayFinish;
+    final sink = desktop ? null : localSink;
+    if (!desktop && sink == null) return;
     try {
       final reasonSize = reason == null ? 0 : utf8Length(reason);
+      final size = code == null ? 0 : 2 + reasonSize;
+      if (!desktop) {
+        sink!.streamWs(id, nowEpochMs(), dir, 'close', size, null, code, _cut(reason));
+        return;
+      }
+      _started = true;
       recorder.sendNetMessage(buildNetWs(
         id: id,
         ts: nowEpochMs(),
         dir: dir,
         opcode: 'close',
-        size: code == null ? 0 : 2 + reasonSize,
+        size: size,
         closeCode: code,
         closeReason: _cut(reason),
       ));
@@ -180,17 +263,26 @@ class StreamReporter {
 
   /// One dispatched SSE event.
   void sseEvent(SseEvent event) {
-    if (_ended || !sending) return;
+    if (_ended) return;
+    if (sending) {
+      try {
+        recorder.sendNetMessage(buildNetSse(
+          id: id,
+          ts: nowEpochMs(),
+          event: _cut(event.event),
+          eventId: _cut(event.eventId),
+          retry: event.retry,
+          size: event.size,
+          body: _body(event.data, event.size, text: true),
+        ));
+      } catch (_) {}
+      return;
+    }
+    final sink = localSink;
+    if (sink == null) return;
     try {
-      recorder.sendNetMessage(buildNetSse(
-        id: id,
-        ts: nowEpochMs(),
-        event: _cut(event.event),
-        eventId: _cut(event.eventId),
-        retry: event.retry,
-        size: event.size,
-        body: _body(event.data, event.size, text: true),
-      ));
+      sink.streamSse(id, nowEpochMs(), _cut(event.event), _cut(event.eventId), event.retry, event.size,
+          _localBytes(event.data, event.size, _localCap(sink)));
     } catch (_) {}
   }
 
@@ -198,28 +290,35 @@ class StreamReporter {
   void sseEnd() {
     if (_ended) return;
     _ended = true;
-    if (!_mayFinish) return;
     try {
-      recorder.sendNetMessage(buildNetSse(id: id, ts: nowEpochMs(), end: true));
+      if (_mayFinish) {
+        recorder.sendNetMessage(buildNetSse(id: id, ts: nowEpochMs(), end: true));
+      } else {
+        localSink?.streamEnded(id, nowEpochMs());
+      }
     } catch (_) {}
   }
 
   /// The connection broke after it opened ([cancelled]: the app stopped
   /// reading). Sent once; not at all for a stream that never started while
-  /// the desktop does not take stream messages (the entry stays as before).
+  /// the desktop does not take stream messages (the entry stays as before;
+  /// the panel is told).
   void fail(Object error, {bool cancelled = false}) {
     if (_ended) return;
     _ended = true;
-    if (!_mayFinish) return;
     try {
-      recorder.sendNetMessage(buildNetError(
-        id: id,
-        ts: nowEpochMs(),
-        error: describeNetError(error),
-        cancelled: cancelled,
-        mocked: mockRuleId != null,
-        mockRuleId: mockRuleId,
-      ));
+      if (_mayFinish) {
+        recorder.sendNetMessage(buildNetError(
+          id: id,
+          ts: nowEpochMs(),
+          error: describeNetError(error),
+          cancelled: cancelled,
+          mocked: mockRuleId != null,
+          mockRuleId: mockRuleId,
+        ));
+      } else {
+        localSink?.streamEnded(id, nowEpochMs(), error: describeNetError(error), cancelled: cancelled);
+      }
     } catch (_) {}
   }
 }

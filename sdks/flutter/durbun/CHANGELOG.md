@@ -78,8 +78,14 @@
   needs the new method.
 - On Android and iOS the native cores inside the plugin report OkHttp and
   URLSession streams too (`DurbunWebSocketFactory`, `URLSessionWebSocketTask`).
-- In-app panel: a WebSocket or event-stream response says that its messages
-  show on the Mac; in Statistics the timeouts note sits under the number.
+- In-app panel: WebSocket and event stream rows show WS/SSE, the state and the
+  message count; the detail opens on **Messages** (**Events**), and a message
+  opens on its own page with a masked Share. Works without the Mac for dart:io
+  sockets and streams and `DurbunNetwork.webSocket`; OkHttp, URLSession and
+  background-isolate connections show their messages while the Mac app records
+  them. The phone keeps up to 500 messages per connection (the first 20 stay),
+  16 KB of each payload, and 8 MB / 5,000 messages in total.
+- In-app panel: in Statistics the timeouts note sits under the number.
 - In-app panel: **Report a bug** (Tools, an error or crash line's detail, a
   failed request's ⋯ menu and Share sheet): pick 30 s to 5 min before the
   moment (10 s after are always in), see the counts, leave the screenshot out

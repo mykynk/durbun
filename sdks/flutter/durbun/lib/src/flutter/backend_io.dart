@@ -159,7 +159,10 @@ class IoDurbunBackend implements DurbunBackend {
           ..attached = true;
         setExtraSecretNames(options.secretNames);
         inspectorPanelBuilder ??= (store, onClose) => InspectorPanelHost(store: store, onClose: onClose);
-        client.outgoingTap = store.ingest;
+        client
+          ..outgoingTap = store.ingest
+          ..localStreams = store;
+        store.captureBodiesNow = () => !client.isDisposed && client.captureBodies;
       }
       client.runInternal(() {
         final bridge = _native =

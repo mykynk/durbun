@@ -12,8 +12,13 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../core/protocol.dart' show kEncodedLineKey, kPendingBodyMarker;
+import '../core/streams/sse_parser.dart' show isEventStreamContentType;
+import '../core/streams/stream_host.dart';
 import 'print_lines.dart';
+import 'streams.dart';
 import 'text_match.dart';
+
+export 'streams.dart';
 
 /// Turns a pending body marker map into a wire body map (`encoding`, `data`,
 /// `size`, `truncated`). Supplied by the IO backend (`wireBodyFromPending`).
@@ -199,18 +204,22 @@ class InspectorCall {
     required this.seq,
     required this.ts,
     required this.method,
-    required this.url,
+    required String url,
     required this.requestHeaders,
     required this.source,
     required this.native,
-  });
+  }) : _url = url;
 
   final String key;
   final String id;
   final int seq;
   final double ts;
   final String method;
-  final String url;
+
+  /// The request's URL (a WebSocket's `ws(s)://` once the panel knows the
+  /// connection is one).
+  String get url => _url;
+  String _url;
   final List<List<String>> requestHeaders;
 
   /// `dart:io`, `dio`, `okhttp`, `urlsession`, …
@@ -235,6 +244,29 @@ class InspectorCall {
 
   /// Bodies dropped to stay inside the store's byte budget.
   bool bodiesDropped = false;
+
+  /// The messages of the connection this request opened (a WebSocket, an
+  /// event stream), once the panel follows them or one arrived.
+  InspectorStream? stream;
+
+  /// The SDK saw this handshake but has no hook on its messages
+  /// (`net.response.noStream`).
+  bool noStream = false;
+
+  /// A WebSocket or an event stream, by its messages or, without them, by
+  /// its handshake (a 101 upgrade to `websocket`, a `text/event-stream`
+  /// response); null for any other request.
+  StreamKind? get connectionKind {
+    final s = stream;
+    if (s != null) return s.kind;
+    if (status == 101) {
+      final upgrade = (header(responseHeaders, 'upgrade') ?? header(requestHeaders, 'upgrade') ?? '').toLowerCase();
+      if (upgrade.contains('websocket') || url.startsWith('ws')) return StreamKind.webSocket;
+      return null;
+    }
+    if (status != null && isEventStreamContentType(responseContentType)) return StreamKind.sse;
+    return null;
+  }
 
   /// The bodies as they arrived (a pending marker map with the captured
   /// bytes, or a wire map), until they are resolved; then the resolved
@@ -272,7 +304,22 @@ class InspectorCall {
 
   /// Parsed once (rows, filters and the header badge read it on every
   /// store update).
-  late final Uri? uri = Uri.tryParse(url);
+  Uri? get uri {
+    if (!_uriParsed) {
+      _uriParsed = true;
+      _uri = Uri.tryParse(_url);
+    }
+    return _uri;
+  }
+
+  Uri? _uri;
+  bool _uriParsed = false;
+
+  void _setUrl(String url) {
+    _url = url;
+    _uriParsed = false;
+    _uri = null;
+  }
 
   /// The request body, decoded on first use (then the captured bytes are
   /// let go).
@@ -455,13 +502,25 @@ class InspectorMetric {
 }
 
 /// The on-device store behind the in-app inspector.
-class DurbunInspectorStore extends ChangeNotifier {
+///
+/// It also keeps the messages of WebSockets and event streams
+/// ([LocalStreamSink]), apart from what goes to the desktop: per connection
+/// at most [maxStreamMessages] (the first [kStreamHeadKept] stay longest,
+/// then the newest), each payload cut at [streamMessageCap] bytes (the size
+/// stays the true one), and across connections at most
+/// [maxStreamBytes] of payload and [maxStreamMessagesTotal] messages, the
+/// oldest closed connection's messages going first.
+class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
   DurbunInspectorStore({
     int maxLogs = kDefaultMaxLogs,
     int maxCalls = kDefaultMaxCalls,
     this.maxMetrics = 120,
     int maxBodyBytes = kDefaultMaxBodyBytes,
     this.notifyDelay = const Duration(milliseconds: 200),
+    this.maxStreamMessages = kDefaultStreamMessages,
+    this.streamMessageCap = kDefaultStreamMessageCap,
+    this.maxStreamBytes = kDefaultStreamBytes,
+    this.maxStreamMessagesTotal = kDefaultStreamMessagesTotal,
   })  : _maxLogs = maxLogs < 1 ? 1 : maxLogs,
         _maxCalls = maxCalls < 1 ? 1 : maxCalls,
         _maxBodyBytes = maxBodyBytes < 0 ? 0 : maxBodyBytes;
@@ -470,6 +529,40 @@ class DurbunInspectorStore extends ChangeNotifier {
   static const int kDefaultMaxLogs = 2000;
   static const int kDefaultMaxCalls = 1000;
   static const int kDefaultMaxBodyBytes = 24 * 1024 * 1024;
+
+  /// Messages kept per connection.
+  static const int kDefaultStreamMessages = 500;
+
+  /// The first messages of a connection kept longest (sign-in, subscribe).
+  static const int kStreamHeadKept = 20;
+
+  /// Payload bytes kept per message: a phone screen shows a few KB, and
+  /// almost every chat, ticker or GraphQL message fits whole.
+  static const int kDefaultStreamMessageCap = 16 * 1024;
+
+  /// Payload bytes kept across all connections.
+  static const int kDefaultStreamBytes = 8 * 1024 * 1024;
+
+  /// Messages kept across all connections.
+  static const int kDefaultStreamMessagesTotal = 5000;
+
+  final int maxStreamMessages;
+  final int streamMessageCap;
+  final int maxStreamBytes;
+  final int maxStreamMessagesTotal;
+
+  /// Whether bodies are captured right now (set by the IO backend): a
+  /// message without a payload then says why.
+  bool Function()? captureBodiesNow;
+
+  /// Bodies (and message payloads) are captured; true when unknown.
+  bool get capturesBodies {
+    try {
+      return captureBodiesNow?.call() ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
 
   /// The store the SDK feeds (created on first use).
   static DurbunInspectorStore get instance =>
@@ -543,6 +636,10 @@ class DurbunInspectorStore extends ChangeNotifier {
   final ListQueue<InspectorMetric> _metrics = ListQueue<InspectorMetric>();
   int _seq = 0;
   int _bodyBytes = 0;
+
+  /// Stream payload bytes and messages kept across connections.
+  int _streamBytes = 0;
+  int _streamHeld = 0;
   int _droppedLogs = 0;
   int _droppedCalls = 0;
   int _droppedOtherHostCalls = 0;
@@ -654,11 +751,16 @@ class DurbunInspectorStore extends ChangeNotifier {
 
   void clear() {
     _clears++;
+    for (final c in _calls) {
+      c.stream?.releaseAll();
+    }
     _logs.clear();
     _calls.clear();
     _callsByKey.clear();
     _metrics.clear();
     _bodyBytes = 0;
+    _streamBytes = 0;
+    _streamHeld = 0;
     _droppedLogs = 0;
     _droppedCalls = 0;
     _droppedOtherHostCalls = 0;
@@ -777,6 +879,10 @@ class DurbunInspectorStore extends ChangeNotifier {
         _onResponse(m, native: native);
       case 'net.error':
         _onError(m, native: native);
+      case 'net.ws':
+        _onWireWs(m, native: native);
+      case 'net.sse':
+        _onWireSse(m, native: native);
       case 'metric':
         _metrics.addLast(
           InspectorMetric(
@@ -835,6 +941,7 @@ class DurbunInspectorStore extends ChangeNotifier {
       _callsByKey.remove(gone.key);
       _bodyBytes -= gone._bodyCost;
       gone._onCost = null;
+      _releaseStream(gone);
       if (_listed(gone)) {
         _droppedCalls++;
       } else {
@@ -878,12 +985,16 @@ class DurbunInspectorStore extends ChangeNotifier {
     )
       .._resolver = bodyResolver
       .._onCost = _costChanged;
+    // The panel's own copy of a connection's handshake, then the same
+    // handshake once the desktop takes its messages: one entry.
+    if (_callsByKey[key]?.stream != null) return;
     _setBody(call, m['body'], request: true);
     final previous = _callsByKey.remove(key);
     if (previous != null) {
       _calls.remove(previous);
       _bodyBytes -= previous._bodyCost;
       previous._onCost = null;
+      _releaseStream(previous);
     }
     _calls.addLast(call);
     _callsByKey[key] = call;
@@ -905,7 +1016,8 @@ class DurbunInspectorStore extends ChangeNotifier {
       ..remoteAddress = m['remoteAddress'] as String?
       ..timings = _map(m['timings'])
       ..mocked = m['mocked'] == true
-      ..mockRuleId = m['mockRuleId'] as String?;
+      ..mockRuleId = m['mockRuleId'] as String?
+      ..noStream = m['noStream'] == true;
     _setBody(call, m['body'], request: false);
     call.revision++;
     if (!wasFailure && call.isFailure) _failuresTotal++;
@@ -916,6 +1028,18 @@ class DurbunInspectorStore extends ChangeNotifier {
   void _onError(Map<String, Object?> m, {required bool native}) {
     final call = _callsByKey[_key(m['id'], native)];
     if (call == null) return;
+    // A connection that opened: its stream ends (the handshake stays done).
+    final ts = _num(m['ts']) ?? _now();
+    final stream = call.stream ??
+        (call.status != null && call.connectionKind == StreamKind.webSocket
+            ? _streamOf(call, StreamKind.webSocket, ts)
+            : null);
+    if (stream != null && call.status != null) {
+      final cancelled = m['cancelled'] == true;
+      _endStream(call, stream, ts,
+          error: cancelled ? null : (m['error'] is String ? m['error'] as String : 'error'), cancelled: cancelled);
+      return;
+    }
     final wasFailure = call.isFailure;
     call
       ..error = m['error'] is String ? m['error'] as String : 'error'
@@ -926,6 +1050,318 @@ class DurbunInspectorStore extends ChangeNotifier {
     call.revision++;
     if (!wasFailure && !call.cancelled) _failuresTotal++;
     _scheduleNotify();
+  }
+
+  // ---------------------------------------------------------------------
+  // Stream messages (WebSockets, event streams).
+
+  @override
+  bool get recordsStreams => attached && !_disposed && !readOnly;
+
+  @override
+  int get localStreamCap => streamMessageCap < 0 ? 0 : streamMessageCap;
+
+  /// Stream messages kept right now across connections, and their payload
+  /// bytes.
+  int get streamMessagesHeld => _streamHeld;
+  int get streamBytesHeld => _streamBytes;
+
+  int get _headKept {
+    final max = maxStreamMessages < 1 ? 1 : maxStreamMessages;
+    return max >= kStreamHeadKept * 4 ? kStreamHeadKept : max ~/ 4;
+  }
+
+  InspectorStream _streamOf(InspectorCall call, StreamKind kind, double ts) {
+    final existing = call.stream;
+    if (existing != null) return existing;
+    final s = InspectorStream(
+      kind,
+      openTs: call.endTs ?? ts,
+      maxMessages: maxStreamMessages < 1 ? 1 : maxStreamMessages,
+      headKept: _headKept,
+    );
+    call.stream = s;
+    if (kind == StreamKind.webSocket) {
+      final url = call.url;
+      if (url.startsWith('https:')) {
+        call._setUrl('wss:${url.substring(6)}');
+      } else if (url.startsWith('http:')) {
+        call._setUrl('ws:${url.substring(5)}');
+      }
+    }
+    return s;
+  }
+
+  @override
+  void streamOpened(
+    String id, {
+    required String kind,
+    required double ts,
+    String? url,
+    int? status,
+    String? statusText,
+    List<List<String>>? headers,
+  }) {
+    if (!recordsStreams) return;
+    try {
+      final call = _callsByKey[_key(id, false)];
+      if (call == null) return;
+      if (call.status == null && status != null) {
+        // An event stream the desktop gets as one body at its end: the panel
+        // shows it open now.
+        call
+          ..status = status
+          ..statusText = statusText
+          ..responseHeaders = headers ?? const <List<String>>[]
+          ..endTs = ts;
+        if (call.isFailure) _failuresTotal++;
+      }
+      final s = _streamOf(call, kind == 'sse' ? StreamKind.sse : StreamKind.webSocket, ts);
+      s.followed = true;
+      if (url != null && url.isNotEmpty && url != call.url) call._setUrl(url);
+      s.revision++;
+      call.revision++;
+      _scheduleNotify();
+    } catch (_) {}
+  }
+
+  @override
+  void streamWs(
+    String id,
+    double ts,
+    String dir,
+    String opcode,
+    int size,
+    Uint8List? data,
+    int? closeCode,
+    String? closeReason,
+  ) {
+    if (!recordsStreams) return;
+    try {
+      final call = _callsByKey[_key(id, false)];
+      if (call == null) return;
+      _addStreamMessage(call, StreamKind.webSocket, ts,
+          out: dir == 'out',
+          type: opcode,
+          size: size,
+          payload: data == null ? null : _keptBytes(data),
+          truncated: data != null && size > data.length,
+          closeCode: closeCode,
+          closeReason: closeReason);
+    } catch (_) {}
+  }
+
+  @override
+  void streamSse(String id, double ts, String? event, String? eventId, int? retry, int size, Uint8List? data) {
+    if (!recordsStreams) return;
+    try {
+      final call = _callsByKey[_key(id, false)];
+      if (call == null) return;
+      _addStreamMessage(call, StreamKind.sse, ts,
+          out: false,
+          type: 'event',
+          size: size,
+          payload: data == null ? null : _keptBytes(data),
+          truncated: data != null && size > data.length,
+          event: event == 'message' ? null : event,
+          eventId: eventId,
+          retry: retry);
+    } catch (_) {}
+  }
+
+  @override
+  void streamEnded(String id, double ts, {String? error, bool cancelled = false}) {
+    if (!recordsStreams) return;
+    try {
+      final call = _callsByKey[_key(id, false)];
+      final stream = call?.stream;
+      if (call == null || stream == null) return;
+      _endStream(call, stream, ts, error: error, cancelled: cancelled, sseEnded: error == null && !cancelled);
+    } catch (_) {}
+  }
+
+  @override
+  void localNet(Map<String, Object?> message) {
+    if (!recordsStreams) return;
+    try {
+      _take(message, native: false);
+    } catch (_) {}
+  }
+
+  /// A `net.ws` the SDK sent to the desktop (the panel keeps its copy).
+  void _onWireWs(Map<String, Object?> m, {required bool native}) {
+    final call = _callsByKey[_key(m['id'], native)];
+    if (call == null) return;
+    final (payload, base64, truncated) = _wirePayload(m['body']);
+    final opcode = m['opcode'] is String ? m['opcode'] as String : 'text';
+    _addStreamMessage(call, StreamKind.webSocket, _num(m['ts']) ?? _now(),
+        out: m['dir'] == 'out',
+        type: opcode,
+        size: _num(m['size'])?.toInt() ?? 0,
+        payload: opcode == 'close' ? null : payload,
+        base64: base64,
+        truncated: truncated,
+        closeCode: _num(m['closeCode'])?.toInt(),
+        closeReason: m['closeReason'] is String ? m['closeReason'] as String : null);
+  }
+
+  /// A `net.sse` the SDK sent to the desktop.
+  void _onWireSse(Map<String, Object?> m, {required bool native}) {
+    final call = _callsByKey[_key(m['id'], native)];
+    if (call == null) return;
+    final ts = _num(m['ts']) ?? _now();
+    if (m['end'] == true) {
+      _endStream(call, _streamOf(call, StreamKind.sse, ts), ts, sseEnded: true);
+      return;
+    }
+    final (payload, base64, truncated) = _wirePayload(m['body']);
+    _addStreamMessage(call, StreamKind.sse, ts,
+        out: false,
+        type: 'event',
+        size: _num(m['size'])?.toInt() ?? 0,
+        payload: payload,
+        base64: base64,
+        truncated: truncated,
+        event: m['event'] is String ? m['event'] as String : null,
+        eventId: m['eventId'] is String ? m['eventId'] as String : null,
+        retry: _num(m['retry'])?.toInt());
+  }
+
+  /// The kept part of a message body as the SDK sent it: a pending marker
+  /// (bytes) or a wire map (text or base64), cut at [streamMessageCap].
+  (Object?, bool, bool) _wirePayload(Object? body) {
+    if (body is! Map) return (null, false, false);
+    final truncated = body['truncated'] == true;
+    if (body[kPendingBodyMarker] == true) {
+      final bytes = body['bytes'];
+      if (bytes is! Uint8List || bytes.isEmpty) return (null, false, truncated);
+      final kept = _keptBytes(bytes);
+      return (kept, false, truncated || kept.length < bytes.length);
+    }
+    final data = body['data'];
+    if (data is! String || data.isEmpty) return (null, false, truncated);
+    final cap = localStreamCap;
+    if (cap <= 0) return (null, false, truncated);
+    if (body['encoding'] == 'base64') {
+      final max = (cap ~/ 3) * 4;
+      return data.length <= max ? (data, true, truncated) : (data.substring(0, max), true, true);
+    }
+    if (data.length <= cap) return (data, false, truncated);
+    var end = cap;
+    if ((data.codeUnitAt(end - 1) & 0xFC00) == 0xD800) end--;
+    return (data.substring(0, end), false, true);
+  }
+
+  /// At most [streamMessageCap] bytes of [b]; a copy when [b] is a view into
+  /// a much larger buffer (a cut message must not keep the whole one).
+  Uint8List _keptBytes(Uint8List b) {
+    final cap = localStreamCap;
+    final v = b.length > cap ? Uint8List.sublistView(b, 0, cap) : b;
+    final buffer = v.buffer.lengthInBytes;
+    return buffer > v.length * 2 && buffer - v.length > 4096 ? Uint8List.fromList(v) : v;
+  }
+
+  void _addStreamMessage(
+    InspectorCall call,
+    StreamKind kind,
+    double ts, {
+    required bool out,
+    required String type,
+    required int size,
+    Object? payload,
+    bool base64 = false,
+    bool truncated = false,
+    int? closeCode,
+    String? closeReason,
+    String? event,
+    String? eventId,
+    int? retry,
+  }) {
+    final s = _streamOf(call, kind, ts);
+    final m = InspectorStreamMessage(
+      seq: s.count + 1,
+      ts: ts,
+      out: out,
+      type: type,
+      size: size < 0 ? 0 : size,
+      payload: payload,
+      base64: base64,
+      truncated: truncated,
+      closeCode: closeCode,
+      closeReason: closeReason,
+      event: event,
+      eventId: eventId,
+      retry: retry,
+    );
+    final (gone, goneBytes) = s.add(m);
+    _streamHeld += 1 - gone;
+    _streamBytes += m.heldBytes - goneBytes;
+    if (m.isClose && s.closedBy == null) {
+      s
+        ..closedBy = out ? 'out' : 'in'
+        ..closeCode = closeCode
+        ..closeReason = closeReason;
+      if (s.state == StreamState.open) {
+        s
+          ..state = StreamState.closed
+          ..endTs = ts;
+      }
+    }
+    _enforceStreamBudget();
+    call.revision++;
+    _scheduleNotify();
+  }
+
+  void _endStream(
+    InspectorCall call,
+    InspectorStream s,
+    double ts, {
+    String? error,
+    bool cancelled = false,
+    bool sseEnded = false,
+  }) {
+    if (error != null) {
+      s
+        ..state = StreamState.failed
+        ..error = error;
+    } else if (s.state == StreamState.open) {
+      s.state = StreamState.closed;
+      if (cancelled) s.cancelled = true;
+      if (sseEnded) s.sseEnded = true;
+    }
+    s.endTs ??= ts;
+    s.revision++;
+    call.revision++;
+    _scheduleNotify();
+  }
+
+  /// Removes messages until the global limits fit: the oldest ended
+  /// connection's first, then the oldest open one's.
+  void _enforceStreamBudget() {
+    bool over() => _streamBytes > maxStreamBytes || _streamHeld > maxStreamMessagesTotal;
+    if (!over()) return;
+    for (final endedOnly in const <bool>[true, false]) {
+      for (final c in _calls) {
+        final s = c.stream;
+        if (s == null || s.held == 0 || (endedOnly && s.isOpen)) continue;
+        while (over() && s.held > 0) {
+          final b = s.evictOne();
+          if (b < 0) break;
+          _streamHeld--;
+          _streamBytes -= b;
+        }
+        c.revision++;
+        if (!over()) return;
+      }
+    }
+  }
+
+  void _releaseStream(InspectorCall call) {
+    final s = call.stream;
+    if (s == null) return;
+    _streamHeld -= s.held;
+    _streamBytes -= s.heldBytes;
+    s.releaseAll();
   }
 
   void _setBody(InspectorCall call, Object? body, {required bool request}) {

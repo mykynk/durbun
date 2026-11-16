@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:durbun/durbun_core.dart';
+import 'package:durbun/src/inspector/store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart' as http_io;
@@ -502,6 +503,136 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(streamOf(id), isEmpty);
       httpClient.close();
+    });
+  });
+
+  // The in-app panel keeps its own record, apart from what goes to the
+  // desktop: messages reach it whether or not the desktop records them, and
+  // the desktop never gets more than its setting allows.
+  group('the in-app panel', () {
+    late DurbunInspectorStore store;
+
+    setUp(() {
+      store = DurbunInspectorStore(notifyDelay: Duration.zero)..attached = true;
+      store.captureBodiesNow = () => client.captureBodies;
+      client
+        ..outgoingTap = store.ingest
+        ..localStreams = store;
+    });
+
+    tearDown(() {
+      client
+        ..outgoingTap = null
+        ..localStreams = null;
+      store.dispose();
+    });
+
+    InspectorCall? panelCall(String suffix) {
+      for (final c in store.calls) {
+        if (c.url.endsWith(suffix)) return c;
+      }
+      return null;
+    }
+
+    Future<InspectorStream> panelStream(String suffix, bool Function(InspectorStream s) done) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (true) {
+        final s = panelCall(suffix)?.stream;
+        if (s != null && done(s)) return s;
+        if (DateTime.now().isAfter(deadline)) throw TimeoutException('panel stream $suffix');
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    }
+
+    test('the setting off: the desktop gets a plain 101, the panel gets the messages and the close', () async {
+      await setConfig(streamConfig(on: false));
+      final ws = await WebSocket.connect('ws://${origin.host}/ws?case=panel-off', customClient: HttpClient());
+      final echoes = StreamIterator<Object?>(ws);
+      ws.add('merhaba');
+      await echoes.moveNext();
+      ws.add(<int>[1, 2, 3]);
+      await echoes.moveNext();
+      ws.add('bye');
+      await echoes.moveNext();
+      final req = await request('/ws?case=panel-off');
+      final id = req['id']! as String;
+      expect(req['url'], startsWith('http://'), reason: 'the desktop sees it as before');
+      expect((await conn.waitForNetEnd(id))['status'], 101);
+      final s = await panelStream('/ws?case=panel-off', (s) => s.state == StreamState.closed && s.count >= 7);
+      final call = panelCall('/ws?case=panel-off')!;
+      expect(call.url, startsWith('ws://'));
+      expect(s.followed, isTrue);
+      final m = s.messages;
+      expect(m.where((x) => x.out && x.type == 'text').map((x) => x.text()), <String?>['merhaba', 'bye']);
+      expect(m.where((x) => !x.out && x.type == 'binary').single.bytes(), <int>[1, 2, 3]);
+      expect(s.closedBy, 'in');
+      expect(s.closeCode, 4000);
+      expect(s.closeReason, 'done');
+      await echoes.cancel();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(streamOf(id), isEmpty, reason: 'nothing reached the desktop');
+      expect(store.calls.where((c) => c.url.endsWith('/ws?case=panel-off')), hasLength(1));
+    });
+
+    test('the setting on: one entry, each message once, the same count as the desktop', () async {
+      final ws = await WebSocket.connect('ws://${origin.host}/ws?case=panel-on', customClient: HttpClient());
+      final echoes = StreamIterator<Object?>(ws);
+      for (final text in <String>['a', 'b', 'c']) {
+        ws.add(text);
+        await echoes.moveNext();
+      }
+      final id = (await request('/ws?case=panel-on'))['id']! as String;
+      await waitStream(id, 6);
+      final s = await panelStream('/ws?case=panel-on', (s) => s.count >= 6);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(s.count, streamOf(id).length);
+      expect(s.messages.map((m) => '${m.out ? '>' : '<'}${m.text()}'), <String>['>a', '<a', '>b', '<b', '>c', '<c']);
+      expect(store.calls.where((c) => c.url.endsWith('/ws?case=panel-on')), hasLength(1));
+      await echoes.cancel();
+      await ws.close();
+    });
+
+    test('an older desktop: the panel gets the events and the end, the desktop the body at its end', () async {
+      await setConfig(streamConfig(on: null));
+      final httpClient = HttpClient();
+      final res = await (await httpClient.getUrl(Uri.parse('http://${origin.host}/sse?case=panel-old'))).close();
+      await res.drain<void>();
+      final id = (await request('/sse?case=panel-old'))['id']! as String;
+      expect(bodyText(await conn.waitForNetEnd(id)), contains('line one'));
+      final s = await panelStream('/sse?case=panel-old', (s) => s.state == StreamState.closed);
+      expect(s.sseEnded, isTrue);
+      final m = s.messages;
+      expect(m, hasLength(3));
+      expect(m[0].event, 'price');
+      expect(m[0].retry, 2500);
+      expect(m[0].text(), '{"sym":"DÜR","px":1.5}');
+      expect(m[1].text(), 'line one\nline two');
+      expect(m[2].size, 300);
+      expect(streamOf(id), isEmpty);
+      httpClient.close();
+    });
+
+    test('bodies off: sizes only; a long message is cut at 16 KB with its true size', () async {
+      await setConfig(streamConfig(on: false, captureBodies: false));
+      final ws = await WebSocket.connect('ws://${origin.host}/ws?case=panel-sizes', customClient: HttpClient());
+      final echoes = StreamIterator<Object?>(ws);
+      ws.add('secret');
+      await echoes.moveNext();
+      var s = await panelStream('/ws?case=panel-sizes', (s) => s.count >= 2);
+      expect(s.messages.every((m) => !m.hasPayload), isTrue);
+      expect(s.messages.first.size, 6);
+
+      await setConfig(streamConfig(on: false));
+      final big = 'x' * 40000;
+      ws.add(big);
+      await echoes.moveNext();
+      s = await panelStream('/ws?case=panel-sizes', (s) => s.count >= 4);
+      final m = s.messages[2];
+      expect(m.size, 40000);
+      expect(m.keptBytes, DurbunInspectorStore.kDefaultStreamMessageCap);
+      expect(m.truncated, isTrue);
+      await echoes.cancel();
+      await ws.close();
     });
   });
 }
