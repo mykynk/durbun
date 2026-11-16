@@ -23,6 +23,20 @@ final class StdioCaptureTests: SDKTestCase {
         XCTAssertNotNil(desktop.waitForType("log") { $0["message"] as? String == "NSLog style line" }, "NSLog prefix removed")
     }
 
+    func testCaptureOSLogIsItsOwnSwitch() throws {
+        try XCTSkipUnless(OSLogCapture.isAvailable, "OSLogStore needs macOS 12 / iOS 15")
+        var stdoutOnly = options(stdout: true)
+        stdoutOnly.captureOSLog = false
+        startConnected(stdoutOnly)
+        XCTAssertEqual(DurbunCore.shared.osLogMode, .off, "stdout stays on, the unified log is left alone")
+        Durbun.stop()
+
+        var osLogOnly = options(stdout: false)
+        osLogOnly.captureOSLog = true
+        startConnected(osLogOnly)
+        XCTAssertTrue(waitUntil { DurbunCore.shared.osLogMode == .fast })
+    }
+
     func testOwnOSLogIsForwardedOnlyWhileTheDesktopHasNoDeviceLogs() throws {
         try XCTSkipUnless(OSLogCapture.isAvailable, "OSLogStore needs macOS 12 / iOS 15")
         startConnected(options(stdout: true)) // the fake desktop reads no device logs (Wi-Fi)

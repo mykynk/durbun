@@ -24,7 +24,9 @@ public enum Durbun {
     public static let version = "0.2.0"
 
     /// Starts capturing and connecting to the Dürbün desktop app. Calling it again restarts the SDK
-    /// with the new options. Does nothing in non-DEBUG builds unless `allowInReleaseBuilds` is set.
+    /// with the new options. Runs in development builds (compiled with `DEBUG`, Simulator, debugger,
+    /// signed for development); elsewhere only with `allowInReleaseBuilds` or `DurbunEnabled = YES` in
+    /// Info.plist, which can also say `NO` to keep it off in a configuration.
     public static func start(options: DurbunOptions = DurbunOptions()) {
         DurbunCore.shared.start(options: options)
     }

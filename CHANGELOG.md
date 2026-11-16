@@ -80,6 +80,8 @@ All notable changes to Dürbün are listed here. The format follows
 - iOS SDK: URLSessions that differ only in their additional headers (a new token after each login) share one
   capture slot, so long-running apps no longer stop showing requests of new sessions. When the limit of
   different session configurations is reached, a warning line says so on the Mac.
+- Android SDK: a `respond` mock skipped because `DurbunInterceptor` was added as a network interceptor is
+  explained on the desktop, not only in logcat.
 
 ### Changed
 
@@ -129,6 +131,9 @@ All notable changes to Dürbün are listed here. The format follows
   every 30 seconds and stop while the app is in the background; returning to the app tries at once.
 - Less work while idle: Android devices are followed through adb's own device list instead of asking every
   two seconds, and simulators are not asked at all while none is open.
+- iOS SDK: in a build compiled without `DEBUG`, Dürbün also runs in the Simulator, under a debugger and in
+  builds signed for development, so custom configurations such as Debug-Staging work. Ad hoc, enterprise,
+  TestFlight and App Store builds still need an explicit opt-in.
 
 ### Added
 
@@ -271,6 +276,17 @@ All notable changes to Dürbün are listed here. The format follows
   thread's stack, native crashes with their signal, low-memory kills and other system kills.
 - iOS SDK: MetricKit diagnostics of earlier launches are reported (iOS 14+): crashes the SDK could not catch
   such as watchdog kills, main-thread hangs, CPU and disk-write exceptions, slow launches.
+- Android SDK: `DurbunEventListenerFactory` shows DNS, connect, TLS, send and wait times of OkHttp calls and
+  keeps the app's own event listener working.
+- Android SDK: `redactHeaders` and `ignoredHosts` in `DurbunOptions` apply to every OkHttp client.
+- Android SDK: Appearance (light / dark, Android 12+), Dump view hierarchy and Dump SharedPreferences tools.
+- Android SDK: Dürbün can start without code: add `<meta-data android:name="dev.durbun.autoStart"
+  android:value="true" />` to the app's manifest. Without the entry nothing changes.
+- Android SDK: when no OkHttp client has `DurbunInterceptor`, one line on the desktop says why the network
+  list is empty.
+- iOS SDK: `captureBodies`, `maxBodyBytes`, `appName` and `captureOSLog` options.
+- iOS SDK: usable from Objective-C as `DURDurbun`.
+- iOS SDK: the `DurbunEnabled` Info.plist key turns Dürbün on or off per build configuration.
 
 ## [0.2.0] - 2026-11-12
 

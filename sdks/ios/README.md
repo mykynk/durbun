@@ -48,8 +48,8 @@ The pod needs iOS 15 or macOS 12, the oldest targets Xcode 27 builds. For iOS 13
 Manager or point the Podfile at the repository tag:
 `pod 'Durbun', :git => 'https://github.com/mykynk/durbun.git', :tag => 'v0.2.0'`.
 
-With SwiftPM the package is linked into every configuration; compiled without `DEBUG`, the SDK does nothing
-by itself (see [Release safety](#release-safety)). The package ships a privacy manifest
+With SwiftPM the package is linked into every configuration; in a build that is not a development build, the
+SDK does nothing by itself (see [Release safety](#release-safety)). The package ships a privacy manifest
 (`PrivacyInfo.xcprivacy`, reason `CA92.1` for the UserDefaults dump).
 
 **From a local path (developing the SDK):** in Xcode choose **Add Local…** and select the `sdks/ios` folder of
@@ -100,6 +100,25 @@ Durbun.registerAction(DurbunAction(id: "app.mockLogin", label: "Mock login", kin
 
 `data` can be a dictionary, an array, an `Encodable` or any other value (converted to JSON on a best-effort
 basis).
+
+### Objective-C
+
+The same SDK is available to Objective-C code as `DURDurbun`:
+
+```objc
+@import Durbun;
+
+[DURDurbun start];                                   // or [DURDurbun startWithHost:@"192.168.1.20"]
+[DURDurbun info:@"Logged in" tag:@"auth"];
+[DURDurbun log:@"Cache miss" level:@"debug" tag:@"cache" data:@{@"key": key}];
+[DURDurbun error:@"Payment failed" tag:@"payment" error:error];
+[DURDurbun event:@"purchase" properties:@{@"amount": @49.9}];
+[DURDurbun addButtonWithId:@"app.logout" label:@"Log out" handler:^{ [session logout]; }];
+[DURDurbun addToggleWithId:@"app.staging" label:@"Staging API" initialValue:NO handler:^(BOOL on) { useStaging = on; }];
+```
+
+`isRunning`, `isConnected`, `connectionStatusDescription`, `setDesktopHost:`, `stop` and `removeActionWithId:`
+are there too. Options other than the host are set from Swift (`DurbunOptions`).
 
 ## Connecting
 
@@ -180,14 +199,28 @@ The other Dürbün SDKs use the same table and words.
 | `devicePorts` | `9752...9755` | USB listener ports on a physical device |
 | `enabled` | `true` | If `false`, `start` does nothing |
 | `captureStdout` | `true` | Capture `print` / stdout / stderr |
+| `captureOSLog` | `nil` (same as `captureStdout`) | Forward the app's own `os_log` / `Logger` / `NSLog` lines when the desktop cannot read device logs (Wi-Fi) |
 | `captureNetwork` | `true` | Capture URLSession traffic and apply mocks |
 | `captureCrashes` | `true` | Exception and signal (crash) reports, and MetricKit diagnostics of earlier launches |
 | `collectMetrics` | `true` | CPU / memory / FPS samples (only while connected) |
 | `interceptUploadTasks` | `true` | Intercept upload tasks; with `false`, `didSendBodyData` progress callbacks are preserved |
 | `ignoredHosts` | `[]` | Domains that are never captured (subdomains included) |
 | `redactHeaders` | `[]` | Header names (case-insensitive) whose values show as `••••`, e.g. `["Authorization", "Cookie"]`; the real request is unchanged |
+| `captureBodies` | `nil` | Overrides the desktop setting (`false` records sizes only) |
+| `maxBodyBytes` | `nil` | Capture limit per body, at most 8 MB (the desktop default is 1 MB) |
+| `appName` | `nil` | Name shown on the desktop (default: the bundle's display name) |
 | `maxBufferedMessages` | `5000` | Messages kept while disconnected |
-| `allowInReleaseBuilds` | `false` | Force the SDK to run in non-DEBUG builds |
+| `allowInReleaseBuilds` | `false` | Run in every build, also those that are not development builds (see [Release safety](#release-safety)) |
+
+The Android SDK has the same options; a few names differ:
+
+| iOS | Android |
+|---|---|
+| `collectMetrics` | `captureMetrics` |
+| `allowInReleaseBuilds` | `forceInRelease` |
+| `captureOSLog` | `captureLogcat` |
+| `Durbun.isRunning` | `Durbun.isStarted` |
+| `Durbun.registerAction(...)` | `Durbun.addAction(...)` |
 
 ## Mocks
 
@@ -227,9 +260,21 @@ the SDK subscribes to MetricKit's diagnostics and sends them once a desktop is c
 ## Release safety
 
 - With `Durbun.start()` inside `#if DEBUG`, release builds never start the SDK.
-- The SDK itself does **nothing** when compiled without `DEBUG`, unless you force it with
-  `allowInReleaseBuilds: true`. With that option it runs wherever the app was installed from (Xcode, ad-hoc,
-  TestFlight, App Store). Each project decides which builds run Dürbün.
+- Without `#if DEBUG`, the SDK decides by itself and runs in **development builds** only: the package was
+  compiled with `DEBUG`, or the app runs in the Simulator, under a debugger, or is signed for development
+  (`get-task-allow` in its provisioning profile, which Xcode's Run and Profile builds have). So a custom
+  configuration such as `Debug-Staging` works even when Xcode compiles the package without `DEBUG`. Ad hoc,
+  enterprise, TestFlight and App Store builds are not development builds.
+- The signing check reads the embedded provisioning profile off the main thread. In that one case (a device build
+  without `DEBUG`, started from the home screen) the SDK starts a moment after `Durbun.start()`, from a
+  background queue.
+- Per build configuration, the `DurbunEnabled` Info.plist key decides instead: `YES` runs Dürbün in that build
+  (whatever its signing), `NO` keeps it off (even with `DEBUG`). Feed it from a build setting, for example
+  `<key>DurbunEnabled</key><string>$(DURBUN_ENABLED)</string>` with `DURBUN_ENABLED = YES` for Staging only; an
+  empty or undefined setting is ignored.
+- `allowInReleaseBuilds: true` in code runs it in every build. With it, or with `DurbunEnabled = YES`, it runs
+  wherever the app was installed from (Xcode, ad-hoc, TestFlight, App Store). Each project decides which builds
+  run Dürbün.
 - When the connection drops, the mock rules that connection pushed are removed at once; the desktop sends them
   again when it reconnects.
 - Security note: the link has no pairing yet. On a physical device, a build with Dürbün enabled listens on one
@@ -250,7 +295,8 @@ SDK stays off. To run Dürbün in such builds only:
 1. In the project's **Info → Configurations**, duplicate Release as, for example, **Staging**.
 2. In the app target's Build Settings, add `DURBUN` to **Active Compilation Conditions**
    (`SWIFT_ACTIVE_COMPILATION_CONDITIONS`) for Staging only.
-3. Start the SDK under that condition and allow it outside `DEBUG`:
+3. Start the SDK under that condition and allow it outside `DEBUG` (or, instead of the option, set
+   `DurbunEnabled = YES` in Info.plist for Staging, see [Release safety](#release-safety)):
 
    ```swift
    #if DEBUG || DURBUN
@@ -266,8 +312,8 @@ SDK stays off. To run Dürbün in such builds only:
 4. Archive with a scheme whose **Archive** action uses Staging (Edit Scheme → Archive → Build Configuration),
    then distribute it through TestFlight, ad hoc or Firebase App Distribution as usual.
 
-- `allowInReleaseBuilds` is needed because the package checks `DEBUG` itself; the app target's own
-  compilation conditions do not reach the package.
+- `allowInReleaseBuilds` (or `DurbunEnabled`) is needed because an archived Staging build is neither compiled
+  with `DEBUG` nor signed for development; the app target's own compilation conditions do not reach the package.
 - With CocoaPods, link the pod only where it runs:
   `pod 'Durbun', :configurations => ['Debug', 'Staging']` (with a version requirement as in
   [Installation](#installation)). A custom configuration also needs a mapping at the top of the Podfile, for
@@ -275,8 +321,8 @@ SDK stays off. To run Dürbün in such builds only:
 - Over USB nothing else is needed: the SDK listens on the device's loopback and the Mac connects through
   usbmux, whatever the app was installed from. Wi-Fi needs `host` and `NSLocalNetworkUsageDescription`, as in
   [Connecting](#connecting); the address can be [given without a rebuild](#giving-the-app-the-macs-address).
-- Without `allowInReleaseBuilds`, the SDK writes `Dürbün is disabled in non-DEBUG builds (set
-  allowInReleaseBuilds to force it). …` to Xcode's console and the unified log (subsystem `dev.durbun.sdk`).
+- When it stays off, the SDK writes `Dürbün is off in this build: …` with the reason and both switches to
+  Xcode's console and the unified log (subsystem `dev.durbun.sdk`).
 
 The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, Android and React Native as well.
 
@@ -299,8 +345,8 @@ The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, Android 
 - WKWebView and AVPlayer traffic does not go through URLSession protocols.
 - The desktop reads `os_log` / `Logger` / `NSLog` messages from device logs (simulator, USB). When it cannot
   (Wi-Fi, no `idevicesyslog`), the SDK on iOS 15+ reads the app's own log store once a second and sends the
-  entries; iOS does not keep `debug` entries, and `com.apple.*` lines are skipped. `captureStdout: false`
-  turns this off.
+  entries; iOS does not keep `debug` entries, and `com.apple.*` lines are skipped. `captureOSLog: false` (or
+  `captureStdout: false` without `captureOSLog`) turns this off.
 - `regex` mock rules use NSRegularExpression (ICU). For typical URL patterns it behaves the same as
   JavaScript; only exotic JavaScript-specific syntax may differ.
 - FPS / janky frames are iOS-only (there is no CADisplayLink on macOS).

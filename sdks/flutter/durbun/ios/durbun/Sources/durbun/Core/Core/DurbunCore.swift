@@ -43,6 +43,12 @@ final class DurbunCore {
         var infoPlistHost: String??
         /// Where the run-time address is kept (default: `UserDefaults.standard`).
         var defaults: UserDefaults?
+        /// The `DurbunEnabled` Info.plist value (default: the main bundle's).
+        var infoPlistEnabled: String??
+        /// Simulator or a debugger attached (default: checked at run time).
+        var debuggerAttached: Bool?
+        /// `get-task-allow` of the embedded provisioning profile (default: read from the bundle).
+        var developmentSigned: Bool??
     }
 
     /// Launch argument (`-DurbunHost 192.168.1.20`) and Info.plist key with the desktop address.
@@ -64,6 +70,11 @@ final class DurbunCore {
     private let lifecycle = NSRecursiveLock()
     /// Bumped on every start/stop; transport callbacks from an older generation are ignored.
     private var generation = 0
+    /// Bumped by every `start`, `startHosted` and `stop` call: a start that waits for the signing check
+    /// goes ahead only when nothing else was asked for meanwhile.
+    private var startRequest = 0
+    /// `DurbunOptions.captureBodies` / `maxBodyBytes`: the app's values win over the desktop's.
+    private var bodyOverride: (captureBodies: Bool?, maxBodyBytes: Int?) = (nil, nil)
     private var running = false
     private var connected = false
     private var transport: Transport?
@@ -128,7 +139,18 @@ final class DurbunCore {
 
     var isRunning: Bool { lock.withLock { running } }
     var isConnected: Bool { lock.withLock { connected } }
-    var sdkConfig: SdkConfig { lock.withLock { config } }
+    /// The desktop's config with the app's own body settings applied (what network capture uses).
+    var sdkConfig: SdkConfig {
+        lock.withLock {
+            var effective = config
+            if let capture = bodyOverride.captureBodies { effective.captureBodies = capture }
+            if let limit = bodyOverride.maxBodyBytes { effective.maxBodyBytes = min(max(0, limit), Self.maxBodyBytesCap) }
+            return effective
+        }
+    }
+
+    /// Bodies above this are always truncated, whatever is asked (keeps every frame well below 16 MiB).
+    static let maxBodyBytesCap = 8 * 1024 * 1024
     var mockRules: [MockRule] { lock.withLock { mocks } }
     var networkPolicy: NetworkCapturePolicy { lock.withLock { policy } }
     var appIdentifier: String? { lock.withLock { environment?.app.id } }
@@ -171,10 +193,17 @@ final class DurbunCore {
     func start(options: DurbunOptions) {
         lifecycle.lock()
         defer { lifecycle.unlock() }
-        startLocked(options: options)
+        lock.withLock { startRequest += 1 }
+        startLocked(options: options, developmentSigned: false)
     }
 
-    private func startLocked(options: DurbunOptions) {
+    static let releaseOffMessage =
+        "Dürbün is off in this build: the Durbun package was compiled without DEBUG, no debugger is attached and the "
+        + "app is not signed for development. Where Dürbün should run, set DurbunEnabled = YES in Info.plist (for "
+        + "example from a build setting per configuration) or DurbunOptions(allowInReleaseBuilds: true)."
+
+    /// `developmentSigned`: the signing check already ran and found a development build.
+    private func startLocked(options: DurbunOptions, developmentSigned: Bool) {
         guard options.enabled else { return }
         let overrides = self.overrides
         // Flutter apps: package:durbun starts this core from Dart (and keeps it off when Dart is off), so a
@@ -183,14 +212,24 @@ final class DurbunCore {
             Diagnostics.info("Durbun.start() is not needed in Flutter apps: package:durbun starts the native layer from Dart.")
             return
         }
-        let debugBuild = overrides.releaseBuild.map { !$0 } ?? Self.buildAllowsRunning
-        guard debugBuild || options.allowInReleaseBuilds else {
-            Diagnostics.notice(
-                "Dürbün is disabled in non-DEBUG builds (set allowInReleaseBuilds to force it). The Durbun package "
-                    + "decides by its own DEBUG flag: a custom configuration such as Staging needs "
-                    + "DurbunOptions(allowInReleaseBuilds: true) where Dürbün should run."
-            )
+        let plistValue: Any? = overrides.infoPlistEnabled.map { $0 as Any? }
+            ?? Bundle.main.object(forInfoDictionaryKey: BuildSignals.enabledInfoKey)
+        let plistSwitch = BuildSignals.infoPlistSwitch(plistValue)
+        if plistSwitch == false {
+            Diagnostics.notice("Dürbün is off in this build: DurbunEnabled is NO in Info.plist.")
             return
+        }
+        let debugBuild = overrides.releaseBuild.map { !$0 } ?? Self.buildAllowsRunning
+        if !(debugBuild || options.allowInReleaseBuilds || plistSwitch == true || developmentSigned) {
+            // Xcode may compile the package without DEBUG for a custom configuration of a debug build: ask
+            // the running process instead. Simulator and debugger are cheap checks; the signing check reads
+            // a file, so it runs off this thread and starts the SDK from there.
+            if overrides.debuggerAttached ?? (BuildSignals.isSimulator || BuildSignals.debuggerAttached) {
+                Diagnostics.notice("Dürbün runs in this build without DEBUG because it runs in the Simulator or under a debugger.")
+            } else {
+                startIfDevelopmentSigned(options: options)
+                return
+            }
         }
         let env = ProcessInfo.processInfo.environment
         // Explicit opt-out, and SwiftUI previews (no desktop there; stdout belongs to the preview agent).
@@ -201,7 +240,7 @@ final class DurbunCore {
             self.generation += 1
             return self.generation
         }
-        let environment = AppEnvironment.current()
+        let environment = AppEnvironment.current().named(options.appName)
         let infoHost = overrides.infoPlistHost ?? (Bundle.main.object(forInfoDictionaryKey: Self.hostArgumentKey) as? String)
         let build = Self.buildHost(options: options.host, environment: env["DURBUN_HOST"], infoPlist: infoHost)
         let isDevice = AppEnvironment.isPhysicalIOSDevice
@@ -228,7 +267,8 @@ final class DurbunCore {
             connected = false
             config = .defaults
             mocks = []
-            captureConsole = options.captureStdout
+            captureConsole = options.captureOSLog ?? options.captureStdout
+            bodyOverride = (options.captureBodies, options.maxBodyBytes)
             osLogAnnounced = false
             hostDeviceLogs = HostDeviceLogs()
             self.environment = environment
@@ -270,6 +310,27 @@ final class DurbunCore {
         }
     }
 
+    /// A build without `DEBUG`, outside the Simulator and without a debugger: runs when the app is signed
+    /// for development (`get-task-allow`, read from the embedded profile off the calling thread). The SDK
+    /// then starts a moment later, from that background queue, unless `start`/`stop` was called meanwhile.
+    private func startIfDevelopmentSigned(options: DurbunOptions) {
+        let request = lock.withLock { startRequest }
+        let known = overrides.developmentSigned
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let signed = known ?? BuildSignals.provisioningAllowsDebugging()
+            guard let self else { return }
+            self.lifecycle.lock()
+            defer { self.lifecycle.unlock() }
+            guard self.lock.withLock({ self.startRequest == request }) else { return }
+            if signed == true {
+                Diagnostics.notice("Dürbün runs in this build without DEBUG because the app is signed for development (get-task-allow).")
+                self.startLocked(options: options, developmentSigned: true)
+            } else {
+                Diagnostics.notice(Self.releaseOffMessage)
+            }
+        }
+    }
+
     /// Hosted mode, started by the Flutter plugin: no socket, no metrics (Flutter reports frames itself).
     /// URLSession capture, crash capture and stdout/stderr capture run as usual; every message goes to
     /// `link`, and the desktop state comes from `applyHostState`. Returns false when it cannot run.
@@ -277,13 +338,14 @@ final class DurbunCore {
     func startHosted(options: DurbunOptions, link: HostLink, redactedHeaders: Set<String> = []) -> Bool {
         lifecycle.lock()
         defer { lifecycle.unlock() }
+        lock.withLock { startRequest += 1 }
         guard options.enabled else { return false }
         if isRunning { stop() }
         let generation: Int = lock.withLock {
             self.generation += 1
             return self.generation
         }
-        let environment = AppEnvironment.current()
+        let environment = AppEnvironment.current().named(options.appName)
         let relay = HostRelay(link: link, maxMessages: max(1, options.maxBufferedMessages))
         lock.withLock {
             running = true
@@ -291,7 +353,8 @@ final class DurbunCore {
             config = .defaults
             mocks = []
             requestCounter = 0
-            captureConsole = options.captureStdout
+            captureConsole = options.captureOSLog ?? options.captureStdout
+            bodyOverride = (options.captureBodies, options.maxBodyBytes)
             osLogAnnounced = false
             hostDeviceLogs = HostDeviceLogs()
             self.environment = environment
@@ -390,6 +453,7 @@ final class DurbunCore {
             () -> (Transport?, StdioCapture?, MetricsReporter?, Bool, NSObjectProtocol?, HostRelay?, OSLogCapture?) in
             let result = (self.transport, self.stdio, self.metrics, crashCapture, foregroundObserver, self.relay, self.osLog)
             generation += 1
+            startRequest += 1
             running = false
             connected = false
             self.relay = nil

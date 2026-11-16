@@ -34,9 +34,21 @@ public struct DurbunOptions: Sendable {
     public var redactHeaders: [String]
     /// Outgoing messages kept while the desktop is not connected (oldest dropped first). Default 5000.
     public var maxBufferedMessages: Int
-    /// Allow running in builds compiled without `DEBUG`. Default false: release builds stay inert
-    /// even when `Durbun.start()` is called.
+    /// Allow running in builds compiled without `DEBUG`. Default false: such builds run only when they
+    /// are development builds (Simulator, a debugger attached, signed for development) or when
+    /// Info.plist says `DurbunEnabled = YES`.
     public var allowInReleaseBuilds: Bool
+    /// Overrides the desktop's "capture bodies" setting: `false` records sizes only. Default nil
+    /// (follow the desktop).
+    public var captureBodies: Bool?
+    /// Overrides the desktop's per-body capture limit in bytes (at most 8 MB). Default nil (follow the
+    /// desktop, 1 MB unless changed there).
+    public var maxBodyBytes: Int?
+    /// Name shown on the desktop. Default nil: the bundle's display name.
+    public var appName: String?
+    /// Forward this app's own `os_log` / `Logger` / `NSLog` lines when the desktop cannot read the
+    /// device's logs (Wi-Fi). Default nil: the same as `captureStdout`.
+    public var captureOSLog: Bool?
 
     public init(
         host: String? = nil,
@@ -66,5 +78,50 @@ public struct DurbunOptions: Sendable {
         self.redactHeaders = redactHeaders
         self.maxBufferedMessages = maxBufferedMessages
         self.allowInReleaseBuilds = allowInReleaseBuilds
+        self.captureBodies = nil
+        self.maxBodyBytes = nil
+        self.appName = nil
+        self.captureOSLog = nil
+    }
+
+    /// Every option, including the ones added after the first release.
+    public init(
+        host: String? = nil,
+        port: UInt16 = 9751,
+        devicePorts: ClosedRange<UInt16> = 9752...9755,
+        enabled: Bool = true,
+        captureStdout: Bool = true,
+        captureNetwork: Bool = true,
+        captureCrashes: Bool = true,
+        collectMetrics: Bool = true,
+        interceptUploadTasks: Bool = true,
+        ignoredHosts: [String] = [],
+        redactHeaders: [String] = [],
+        maxBufferedMessages: Int = 5000,
+        allowInReleaseBuilds: Bool = false,
+        captureBodies: Bool? = nil,
+        maxBodyBytes: Int? = nil,
+        appName: String? = nil,
+        captureOSLog: Bool? = nil
+    ) {
+        self.init(
+            host: host,
+            port: port,
+            devicePorts: devicePorts,
+            enabled: enabled,
+            captureStdout: captureStdout,
+            captureNetwork: captureNetwork,
+            captureCrashes: captureCrashes,
+            collectMetrics: collectMetrics,
+            interceptUploadTasks: interceptUploadTasks,
+            ignoredHosts: ignoredHosts,
+            redactHeaders: redactHeaders,
+            maxBufferedMessages: maxBufferedMessages,
+            allowInReleaseBuilds: allowInReleaseBuilds
+        )
+        self.captureBodies = captureBodies
+        self.maxBodyBytes = maxBodyBytes
+        self.appName = appName
+        self.captureOSLog = captureOSLog
     }
 }

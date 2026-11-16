@@ -201,6 +201,26 @@ final class NetworkCaptureTests: SDKTestCase {
         XCTAssertEqual(body["size"] as? Int, #"{"id":42,"name":"Çağrı"}"#.utf8.count)
     }
 
+    func testTheAppsBodySettingsWinOverTheDesktops() throws {
+        desktop.config["captureBodies"] = true
+        var sizesOnly = options(network: true)
+        sizesOnly.captureBodies = false
+        startConnected(sizesOnly)
+        _ = perform(URLRequest(url: url("/json")))
+        let (_, json) = try XCTUnwrap(capture(for: "/json"))
+        XCTAssertEqual((json["body"] as? [String: Any])?["data"] as? String, "")
+        Durbun.stop()
+
+        desktop.config["maxBodyBytes"] = 1_000_000
+        startConnected(DurbunOptions(port: desktop.port, captureStdout: false, captureNetwork: true, captureCrashes: false,
+                                     collectMetrics: false, maxBodyBytes: 500))
+        _ = perform(URLRequest(url: url("/large")))
+        let (_, large) = try XCTUnwrap(capture(for: "/large"))
+        let body = try XCTUnwrap(large["body"] as? [String: Any])
+        XCTAssertEqual(body["truncated"] as? Bool, true)
+        XCTAssertEqual((body["data"] as? String)?.utf8.count, 500)
+    }
+
     func testBinaryResponsesAreBase64() throws {
         startConnected(options(network: true))
         _ = perform(URLRequest(url: url("/png")))

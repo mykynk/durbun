@@ -42,6 +42,14 @@ struct AppEnvironment {
         return AppEnvironment(app: app, device: deviceHints(processInfo: processInfo))
     }
 
+    /// The same facts with the app's display name replaced (`DurbunOptions.appName`); blank keeps it.
+    func named(_ name: String?) -> AppEnvironment {
+        guard let name = Self.nonEmpty(name) else { return self }
+        var copy = self
+        copy.app.name = name
+        return copy
+    }
+
     private static func deviceHints(processInfo: ProcessInfo) -> WireDeviceHints {
         let env = processInfo.environment
         let os = processInfo.operatingSystemVersion
