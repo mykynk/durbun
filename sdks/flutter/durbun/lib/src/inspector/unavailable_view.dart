@@ -3,10 +3,13 @@
 /// instead of nothing happening.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../flutter/backend.dart' show DurbunOffReason, DurbunStartState;
 import '../flutter/durbun.dart' show durbunBackend;
+import 'home.dart' show ThemeSwitchButton;
 import 'strings.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -59,40 +62,50 @@ class InspectorUnavailablePage extends StatelessWidget {
       appBar: AppBar(
         title: Text(t.title),
         automaticallyImplyLeading: false,
-        shape: Border(bottom: BorderSide(color: c.border)),
         actions: <Widget>[
-          DIconButton(icon: Icons.close_rounded, tooltip: t.close, onTap: onClose),
+          const ThemeSwitchButton(),
           const SizedBox(width: 4),
+          DIconButton(icon: Icons.close_rounded, tooltip: t.close, onTap: onClose),
+          const SizedBox(width: 8),
         ],
       ),
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(20, 32, 20, 24 + MediaQuery.paddingOf(context).bottom),
-        children: <Widget>[
-          MaxWidth(
-            width: 480,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                const Center(child: DurbunLogo(size: 48)),
-                const SizedBox(height: 16),
-                Text(title,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: DurbunType.title, fontWeight: FontWeight.w600, color: c.text, height: 1.3)),
-                const SizedBox(height: 6),
-                Text(body,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: DurbunType.body + 1, height: 1.45, color: c.textMuted)),
-                if (state == DurbunStartState.notStarted || state == DurbunStartState.running) ...<Widget>[
-                  const SizedBox(height: 20),
-                  // The copy button sits in the snippet's corner.
-                  const PlainCodeBlock(text: kDurbunStartSnippet),
-                ],
-                const SizedBox(height: 24),
-                Align(child: DButton(label: t.close, kind: DButtonKind.ghost, onTap: onClose)),
-              ],
+      // Centred in the page while it fits; scrolls at large text.
+      body: LayoutBuilder(
+        builder: (context, box) => SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(16, 24, 16, 24 + MediaQuery.paddingOf(context).bottom),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: math.max(0, box.maxHeight - 48 - MediaQuery.paddingOf(context).bottom)),
+            child: Center(
+              child: MaxWidth(
+                width: 480,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    const Center(child: DurbunLogo(size: 56)),
+                    const SizedBox(height: 20),
+                    Semantics(
+                      header: true,
+                      child: Text(title, textAlign: TextAlign.center, style: DurbunType.heading(size: DurbunType.title, color: c.text)),
+                    ),
+                    const SizedBox(height: 8),
+                    Text.rich(
+                      inlineCode(body, base: DurbunType.ui(size: DurbunType.bodyMd, color: c.textMuted, height: 1.5), colors: c),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (state == DurbunStartState.notStarted || state == DurbunStartState.running) ...<Widget>[
+                      const SizedBox(height: 20),
+                      // The copy button sits in the snippet's corner.
+                      const PlainCodeBlock(text: kDurbunStartSnippet, dart: true),
+                    ],
+                    const SizedBox(height: 24),
+                    Align(child: DButton(label: t.close, kind: DButtonKind.outline, onTap: onClose)),
+                  ],
+                ),
+              ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }

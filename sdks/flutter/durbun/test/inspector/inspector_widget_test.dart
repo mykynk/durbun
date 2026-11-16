@@ -131,6 +131,7 @@ void main() {
     expect(find.text('Crash'), findsOneWidget);
 
     await tester.ensureVisible(find.text('Errors only'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Errors only'));
     await tester.pumpAndSettle();
     expect(find.text('Sepet açıldı'), findsNothing);
@@ -186,7 +187,7 @@ void main() {
     expect(find.text('Waiting (TTFB)'), findsOneWidget);
   });
 
-  testWidgets('Network first; a swipe goes to Logs and back, each keeps its search', (tester) async {
+  testWidgets('Network first; the bottom bar goes to Logs and back, each keeps its search', (tester) async {
     await phone(tester);
     final store = filledStore();
     await tester.pumpWidget(app(store));
@@ -196,12 +197,12 @@ void main() {
     await tester.enterText(find.byType(TextField), 'orders');
     await tester.pumpAndSettle();
 
-    await tester.fling(find.byType(TabBarView), const Offset(-500, 0), 1500);
+    await tester.tap(find.byTooltip('Logs').first);
     await tester.pumpAndSettle();
-    expect(find.text('Sepet açıldı'), findsOneWidget, reason: 'swiped to Logs');
+    expect(find.text('Sepet açıldı'), findsOneWidget, reason: 'on Logs');
 
     store.ingest(buildLog(level: 'info', message: 'while away', tag: 'cart', ts: 1400));
-    await tester.fling(find.byType(TabBarView), const Offset(500, 0), 1500);
+    await tester.tap(find.byTooltip('Network').first);
     await tester.pumpAndSettle();
     expect(find.text('/v1/orders'), findsOneWidget);
     expect(find.text('/charge'), findsNothing, reason: 'Network kept its search');
@@ -215,7 +216,7 @@ void main() {
     await tester.pumpWidget(app(store, locale: const Locale('tr')));
     Durbun.showInspector();
     await tester.pumpAndSettle();
-    expect(find.text('Sadece hatalar'), findsOneWidget);
+    expect(find.text('Yalnızca hatalar'), findsOneWidget);
     await tester.tap(find.byTooltip('Araçlar').first);
     await tester.pumpAndSettle();
     expect(find.text('Yalnızca telefonda'), findsOneWidget);

@@ -88,7 +88,7 @@ class ActiveChip extends StatelessWidget {
   }
 }
 
-/// The scrolling row under the search field.
+/// The scrolling row of chips under the search field.
 class FilterRow extends StatelessWidget {
   const FilterRow({super.key, required this.children});
 
@@ -98,11 +98,11 @@ class FilterRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     return Container(
-      color: c.bgPanel,
-      height: 52,
+      color: c.bgApp,
+      height: 48,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+        padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 2, DurbunSpace.gutter, 2),
         itemCount: children.length,
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (_, i) => children[i],
@@ -111,7 +111,8 @@ class FilterRow extends StatelessWidget {
   }
 }
 
-/// A titled group in the filter sheet.
+/// A titled group in the filter sheet: a small muted title, an optional
+/// hint, then its chips.
 class SheetSection extends StatelessWidget {
   const SheetSection(
       {super.key, required this.title, required this.children, this.hint});
@@ -124,7 +125,7 @@ class SheetSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 14, DurbunSpace.gutter, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -132,10 +133,12 @@ class SheetSection extends StatelessWidget {
               style: TextStyle(
                   fontSize: DurbunType.body,
                   fontWeight: FontWeight.w600,
+                  letterSpacing: 0.1,
+                  height: 1.4,
                   color: c.textMuted)),
           if (hint != null) ...<Widget>[
-            const SizedBox(height: 2),
-            Text(hint!, style: TextStyle(fontSize: DurbunType.body, color: c.textSubtle)),
+            const SizedBox(height: 1),
+            Text(hint!, style: TextStyle(fontSize: DurbunType.sm, height: 1.35, color: c.textSubtle)),
           ],
           const SizedBox(height: 2),
           // Chips are 44 pt tall to tap and 32 pt drawn: no run spacing.
@@ -154,41 +157,53 @@ class SheetSwitch extends StatelessWidget {
       required this.value,
       required this.onChanged,
       this.hint,
-      this.icon});
+      this.icon,
+      this.iconColor});
 
   final String label;
   final String? hint;
   final IconData? icon;
+
+  /// The icon's colour (a warning sign in amber); muted by default.
+  final Color? iconColor;
   final bool value;
   final ValueChanged<bool> onChanged;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    return InkWell(
-      onTap: () => onChanged(!value),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
-        child: Row(
-          children: <Widget>[
-            if (icon != null) ...<Widget>[
-              Icon(icon, size: 22, color: c.textMuted),
-              const SizedBox(width: 14),
-            ],
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: c.text)),
-                  if (hint != null)
-                    Text(hint!,
-                        style: TextStyle(fontSize: DurbunType.body, color: c.textSubtle)),
-                ],
+    return MergeSemantics(
+      child: Semantics(
+      toggled: value,
+      child: Pressable(
+        onTap: () => onChanged(!value),
+        builder: (pressed) => Container(
+          color: pressed ? c.bgHover : Colors.transparent,
+          constraints: const BoxConstraints(minHeight: 52),
+          padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 6, 10, 6),
+          child: Row(
+            children: <Widget>[
+              if (icon != null) ...<Widget>[
+                Icon(icon, size: 20, color: iconColor ?? c.textMuted),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(label, style: DurbunType.heading(size: DurbunType.label, color: c.text).copyWith(height: 1.3)),
+                    if (hint != null)
+                      Text(hint!, style: TextStyle(fontSize: DurbunType.sm, height: 1.35, color: c.textMuted)),
+                  ],
+                ),
               ),
-            ),
-            Switch(value: value, onChanged: onChanged),
-          ],
+              const SizedBox(width: 8),
+              ExcludeSemantics(child: Switch(value: value, onChanged: onChanged)),
+            ],
+          ),
         ),
+      ),
       ),
     );
   }
@@ -203,6 +218,7 @@ Future<void> showFilterSheet(
       build,
   required VoidCallback onChanged,
   VoidCallback? onReset,
+  String? subtitle,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -223,37 +239,37 @@ Future<void> showFilterSheet(
           final t = InspectorStrings.of(sheet);
           return ConstrainedBox(
             constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(sheet).height * 0.8),
+                maxHeight: MediaQuery.sizeOf(sheet).height * 0.85),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 8, 4),
-                  child: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Text(title,
-                            style: TextStyle(
-                                fontSize: DurbunType.title,
-                                fontWeight: FontWeight.w600,
-                                color: c.text)),
-                      ),
-                      if (onReset != null)
-                        TextButton(
-                          onPressed: () {
-                            onReset();
-                            changed();
-                          },
-                          child: Text(t.resetFilters),
-                        ),
-                    ],
+                  padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 0, 6, 2),
+                  child: TitleWithLink(
+                    title: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(title, style: DurbunType.heading(color: c.text)),
+                        if (subtitle != null)
+                          Text(subtitle, style: DurbunType.ui(size: DurbunType.sm, color: c.textMuted, height: 1.35)),
+                      ],
+                    ),
+                    link: onReset == null
+                        ? null
+                        : TextButton(
+                            onPressed: () {
+                              onReset();
+                              changed();
+                            },
+                            child: Text(t.resetFilters, textAlign: TextAlign.end),
+                          ),
                   ),
                 ),
                 // A few dozen rows: built at once (a lazy list would leave
                 // the last ones unbuilt until scrolled to).
                 Flexible(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.only(bottom: 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: build(sheet, changed),
@@ -262,7 +278,7 @@ Future<void> showFilterSheet(
                 ),
                 Padding(
                   padding: EdgeInsets.fromLTRB(
-                      16, 4, 16, 12 + MediaQuery.paddingOf(sheet).bottom),
+                      DurbunSpace.gutter, 8, DurbunSpace.gutter, 12 + MediaQuery.paddingOf(sheet).bottom),
                   child: SizedBox(
                     width: double.infinity,
                     child: DButton(
@@ -315,16 +331,12 @@ Future<void> showQueryHelp(BuildContext context,
             children: <Widget>[
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                child: Text(t.queryHelp,
-                    style: TextStyle(
-                        fontSize: DurbunType.title,
-                        fontWeight: FontWeight.w600,
-                        color: c.text)),
+                child: Text(t.queryHelp, style: DurbunType.heading(color: c.text)),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Text(t.queryHelpBody,
-                    style: TextStyle(fontSize: 13, color: c.textMuted)),
+                    style: TextStyle(fontSize: DurbunType.body, height: 1.45, color: c.textMuted)),
               ),
               for (final h in hints)
                 InkWell(
@@ -353,7 +365,7 @@ Future<void> showQueryHelp(BuildContext context,
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                  color: c.trackBg,
+                                  color: c.chipBg,
                                   border: Border.all(color: c.border),
                                   borderRadius: BorderRadius.circular(DurbunRadius.sm)),
                               child: Text(h.token,
@@ -367,7 +379,7 @@ Future<void> showQueryHelp(BuildContext context,
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(h.meaning,
-                              style: TextStyle(fontSize: 13, color: c.text)),
+                              style: TextStyle(fontSize: DurbunType.bodyMd, height: 1.4, color: c.text)),
                         ),
                       ],
                     ),
@@ -379,4 +391,28 @@ Future<void> showQueryHelp(BuildContext context,
       }),
     ),
   );
+}
+
+/// A title (and its hint) with a link at the end of the row. The link takes
+/// its own width up to half the row, wrapping at large text; the title the
+/// rest.
+class TitleWithLink extends StatelessWidget {
+  const TitleWithLink({super.key, required this.title, this.link});
+
+  final Widget title;
+  final Widget? link;
+
+  @override
+  Widget build(BuildContext context) {
+    final end = link;
+    if (end == null) return SizedBox(width: double.infinity, child: title);
+    return LayoutBuilder(
+      builder: (context, box) => Row(
+        children: <Widget>[
+          Expanded(child: title),
+          ConstrainedBox(constraints: BoxConstraints(maxWidth: box.maxWidth / 2), child: end),
+        ],
+      ),
+    );
+  }
 }

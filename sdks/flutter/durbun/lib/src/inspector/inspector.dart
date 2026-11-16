@@ -372,13 +372,19 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
     if (navigator == null) return;
     setState(() => _open = true);
     _syncShake();
+    // The theme picked last time, read before the first frame (no flash).
+    if (!panelThemeLoaded) await loadPanelTheme();
+    if (!mounted) {
+      _open = false;
+      return;
+    }
     final store = _store;
     store.markSeen();
     store.panelOpen.value = true;
     late final MaterialPageRoute<void> route;
     route = MaterialPageRoute<void>(
       settings: const RouteSettings(name: kInspectorRouteName),
-      // Rises over the app like a sheet; no edge swipe fighting the tabs.
+      // Rises over the app like a sheet; no edge swipe fighting the lists.
       fullscreenDialog: true,
       builder: (_) => panel(store, () => _close(route)),
     );

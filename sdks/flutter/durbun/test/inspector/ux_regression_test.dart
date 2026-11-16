@@ -328,6 +328,9 @@ void main() {
       await _phone(tester);
       final store = _manyLogs(4);
       await _open(tester, store);
+      // The chip row scrolls sideways; the test font is wider than a phone's.
+      await tester.ensureVisible(find.text('Errors only'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Errors only'));
       await tester.enterText(find.byType(TextField), 'nothing-like-this');
       await tester.pumpAndSettle();

@@ -1,5 +1,6 @@
-/// Shared components of the in-app inspector, modelled on the desktop UI
-/// (`packages/ui/src/components`, `styles/components.css`).
+/// Shared components of the in-app inspector: cards, pills, chips, fields,
+/// buttons, segmented controls, rows and states, drawn with the tokens of
+/// `theme.dart`.
 library;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
@@ -60,17 +61,18 @@ class TagChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final (fg, bg) = DurbunColors.of(context).tag(name);
     final chip = Container(
-      constraints: BoxConstraints(maxWidth: maxWidth),
-      height: 18,
+      // 20 pt, taller when the text is scaled up.
+      constraints: BoxConstraints(maxWidth: maxWidth, minHeight: 20),
       padding: const EdgeInsets.symmetric(horizontal: 6),
       decoration: BoxDecoration(
           color: bg, borderRadius: BorderRadius.circular(DurbunRadius.sm)),
       child: Align(
           widthFactor: 1,
+          heightFactor: 1,
           child: Text(name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: DurbunType.monoStyle(size: 11.5, color: fg, height: 1.2))),
+              style: DurbunType.monoStyle(size: DurbunType.monoSm, color: fg, weight: FontWeight.w500, height: 1.2))),
     );
     return onTap == null ? chip : GestureDetector(onTap: onTap, child: chip);
   }
@@ -78,20 +80,27 @@ class TagChip extends StatelessWidget {
 
 enum BadgeTone { neutral, accent, success, warning, danger, info }
 
-/// Small rounded label (source, build, mock, error kind…).
+/// Small rounded label (source, build, mock, error kind…): the tone's ink
+/// on its tint, or, [solid], the tone's fill with a dark (light theme:
+/// white) label for what must stand out (a crash, an error level).
 class DBadge extends StatelessWidget {
   const DBadge(this.text,
-      {super.key, this.tone = BadgeTone.neutral, this.icon, this.mono = false});
+      {super.key, this.tone = BadgeTone.neutral, this.icon, this.mono = false, this.solid = false, this.outlined = false});
 
   final String text;
   final BadgeTone tone;
   final IconData? icon;
   final bool mono;
+  final bool solid;
+
+  /// No fill, an outline in the tone: for a badge on a card of the same
+  /// tone, where a tint on the tint would fade the label.
+  final bool outlined;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    final (fg, bg) = switch (tone) {
+    final (ink, tint) = switch (tone) {
       BadgeTone.neutral => (c.textMuted, c.bgActive),
       BadgeTone.accent => (c.accentInk, c.accentSoft),
       BadgeTone.success => (c.success, c.successSoft),
@@ -99,19 +108,26 @@ class DBadge extends StatelessWidget {
       BadgeTone.danger => (c.danger, c.dangerSoft),
       BadgeTone.info => (c.info, c.infoSoft),
     };
+    final fill = tone == BadgeTone.accent ? c.accentFill : (tone == BadgeTone.neutral ? c.textMuted : ink);
+    final fg = solid ? (tone == BadgeTone.accent ? c.onAccent : c.onDanger) : ink;
+    final bg = solid ? fill : (outlined ? null : tint);
     final style = mono
         ? DurbunType.monoStyle(
-            size: 11, color: fg, weight: FontWeight.w600, height: 1.2)
+            size: DurbunType.monoSm, color: fg, weight: FontWeight.w600, height: 1.2)
         : TextStyle(
-            fontSize: 11.5,
+            fontSize: DurbunType.caption,
             color: fg,
             fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
             height: 1.2);
     return Container(
-      height: 20,
+      // 20 pt, taller when the text is scaled up (the row centres the label).
+      constraints: const BoxConstraints(minHeight: 20),
       padding: const EdgeInsets.symmetric(horizontal: 6),
       decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(DurbunRadius.sm)),
+          color: bg,
+          border: outlined ? Border.all(color: ink.withValues(alpha: 0.5)) : null,
+          borderRadius: BorderRadius.circular(DurbunRadius.sm)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -137,6 +153,7 @@ class DToggle extends StatelessWidget {
       required this.onTap,
       this.color,
       this.icon,
+      this.iconColor,
       this.trailingIcon,
       this.tonal = false,
       this.mono = false});
@@ -148,6 +165,10 @@ class DToggle extends StatelessWidget {
   /// A dot in this colour before the label (a method, a status class).
   final Color? color;
   final IconData? icon;
+
+  /// The icon's colour while off (a warning sign in amber); on, it takes
+  /// the label's.
+  final Color? iconColor;
 
   /// After the label: a chevron when the chip opens a menu.
   final IconData? trailingIcon;
@@ -172,6 +193,7 @@ class DToggle extends StatelessWidget {
         color: fg,
         mono: mono,
         icon: icon,
+        iconColor: selected ? null : iconColor,
         dot: color == null ? null : (filled ? c.onAccent : color),
         trailing: trailingIcon == null
             ? null
@@ -185,7 +207,8 @@ class DToggle extends StatelessWidget {
 /// white label), [tonal] an active filter (accent tint).
 enum ChipLook { outline, filled, tonal }
 
-/// A chip's frame: 32 pt drawn, 44 pt to tap, darker while pressed.
+/// A chip's frame: a full pill, 32 pt drawn, 44 pt to tap, darker while
+/// pressed. Off, it sits one step above the page with a 1 pt outline.
 class ChipFrame extends StatelessWidget {
   const ChipFrame(
       {super.key, required this.look, required this.onTap, required this.child, this.selected, this.semanticLabel, this.maxWidth = 260});
@@ -201,9 +224,9 @@ class ChipFrame extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final (bg, side) = switch (look) {
-      ChipLook.outline => (c.cardBg, c.border),
+      ChipLook.outline => (c.chipBg, c.border),
       ChipLook.filled => (c.accentFill, c.accentFill),
-      ChipLook.tonal => (c.accentSoft, c.accent.withValues(alpha: 0.35)),
+      ChipLook.tonal => (Color.alphaBlend(c.accentSoft, c.bgApp), c.accent.withValues(alpha: 0.45)),
     };
     return Semantics(
       button: true,
@@ -221,7 +244,7 @@ class ChipFrame extends StatelessWidget {
               curve: DurbunMotion.curve,
               height: 32,
               constraints: BoxConstraints(maxWidth: maxWidth),
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               foregroundDecoration: pressed
                   ? BoxDecoration(
                       color: (look == ChipLook.filled ? Colors.black : c.text).withValues(alpha: 0.08),
@@ -243,29 +266,31 @@ class ChipFrame extends StatelessWidget {
 
 /// A chip's content: an optional colour dot or icon, then the label.
 class ChipLabel extends StatelessWidget {
-  const ChipLabel({super.key, required this.label, required this.color, this.mono = false, this.icon, this.dot, this.trailing});
+  const ChipLabel(
+      {super.key, required this.label, required this.color, this.mono = false, this.icon, this.iconColor, this.dot, this.trailing});
 
   final String label;
   final Color color;
   final bool mono;
   final IconData? icon;
+  final Color? iconColor;
   final Color? dot;
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     final style = mono
-        ? DurbunType.monoStyle(size: DurbunType.monoRow, color: color, weight: FontWeight.w600, height: 1.2)
+        ? DurbunType.monoStyle(size: DurbunType.monoRow, color: color, weight: FontWeight.w500, height: 1.2)
         : TextStyle(fontSize: DurbunType.body, color: color, fontWeight: FontWeight.w500, height: 1.2);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         if (dot != null) ...<Widget>[
           Container(width: 6, height: 6, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
-          const SizedBox(width: 6),
+          const SizedBox(width: 7),
         ] else if (icon != null) ...<Widget>[
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 5),
+          Icon(icon, size: 16, color: iconColor ?? color),
+          const SizedBox(width: 6),
         ],
         // Shrinks with an ellipsis when wider than the screen (large text).
         Flexible(child: Text(label, style: style, maxLines: 1, overflow: TextOverflow.ellipsis)),
@@ -306,6 +331,63 @@ class _PressableState extends State<Pressable> {
       onTapUp: enabled ? (_) => _set(false) : null,
       onTapCancel: enabled ? () => _set(false) : null,
       child: widget.builder(_pressed),
+    );
+  }
+}
+
+/// How a [PanelCard] is tinted: [normal] the card surface, [warning] a
+/// warning, [danger] an error or a failed request, [crash] a crash.
+enum CardTone { normal, warning, danger, crash }
+
+/// A card of a list (a request, a log line): the card surface with a 1 pt
+/// outline and a 12 pt radius, tinted with its outline in the tone's colour
+/// for warnings and errors, a little darker while pressed.
+class PanelCard extends StatelessWidget {
+  const PanelCard({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.tone = CardTone.normal,
+    this.padding = const EdgeInsets.fromLTRB(12, 10, 12, 10),
+    this.margin = const EdgeInsets.fromLTRB(DurbunSpace.gutter, 0, DurbunSpace.gutter, DurbunSpace.cardGap),
+  });
+
+  final Widget child;
+  final VoidCallback? onTap;
+  final CardTone tone;
+  final EdgeInsets padding;
+  final EdgeInsets margin;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final (tint, side) = switch (tone) {
+      CardTone.normal => (null, c.border),
+      CardTone.warning => (c.lvWarnBg, c.warning.withValues(alpha: 0.3)),
+      CardTone.danger => (c.lvErrorBg, c.danger.withValues(alpha: 0.4)),
+      CardTone.crash => (c.lvFatalBg, c.danger.withValues(alpha: 0.55)),
+    };
+    final bg = tint == null ? c.cardBg : Color.alphaBlend(tint, c.cardBg);
+    final radius = BorderRadius.circular(DurbunRadius.lg);
+    return Padding(
+      padding: margin,
+      child: Semantics(
+        button: onTap != null,
+        child: Pressable(
+          onTap: onTap,
+          builder: (pressed) => AnimatedContainer(
+            duration: DurbunMotion.of(context, DurbunMotion.fast),
+            curve: DurbunMotion.curve,
+            padding: padding,
+            decoration: BoxDecoration(
+              color: pressed ? Color.alphaBlend(c.text.withValues(alpha: c.isDark ? 0.05 : 0.04), bg) : bg,
+              borderRadius: radius,
+              border: Border.all(color: side),
+            ),
+            child: child,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -354,17 +436,18 @@ class _DSearchFieldState extends State<DSearchField> {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     final controller = _controller;
+    // 40 pt drawn; the row around it keeps 44 pt to tap.
     return Container(
-      height: kMinTapTarget,
+      height: 40,
       decoration: BoxDecoration(
         color: c.fieldBg,
         borderRadius: BorderRadius.circular(DurbunRadius.md),
-        border: c.isDark ? Border.all(color: c.border) : null,
+        border: Border.all(color: c.border),
       ),
       child: Row(
         children: <Widget>[
           const SizedBox(width: 12),
-          Icon(Icons.search_rounded, size: 18, color: c.textSubtle),
+          Icon(Icons.search_rounded, size: 18, color: c.textMuted),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
@@ -375,7 +458,7 @@ class _DSearchFieldState extends State<DSearchField> {
               autocorrect: false,
               enableSuggestions: false,
               textInputAction: TextInputAction.search,
-              style: TextStyle(fontSize: DurbunType.label, color: c.text, height: 1.2),
+              style: TextStyle(fontSize: DurbunType.bodyMd, color: c.text, height: 1.2),
               cursorColor: c.accent,
               decoration: InputDecoration(
                 isDense: true,
@@ -383,7 +466,7 @@ class _DSearchFieldState extends State<DSearchField> {
                 hintText: widget.hint,
                 hintMaxLines: 1,
                 hintStyle: TextStyle(
-                    fontSize: DurbunType.label,
+                    fontSize: DurbunType.bodyMd,
                     color: c.textSubtle,
                     height: 1.2,
                     overflow: TextOverflow.ellipsis),
@@ -397,6 +480,7 @@ class _DSearchFieldState extends State<DSearchField> {
                 : DIconButton(
                     icon: Icons.close_rounded,
                     tooltip: t.clearSearch,
+                    size: 40,
                     onTap: () {
                       controller.clear();
                       widget.onChanged('');
@@ -407,9 +491,10 @@ class _DSearchFieldState extends State<DSearchField> {
             DIconButton(
                 icon: Icons.help_outline_rounded,
                 tooltip: t.queryHelp,
+                size: 40,
                 onTap: widget.onHelp),
           if (widget.trailing != null) widget.trailing!,
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
         ],
       ),
     );
@@ -426,6 +511,7 @@ class DIconButton extends StatelessWidget {
       required this.onTap,
       this.active = false,
       this.color,
+      this.boxed = false,
       this.size = kMinTapTarget});
 
   final IconData icon;
@@ -435,12 +521,46 @@ class DIconButton extends StatelessWidget {
   /// Shown on (a filter or a mode that is on): accent icon on a tint.
   final bool active;
   final Color? color;
+
+  /// A 34 pt box one step above the page with an outline (the headers'
+  /// buttons); the tap target stays [size].
+  final bool boxed;
   final double size;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final fg = onTap == null ? c.textSubtle.withValues(alpha: 0.6) : (active ? c.accentInk : (color ?? c.textMuted));
+    if (boxed) {
+      return Tooltip(
+        message: tooltip,
+        child: Semantics(
+          button: true,
+          enabled: onTap != null,
+          selected: active ? true : null,
+          child: Pressable(
+            onTap: onTap,
+            builder: (pressed) => SizedBox(
+              width: size,
+              height: size,
+              child: Center(
+                child: AnimatedContainer(
+                  duration: DurbunMotion.of(context, DurbunMotion.fast),
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: pressed ? c.bgActive : (active ? Color.alphaBlend(c.accentSoft, c.bgApp) : c.chipBg),
+                    borderRadius: BorderRadius.circular(DurbunRadius.md),
+                    border: Border.all(color: active ? c.accent.withValues(alpha: 0.45) : c.border),
+                  ),
+                  child: Icon(icon, size: 18, color: fg),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Tooltip(
       message: tooltip,
       child: Semantics(
@@ -508,7 +628,7 @@ class DButton extends StatelessWidget {
     final (bg, fg, side) = switch (kind) {
       DButtonKind.primary => (c.accentFill, c.onAccent, null),
       DButtonKind.tonal => (c.accentSoft, c.accentInk, null),
-      DButtonKind.outline => (c.cardBg, c.text, c.borderStrong),
+      DButtonKind.outline => (c.chipBg, c.text, c.border),
       DButtonKind.ghost => (Colors.transparent, c.textMuted, null),
       DButtonKind.danger => (c.dangerSoft, c.danger, null),
     };
@@ -546,9 +666,10 @@ class DButton extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: large ? DurbunType.label : DurbunType.body + 1,
+                        fontSize: DurbunType.bodyMd,
                         color: ink,
                         fontWeight: primary || large ? FontWeight.w600 : FontWeight.w500,
+                        letterSpacing: 0.1,
                         height: 1.2)),
               ),
               if (trailingIcon != null) ...<Widget>[
@@ -587,7 +708,7 @@ class SegmentTrack extends StatelessWidget {
               decoration: BoxDecoration(
                 color: c.trackBg,
                 borderRadius: BorderRadius.circular(DurbunRadius.md),
-                border: c.isDark ? Border.all(color: c.border) : null,
+                border: Border.all(color: c.border),
               ),
             ),
           ),
@@ -613,12 +734,17 @@ class Segment extends StatelessWidget {
       required this.selected,
       required this.onTap,
       required this.child,
-      this.semanticLabel});
+      this.semanticLabel,
+      this.pill = false});
 
   final bool selected;
   final VoidCallback? onTap;
   final Widget child;
   final String? semanticLabel;
+
+  /// A free-standing chip (no track): outlined, rounded fully; the
+  /// selected one filled.
+  final bool pill;
 
   @override
   Widget build(BuildContext context) {
@@ -634,12 +760,13 @@ class Segment extends StatelessWidget {
           child: AnimatedContainer(
             duration: DurbunMotion.of(context, DurbunMotion.medium),
             curve: DurbunMotion.curve,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: EdgeInsets.symmetric(horizontal: pill ? 12 : 10),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: selected ? c.accentFill : (pressed ? c.bgActive : Colors.transparent),
+              color: selected ? c.accentFill : (pressed ? c.bgActive : (pill ? c.chipBg : Colors.transparent)),
+              border: pill && !selected ? Border.all(color: c.border) : null,
               // The track's radius minus its 3 pt inset.
-              borderRadius: BorderRadius.circular(DurbunRadius.md - 3),
+              borderRadius: BorderRadius.circular(pill ? DurbunRadius.pill : DurbunRadius.md - 3),
             ),
             child: DefaultTextStyle.merge(
               style: TextStyle(color: selected ? c.onAccent : c.textMuted),
@@ -679,7 +806,8 @@ Widget _segmentLabel(DurbunColors c, String label, Object? count, bool selected,
       ),
     );
 
-/// Segmented control sized to its labels (Preview / Code / Hex).
+/// A choice of parts as a row of chips sized to their labels (Body 2 KB /
+/// Headers 6 / Cookies), the current one filled.
 class DSegmented extends StatelessWidget {
   const DSegmented(
       {super.key,
@@ -698,15 +826,21 @@ class DSegmented extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    return SegmentTrack(
-      children: <Widget>[
-        for (var i = 0; i < labels.length; i++)
-          Segment(
-            selected: i == index,
-            onTap: () => onChanged(i),
-            child: _segmentLabel(c, labels[i], counts?[i], i == index, DurbunType.body),
-          ),
-      ],
+    return SizedBox(
+      height: kMinTapTarget,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        spacing: 6,
+        children: <Widget>[
+          for (var i = 0; i < labels.length; i++)
+            Segment(
+              pill: true,
+              selected: i == index,
+              onTap: () => onChanged(i),
+              child: _segmentLabel(c, labels[i], counts?[i], i == index, DurbunType.body),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -733,7 +867,7 @@ class ChoiceSegments extends StatelessWidget {
       decoration: BoxDecoration(
           color: c.trackBg,
           borderRadius: BorderRadius.circular(DurbunRadius.md),
-          border: c.isDark ? Border.all(color: c.border) : null),
+          border: Border.all(color: c.border)),
       child: IntrinsicHeight(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -767,21 +901,25 @@ class ChoiceSegments extends StatelessWidget {
   }
 }
 
-/// Status of a request as a tinted token: `200`, `404`, `FAIL`, `1.2 s`.
+/// Status of a request as a token: `200`, `404`, `HATA`, `1.2 s`; the
+/// colour on its own tint with a faint outline, or, [solid], the colour
+/// itself with a dark label (a request that failed without a response).
 class StatusPill extends StatelessWidget {
-  const StatusPill({super.key, required this.text, required this.color, this.width = 44});
+  const StatusPill({super.key, required this.text, required this.color, this.width = 44, this.solid = false});
 
   final String text;
   final Color color;
   final double? width;
+  final bool solid;
 
   @override
   Widget build(BuildContext context) => Container(
         width: width,
         height: 22,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 5),
         decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.15),
+            color: solid ? color : color.withValues(alpha: 0.14),
+            border: solid ? null : Border.all(color: color.withValues(alpha: 0.32)),
             borderRadius: BorderRadius.circular(DurbunRadius.sm)),
         // widthFactor 1: without a width the pill hugs its text (a Wrap
         // would stretch an aligned box to the full row).
@@ -791,7 +929,11 @@ class StatusPill extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text(text,
                 maxLines: 1,
-                style: DurbunType.monoStyle(size: DurbunType.monoRow, color: color, weight: FontWeight.w600, height: 1.1)),
+                style: DurbunType.monoStyle(
+                    size: DurbunType.monoRow,
+                    color: solid ? DurbunColors.of(context).onDanger : color,
+                    weight: FontWeight.w600,
+                    height: 1.1)),
           ),
         ),
       );
@@ -900,68 +1042,110 @@ class CodeBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: c.isDark ? c.bgSunken : c.bgPanel,
-        borderRadius: BorderRadius.circular(DurbunRadius.lg),
-        border: Border.all(color: c.border),
-      ),
-      child: Stack(
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, kMinTapTarget + 4, 12),
-            child: SelectableText(text,
-                maxLines: maxLines,
-                style: DurbunType.monoStyle(size: DurbunType.monoBody, color: c.text, height: 1.5)),
-          ),
-          Positioned(
-            top: 2,
-            right: 2,
-            child: DIconButton(
-              icon: Icons.copy_rounded,
-              tooltip: t.copy,
-              onTap: () => copyText(context, text, note: copyNote),
-            ),
-          ),
-        ],
-      ),
+    return _codeCard(
+      context,
+      label: null,
+      onCopy: () => copyText(context, text, note: copyNote),
+      tooltip: t.copy,
+      code: SelectableText(text, maxLines: maxLines, style: DurbunType.monoStyle(size: DurbunType.monoRow, color: c.text, height: 1.6)),
     );
   }
+}
+
+/// A code card: a bar with the language (if any) and the copy button over
+/// the code, so the code has the card's whole width.
+Widget _codeCard(BuildContext context,
+    {required String? label, required VoidCallback onCopy, required String tooltip, required Widget code}) {
+  final c = DurbunColors.of(context);
+  return Container(
+    decoration: BoxDecoration(
+      color: c.cardBg,
+      borderRadius: BorderRadius.circular(DurbunRadius.lg),
+      border: Border.all(color: c.border),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Container(
+          padding: const EdgeInsetsDirectional.fromSTEB(16, 2, 4, 2),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.hairline))),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(label ?? '',
+                    style: DurbunType.monoStyle(size: DurbunType.monoSm, color: c.textMuted, weight: FontWeight.w500, height: 1.2)),
+              ),
+              DIconButton(icon: Icons.copy_rounded, tooltip: tooltip, onTap: onCopy),
+            ],
+          ),
+        ),
+        Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 14), child: code),
+      ],
+    ),
+  );
 }
 
 /// [CodeBlock] without text selection: for the page that opens while the
 /// SDK is off, so a build without Dürbün does not carry the text-selection
 /// machinery only for it. The copy button still copies the whole text.
 class PlainCodeBlock extends StatelessWidget {
-  const PlainCodeBlock({super.key, required this.text});
+  const PlainCodeBlock({super.key, required this.text, this.dart = false});
 
   final String text;
+
+  /// Dart source: its keywords in the accent ink.
+  final bool dart;
+
+  static final RegExp _keyword = RegExp(r'\b(void|const|final|var|await|async|return|import|class|new)\b');
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: c.isDark ? c.bgSunken : c.bgPanel,
-        borderRadius: BorderRadius.circular(DurbunRadius.lg),
-        border: Border.all(color: c.border),
-      ),
-      child: Stack(
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, kMinTapTarget + 4, 12),
-            child: Text(text, style: DurbunType.monoStyle(size: DurbunType.monoBody, color: c.text, height: 1.5)),
-          ),
-          Positioned(
-            top: 2,
-            right: 2,
-            child: DIconButton(icon: Icons.copy_rounded, tooltip: t.copy, onTap: () => copyText(context, text)),
-          ),
-        ],
-      ),
+    final base = DurbunType.monoStyle(size: DurbunType.monoRow, color: c.text, height: 1.6);
+    final spans = <InlineSpan>[];
+    if (dart) {
+      var at = 0;
+      for (final m in _keyword.allMatches(text)) {
+        if (m.start > at) spans.add(TextSpan(text: text.substring(at, m.start)));
+        spans.add(TextSpan(text: m[0], style: TextStyle(color: c.accentInk)));
+        at = m.end;
+      }
+      if (at < text.length) spans.add(TextSpan(text: text.substring(at)));
+    } else {
+      spans.add(TextSpan(text: text));
+    }
+    return _codeCard(
+      context,
+      label: dart ? 'Dart' : null,
+      onCopy: () => copyText(context, text),
+      tooltip: t.copy,
+      code: Text.rich(TextSpan(style: base, children: spans)),
     );
   }
+}
+
+/// Prose with code in it: calls, dotted names and flags (`main()`,
+/// `Durbun.run`, `--dart-define=DURBUN=true`) set in the mono face; dotted
+/// names in the accent ink.
+TextSpan inlineCode(String text, {required TextStyle base, required DurbunColors colors}) {
+  final code = RegExp(r'--[\w-]+(=[\w=]+)?|\b[A-Za-z_]\w*(\.[A-Za-z_]\w*)+\b(\([^)]*\))?|\b[A-Za-z_]\w*\([^)]*\)');
+  final spans = <InlineSpan>[];
+  var at = 0;
+  for (final m in code.allMatches(text)) {
+    if (m.start > at) spans.add(TextSpan(text: text.substring(at, m.start)));
+    final s = m[0]!;
+    spans.add(TextSpan(
+      text: s,
+      style: DurbunType.monoStyle(
+          size: (base.fontSize ?? DurbunType.body) - 1,
+          color: s.contains('.') ? colors.accentInk : colors.text,
+          height: base.height ?? 1.45),
+    ));
+    at = m.end;
+  }
+  if (at < text.length) spans.add(TextSpan(text: text.substring(at)));
+  return TextSpan(style: base, children: spans);
 }
 
 /// A row of a grouped list: an icon (no tile), a title with an optional
@@ -1065,11 +1249,11 @@ class GroupCard extends StatelessWidget {
       children: <Widget>[
         if (title != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(DurbunSpace.lg + 4, DurbunSpace.xl, DurbunSpace.lg, DurbunSpace.sm),
+            padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter + 4, DurbunSpace.xl, DurbunSpace.lg, DurbunSpace.sm),
             child: Text(title!, style: TextStyle(fontSize: DurbunType.body, fontWeight: FontWeight.w600, color: c.textMuted)),
           ),
         Container(
-          margin: const EdgeInsets.symmetric(horizontal: DurbunSpace.md),
+          margin: const EdgeInsets.symmetric(horizontal: DurbunSpace.gutter),
           decoration: BoxDecoration(
             color: c.cardBg,
             borderRadius: BorderRadius.circular(DurbunRadius.lg),
@@ -1270,7 +1454,10 @@ class Callout extends StatelessWidget {
     };
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(DurbunRadius.md)),
+      decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(DurbunRadius.md),
+          border: Border.all(color: fg.withValues(alpha: 0.25))),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -1305,6 +1492,77 @@ class Callout extends StatelessWidget {
   }
 }
 
+/// A toolbar part that steps aside (folds up) while its list is scrolled
+/// down and comes back at the list's top.
+class CollapseAway extends StatelessWidget {
+  const CollapseAway({super.key, required this.away, required this.child});
+
+  final bool away;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ClipRect(
+        child: AnimatedAlign(
+          duration: DurbunMotion.of(context, DurbunMotion.medium),
+          curve: DurbunMotion.enter,
+          alignment: Alignment.topCenter,
+          heightFactor: away ? 0 : 1,
+          child: child,
+        ),
+      );
+}
+
+/// A one-line note floating above the bottom of a list (older lines
+/// dropped). It floats so that a row being read never moves when it shows
+/// up; the list gets room under its last row for it.
+class ListFootNote extends StatelessWidget {
+  const ListFootNote({super.key, required this.note, required this.child});
+
+  final String? note;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = note;
+    final c = DurbunColors.of(context);
+    final mq = MediaQuery.of(context);
+    final bottom = mq.padding.bottom;
+    // One tree with or without the note: the list keeps its state (and its
+    // scroll position) when the note shows up.
+    return Stack(
+      children: <Widget>[
+        Positioned.fill(
+          child: MediaQuery(
+            data: mq.copyWith(padding: mq.padding.copyWith(bottom: bottom + (text == null ? 0 : 36))),
+            child: child,
+          ),
+        ),
+        if (text != null)
+          PositionedDirectional(
+            start: DurbunSpace.gutter,
+            end: DurbunSpace.gutter,
+            bottom: bottom + 4,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: c.bgElevated,
+                  borderRadius: BorderRadius.circular(DurbunRadius.pill),
+                  border: Border.all(color: c.border),
+                ),
+                child: Text(text,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: DurbunType.ui(size: DurbunType.sm, color: c.textMuted, height: 1.3)),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 /// An empty list or page: the Dürbün mark, one sentence, an optional
 /// second line and at most one action.
 class EmptyState extends StatelessWidget {
@@ -1334,7 +1592,8 @@ class EmptyState extends StatelessWidget {
           constraints: BoxConstraints(minHeight: box.maxHeight.isFinite ? box.maxHeight : 0),
           child: Center(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(32, 24, 32, 48),
+              // Clears what floats over the bottom (the navigation bar).
+              padding: EdgeInsets.fromLTRB(32, 24, 32, 48 + MediaQuery.paddingOf(context).bottom),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 320),
                 child: Column(
@@ -1344,12 +1603,12 @@ class EmptyState extends StatelessWidget {
                     const SizedBox(height: 14),
                     Text(title,
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: DurbunType.label, fontWeight: FontWeight.w600, color: c.text, height: 1.35)),
+                        style: DurbunType.heading(size: DurbunType.label, color: c.text)),
                     if (body != null) ...<Widget>[
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       Text(body!,
                           textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: DurbunType.body, height: 1.45, color: c.textMuted)),
+                          style: TextStyle(fontSize: DurbunType.bodyMd, height: 1.45, color: c.textMuted)),
                     ],
                     if (actionLabel != null && onAction != null) ...<Widget>[
                       const SizedBox(height: 16),
@@ -1424,15 +1683,13 @@ class SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     return Padding(
-      padding: const EdgeInsets.only(top: DurbunSpace.xl, bottom: DurbunSpace.sm),
+      padding: const EdgeInsets.fromLTRB(4, DurbunSpace.lg + 4, 4, DurbunSpace.sm),
       child: Row(
         children: <Widget>[
           Expanded(
-              child: Text(text,
-                  style: TextStyle(
-                      fontSize: DurbunType.body,
-                      fontWeight: FontWeight.w600,
-                      color: c.textMuted))),
+              child: Semantics(
+                  header: true,
+                  child: Text(text, style: DurbunType.ui(size: DurbunType.body, weight: FontWeight.w600, color: c.textMuted)))),
           if (trailing != null) trailing!,
         ],
       ),
@@ -1521,7 +1778,7 @@ class DTab {
 }
 
 /// Segmented tabs driven by a [TabController]: the raised segment follows a
-/// swipe of the [TabBarView] under it (the panel, the detail pages).
+/// swipe of the [TabBarView] under it (the detail pages).
 class DTabBar extends StatelessWidget {
   const DTabBar({super.key, required this.controller, required this.tabs, this.height = kMinTapTarget});
 
@@ -1538,7 +1795,7 @@ class DTabBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.trackBg,
         borderRadius: BorderRadius.circular(DurbunRadius.md),
-        border: c.isDark ? Border.all(color: c.border) : null,
+        border: Border.all(color: c.border),
       ),
       child: TabBar(
         controller: controller,
@@ -1693,7 +1950,7 @@ class SwipeTabs extends StatefulWidget {
     required this.pages,
     this.initialIndex = 0,
     this.onChanged,
-    this.barPadding = const EdgeInsets.fromLTRB(12, 2, 12, 8),
+    this.barPadding = const EdgeInsets.fromLTRB(16, 4, 16, 8),
   }) : assert(tabs.length == pages.length);
 
   final List<DTab> tabs;

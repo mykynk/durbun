@@ -99,7 +99,7 @@ class _AppToolsViewState extends State<AppToolsView> {
             return AlertDialog(
               backgroundColor: c.bgElevated,
               surfaceTintColor: Colors.transparent,
-              title: Text(t.runConfirm(label), style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
+              title: Text(t.runConfirm(label), style: DurbunType.heading(color: c.text)),
               actions: <Widget>[
                 TextButton(onPressed: () => Navigator.of(dialog).pop(false), child: Text(t.cancel)),
                 TextButton(onPressed: () => Navigator.of(dialog).pop(true), child: Text(t.run)),
@@ -134,7 +134,7 @@ class _AppToolsViewState extends State<AppToolsView> {
             children: <Widget>[
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                child: Text(_label(t, a), style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
+                child: Text(_label(t, a), style: DurbunType.heading(color: c.text)),
               ),
               for (final o in options)
                 ListTile(
@@ -183,7 +183,7 @@ class _AppToolsViewState extends State<AppToolsView> {
             return rank(x).compareTo(rank(y));
           });
         return ListView(
-          padding: EdgeInsets.fromLTRB(12, 0, 12, 20 + MediaQuery.paddingOf(context).bottom),
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.paddingOf(context).bottom),
           children: <Widget>[
             for (final g in keys) ...<Widget>[
               SectionTitle(t.actionGroup(g)),

@@ -77,6 +77,28 @@ class InspectorStrings {
   String get clearFilters => _('Filtreleri temizle', 'Clear filters');
   String get off => _('Kapalı', 'Off');
 
+  /* the panel's header and navigation */
+  String get switchToLight => _('Açık temaya geç', 'Switch to light theme');
+  String get switchToDark => _('Koyu temaya geç', 'Switch to dark theme');
+  String get liveStream => _('Canlı akış', 'Live');
+  String get pausedStream => _('Duraklatıldı', 'Paused');
+  String get openPerformance => _('Performansı aç', 'Open performance');
+  String errorCountShort(int n) => _('$n hata', n == 1 ? '1 error' : '$n errors');
+  String get navigation => _('Panel sayfaları', 'Panel pages');
+
+  /* the Network summary */
+  String get tileTotal => _('Toplam', 'Total');
+  String get tileErrors => _('Hatalar', 'Errors');
+  String get tileAvgDuration => _('Ort. süre', 'Avg. time');
+  String listedOf(int shown, int total) => _('$shown / $total istek', '$shown / $total requests');
+  String get showErrorsOnly => _('Yalnızca hataları göster', 'Show errors only');
+  String get showAllRequests => _('Tüm istekleri göster', 'Show all requests');
+
+  /* filter sheets */
+  String hostCount(int n) => _('$n host', n == 1 ? '1 host' : '$n hosts');
+  String logLineCount(int n) => _('$n log', n == 1 ? '1 line' : '$n lines');
+  String tagCount(int n) => _('$n etiket', n == 1 ? '1 tag' : '$n tags');
+
   /* logs */
   String get logSearchHint => _('Loglarda ara', 'Search logs');
   String get logFilters => _('Log filtreleri', 'Log filters');
@@ -115,7 +137,7 @@ class InspectorStrings {
   String get onlyErrorsHint => _('Hata, ölümcül ve çökme kayıtları', 'Error, fatal and crash lines');
   String get crashesHint => _('Yakalanmamış hatalar ve Flutter hata kutuları', 'Uncaught errors and Flutter error boxes');
   String get eventsHint => _('Durbun.event ile gönderilenler', 'Sent with Durbun.event');
-  String get errorsOnly => _('Sadece hatalar', 'Errors only');
+  String get errorsOnly => _('Yalnızca hatalar', 'Errors only');
   String get crashes => _('Çökmeler', 'Crashes');
   String get events => _('Olaylar', 'Events');
   String get native => 'Native';
@@ -577,6 +599,18 @@ class InspectorStrings {
   String avg(String? v) => _('ort. ${v ?? '—'}', 'avg ${v ?? '—'}');
   String peak(String v) => _('en yüksek $v MB', 'peak $v MB');
   String inWindow(int n) => _('pencerede $n', '$n in window');
+  String get frameRate => _('Kare hızı', 'Frame rate');
+  String get fpsTimeline => _('FPS zaman çizelgesi', 'FPS over time');
+  String fpsTarget(int hz) => _('hedef $hz FPS', 'target $hz FPS');
+  String frameTimesBudget(double ms) {
+    final v = ms.toStringAsFixed(1);
+    return _('Kare süreleri · ${v.replaceAll('.', ',')} ms bütçe', 'Frame times · $v ms budget');
+  }
+
+  String jankLine(int last, int inWindow) =>
+      _('Takılan kare: son saniye $last, pencerede $inWindow', 'Janky frames: $last last second, $inWindow in window');
+  String threadCount(int n) => _('$n thread', '$n threads');
+  String peakShort(String v) => _('maks $v', 'max $v');
   String perfWindow(int n, {double refreshRate = 60}) {
     final hz = refreshRate.round();
     final budget = 1000 / refreshRate;

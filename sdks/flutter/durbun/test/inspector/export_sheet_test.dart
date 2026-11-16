@@ -113,6 +113,9 @@ Future<void> _openSheet(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// The sheet's own title (the Tools page under it has a row of that name).
+Finder _sheetTitle() => find.descendant(of: find.byType(BottomSheet), matching: find.text('Export session'));
+
 Future<void> _export(WidgetTester tester) async {
   await tester.ensureVisible(find.text('Export…'));
   await tester.tap(find.text('Export…'));
@@ -144,7 +147,7 @@ void main() {
     expect(entries, hasLength(1), reason: 'only what the search lists');
     expect(out.files.single, isNot(contains('hunter2')));
     expect(out.files.single, isNot(contains('abc123')));
-    expect(find.text('Export session'), findsNothing, reason: 'the sheet closed');
+    expect(_sheetTitle(), findsNothing, reason: 'the sheet closed');
     expect(out.clipboard, isEmpty);
 
     // Opened again: HAR is still picked; All exports everything.
@@ -180,7 +183,7 @@ void main() {
     await _export(tester);
     expect(out.clipboard, isEmpty);
     expect(find.textContaining('too large to copy'), findsOneWidget);
-    expect(find.text('Export session'), findsOneWidget, reason: 'the sheet stays open');
+    expect(_sheetTitle(), findsOneWidget, reason: 'the sheet stays open');
 
     await tester.ensureVisible(find.byType(Switch).last);
     await tester.tap(find.byType(Switch).last);
@@ -197,7 +200,7 @@ void main() {
     await _openSheet(tester);
     expect(find.text('No requests to export'), findsOneWidget);
     await _export(tester);
-    expect(find.text('Export session'), findsOneWidget);
+    expect(_sheetTitle(), findsOneWidget);
   });
 
   testWidgets('an error while making it never escapes', (tester) async {

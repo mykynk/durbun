@@ -570,10 +570,12 @@ required, so a tester can inspect the app on their own phone.
 
 ### What the panel shows
 
-The panel carries the Mac app's design (colors, level
-and status colors, tag colors, light and dark theme). It has two tabs, **Network** and **Logs**, and a **Tools**
-button (top right) that opens Mac connection, App tools, Mocks (only while the Mac app is connected), Performance,
-Statistics, Device & SDK, Export session, Previous run and Clear:
+The panel has its own look in light and dark: it follows the phone, and the
+switch at the top keeps your choice. Four tabs sit at the bottom: **Network**,
+**Logs**, **Performance** and **Tools** (on a short screen, such as a phone in
+landscape, they move into the header). Tools opens Mac connection, App tools,
+Mocks (only while the Mac app is connected), Statistics, Device & SDK, Export
+session, Previous run and Clear:
 
 - **Logs:** a live stream (newest at the bottom; it stops following when you
   scroll up and resumes with "↓ N new"), V D I W E level toggles, the quick
@@ -586,10 +588,12 @@ Statistics, Device & SDK, Export session, Previous run and Clear:
   and **Share**: the line as a report (level, app, device, message, data,
   stack; secret values in the data are masked like a request's) to copy, send through the system share sheet or
   [send to Slack](#send-to-slack).
-- **Network:** dart:io, `package:http`, Dio, OkHttp and URLSession in one table
-  with status, method, path (query dimmed), start time (`HH:mm:ss`), host,
-  source, size, duration (slow requests in yellow or red), GraphQL operation,
-  mock and error labels (such as "could not resolve DNS"). It offers method and
+- **Network:** dart:io, `package:http`, Dio, OkHttp and URLSession in one list
+  of cards with status, method, path (query dimmed), start time (`HH:mm:ss`),
+  host, source, size, duration (slow requests in yellow or red, with a bar
+  against the slowest listed request), GraphQL operation, mock and error labels
+  (such as "could not resolve DNS"). On a tall screen, tiles above the list show
+  the total, the errors and the average time. It offers method and
   status toggles, the quick filters *Errors only · Slow ≥ 1 s · Mocked*, a host
   picker, queries such as `status:4xx method:post host:api is:slow`, and search
   inside bodies. The detail view has General / Request / Response / Timing
@@ -608,10 +612,10 @@ Statistics, Device & SDK, Export session, Previous run and Clear:
 - **Mocks** (under Tools): the rules that come from the Mac app and how many
   times each was applied. Rules last only as long as the connection, so the
   row appears only while the Mac app is connected.
-- **Performance** (under Tools): tiles for FPS, janky frames, build/raster time,
-  memory (resident memory of the app process, with its peak), and CPU and
-  threads where the platform reports them, plus charts for FPS, frame time and
-  memory. The dashed lines follow the screen's refresh rate (120 FPS and 8.3 ms
+- **Performance:** the frame rate on top, with a ring against the screen's
+  refresh rate and the janky frames; tiles for build/raster time, memory
+  (resident memory of the app process, with its peak), and CPU and threads
+  where the platform reports them; charts for FPS, frame time and memory. The dashed lines follow the screen's refresh rate (120 FPS and 8.3 ms
   on a 120 Hz phone), the same budget janky frames are counted against. The
   Dart heap is not shown on the phone: reading it needs the Dart VM Service,
   which release builds do not have.
@@ -654,8 +658,8 @@ The panel shows the same messages the Mac app receives. When the Mac app is
 connected, both work side by side. The app's own native logs (Android logcat,
 iOS 15+ `os_log` / `Logger` / `NSLog`) appear in the panel even without a Mac
 connection, and the host app needs no setup. The Mac app reads these from the
-device itself over USB, so lines are not delivered twice. The status bar at the
-bottom shows the connection and the log, error and request counts.
+device itself over USB, so lines are not delivered twice. The header shows the
+connection, and the Network and Logs tabs count the errors.
 
 ### Limits and settings
 

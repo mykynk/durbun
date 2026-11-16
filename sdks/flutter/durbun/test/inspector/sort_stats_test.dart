@@ -51,7 +51,9 @@ DurbunInspectorStore _mixed() {
 List<String> _paths(List<InspectorCall> calls) => [for (final c in calls) c.uri!.path];
 
 Future<void> _open(WidgetTester tester, DurbunInspectorStore store, {String tab = 'Network'}) async {
-  tester.view.physicalSize = const Size(390, 844) * 3;
+  // Tall enough for the seven rows of [_mixed] under the summary tiles and
+  // above the floating bar.
+  tester.view.physicalSize = const Size(390, 960) * 3;
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
@@ -170,7 +172,7 @@ void main() {
       final newest = all.reversed.toList();
       expect(_onScreen(tester, all), newest, reason: 'the default: newest on top');
       expect(find.byType(ActiveChip), findsNothing, reason: 'the default order is not shown as a chip');
-      expect(find.text('api.example.com'), findsWidgets, reason: 'each row names its host');
+      expect(find.textContaining('api.example.com', findRichText: true), findsWidgets, reason: 'each row names its host');
 
       await tester.tap(find.byTooltip('Sort').first);
       await tester.pumpAndSettle();
@@ -263,7 +265,7 @@ void main() {
       await _open(tester, s);
       await tester.tap(find.byTooltip('Tools').first);
       await tester.pumpAndSettle();
-      expect(find.text('7 requests'), findsOneWidget, reason: 'the row says how many');
+      expect(find.textContaining('7 requests'), findsOneWidget, reason: 'the tile says how many');
       await tester.tap(find.text('Statistics'));
       await tester.pumpAndSettle();
       expect(find.text('Statistics'), findsOneWidget);

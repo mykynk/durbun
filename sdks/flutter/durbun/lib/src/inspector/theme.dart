@@ -1,11 +1,17 @@
-/// Design tokens of the in-app inspector: the same values as the desktop UI
-/// (`packages/ui/src/styles/tokens.css`), so the panel on the phone looks
-/// like Dürbün on the Mac. Keep both in sync.
+/// Design tokens of the in-app inspector: the panel's own SDK design system.
+/// Close to the desktop UI (`packages/ui/src/styles/tokens.css`) in spirit:
+/// the same dark-first slate surfaces, violet accent and status colours,
+/// but tuned for a phone (deeper surfaces, tonal depth and a 1 pt outline
+/// instead of shadows, a larger type scale), so it is no longer a
+/// value-for-value copy of the desktop.
 library;
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable, visibleForTesting;
 import 'package:flutter/material.dart';
+
+import 'panel_prefs.dart';
 
 @immutable
 class DurbunColors {
@@ -84,8 +90,8 @@ class DurbunColors {
 
   /// [accent]: lines and marks. [accentSoft]: the tonal fill (selection
   /// tint, tonal buttons). [accentInk]: accent text and icons on the
-  /// panel's surfaces. [accentFill]: filled surfaces with a white label
-  /// (primary button, selected segment and chip), dark enough for 4.5:1.
+  /// panel's surfaces. [accentFill]: filled surfaces (primary button,
+  /// selected segment and chip, the active tab) with an [onAccent] label.
   final Color accent, accentSoft, accentInk, accentFill;
   final Color lvVerbose, lvDebug, lvInfo, lvWarn, lvError, lvFatal;
   final Color lvWarnBg, lvErrorBg, lvFatalBg;
@@ -101,103 +107,110 @@ class DurbunColors {
 
   bool get isDark => brightness == Brightness.dark;
 
-  /* Phone-only surfaces, derived from the desktop tokens above. */
+  /* Surfaces of the panel, derived from the tokens above. */
 
-  /// Search fields and other inputs on a panel.
-  Color get fieldBg => isDark ? bgElevated : bgSunken;
+  /// Search fields and other inputs.
+  Color get fieldBg => bgPanel;
 
-  /// Track of a segmented control (the panel's tabs, detail tabs).
-  Color get trackBg => bgSunken;
+  /// Track of a segmented control.
+  Color get trackBg => bgPanel;
 
-  /// Grouped cards on the page background.
-  Color get cardBg => isDark ? bgElevated : bgPanel;
+  /// Cards on the page background (a request, a log line, a group of rows).
+  Color get cardBg => bgPanel;
 
-  /// Hairline between rows of a list.
-  Color get hairline => border.withValues(alpha: isDark ? 0.7 : 0.9);
+  /// Chips and small boxed buttons: one step above a card.
+  Color get chipBg => bgElevated;
 
-  /// Label on [accentFill].
-  Color get onAccent => const Color(0xFFFFFFFF);
+  /// Hairline between rows of a list and under a header.
+  Color get hairline => isDark ? const Color(0xFF1E2330) : const Color(0xFFE2E8F0);
 
-  /// Label on a [danger] fill (a count of errors): white is too faint on
-  /// the dark theme's light red.
+  /// Label on [accentFill]: dark on the bright violet of the dark theme,
+  /// white on the deeper violet of the light one.
+  Color get onAccent => isDark ? bgApp : const Color(0xFFFFFFFF);
+
+  /// Label on a [danger] fill (a count of errors, a failed request).
   Color get onDanger => isDark ? bgApp : const Color(0xFFFFFFFF);
 
-  /// Soft shadow under floating things on light (menus, the bubble); on
-  /// dark a hairline and the surface step lift them instead.
+  /// Soft shadow under floating things on light (menus, the bubble, the
+  /// navigation bar); on dark the outline and the surface step lift them.
   List<BoxShadow> get raised => isDark
       ? const <BoxShadow>[]
       : <BoxShadow>[
-          BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 4, offset: const Offset(0, 1)),
+          BoxShadow(color: const Color(0xFF0F172A).withValues(alpha: 0.06), blurRadius: 4, offset: const Offset(0, 1)),
         ];
 
-  /// The bubble and toasts over the app.
+  /// The bubble, toasts and the navigation bar over the content.
   List<BoxShadow> get floating => isDark
       ? const <BoxShadow>[]
       : <BoxShadow>[
-          BoxShadow(color: Colors.black.withValues(alpha: 0.16), blurRadius: 16, offset: const Offset(0, 4)),
-          BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 3, offset: const Offset(0, 1)),
+          BoxShadow(color: const Color(0xFF0F172A).withValues(alpha: 0.10), blurRadius: 16, offset: const Offset(0, 4)),
+          BoxShadow(color: const Color(0xFF0F172A).withValues(alpha: 0.06), blurRadius: 3, offset: const Offset(0, 1)),
         ];
 
+  /// Dark, the panel's first theme: deep slate surfaces in three steps
+  /// (page, card, raised), a 1 pt outline, a bright violet with dark
+  /// labels on it, and status colours that read on their own tints.
   static const DurbunColors dark = DurbunColors(
     brightness: Brightness.dark,
-    bgApp: Color(0xFF0B0D12),
-    bgPanel: Color(0xFF11141B),
-    bgElevated: Color(0xFF171B24),
-    bgSunken: Color(0xFF0D1016),
-    bgHover: Color(0xFF1B2030),
-    bgActive: Color(0xFF222839),
-    bgSelected: Color(0x297C6CF2),
-    border: Color(0xFF232937),
-    borderStrong: Color(0xFF2F3647),
-    text: Color(0xFFE6E9F0),
-    textMuted: Color(0xFF9AA3B5),
-    textSubtle: Color(0xFF7F889B),
-    accent: Color(0xFF7C6CF2),
-    accentSoft: Color(0x2E7C6CF2),
-    // The desktop's --accent-hover: accent text and icons on dark.
-    accentInk: Color(0xFF9587F7),
-    // White on the desktop's #7C6CF2 is about 4:1; this is 4.7:1.
-    accentFill: Color(0xFF6D5DEB),
-    lvVerbose: Color(0xFF7D8799),
-    lvDebug: Color(0xFF4EA1FF),
-    lvInfo: Color(0xFF3DD68C),
-    lvWarn: Color(0xFFF5B544),
-    lvError: Color(0xFFFF6369),
-    lvFatal: Color(0xFFFF4FD8),
-    lvWarnBg: Color(0x12F5B544),
-    lvErrorBg: Color(0x17FF6369),
-    lvFatalBg: Color(0x21FF4FD8),
-    mGet: Color(0xFF4EA1FF),
-    mPost: Color(0xFF3DD68C),
-    mPut: Color(0xFFF5B544),
-    mPatch: Color(0xFFB18CFF),
-    mDelete: Color(0xFFFF6369),
-    mOther: Color(0xFF9AA3B5),
-    st2xx: Color(0xFF3DD68C),
-    st3xx: Color(0xFF5CC8FF),
-    st4xx: Color(0xFFF5B544),
-    st5xx: Color(0xFFFF6369),
-    stPending: Color(0xFF9AA3B5),
-    jsonKey: Color(0xFF9CC2FF),
-    jsonString: Color(0xFFA5E3B4),
-    jsonNumber: Color(0xFFF5C27A),
-    jsonBool: Color(0xFFD7A4FF),
-    jsonNull: Color(0xFF8B94A7),
-    success: Color(0xFF3DD68C),
-    warning: Color(0xFFF5B544),
-    danger: Color(0xFFFF6369),
-    info: Color(0xFF4EA1FF),
-    successSoft: Color(0x1F3DD68C),
-    warningSoft: Color(0x1FF5B544),
-    dangerSoft: Color(0x1FFF6369),
-    infoSoft: Color(0x1F4EA1FF),
-    hlMark: Color(0x4DF5B544),
-    inputBg: Color(0xFF0D1016),
+    bgApp: Color(0xFF0B0D14),
+    bgPanel: Color(0xFF12151F),
+    bgElevated: Color(0xFF1A1E2B),
+    bgSunken: Color(0xFF0B0D14),
+    bgHover: Color(0xFF1F2433),
+    bgActive: Color(0xFF262C3C),
+    bgSelected: Color(0x297C6BFF),
+    border: Color(0xFF272D3D),
+    borderStrong: Color(0xFF343B4F),
+    text: Color(0xFFF1F5F9),
+    textMuted: Color(0xFF94A3B8),
+    textSubtle: Color(0xFF8391A7),
+    accent: Color(0xFF7C6BFF),
+    accentSoft: Color(0x2E7C6BFF),
+    // Violet text and icons on the dark surfaces (the fill is too dark for
+    // small text on a card).
+    accentInk: Color(0xFFA193FF),
+    accentFill: Color(0xFF7C6BFF),
+    lvVerbose: Color(0xFF8B97AB),
+    lvDebug: Color(0xFF38BDF8),
+    lvInfo: Color(0xFF22C55E),
+    lvWarn: Color(0xFFF59E0B),
+    lvError: Color(0xFFF64C68),
+    lvFatal: Color(0xFFFB7185),
+    lvWarnBg: Color(0x14F59E0B),
+    lvErrorBg: Color(0x1AF64C68),
+    lvFatalBg: Color(0x26F64C68),
+    mGet: Color(0xFF38BDF8),
+    mPost: Color(0xFF22C55E),
+    mPut: Color(0xFFF59E0B),
+    mPatch: Color(0xFFA78BFA),
+    mDelete: Color(0xFFF64C68),
+    mOther: Color(0xFF94A3B8),
+    st2xx: Color(0xFF22C55E),
+    st3xx: Color(0xFF38BDF8),
+    st4xx: Color(0xFFF59E0B),
+    // A touch lighter than a pure rose so the red reads on its own tint.
+    st5xx: Color(0xFFF64C68),
+    stPending: Color(0xFF94A3B8),
+    jsonKey: Color(0xFF38BDF8),
+    jsonString: Color(0xFF22C55E),
+    jsonNumber: Color(0xFFF59E0B),
+    jsonBool: Color(0xFFA78BFA),
+    jsonNull: Color(0xFF8391A7),
+    success: Color(0xFF22C55E),
+    warning: Color(0xFFF59E0B),
+    danger: Color(0xFFF64C68),
+    info: Color(0xFF38BDF8),
+    successSoft: Color(0x2422C55E),
+    warningSoft: Color(0x24F59E0B),
+    dangerSoft: Color(0x24F64C68),
+    infoSoft: Color(0x2438BDF8),
+    hlMark: Color(0x4DF59E0B),
+    inputBg: Color(0xFF12151F),
     pickOrange: Color(0xFFFF9F43),
     pickYellow: Color(0xFFF5D544),
-    pickGreen: Color(0xFF3DD68C),
-    pickBlue: Color(0xFF4EA1FF),
-    pickViolet: Color(0xFFB18CFF),
+    pickGreen: Color(0xFF22C55E),
+    pickBlue: Color(0xFF38BDF8),
+    pickViolet: Color(0xFFA78BFA),
     sdkFlutter: Color(0xFF54C5F8),
     sdkAndroid: Color(0xFF3DDC84),
     sdkIos: Color(0xFFC9CFDB),
@@ -207,84 +220,82 @@ class DurbunColors {
     tagBgA: 0.14,
   );
 
-  /// Light: the desktop's values, except the level, method, status and
-  /// semantic colours, a few percent darker so small coloured text keeps
-  /// 4.5:1 on its own tint (a status pill, a warning row) and on the page.
+  /// Light: the same surfaces in slate on white, a deeper violet with a
+  /// white label, and status, method and level inks dark enough for 4.5:1
+  /// on the page and on their own tints (a status badge, an error card).
   static const DurbunColors light = DurbunColors(
     brightness: Brightness.light,
-    bgApp: Color(0xFFF5F6F9),
+    bgApp: Color(0xFFF8FAFC),
     bgPanel: Color(0xFFFFFFFF),
-    bgElevated: Color(0xFFFFFFFF),
-    bgSunken: Color(0xFFEEF0F4),
-    bgHover: Color(0xFFF0F2F7),
-    bgActive: Color(0xFFE6E9F1),
+    bgElevated: Color(0xFFF1F5F9),
+    bgSunken: Color(0xFFF1F5F9),
+    bgHover: Color(0xFFEEF2F6),
+    bgActive: Color(0xFFE2E8F0),
     bgSelected: Color(0x1A5B4BE0),
-    border: Color(0xFFE3E6EE),
-    borderStrong: Color(0xFFCDD2DE),
-    text: Color(0xFF161A23),
-    textMuted: Color(0xFF5B6476),
-    textSubtle: Color(0xFF636C7F),
+    border: Color(0xFFCBD5E1),
+    borderStrong: Color(0xFFB6C0CE),
+    text: Color(0xFF0F172A),
+    textMuted: Color(0xFF475569),
+    textSubtle: Color(0xFF5B6779),
     accent: Color(0xFF5B4BE0),
     accentSoft: Color(0x1A5B4BE0),
-    // The desktop's --accent-hover: accent text on light and tinted surfaces.
     accentInk: Color(0xFF4B3BD0),
     accentFill: Color(0xFF5B4BE0),
-    lvVerbose: Color(0xFF60687A),
-    lvDebug: Color(0xFF1360D8),
-    lvInfo: Color(0xFF187445),
-    lvWarn: Color(0xFF8A5A12),
-    lvError: Color(0xFFC4262D),
-    lvFatal: Color(0xFFB91788),
-    lvWarnBg: Color(0x14B7791F),
-    lvErrorBg: Color(0x12D93A41),
-    lvFatalBg: Color(0x17C2188F),
-    mGet: Color(0xFF1360D8),
-    mPost: Color(0xFF187445),
-    mPut: Color(0xFF8A5A12),
-    mPatch: Color(0xFF7748D8),
-    mDelete: Color(0xFFC4262D),
-    mOther: Color(0xFF5B6476),
-    st2xx: Color(0xFF187445),
-    st3xx: Color(0xFF0C6CA3),
-    st4xx: Color(0xFF8A5A12),
-    st5xx: Color(0xFFC4262D),
-    stPending: Color(0xFF5B6476),
-    jsonKey: Color(0xFF1F4FB8),
-    jsonString: Color(0xFF187445),
-    jsonNumber: Color(0xFFA15C00),
-    jsonBool: Color(0xFF7748D8),
-    jsonNull: Color(0xFF60687A),
-    success: Color(0xFF187445),
-    warning: Color(0xFF8A5A12),
-    danger: Color(0xFFC4262D),
-    info: Color(0xFF1360D8),
-    successSoft: Color(0x1A1A7F4B),
-    warningSoft: Color(0x1CB7791F),
-    dangerSoft: Color(0x17D93A41),
-    infoSoft: Color(0x171F6FEB),
+    lvVerbose: Color(0xFF5B6779),
+    lvDebug: Color(0xFF0369A1),
+    lvInfo: Color(0xFF13703A),
+    lvWarn: Color(0xFF9A4A06),
+    lvError: Color(0xFFBE123C),
+    lvFatal: Color(0xFF9F1239),
+    lvWarnBg: Color(0x14B45309),
+    lvErrorBg: Color(0x12E11D48),
+    lvFatalBg: Color(0x1AE11D48),
+    mGet: Color(0xFF0369A1),
+    mPost: Color(0xFF13703A),
+    mPut: Color(0xFF9A4A06),
+    mPatch: Color(0xFF6D28D9),
+    mDelete: Color(0xFFBE123C),
+    mOther: Color(0xFF475569),
+    st2xx: Color(0xFF13703A),
+    st3xx: Color(0xFF0369A1),
+    st4xx: Color(0xFF9A4A06),
+    st5xx: Color(0xFFBE123C),
+    stPending: Color(0xFF475569),
+    jsonKey: Color(0xFF0369A1),
+    jsonString: Color(0xFF13703A),
+    jsonNumber: Color(0xFF9A4A06),
+    jsonBool: Color(0xFF6D28D9),
+    jsonNull: Color(0xFF5B6779),
+    success: Color(0xFF13703A),
+    warning: Color(0xFF9A4A06),
+    danger: Color(0xFFBE123C),
+    info: Color(0xFF0369A1),
+    successSoft: Color(0x1A16A34A),
+    warningSoft: Color(0x1CD97706),
+    dangerSoft: Color(0x17E11D48),
+    infoSoft: Color(0x170284C7),
     hlMark: Color(0x61FFC400),
     inputBg: Color(0xFFFFFFFF),
     pickOrange: Color(0xFFA3510F),
     pickYellow: Color(0xFF7D6800),
-    pickGreen: Color(0xFF187445),
-    pickBlue: Color(0xFF1360D8),
-    pickViolet: Color(0xFF7748D8),
+    pickGreen: Color(0xFF13703A),
+    pickBlue: Color(0xFF0369A1),
+    pickViolet: Color(0xFF6D28D9),
     sdkFlutter: Color(0xFF0A6AA6),
-    sdkAndroid: Color(0xFF187445),
+    sdkAndroid: Color(0xFF13703A),
     sdkIos: Color(0xFF3B4252),
-    sdkDart: Color(0xFF0C6CA3),
+    sdkDart: Color(0xFF0A5F90),
     tagL: 0.48,
     tagC: 0.13,
     tagBgA: 0.1,
   );
 
-  /// The desktop default is dark; the panel follows the phone's setting.
+  /// The panel's theme: the one chosen with its theme switch, else the
+  /// phone's setting (dark when unknown).
   static DurbunColors of(BuildContext context) =>
-      DurbunTheme.maybeOf(context)?.colors ??
-      ((MediaQuery.maybePlatformBrightnessOf(context) ?? Brightness.dark) ==
-              Brightness.light
-          ? light
-          : dark);
+      DurbunTheme.maybeOf(context)?.colors ?? forBrightness(panelBrightness(context));
+
+  static DurbunColors forBrightness(Brightness b) => b == Brightness.light ? light : dark;
 
   Color level(String level) => switch (level) {
     'verbose' => lvVerbose,
@@ -370,30 +381,37 @@ Color oklch(double l, double c, double hueDeg) {
   return Color.from(alpha: 1, red: enc(r), green: enc(g), blue: enc(bl));
 }
 
-/// Typography: the desktop uses Inter for UI and JetBrains Mono for data.
-/// The panel keeps the phone's system font (SF / Roboto, close to Inter) and
-/// its monospace (Menlo / the system mono), so it adds no font to the app.
+/// Typography. The panel adds no font to the app: it uses the phone's
+/// system face (SF / Roboto) for the UI and the system monospace for data.
 ///
-/// Five UI sizes: [caption] meta and hints, [body] text and row meta,
-/// [label] row titles and buttons, [title] page and sheet titles, [figure]
-/// stat figures. Weights 400 and 500; 600 only for titles and status codes.
-/// Mono is for data only (paths, hosts, statuses, sizes, durations, times,
-/// headers, bodies, log text): [monoRow] in rows, [monoBody] in bodies.
+/// The scale: [caption] (11) small labels, badges, the nav bar; [sm] (12)
+/// hints and meta lines; [body] (13) labels of chips, buttons and rows;
+/// [bodyMd] (14) running text (a log message); [label] (15) row and tile
+/// titles; [title] (18) page and sheet titles; [headline] (22) and
+/// [figure] (28) large numbers, bold with tight tracking ([heading],
+/// [figureStyle]). Weights 400 to 600, 700 only for figures. Mono is for
+/// data only (paths, hosts, statuses, sizes, durations, times, headers,
+/// bodies): [monoSm] meta, [monoMd] paths and bodies. Numbers are always
+/// tabular.
 abstract final class DurbunType {
   static const String mono = 'monospace';
   static const List<String> monoFallback = <String>['Menlo', 'Roboto Mono', 'Courier New', 'Courier'];
 
   static const double caption = 11;
+  static const double sm = 12;
   static const double body = 13;
+  static const double bodyMd = 14;
   static const double label = 15;
-  static const double title = 17;
-  static const double figure = 24;
+  static const double title = 18;
+  static const double headline = 22;
+  static const double figure = 28;
+  static const double monoSm = 11;
+  static const double monoMd = 13;
   static const double monoRow = 12;
-  static const double monoBody = 12.5;
+  static const double monoBody = 13;
 
   // Older names of the scale.
   static const double xs = caption;
-  static const double sm = 12;
   static const double md = body;
   static const double lg = label;
   static const double xl = title;
@@ -402,8 +420,30 @@ abstract final class DurbunType {
   static const List<FontFeature> tabular = <FontFeature>[FontFeature.tabularFigures()];
 
   /// The UI face with tabular figures.
-  static TextStyle ui({double size = body, Color? color, FontWeight weight = FontWeight.w400, double height = 1.35}) =>
-      TextStyle(fontSize: size, color: color, fontWeight: weight, height: height, fontFeatures: tabular);
+  static TextStyle ui(
+          {double size = body, Color? color, FontWeight weight = FontWeight.w400, double height = 1.35, double? letterSpacing}) =>
+      TextStyle(fontSize: size, color: color, fontWeight: weight, height: height, letterSpacing: letterSpacing, fontFeatures: tabular);
+
+  /// Page, sheet and card titles: semibold, tracked a little tighter the
+  /// larger they are.
+  static TextStyle heading({double size = title, Color? color, FontWeight weight = FontWeight.w600}) => TextStyle(
+        fontSize: size,
+        color: color,
+        fontWeight: weight,
+        height: size >= headline ? 1.27 : (size >= title ? 1.33 : 1.33),
+        letterSpacing: size >= headline ? -0.25 : (size >= title ? -0.15 : 0),
+        fontFeatures: tabular,
+      );
+
+  /// A large number (a stat tile, the FPS): bold, tight, tabular.
+  static TextStyle figureStyle({double size = figure, Color? color}) => TextStyle(
+        fontSize: size,
+        color: color,
+        fontWeight: FontWeight.w700,
+        height: 1.2,
+        letterSpacing: size >= figure ? -0.4 : -0.2,
+        fontFeatures: tabular,
+      );
 
   static TextStyle monoStyle({double size = logFs, Color? color, FontWeight? weight, double height = 1.45}) =>
       TextStyle(
@@ -417,15 +457,13 @@ abstract final class DurbunType {
       );
 }
 
-/// Radii. Rounder than the desktop's (4 / 6 / 10): on a phone the panel
-/// sits among the system's own rounded controls. Tags and tokens [sm],
-/// controls (buttons, fields, chips, segments) [md], cards [lg], sheets and
-/// dialogs [xl]; a part inside another takes the outer radius minus the gap
-/// between them.
+/// Radii: [sm] badges and tokens, [md] inputs, buttons and small tiles,
+/// [lg] cards, [xl] sheets, dialogs and the navigation bar, [pill] chips.
+/// A part inside another takes the outer radius minus the gap between them.
 abstract final class DurbunRadius {
   static const double sm = 6;
   static const double md = 10;
-  static const double lg = 14;
+  static const double lg = 12;
   static const double xl = 20;
   static const double pill = 999;
 }
@@ -441,21 +479,76 @@ abstract final class DurbunSpace {
   /// Left and right margin of a page.
   static const double gutter = 16;
 
+  /// Space between two cards of a list (tight: lists are long).
+  static const double cardGap = 6;
+
   /// Lists, sheets and pages stop growing past this width (landscape,
   /// tablets) and sit centred.
   static const double maxContent = 720;
 }
 
-/// Motion: short, only for state changes (press, select, sheet, expand).
+/// Motion: mechanical and short. [fast] a state change (press, select,
+/// toggle), [medium] a surface (sheet, expand, the theme), [slow] a page.
+/// Nothing loops.
 abstract final class DurbunMotion {
-  static const Duration fast = Duration(milliseconds: 150);
+  static const Duration fast = Duration(milliseconds: 100);
   static const Duration medium = Duration(milliseconds: 200);
   static const Duration slow = Duration(milliseconds: 250);
-  static const Curve curve = Curves.easeOutCubic;
+  static const Curve curve = Curves.easeOut;
+  static const Curve enter = Cubic(0.2, 0, 0, 1);
 
   /// [d], or nothing when the system asks for fewer animations.
   static Duration of(BuildContext context, Duration d) =>
       (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ? Duration.zero : d;
+}
+
+/// The theme picked with the panel's theme switch; null follows the phone.
+/// Kept for the app's run and, where the panel can keep small values, for
+/// later launches too.
+final ValueNotifier<Brightness?> _themeChoice = ValueNotifier<Brightness?>(null);
+const String _kThemePref = 'panel-theme';
+bool _themeLoaded = false;
+
+/// The theme picked with the switch (null: the phone's).
+ValueListenable<Brightness?> get panelThemeChoice => _themeChoice;
+
+/// The brightness the panel is drawn in under [context].
+Brightness panelBrightness(BuildContext context) =>
+    _themeChoice.value ?? MediaQuery.maybePlatformBrightnessOf(context) ?? Brightness.dark;
+
+/// Flips the panel between light and dark. Landing on the phone's own
+/// brightness follows the phone again.
+void togglePanelTheme(BuildContext context) {
+  final system = MediaQuery.maybePlatformBrightnessOf(context) ?? Brightness.dark;
+  final next = panelBrightness(context) == Brightness.dark ? Brightness.light : Brightness.dark;
+  _themeChoice.value = next == system ? null : next;
+  _themeLoaded = true;
+  // Fire and forget; a failed write only loses the choice on the next launch.
+  writePanelPref(_kThemePref, _themeChoice.value?.name).ignore();
+}
+
+/// Reads the kept choice once per run, before the panel's first frame.
+/// Returns at once when nothing can be kept (tests, the web).
+Future<void> loadPanelTheme() async {
+  if (_themeLoaded) return;
+  _themeLoaded = true;
+  if (!panelPrefsAvailable) return;
+  try {
+    final kept = await readPanelPref(_kThemePref).timeout(const Duration(milliseconds: 300), onTimeout: () => null);
+    if (_themeChoice.value != null) return;
+    _themeChoice.value = switch (kept) { 'light' => Brightness.light, 'dark' => Brightness.dark, _ => null };
+  } catch (_) {
+    // A theme is a nicety: the app never sees its errors.
+  }
+}
+
+/// Whether [loadPanelTheme] has nothing left to do.
+bool get panelThemeLoaded => _themeLoaded || !panelPrefsAvailable;
+
+@visibleForTesting
+void debugResetPanelTheme() {
+  _themeChoice.value = null;
+  _themeLoaded = false;
 }
 
 /// Caps [child] at [DurbunSpace.maxContent] and centres it (landscape,
@@ -481,11 +574,16 @@ class DurbunTheme extends InheritedWidget {
   static DurbunTheme? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<DurbunTheme>();
 
-  static Widget wrap(BuildContext context, Widget child) {
-    final c = (MediaQuery.maybePlatformBrightnessOf(context) ?? Brightness.dark) ==
-            Brightness.light
-        ? DurbunColors.light
-        : DurbunColors.dark;
+  /// The panel's tokens and Material theme over [child]; follows the
+  /// theme switch.
+  static Widget wrap(BuildContext context, Widget child) => ValueListenableBuilder<Brightness?>(
+        valueListenable: _themeChoice,
+        child: child,
+        builder: (context, _, child) => _build(context, child!),
+      );
+
+  static Widget _build(BuildContext context, Widget child) {
+    final c = DurbunColors.forBrightness(panelBrightness(context));
     final scheme = ColorScheme(
       brightness: c.brightness,
       primary: c.accentFill,
@@ -526,13 +624,15 @@ class DurbunTheme extends InheritedWidget {
             selectionHandleColor: c.accent,
           ),
           appBarTheme: AppBarTheme(
-            backgroundColor: c.bgPanel,
+            backgroundColor: c.bgApp,
             surfaceTintColor: Colors.transparent,
             foregroundColor: c.text,
             elevation: 0,
             scrolledUnderElevation: 0,
-            toolbarHeight: 52,
-            titleTextStyle: TextStyle(color: c.text, fontSize: DurbunType.title, fontWeight: FontWeight.w600, height: 1.2),
+            // A hairline under every sub-page's bar, as under the panel's header.
+            shape: Border(bottom: BorderSide(color: c.hairline)),
+            toolbarHeight: 56,
+            titleTextStyle: DurbunType.heading(color: c.text).copyWith(height: 1.2),
             iconTheme: IconThemeData(color: c.text, size: 20),
             actionsIconTheme: IconThemeData(color: c.textMuted, size: 20),
           ),
@@ -550,23 +650,24 @@ class DurbunTheme extends InheritedWidget {
           bottomSheetTheme: BottomSheetThemeData(
             backgroundColor: c.bgPanel,
             surfaceTintColor: Colors.transparent,
-            dragHandleColor: c.borderStrong,
-            dragHandleSize: const Size(36, 4),
+            dragHandleColor: c.border,
+            dragHandleSize: const Size(40, 4),
+            modalBarrierColor: (c.isDark ? Colors.black : const Color(0xFF0F172A)).withValues(alpha: c.isDark ? 0.6 : 0.35),
             constraints: const BoxConstraints(maxWidth: DurbunSpace.maxContent),
             shape: const RoundedRectangleBorder(
                 borderRadius: BorderRadius.vertical(top: Radius.circular(DurbunRadius.xl))),
           ),
           dialogTheme: DialogThemeData(
-            backgroundColor: c.bgElevated,
+            backgroundColor: c.bgPanel,
             surfaceTintColor: Colors.transparent,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(DurbunRadius.xl),
                 side: c.isDark ? BorderSide(color: c.border) : BorderSide.none),
-            titleTextStyle: TextStyle(color: c.text, fontSize: DurbunType.title, fontWeight: FontWeight.w600, height: 1.3),
-            contentTextStyle: TextStyle(color: c.textMuted, fontSize: DurbunType.body, height: 1.45),
+            titleTextStyle: DurbunType.heading(color: c.text),
+            contentTextStyle: TextStyle(color: c.textMuted, fontSize: DurbunType.bodyMd, height: 1.45),
           ),
           popupMenuTheme: PopupMenuThemeData(
-            color: c.bgElevated,
+            color: c.isDark ? c.bgElevated : c.bgPanel,
             surfaceTintColor: Colors.transparent,
             elevation: c.isDark ? 0 : 8,
             shadowColor: Colors.black.withValues(alpha: 0.35),
@@ -584,9 +685,10 @@ class DurbunTheme extends InheritedWidget {
             thumbColor: WidgetStateProperty.resolveWith(
                 (s) => s.contains(WidgetState.selected) ? c.onAccent : c.textMuted),
             trackColor: WidgetStateProperty.resolveWith(
-                (s) => s.contains(WidgetState.selected) ? c.accentFill : c.bgActive),
+                (s) => s.contains(WidgetState.selected) ? c.accentFill : c.bgElevated),
             trackOutlineColor: WidgetStateProperty.resolveWith(
-                (s) => s.contains(WidgetState.selected) ? c.accentFill : c.borderStrong),
+                (s) => s.contains(WidgetState.selected) ? c.accentFill : c.border),
+            trackOutlineWidth: const WidgetStatePropertyAll<double>(1),
           ),
           checkboxTheme: CheckboxThemeData(
             fillColor: WidgetStateProperty.resolveWith(
@@ -599,12 +701,12 @@ class DurbunTheme extends InheritedWidget {
             style: TextButton.styleFrom(
               foregroundColor: c.accentInk,
               minimumSize: const Size(44, 44),
-              textStyle: const TextStyle(fontSize: DurbunType.label, fontWeight: FontWeight.w500),
+              textStyle: const TextStyle(fontSize: DurbunType.body, fontWeight: FontWeight.w600, letterSpacing: 0.1),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.md)),
             ),
           ),
           progressIndicatorTheme: ProgressIndicatorThemeData(color: c.accent, linearTrackColor: c.bgActive),
-          dividerTheme: DividerThemeData(color: c.border, thickness: 1, space: 1),
+          dividerTheme: DividerThemeData(color: c.hairline, thickness: 1, space: 1),
         ),
         child: DefaultTextStyle.merge(
           style: TextStyle(color: c.text, fontSize: DurbunType.body, height: 1.45),
@@ -632,7 +734,7 @@ class DurbunLogo extends StatelessWidget {
 class _LogoPainter extends CustomPainter {
   const _LogoPainter();
 
-  static const Color _purple = Color(0xFF7C6CF2);
+  static const Color _purple = Color(0xFF7C6BFF);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -640,7 +742,7 @@ class _LogoPainter extends CustomPainter {
     canvas.scale(size.width / 32, size.height / 32);
     final purple = Paint()..color = _purple;
     final white = Paint()..color = Colors.white;
-    canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(0, 0, 32, 32), const Radius.circular(7.5)), purple);
+    canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(0, 0, 32, 32), const Radius.circular(9)), purple);
     canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(8.6, 6.2, 4.4, 4.6), const Radius.circular(1.2)), white);
     canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(19, 6.2, 4.4, 4.6), const Radius.circular(1.2)), white);
     canvas.drawRRect(

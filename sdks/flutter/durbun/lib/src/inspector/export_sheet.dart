@@ -272,11 +272,11 @@ class _ExportSheetState extends State<_ExportSheet> {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
                       child: Text(t.exportSession,
-                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
+                          style: DurbunType.heading(color: c.text)),
                     ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(t.exportDescription, style: TextStyle(fontSize: 13, height: 1.35, color: c.textSubtle)),
+                      child: Text(t.exportDescription, style: DurbunType.ui(size: DurbunType.body, height: 1.4, color: c.textMuted)),
                     ),
                     label(t.exportScope),
                     Padding(
@@ -325,7 +325,7 @@ class _ExportSheetState extends State<_ExportSheet> {
           ),
           Container(
             decoration: BoxDecoration(color: c.bgPanel, border: Border(top: BorderSide(color: c.hairline))),
-            padding: EdgeInsets.fromLTRB(12, 10, 12, 12 + bottom),
+            padding: EdgeInsets.fromLTRB(16, 10, 16, 12 + bottom),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,

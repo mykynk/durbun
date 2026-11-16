@@ -66,8 +66,11 @@ void main() {
         await tester.tap(row);
         await tester.pumpAndSettle();
       }
+      // Performance is a tab of the bottom bar.
+      await tester.tap(find.byTooltip('Performance').first);
+      await tester.pumpAndSettle();
       // Mocks is listed only while the desktop is connected.
-      for (final tool in ['Performance', 'Statistics', 'Device & SDK']) {
+      for (final tool in ['Statistics', 'Device & SDK']) {
         await tester.tap(find.byTooltip('Tools').first);
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text(tool));

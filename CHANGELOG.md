@@ -160,6 +160,14 @@ All notable changes to Dürbün are listed here. The format follows
 - Primary and danger buttons pass AA contrast in both themes; a test checks them.
 - Android SDK: FPS counts the frames the app actually drew (Android 7+), so an idle screen no longer reads
   as the display's refresh rate; janky frames use the frame's own deadline on Android 12+.
+- Flutter in-app panel: a new look of its own in light and dark, with a switch in the header that keeps your
+  choice. Network, Logs, Performance and Tools are tabs at the bottom; on a short screen they move into the
+  header.
+- Flutter in-app panel: requests and log lines are cards. A request shows a bar of its duration against the
+  slowest listed request; tiles above the list show the total, the errors (tap to filter) and the average time.
+- Flutter in-app panel: Performance is a tab and leads with the frame rate against the screen's refresh rate
+  and the janky frames. Tools is a page: the app on a card, tiles for Statistics, Mac connection, App tools and
+  Device & SDK, and Clear on a card of its own.
 
 ### Added
 

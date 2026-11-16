@@ -137,7 +137,7 @@ class _ConnectionViewState extends State<ConnectionView> {
         final via = report?.via ?? '';
         final overUsb = connected && (via.startsWith('usbmux') || via.startsWith('tcp 127.0.0.1') || via.startsWith('tcp 10.0.2.2'));
         return ListView(
-          padding: EdgeInsets.fromLTRB(12, 12, 12, 20 + MediaQuery.paddingOf(context).bottom),
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + MediaQuery.paddingOf(context).bottom),
           children: <Widget>[
             _Card(children: <Widget>[
               Row(

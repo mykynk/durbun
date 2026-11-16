@@ -20,11 +20,13 @@ import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/protocol.dart' show buildErrorInfo, buildLog;
 import 'package:durbun/src/flutter/durbun.dart' show durbunBackend;
 import 'package:durbun/src/inspector/filter_ui.dart' show FilterButton;
+import 'package:durbun/src/inspector/home.dart' show PanelNavBar;
 import 'package:durbun/src/inspector/inspector.dart' show ShakeHint;
 import 'package:durbun/src/inspector/logs_view.dart' show LogRow;
 import 'package:durbun/src/inspector/network_view.dart' show CallRow;
 import 'package:durbun/src/inspector/run_log.dart';
 import 'package:durbun/src/inspector/store.dart';
+import 'package:durbun/src/inspector/theme.dart' show debugResetPanelTheme;
 import 'package:durbun/src/inspector/strings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -276,15 +278,25 @@ Future<void> tapText(WidgetTester tester, String text, {bool last = false}) asyn
   await settle(tester);
 }
 
-Future<void> openTools(WidgetTester tester) async {
-  await tester.tap(find.byTooltip(tr.tools).first);
+/// A page of the bottom bar, by its label.
+Future<void> openTab(WidgetTester tester, String label) async {
+  await tester.tap(find.byTooltip(label).first);
   await settle(tester);
 }
+
+Future<void> openTools(WidgetTester tester) => openTab(tester, tr.tools);
+
+/// The vertical list on show: the top page's, not one of the tabs kept
+/// built offstage.
+Finder shownList() => find
+    .byWidgetPredicate((w) => w is Scrollable && axisDirectionToAxis(w.axisDirection) == Axis.vertical)
+    .hitTestable()
+    .last;
 
 Future<void> tapTool(WidgetTester tester, String label) async {
   await openTools(tester);
   final f = find.text(label);
-  await tester.scrollUntilVisible(f, 120, scrollable: find.byType(Scrollable).last);
+  await tester.scrollUntilVisible(f, 120, scrollable: shownList());
   await settle(tester);
   await tester.tap(f.first);
   await settle(tester);
@@ -305,22 +317,37 @@ Future<void> tapLabel(WidgetTester tester, String text) async {
 
 Future<void> openRow(WidgetTester tester, String text) async {
   final f = row(text);
-  final rows = find.byType(CallRow).evaluate().isNotEmpty ? find.byType(CallRow) : find.byType(LogRow);
+  // The list of the page on show (the other tabs stay built offstage).
+  final rows = find.byWidgetPredicate((w) => w is CallRow || w is LogRow).hitTestable();
   final list = find
       .ancestor(
           of: rows.first,
           matching: find.byWidgetPredicate((w) => w is Scrollable && axisDirectionToAxis(w.axisDirection) == Axis.vertical))
       .first;
-  if (f.hitTestable().evaluate().isEmpty) {
+  // A row under the floating bar is drawn but not tappable: hit-testable at
+  // the point the tap lands on means above the bar.
+  bool clear() {
+    final hits = f.hitTestable().evaluate();
+    if (hits.isEmpty) return false;
+    final box = hits.first.renderObject! as RenderBox;
+    final centre = box.localToGlobal(box.size.center(Offset.zero));
+    final barTop = find.byType(PanelNavBar).evaluate().isEmpty
+        ? double.infinity
+        : tester.getTopLeft(find.byType(PanelNavBar)).dy;
+    return centre.dy < barTop - 4;
+  }
+
+  if (!clear()) {
     // Start from the top so the search only has to scroll one way.
     tester.state<ScrollableState>(list).position.jumpTo(0);
     await tester.pump();
-    if (f.hitTestable().evaluate().isEmpty) {
-      await tester.scrollUntilVisible(f.first, 200, scrollable: list, maxScrolls: 30);
+    for (var i = 0; i < 40 && !clear(); i++) {
+      await tester.drag(list, const Offset(0, -160));
+      await tester.pump();
     }
   }
   await settle(tester);
-  await tester.tap(f.first);
+  await tester.tap(f.hitTestable().first);
   await settle(tester);
 }
 
@@ -406,6 +433,18 @@ void main() {
       await tapText(tester, tr.done);
       await shot(tester, '05-network-filtered');
     });
+    await step(tester, 'sort', () async {
+      await openPanel(tester);
+      await tester.tap(find.byTooltip(tr.sortTitle).first);
+      await settle(tester);
+      await shot(tester, '08-network-sort');
+      await back(tester);
+    });
+    await step(tester, 'scrolled', () async {
+      await tester.drag(find.byType(CallRow).first, const Offset(0, -300));
+      await settle(tester);
+      await shot(tester, '09-network-scrolled');
+    });
   });
 
   gallery('network empty', (tester) async {
@@ -427,10 +466,34 @@ void main() {
       await tapLabel(tester, tr.headers);
       await shot(tester, '11-detail-request-headers');
     });
+    await step(tester, 'jwt', () async {
+      await tester.tap(find.text('Authorization').first);
+      await settle(tester);
+      await tapText(tester, tr.decodeJwt, last: true);
+      await shot(tester, '19-detail-jwt');
+      await back(tester);
+    });
+    await step(tester, 'copied toast', () async {
+      await tester.tap(find.byTooltip(tr.copyUrl).first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await shot(tester, '29-toast-copied');
+      await settle(tester);
+    });
     await step(tester, 'response json', () async {
       await tapLabel(tester, tr.response);
       await tapLabel(tester, tr.body);
       await shot(tester, '12-detail-response-json');
+    });
+    await step(tester, 'body search', () async {
+      await tester.tap(find.byTooltip(tr.find).first);
+      await settle(tester);
+      await tester.enterText(find.byType(TextField).last, 'Boncuk');
+      await tester.pump(const Duration(milliseconds: 400));
+      await settle(tester);
+      await shot(tester, '28-detail-body-search');
+      await tester.tap(find.byTooltip(tr.find).first);
+      await settle(tester);
     });
     await step(tester, 'code view', () async {
       await tester.tap(find.byTooltip(tr.view).first);
@@ -608,23 +671,21 @@ void main() {
     await openTools(tester);
     await shot(tester, '40-tools-sheet');
     await step(tester, 'tools scrolled', () async {
-      await tester.drag(find.byType(Scrollable).last, const Offset(0, -400));
+      await tester.drag(shownList(), const Offset(0, -400));
       await settle(tester);
       await shot(tester, '41-tools-sheet-scrolled');
-      await back(tester);
     });
     await step(tester, 'performance', () async {
-      await tapTool(tester, tr.performance);
+      await openTab(tester, tr.performance);
       await shot(tester, '42-performance');
-      await tester.drag(find.byType(Scrollable).last, const Offset(0, -600));
+      await tester.drag(shownList(), const Offset(0, -600));
       await settle(tester);
       await shot(tester, '43-performance-scrolled');
-      await back(tester);
     });
     await step(tester, 'statistics', () async {
       await tapTool(tester, tr.statistics);
       await shot(tester, '44-statistics');
-      await tester.drag(find.byType(Scrollable).last, const Offset(0, -600));
+      await tester.drag(shownList(), const Offset(0, -600));
       await settle(tester);
       await shot(tester, '45-statistics-scrolled');
       await back(tester);
@@ -632,7 +693,7 @@ void main() {
     await step(tester, 'device', () async {
       await tapTool(tester, tr.deviceAndSdk);
       await shot(tester, '46-device-sdk');
-      await tester.scrollUntilVisible(find.text(tr.notCapturedTitle), 300, scrollable: find.byType(Scrollable).last);
+      await tester.scrollUntilVisible(find.text(tr.notCapturedTitle), 300, scrollable: shownList());
       await settle(tester);
       await shot(tester, '47-device-sdk-not-captured');
       await back(tester);
@@ -657,7 +718,7 @@ void main() {
 
   gallery('performance empty', (tester) async {
     await openPanel(tester, store: patiStore(withMetrics: false));
-    await tapTool(tester, tr.performance);
+    await openTab(tester, tr.performance);
     await shot(tester, '55-performance-empty');
   });
 
@@ -667,10 +728,9 @@ void main() {
     await openPanel(tester, store: none, keep: true);
     await step(tester, 'none', () async {
       await openTools(tester);
-      await tester.scrollUntilVisible(find.text(tr.previousRun), 120, scrollable: find.byType(Scrollable).last);
+      await tester.scrollUntilVisible(find.text(tr.previousRun), 120, scrollable: shownList());
       await settle(tester);
       await shot(tester, '51-tools-previous-none');
-      await back(tester);
     });
 
     final empty = patiStore();
@@ -711,7 +771,6 @@ void main() {
       await step(tester, 'tools not connected', () async {
         await openTools(tester);
         await shot(tester, '60-tools-not-connected');
-        await back(tester);
       });
       await step(tester, 'not connected', () async {
         await tapTool(tester, tr.macConnection);
@@ -756,7 +815,6 @@ void main() {
       await step(tester, 'tools connected', () async {
         await openTools(tester);
         await shot(tester, '65-tools-connected');
-        await back(tester);
       });
       await step(tester, 'connection connected', () async {
         await tapTool(tester, tr.macConnection);
@@ -843,6 +901,36 @@ void main() {
       await shot(tester, '87-text130-tools');
     });
   }, textScale: 1.3);
+
+  gallery('large text 200', (tester) async {
+    await openPanel(tester);
+    await shot(tester, '88-text200-network');
+    await step(tester, 'large filters', () async {
+      await tester.tap(find.byType(FilterButton).hitTestable().first);
+      await settle(tester);
+      await shot(tester, '89-text200-filters');
+      await tapText(tester, tr.done);
+    });
+    await step(tester, 'large logs 200', () async {
+      await openTab(tester, tr.logs);
+      await shot(tester, '90-text200-logs');
+    });
+  }, textScale: 2);
+
+  gallery('landscape logs', (tester) async {
+    await openPanel(tester);
+    await openTab(tester, tr.logs);
+    await shot(tester, '91-landscape-logs');
+  }, size: kLandscape);
+
+  gallery('theme switch', (tester) async {
+    await openPanel(tester);
+    await tester.tap(find.byTooltip(_theme(tester) == 'dark' ? tr.switchToLight : tr.switchToDark).first);
+    await settle(tester);
+    // Named for the theme it started in: the other one is on screen.
+    await shot(tester, '92-theme-switched');
+    debugResetPanelTheme();
+  });
 
   /* Contact sheets: four screens side by side at pixel ratio 1. */
 

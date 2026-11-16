@@ -32,7 +32,9 @@ class LiveList<T> extends StatefulWidget {
       this.paused = false,
       this.filterKey,
       this.epoch,
-      this.fromTop = false});
+      this.fromTop = false,
+      this.onScrolledAway,
+      this.topPadding = 10});
 
   /// Oldest first.
   final List<T> items;
@@ -57,6 +59,13 @@ class LiveList<T> extends StatefulWidget {
   /// the top and a frozen list keeps its order (see the library comment).
   final bool fromTop;
 
+  /// Told when the list is scrolled away from its top (true, past a few
+  /// rows) and back to it (false): what sits above the list can step aside.
+  final ValueChanged<bool>? onScrolledAway;
+
+  /// Space above the first row.
+  final double topPadding;
+
   @override
   State<LiveList<T>> createState() => _LiveListState<T>();
 }
@@ -76,6 +85,9 @@ class _LiveListState<T> extends State<LiveList<T>> {
 
   /// [LiveList.fromTop]: the order shown when the list froze.
   List<T>? _frozenOrder;
+
+  /// Last value told to [LiveList.onScrolledAway].
+  bool _away = false;
 
   bool get _following => _cutoff == null && !widget.paused;
 
@@ -162,6 +174,14 @@ class _LiveListState<T> extends State<LiveList<T>> {
 
   void _onScroll() {
     if (!_scroll.hasClients) return;
+    final fromTop = _scroll.offset - _scroll.position.minScrollExtent;
+    // Two thresholds, so a list just taller than the screen does not flip
+    // back and forth when what is above it steps aside.
+    final away = _away ? fromTop > 8 : fromTop > 72;
+    if (away != _away) {
+      _away = away;
+      widget.onScrolledAway?.call(away);
+    }
     if (_cutoff == null &&
         !_atEnd() &&
         _scroll.position.userScrollDirection != ScrollDirection.idle) {
@@ -226,8 +246,7 @@ class _LiveListState<T> extends State<LiveList<T>> {
       children: <Widget>[
         ListView.builder(
           controller: _scroll,
-          padding:
-              EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom + 8),
+          padding: EdgeInsets.only(top: widget.topPadding, bottom: MediaQuery.paddingOf(context).bottom + 8),
           itemCount: shown.length,
           itemBuilder: (context, i) => KeyedSubtree(
               key: ValueKey<Object>(widget.keyOf(shown[i])),

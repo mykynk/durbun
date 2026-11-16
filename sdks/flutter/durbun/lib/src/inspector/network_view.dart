@@ -5,6 +5,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -19,6 +20,8 @@ import 'live_list.dart';
 import 'network_model.dart';
 import 'replay.dart';
 import 'share_sheet.dart';
+import 'stats_view.dart';
+import 'tools.dart' show ToolPage;
 import 'store.dart';
 import 'strings.dart';
 import 'text_match.dart';
@@ -26,9 +29,12 @@ import 'theme.dart';
 import 'widgets.dart';
 
 class NetworkView extends StatefulWidget {
-  const NetworkView({super.key, required this.store});
+  const NetworkView({super.key, required this.store, this.paused = false});
 
   final DurbunInspectorStore store;
+
+  /// The list holds still (the header's pause button).
+  final bool paused;
 
   @override
   State<NetworkView> createState() => _NetworkViewState();
@@ -85,8 +91,11 @@ class _NetworkViewState extends State<NetworkView> {
   NetFilters get _filters => _memory.filters;
   late final TextEditingController _search = TextEditingController(text: _memory.query);
   late List<QueryClause> _clauses = parseQuery(_memory.query);
-  bool _paused = false;
   Timer? _debounce;
+
+  /// The list is scrolled down: the summary tiles step aside.
+  bool _scrolledAway = false;
+  bool _searchFocused = false;
 
   /// Match results per call: a store update (a log line, a metric each
   /// second) re-matches only the calls that changed, not every body. Kept
@@ -164,8 +173,8 @@ class _NetworkViewState extends State<NetworkView> {
               padding: EdgeInsets.only(bottom: 12 + MediaQuery.paddingOf(sheet).bottom),
               children: <Widget>[
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text(t.sortTitle, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
+                  padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 0, DurbunSpace.gutter, 8),
+                  child: Text(t.sortTitle, style: DurbunType.heading(color: c.text)),
                 ),
                 for (final s in NetSort.values)
                   _SortRow(
@@ -207,6 +216,7 @@ class _NetworkViewState extends State<NetworkView> {
     showFilterSheet(
       context,
       title: t.netFilters,
+      subtitle: '${t.requestCount(widget.store.calls.length)} · ${t.hostCount(hosts.length)}',
       onChanged: () => setState(() => _clauses = parseQuery(_search.text)),
       onReset: _filters.reset,
       build: (context, changed) {
@@ -246,22 +256,41 @@ class _NetworkViewState extends State<NetworkView> {
           ),
           if (hosts.isNotEmpty) _HostsSection(filters: _filters, store: widget.store, changed: changed),
           const SizedBox(height: 8),
-          SheetSwitch(label: t.errorsOnly, hint: t.failedHint, icon: Icons.warning_amber_rounded, value: _filters.errorsOnly, onChanged: (v) {
-            _filters.errorsOnly = v;
-            changed();
-          }),
-          SheetSwitch(label: t.slowOnly, icon: Icons.schedule_rounded, value: _filters.slowOnly, onChanged: (v) {
-            _filters.slowOnly = v;
-            changed();
-          }),
-          SheetSwitch(label: t.mockedOnly, icon: Icons.theater_comedy_outlined, value: _filters.mockedOnly, onChanged: (v) {
-            _filters.mockedOnly = v;
-            changed();
-          }),
-          SheetSwitch(label: t.searchBodies, hint: t.searchBodiesHint, icon: Icons.data_object_rounded, value: _filters.searchBodies, onChanged: (v) {
-            _filters.searchBodies = v;
-            changed();
-          }),
+          SheetSwitch(
+              label: t.errorsOnly,
+              hint: t.failedHint,
+              icon: Icons.warning_amber_rounded,
+              iconColor: c.warning,
+              value: _filters.errorsOnly,
+              onChanged: (v) {
+                _filters.errorsOnly = v;
+                changed();
+              }),
+          SheetSwitch(
+              label: t.slowOnly,
+              icon: Icons.schedule_rounded,
+              value: _filters.slowOnly,
+              onChanged: (v) {
+                _filters.slowOnly = v;
+                changed();
+              }),
+          SheetSwitch(
+              label: t.mockedOnly,
+              icon: Icons.theater_comedy_outlined,
+              value: _filters.mockedOnly,
+              onChanged: (v) {
+                _filters.mockedOnly = v;
+                changed();
+              }),
+          SheetSwitch(
+              label: t.searchBodies,
+              hint: t.searchBodiesHint,
+              icon: Icons.data_object_rounded,
+              value: _filters.searchBodies,
+              onChanged: (v) {
+                _filters.searchBodies = v;
+                changed();
+              }),
         ];
       },
     );
@@ -287,7 +316,9 @@ class _NetworkViewState extends State<NetworkView> {
           })),
     ];
     final quick = <Widget>[
-      if (!f.errorsOnly) DToggle(label: t.errorsOnly, icon: Icons.warning_amber_rounded, selected: false, onTap: () => setState(() => f.errorsOnly = true)),
+      if (!f.errorsOnly)
+        DToggle(
+            label: t.errorsOnly, icon: Icons.warning_amber_rounded, iconColor: c.warning, selected: false, onTap: () => setState(() => f.errorsOnly = true)),
       if (!f.slowOnly) DToggle(label: t.slowOnly, icon: Icons.schedule_rounded, selected: false, onTap: () => setState(() => f.slowOnly = true)),
       for (final st in const <String>['4xx', '5xx'])
         if (!f.statuses.contains(st)) DToggle(label: st, mono: true, color: _statusColor(c, st), selected: false, onTap: () => setState(() => f.statuses.add(st))),
@@ -337,6 +368,14 @@ class _NetworkViewState extends State<NetworkView> {
     );
   }
 
+  void _openStats() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final t = InspectorStrings.of(context);
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (routeContext) => DurbunTheme.wrap(routeContext, ToolPage(title: t.statistics, child: StatsView(store: widget.store))),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = InspectorStrings.of(context);
@@ -352,77 +391,299 @@ class _NetworkViewState extends State<NetworkView> {
         final terms = freeTerms(_clauses);
         // Only the filters the user set (the default host list is not one).
         final filtered = _filters.activeCount > 0 || _clauses.isNotEmpty;
+        // The duration bars are relative to the slowest listed request,
+        // never to less than a second.
+        var slowest = 1000.0;
+        for (final x in shown) {
+          final ms = x.duration?.inMilliseconds;
+          if (ms != null && ms > slowest) slowest = ms.toDouble();
+        }
+        // Not on a short screen (a phone on its side): the list needs it.
+        final tiles = all.isNotEmpty && MediaQuery.sizeOf(context).height >= 640;
+        // A short window: search and chips step aside too while the list is
+        // scrolled down from its top (not while the search is being typed
+        // in; not in arrival order, whose live end is at the bottom).
+        final foldAll = MediaQuery.sizeOf(context).height < 500 && _scrolledAway && !_searchFocused && sort != NetSort.arrival;
         return Column(
           children: <Widget>[
             Container(
-              color: c.bgPanel,
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: Row(
+              decoration: BoxDecoration(color: c.bgApp, border: Border(bottom: BorderSide(color: c.hairline))),
+              child: Column(
                 children: <Widget>[
-                  Expanded(
-                    child: DSearchField(
-                      hint: t.netSearchHint,
-                      controller: _search,
-                      onChanged: _setQuery,
-                      onHelp: () => showQueryHelp(context,
-                          hints: <QueryHint>[for (final (k, v) in t.netQueryHints) QueryHint(k, v)], controller: _search, onChanged: _setQuery),
+                  if (tiles)
+                    // Step aside while the list is scrolled down, back at its top.
+                    CollapseAway(
+                      away: _scrolledAway,
+                      child: _SummaryTiles(
+                        calls: shown,
+                        total: all.length,
+                        filtered: filtered,
+                        errorsOnly: _filters.errorsOnly,
+                        onErrors: () => setState(() => _filters.errorsOnly = !_filters.errorsOnly),
+                        onStats: _openStats,
+                      ),
+                    ),
+                  CollapseAway(
+                    away: foldAll,
+                    child: Column(
+                      children: <Widget>[
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 2, DurbunSpace.gutter, 0),
+                          child: SizedBox(
+                            height: kMinTapTarget,
+                            child: Row(
+                              children: <Widget>[
+                                Expanded(
+                                  child: Focus(
+                                    canRequestFocus: false,
+                                    skipTraversal: true,
+                                    onFocusChange: (f) => setState(() => _searchFocused = f),
+                                    child: DSearchField(
+                                      hint: t.netSearchHint,
+                                      controller: _search,
+                                      onChanged: _setQuery,
+                                      onHelp: () => showQueryHelp(context,
+                                          hints: <QueryHint>[for (final (k, v) in t.netQueryHints) QueryHint(k, v)],
+                                          controller: _search,
+                                          onChanged: _setQuery),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                _SortButton(sort: sort, onTap: _openSort),
+                              ],
+                            ),
+                          ),
+                        ),
+                        FilterRow(children: _chips(t, c, hosts)),
+                      ],
                     ),
                   ),
-                  if (filtered) ...<Widget>[
-                    const SizedBox(width: 10),
-                    Text('${shown.length}/${all.length}', style: DurbunType.monoStyle(size: 12, color: c.textSubtle, weight: FontWeight.w600)),
-                  ],
-                  const SizedBox(width: 4),
-                  DIconButton(
-                    icon: Icons.sort_rounded,
-                    tooltip: sort == kDefaultNetSort ? t.sortTitle : '${t.sortTitle}: ${t.sortName(sort)}',
-                    active: sort != kDefaultNetSort,
-                    onTap: _openSort,
-                  ),
-                  // A saved run does not change: nothing to pause.
-                  if (!widget.store.readOnly)
-                    DIconButton(
-                      icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                      tooltip: _paused ? t.resume : t.pause,
-                      active: _paused,
-                      onTap: () => setState(() => _paused = !_paused),
-                    ),
                 ],
               ),
             ),
-            FilterRow(children: _chips(t, c, hosts)),
-            Divider(height: 1, color: c.border),
             Expanded(
-              child: shown.isEmpty
-                  ? _empty(t, all, filtered)
-                  : LiveList<InspectorCall>(
-                      items: shown,
-                      keyOf: (x) => x.key,
-                      seqOf: (x) => x.seq,
-                      paused: _paused,
-                      // A new order goes back to its top (or the live end).
-                      filterKey: '${_filters.signature}#${_search.text}#${sort.name}',
-                      epoch: widget.store.clears,
-                      fromTop: sort != NetSort.arrival,
-                      newText: t.newItems,
-                      itemBuilder: (context, call) => CallRow(
-                          call: call,
-                          store: widget.store,
-                          terms: terms,
-                          bodyQuery: _filters.searchBodies && terms.isNotEmpty ? terms.first : null,
-                          siblings: () => sortCalls(widget.store.calls.where(_matches).toList(), sort)),
-                    ),
-            ),
-            if (widget.store.droppedCalls > 0)
-              Container(
-                width: double.infinity,
-                color: c.bgPanel,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: Text(t.dropped(widget.store.droppedCalls), style: TextStyle(fontSize: 13, color: c.textSubtle)),
+              child: ListFootNote(
+                note: widget.store.droppedCalls > 0 ? t.dropped(widget.store.droppedCalls) : null,
+                child: shown.isEmpty
+                    ? _empty(t, all, filtered)
+                    : LiveList<InspectorCall>(
+                        items: shown,
+                        keyOf: (x) => x.key,
+                        seqOf: (x) => x.seq,
+                        paused: widget.paused,
+                        // A new order goes back to its top (or the live end).
+                        filterKey: '${_filters.signature}#${_search.text}#${sort.name}',
+                        epoch: widget.store.clears,
+                        fromTop: sort != NetSort.arrival,
+                        newText: t.newItems,
+                        onScrolledAway: (away) {
+                          if (mounted && away != _scrolledAway) setState(() => _scrolledAway = away);
+                        },
+                        itemBuilder: (context, call) => CallRow(
+                            call: call,
+                            store: widget.store,
+                            terms: terms,
+                            barScaleMs: slowest,
+                            bodyQuery: _filters.searchBodies && terms.isNotEmpty ? terms.first : null,
+                            siblings: () => sortCalls(widget.store.calls.where(_matches).toList(), sort)),
+                      ),
               ),
+            ),
           ],
         );
       },
+    );
+  }
+}
+
+/// "Sırala": opens the orders. Tinted while an order other than the
+/// default is on; only its icon when the row is narrow or the text large.
+class _SortButton extends StatelessWidget {
+  const _SortButton({required this.sort, required this.onTap});
+
+  final NetSort sort;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    final on = sort != kDefaultNetSort;
+    final tooltip = on ? '${t.sortTitle}: ${t.sortName(sort)}' : t.sortTitle;
+    final narrow = MediaQuery.sizeOf(context).width < 360 || MediaQuery.textScalerOf(context).scale(10) > 13;
+    final fg = on ? c.accentInk : c.text;
+    return Tooltip(
+      message: tooltip,
+      excludeFromSemantics: true,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        excludeSemantics: true,
+        child: Pressable(
+          onTap: onTap,
+          builder: (pressed) => SizedBox(
+            height: kMinTapTarget,
+            child: Center(
+              child: AnimatedContainer(
+                duration: DurbunMotion.of(context, DurbunMotion.fast),
+                height: 40,
+                width: narrow ? 40 : null,
+                padding: EdgeInsets.symmetric(horizontal: narrow ? 0 : 12),
+                decoration: BoxDecoration(
+                  color: pressed ? c.bgActive : (on ? Color.alphaBlend(c.accentSoft, c.bgApp) : c.chipBg),
+                  borderRadius: BorderRadius.circular(DurbunRadius.md),
+                  border: Border.all(color: on ? c.accent.withValues(alpha: 0.45) : c.border),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Icon(Icons.sort_rounded, size: 18, color: on ? c.accentInk : c.textMuted),
+                    if (!narrow) ...<Widget>[
+                      const SizedBox(width: 6),
+                      Text(t.sortTitle, style: TextStyle(fontSize: DurbunType.body, fontWeight: FontWeight.w600, letterSpacing: 0.1, color: fg, height: 1.2)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Three numbers over the list, about the requests it shows: how many,
+/// how many failed (a tap lists only those, again all), how long they took
+/// on average. Total and average open Statistics.
+class _SummaryTiles extends StatelessWidget {
+  const _SummaryTiles(
+      {required this.calls, required this.total, required this.filtered, required this.errorsOnly, required this.onErrors, required this.onStats});
+
+  final List<InspectorCall> calls;
+  final int total;
+  final bool filtered;
+  final bool errorsOnly;
+  final VoidCallback onErrors;
+  final VoidCallback onStats;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = InspectorStrings.of(context);
+    var failures = 0, timed = 0, sumMs = 0;
+    for (final x in calls) {
+      if (x.isFailure) failures++;
+      final d = x.duration;
+      if (d != null && x.state != InspectorCallState.pending) {
+        timed++;
+        sumMs += d.inMilliseconds;
+      }
+    }
+    final avg = timed == 0 ? '—' : formatDuration(Duration(milliseconds: (sumMs / timed).round()));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 2, DurbunSpace.gutter, 8),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Expanded(
+              child: _Tile(
+                label: t.tileTotal,
+                value: filtered ? t.listedOf(calls.length, total) : t.requestCount(calls.length),
+                onTap: onStats,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _Tile(
+                label: t.tileErrors,
+                value: t.errorCountShort(failures),
+                alert: failures > 0,
+                selected: errorsOnly,
+                hint: errorsOnly ? t.showAllRequests : t.showErrorsOnly,
+                onTap: onErrors,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: _Tile(label: t.tileAvgDuration, value: avg, onTap: onStats)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Tile extends StatelessWidget {
+  const _Tile({required this.label, required this.value, required this.onTap, this.alert = false, this.selected, this.hint});
+
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+
+  /// Red: there are errors.
+  final bool alert;
+
+  /// A tile that is also a switch (Errors): on or off.
+  final bool? selected;
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final on = selected ?? false;
+    final ink = alert ? c.danger : null;
+    final bg = alert ? Color.alphaBlend(c.dangerSoft, c.bgApp) : c.cardBg;
+    final side = on ? (alert ? c.danger : c.accent) : (alert ? c.danger.withValues(alpha: 0.35) : c.border);
+    return Semantics(
+      button: true,
+      selected: selected,
+      hint: hint,
+      child: Pressable(
+        onTap: onTap,
+        builder: (pressed) => AnimatedContainer(
+          duration: DurbunMotion.of(context, DurbunMotion.fast),
+          constraints: const BoxConstraints(minHeight: kMinTapTarget),
+          padding: const EdgeInsets.fromLTRB(10, 6, 8, 7),
+          decoration: BoxDecoration(
+            color: pressed ? Color.alphaBlend(c.text.withValues(alpha: 0.05), bg) : bg,
+            borderRadius: BorderRadius.circular(DurbunRadius.md),
+            border: Border.all(color: side, width: on ? 1.5 : 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  // Shrinks before it is cut (large text, a long word).
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(label,
+                          maxLines: 1,
+                          style: TextStyle(
+                              fontSize: DurbunType.caption, fontWeight: FontWeight.w500, letterSpacing: 0.2, height: 1.3, color: ink ?? c.textMuted)),
+                    ),
+                  ),
+                  if (on) ...<Widget>[
+                    const SizedBox(width: 4),
+                    Icon(Icons.filter_alt_rounded, size: 12, color: ink ?? c.accentInk),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 1),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(value, maxLines: 1, style: DurbunType.heading(size: DurbunType.label, color: ink ?? c.text).copyWith(height: 1.3)),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -442,30 +703,35 @@ class _SortRow extends StatelessWidget {
     return Semantics(
       selected: selected,
       button: true,
-      child: InkWell(
+      child: Pressable(
         onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 52),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: Row(
-              children: <Widget>[
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(label, style: TextStyle(fontSize: 14.5, fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: c.text)),
-                      Text(hint, style: TextStyle(fontSize: 12, color: c.textSubtle)),
-                    ],
-                  ),
+        builder: (pressed) => Container(
+          color: pressed ? c.bgHover : Colors.transparent,
+          constraints: const BoxConstraints(minHeight: 56),
+          padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 8, DurbunSpace.gutter, 8),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(label,
+                        style: TextStyle(
+                            fontSize: DurbunType.label,
+                            height: 1.3,
+                            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                            color: selected ? c.accentInk : c.text)),
+                    Text(hint, style: TextStyle(fontSize: DurbunType.sm, height: 1.35, color: c.textMuted)),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 24,
-                  child: selected ? Icon(Icons.check_rounded, size: 20, color: c.accent) : null,
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 24,
+                child: selected ? Icon(Icons.check_rounded, size: 20, color: c.accentInk) : null,
+              ),
+            ],
           ),
         ),
       ),
@@ -507,72 +773,136 @@ class _HostsSection extends StatelessWidget {
       changed();
     }
 
+    final links = <Widget>[
+      TextButton(
+        onPressed: () {
+          filters.hiddenHosts.clear();
+          filters.extraHosts.addAll(hosts.where((h) => !store.isDefaultHost(h)));
+          changed();
+        },
+        child: Text(t.showAllHosts, textAlign: TextAlign.end),
+      ),
+      if (store.defaultHosts.isNotEmpty)
+        TextButton(
+          onPressed: () {
+            filters.hiddenHosts.clear();
+            filters.extraHosts.clear();
+            changed();
+          },
+          child: Text(t.defaultHostsOnly, textAlign: TextAlign.end),
+        ),
+    ];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 16, 8, 0),
+      padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 16, DurbunSpace.gutter, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.only(left: 12),
-            child: Row(
+          // One link beside the title; two go on a line of their own.
+          TitleWithLink(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      // Same title and hint as the sheet's other sections.
-                      Text(t.hostsTitle, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: c.text)),
-                      const SizedBox(height: 2),
-                      Text(t.hostsHint, style: TextStyle(fontSize: 13, color: c.textSubtle)),
-                    ],
+                Text(t.hostsTitle, style: DurbunType.heading(size: DurbunType.label, color: c.text).copyWith(height: 1.3)),
+                const SizedBox(height: 1),
+                Text(t.hostsHint, style: TextStyle(fontSize: DurbunType.sm, height: 1.35, color: c.textMuted)),
+              ],
+            ),
+            link: links.length == 1 ? links.first : null,
+          ),
+          if (links.length > 1) Wrap(spacing: 4, children: links),
+          const SizedBox(height: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: c.bgSunken,
+              borderRadius: BorderRadius.circular(DurbunRadius.lg),
+              border: Border.all(color: c.border),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: <Widget>[
+                for (var i = 0; i < hosts.length; i++) ...<Widget>[
+                  if (i > 0) Divider(height: 1, indent: 12, endIndent: 12, color: c.hairline),
+                  _HostRow(
+                    host: hosts[i],
+                    count: counts[hosts[i]]!,
+                    isDefault: store.defaultHosts.isNotEmpty && store.isDefaultHost(hosts[i]),
+                    shown: filters.showsHost(hosts[i], isDefault: store.isDefaultHost(hosts[i])),
+                    onChanged: (v) => set(hosts[i], v),
                   ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    filters.hiddenHosts.clear();
-                    filters.extraHosts.addAll(hosts.where((h) => !store.isDefaultHost(h)));
-                    changed();
-                  },
-                  child: Text(t.showAllHosts),
-                ),
-                if (store.defaultHosts.isNotEmpty)
-                  TextButton(
-                    onPressed: () {
-                      filters.hiddenHosts.clear();
-                      filters.extraHosts.clear();
-                      changed();
-                    },
-                    child: Text(t.defaultHostsOnly),
-                  ),
+                ],
               ],
             ),
           ),
-          for (final h in hosts)
-            CheckboxListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              controlAffinity: ListTileControlAffinity.leading,
-              contentPadding: const EdgeInsets.only(left: 4, right: 8),
-              value: filters.showsHost(h, isDefault: store.isDefaultHost(h)),
-              onChanged: (v) => set(h, v ?? false),
-              title: Text(h, maxLines: 1, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: 12.5, color: c.text)),
-              secondary: Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
-                if (store.defaultHosts.isNotEmpty && store.isDefaultHost(h)) DBadge(t.defaultHost, tone: BadgeTone.accent),
-                Text('${counts[h]}', style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle)),
-              ]),
-            ),
         ],
       ),
     );
   }
 }
 
-/// One request, two lines: the status token, then the method and path
-/// with the duration on the right; under them the host, at most one badge
-/// and the size. [compact]: the same row inside the log stream, with the
-/// time of day under the duration.
+/// A host in the filter sheet: a tick, the name, its request count.
+class _HostRow extends StatelessWidget {
+  const _HostRow({required this.host, required this.count, required this.isDefault, required this.shown, required this.onChanged});
+
+  final String host;
+  final int count;
+  final bool isDefault;
+  final bool shown;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    return MergeSemantics(
+      child: Pressable(
+        onTap: () => onChanged(!shown),
+        builder: (pressed) => Container(
+          color: pressed ? c.bgHover : Colors.transparent,
+          constraints: const BoxConstraints(minHeight: kMinTapTarget),
+          padding: const EdgeInsets.fromLTRB(4, 0, 12, 0),
+          child: Row(
+            children: <Widget>[
+              Checkbox(
+                value: shown,
+                onChanged: (v) => onChanged(v ?? false),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(width: 2),
+              Expanded(
+                child: Text(host,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: DurbunType.monoStyle(size: DurbunType.monoMd, color: shown ? c.text : c.textMuted, height: 1.3)),
+              ),
+              if (isDefault) ...<Widget>[const SizedBox(width: 8), DBadge(t.defaultHost, tone: BadgeTone.accent)],
+              const SizedBox(width: 10),
+              Text('$count', style: DurbunType.monoStyle(size: DurbunType.monoSm, color: c.textMuted, height: 1.2)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One request as a card of two lines: the status, the method, the path
+/// and the duration; under them the host, size and time, up to two tags
+/// (why it failed; mocked, its GraphQL operation or a client other than
+/// dart:io) and a bar of its duration against the slowest listed request.
+/// A failed request or a 5xx is a red card. [compact]: the same card in
+/// the log stream, the time of day where the bar is.
 class CallRow extends StatelessWidget {
-  const CallRow({super.key, required this.call, required this.store, this.terms = const <String>[], this.onTap, this.bodyQuery, this.siblings, this.compact = false});
+  const CallRow(
+      {super.key,
+      required this.call,
+      required this.store,
+      this.terms = const <String>[],
+      this.onTap,
+      this.bodyQuery,
+      this.siblings,
+      this.compact = false,
+      this.barScaleMs});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
@@ -591,6 +921,10 @@ class CallRow extends StatelessWidget {
   final String? bodyQuery;
   final bool compact;
 
+  /// The duration a full bar stands for (the slowest listed request, at
+  /// least a second); null: no bar, the time of day instead.
+  final double? barScaleMs;
+
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
@@ -601,111 +935,214 @@ class CallRow extends StatelessWidget {
     final q = uri != null && uri.hasQuery ? decodeUrl('?${uri.query}') : '';
     final failed = call.error != null && !call.cancelled;
     final pending = call.state == InspectorCallState.pending;
+    final serverError = !failed && (call.status ?? 0) >= 500;
     final statusText = call.error != null ? (call.cancelled ? t.cancelledShort : t.failShort) : (call.status?.toString() ?? '···');
     final statusColor = call.cancelled ? c.textMuted : c.status(call.status, failed: failed);
     final ms = call.duration?.inMilliseconds;
     final slow = ms != null && ms >= kSlowMs;
+    final durationColor = failed || serverError || (ms != null && ms >= 3000) ? c.danger : (slow ? c.warning : c.textMuted);
     final timeStyle =
-        DurbunType.monoStyle(size: DurbunType.monoRow, color: ms != null && ms >= 3000 ? c.danger : (slow ? c.warning : c.textMuted), weight: slow ? FontWeight.w600 : FontWeight.w400, height: 1.3);
-    // One badge: why it failed, else that it was mocked, else the GraphQL
-    // operation, else a client other than dart:io.
+        DurbunType.monoStyle(size: DurbunType.monoRow, color: durationColor, weight: slow || failed ? FontWeight.w600 : FontWeight.w500, height: 1.3);
     final gql = graphqlLabel(call);
-    final Widget? badge = failed
-        ? DBadge(t.shortError(shortErrorKey(call.error)), tone: BadgeTone.danger)
-        : call.mocked
-            ? DBadge(t.mock, tone: BadgeTone.accent, icon: Icons.theater_comedy_outlined)
-            : gql != null
-                ? DBadge(gql, tone: BadgeTone.info, mono: true)
-                : call.source != 'dart:io'
-                    ? _SourceBadge(call)
-                    : null;
+    final scaler = MediaQuery.textScalerOf(context);
+    double widthOf(String text, TextStyle style) =>
+        (TextPainter(text: TextSpan(text: text, style: style), textDirection: TextDirection.ltr, textScaler: scaler, maxLines: 1)..layout()).width;
+    // As the badge draws it: the page's font at the badge's size.
+    final badgeUi = DefaultTextStyle.of(context).style.merge(const TextStyle(fontSize: DurbunType.caption, fontWeight: FontWeight.w600, letterSpacing: 0.2, height: 1.2));
+    final badgeMono = DurbunType.monoStyle(size: DurbunType.monoSm, weight: FontWeight.w600, height: 1.2);
+    // Each tag with its drawn width (text and 6 pt padding each side).
+    final tags = <(Widget, double)>[
+      // On its red card: outlined, not a red tint on red.
+      if (failed)
+        (
+          DBadge(t.shortError(shortErrorKey(call.error)), tone: BadgeTone.danger, outlined: true),
+          widthOf(t.shortError(shortErrorKey(call.error)), badgeUi) + 14
+        ),
+      if (call.mocked)
+        (DBadge(t.mock, tone: BadgeTone.accent), widthOf(t.mock, badgeUi) + 12)
+      else if (gql != null)
+        (DBadge(gql, tone: BadgeTone.info, mono: true), widthOf(gql, badgeMono) + 12)
+      else if (call.source != 'dart:io')
+        (_SourceBadge(call), widthOf(call.source, DurbunType.monoStyle(size: DurbunType.caption, weight: FontWeight.w600, height: 1.2)) + 12),
+    ];
     // The size without decoding the body (rows build while scrolling).
     final size = call.responseSize;
-    final pathStyle = DurbunType.monoStyle(size: DurbunType.body, color: c.text, height: 1.35, weight: FontWeight.w500);
-    final meta = DurbunType.monoStyle(size: DurbunType.caption + 0.5, color: c.textSubtle, height: 1.3);
+    final pathStyle = DurbunType.monoStyle(size: DurbunType.monoMd, color: c.text, height: 1.35, weight: FontWeight.w500);
+    final meta = DurbunType.monoStyle(size: DurbunType.monoSm, color: c.textMuted, height: 1.3);
     final host = uri?.host ?? '';
+    final bar = barScaleMs != null && !compact;
+    // Host · size · time: the host gives way first, the time never.
+    final tail = <String>[
+      if (size != null) formatBytes(size),
+      if (bar) formatTimeOfDay(call.ts),
+    ].join(' · ');
+    final tailText = host.isEmpty || tail.isEmpty ? tail : ' · $tail';
+    final clock = bar ? '' : formatTimeOfDay(call.ts);
     final scaled = MediaQuery.textScalerOf(context).scale(meta.fontSize! * meta.height!);
+    final large = MediaQuery.textScalerOf(context).scale(10) > 15;
+    final pathText = Text.rich(
+      TextSpan(children: <InlineSpan>[
+        highlightTerms(path, terms, pathStyle, c.hlMark),
+        if (q.isNotEmpty) highlightTerms(q, terms, pathStyle.copyWith(color: c.textMuted, fontWeight: FontWeight.w400), c.hlMark),
+      ]),
+      maxLines: large ? 2 : 1,
+      softWrap: large,
+      overflow: TextOverflow.ellipsis,
+    );
     final line2 = scaled > 20 ? scaled : 20.0;
-    return Material(
-      type: MaterialType.transparency,
-      child: InkWell(
-        onTap: () {
-          FocusManager.instance.primaryFocus?.unfocus();
-          if (onTap != null) return onTap!();
-          Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (routeContext) => DurbunTheme.wrap(
-                  routeContext,
-                  CallDetailPage(
-                      call: call, store: store, bodyQuery: bodyQuery, siblings: siblings))));
-        },
-        child: Container(
-          padding: EdgeInsets.fromLTRB(12, compact ? 8 : 10, 12, compact ? 8 : 10),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.hairline))),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              StatusPill(text: statusText, color: statusColor),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 22),
-                      child: Row(
-                        children: <Widget>[
-                          MethodToken(call.method),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text.rich(
-                              TextSpan(children: <InlineSpan>[
-                                highlightTerms(path, terms, pathStyle, c.hlMark),
-                                if (q.isNotEmpty) highlightTerms(q, terms, pathStyle.copyWith(color: c.textSubtle, fontWeight: FontWeight.w400), c.hlMark),
-                              ]),
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          if (pending) _Elapsed(since: call.ts, style: timeStyle.copyWith(color: c.textSubtle)) else Text(formatDuration(call.duration), style: timeStyle),
-                        ],
+    return PanelCard(
+      tone: failed || serverError ? CardTone.danger : CardTone.normal,
+      onTap: () {
+        FocusManager.instance.primaryFocus?.unfocus();
+        if (onTap != null) return onTap!();
+        Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (routeContext) => DurbunTheme.wrap(routeContext, CallDetailPage(call: call, store: store, bodyQuery: bodyQuery, siblings: siblings))));
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 22),
+            child: Row(
+              children: <Widget>[
+                // A red card's pill is solid: a tinted red on red would be faint.
+                StatusPill(text: statusText, color: statusColor, solid: failed || serverError),
+                const SizedBox(width: 8),
+                if (large)
+                  Expanded(child: Align(alignment: AlignmentDirectional.centerStart, child: MethodToken(call.method)))
+                else ...<Widget>[
+                  MethodToken(call.method),
+                  const SizedBox(width: 6),
+                  Expanded(child: pathText),
+                ],
+                const SizedBox(width: 8),
+                if (pending) _Elapsed(since: call.ts, style: timeStyle.copyWith(color: c.textMuted)) else Text(formatDuration(call.duration), style: timeStyle),
+              ],
+            ),
+          ),
+          // Large text: the path gets a line of its own, up to two lines.
+          if (large) ...<Widget>[const SizedBox(height: 4), pathText],
+          const SizedBox(height: 6),
+          LayoutBuilder(
+            builder: (context, box) {
+              final w = box.maxWidth;
+              final right = bar ? _DurationBar.width : widthOf(clock, meta);
+              final tailW = widthOf(tailText, meta);
+              final tagsW = tags.fold<double>(0, (sum, x) => sum + x.$2 + 8);
+              final hostW = host.isEmpty ? 0.0 : math.min(widthOf(host, meta), 56.0);
+              final end = bar ? _DurationBar(call: call, scaleMs: barScaleMs!) : Text(clock, style: meta);
+              final hostText = Text.rich(highlightTerms(host, terms, meta, c.hlMark), maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis);
+              // One line (20 pt, or the scaled text): every such card is the
+              // same height.
+              if (hostW + tailW + tagsW + 10 + right <= w) {
+                return SizedBox(
+                  height: line2,
+                  child: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Row(
+                          children: <Widget>[
+                            if (host.isNotEmpty) Flexible(child: hostText),
+                            Text(tailText, style: meta, maxLines: 1, softWrap: false),
+                            for (final (tag, _) in tags) ...<Widget>[const SizedBox(width: 8), tag],
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 3),
-                    // One height for line 2 with or without a badge (a 20 pt
-                    // badge, or the text when it is scaled up): every row is
-                    // the same height.
-                    SizedBox(
-                      height: line2,
-                      child: Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: Row(
-                              children: <Widget>[
-                                if (host.isNotEmpty)
-                                  Flexible(
-                                    flex: 3,
-                                    child: Text.rich(highlightTerms(host, terms, meta, c.hlMark), maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
-                                  ),
-                                if (badge != null) ...<Widget>[
-                                  const SizedBox(width: 8),
-                                  Flexible(flex: 2, child: badge),
-                                ],
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          if (compact) Text(formatTimeOfDay(call.ts), style: meta) else if (size != null) Text(formatBytes(size), style: meta),
-                        ],
-                      ),
+                      const SizedBox(width: 10),
+                      end,
+                    ],
+                  ),
+                );
+              }
+              // Too much for one line (large text, long tags): the host on a
+              // line of its own, then size and time with the tags and the
+              // bar; the tags go under those when even that is too wide.
+              final tagsFit = tailW + tagsW + 10 + right <= w;
+              final sizeTime = tail.isEmpty
+                  ? const SizedBox.shrink()
+                  : ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: math.max(0, w - right - 10)),
+                      child: FittedBox(fit: BoxFit.scaleDown, alignment: AlignmentDirectional.centerStart, child: Text(tail, style: meta, maxLines: 1)),
+                    );
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  if (host.isNotEmpty) hostText,
+                  const SizedBox(height: 4),
+                  Row(
+                    children: <Widget>[
+                      sizeTime,
+                      if (tagsFit)
+                        for (final (tag, _) in tags) ...<Widget>[const SizedBox(width: 8), tag],
+                      const Spacer(),
+                      const SizedBox(width: 10),
+                      end,
+                    ],
+                  ),
+                  if (!tagsFit && tags.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: <Widget>[for (final (tag, _) in tags) ConstrainedBox(constraints: BoxConstraints(maxWidth: w), child: tag)],
                     ),
                   ],
-                ),
-              ),
-            ],
+                ],
+              );
+            },
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A request's duration as a short bar: its length against the slowest
+/// listed request on a log scale, its colour the outcome (mocked: the accent). Empty while
+/// pending. The duration text says the same to a screen reader.
+/// The share of a request card's duration bar that [ms] fills against the
+/// slowest listed request ([scaleMs]): on a log scale (10 ms steps), so a
+/// normal request next to a timeout is still a bar, not a dot.
+double durationBarFraction(int ms, double scaleMs) {
+  double f(double x) => math.log(1 + x / 10) / math.ln10;
+  return (f(ms.toDouble()) / f(scaleMs)).clamp(0.0, 1.0);
+}
+
+class _DurationBar extends StatelessWidget {
+  const _DurationBar({required this.call, required this.scaleMs});
+
+  final InspectorCall call;
+  final double scaleMs;
+
+  static const double width = 64;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final ms = call.state == InspectorCallState.pending ? null : call.duration?.inMilliseconds;
+    final failed = call.error != null && !call.cancelled;
+    final color = call.cancelled
+        ? c.textSubtle
+        : call.mocked
+            ? c.accent
+            : c.status(call.status, failed: failed);
+    final fill = ms == null ? 0.0 : durationBarFraction(ms, scaleMs) * width;
+    return ExcludeSemantics(
+      child: Container(
+        width: width,
+        height: 6,
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: c.isDark ? c.border : c.bgActive,
+          borderRadius: BorderRadius.circular(DurbunRadius.pill),
         ),
+        child: ms == null
+            ? null
+            : Container(
+                // A very short request still shows a dot.
+                width: fill < 6 ? 6 : fill,
+                decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(DurbunRadius.pill)),
+              ),
       ),
     );
   }
@@ -765,12 +1202,16 @@ class _SourceBadge extends StatelessWidget {
             ? c.sdkIos
             : c.sdkDart;
     return Container(
-      height: 20,
+      constraints: const BoxConstraints(minHeight: 20),
       padding: const EdgeInsets.symmetric(horizontal: 6),
       decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(DurbunRadius.sm)),
       child: Center(
         widthFactor: 1,
-        child: Text(call.source, maxLines: 1, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: DurbunType.caption, color: color, weight: FontWeight.w600, height: 1.2)),
+        heightFactor: 1,
+        child: Text(call.source,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: DurbunType.monoStyle(size: DurbunType.caption, color: color, weight: FontWeight.w600, height: 1.2)),
       ),
     );
   }
@@ -950,7 +1391,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
         // A saved run's request is not sent again (its secrets are masked).
         final replayInMenu = canReplay && !widget.store.readOnly && mq.size.width < 420;
         return Scaffold(
-          backgroundColor: c.bgPanel,
+          backgroundColor: c.bgApp,
           appBar: AppBar(
             titleSpacing: 0,
             title: Column(
@@ -1077,7 +1518,10 @@ class _CallDetailPageState extends State<CallDetailPage> {
   }
 }
 
-/// Host, path and the numbers of the request in one card over the tabs.
+/// Host, path and the numbers of the request in one card over the tabs:
+/// the URL, its phases as one bar (when the timings are known), then the
+/// duration and sizes at the start of a line and the client and the time
+/// at its end.
 class _Summary extends StatelessWidget {
   const _Summary({required this.call, required this.onCopyUrl});
 
@@ -1093,14 +1537,22 @@ class _Summary extends StatelessWidget {
     final path = uri == null ? call.url : decodeUrl(uri.path.isEmpty ? '/' : uri.path);
     final query = uri != null && uri.hasQuery ? decodeUrl('?${uri.query}') : '';
     final ms = call.duration?.inMilliseconds ?? 0;
+    final meta = DurbunType.monoStyle(size: DurbunType.monoRow, color: c.textMuted, height: 1.35);
+    final b = timingBreakdown(call);
+    final phases = b.known && (b.total ?? 0) > 0;
+    final start = <InlineSpan>[
+      if (call.state != InspectorCallState.pending)
+        TextSpan(
+            text: formatDuration(call.duration),
+            style: TextStyle(color: ms >= 3000 ? c.danger : (ms >= kSlowMs ? c.warning : c.text), fontWeight: FontWeight.w600)),
+      if (call.responseBody != null) TextSpan(text: '${call.state != InspectorCallState.pending ? ' · ' : ''}↓ ${formatBytes(call.responseBody!.size)}'),
+      if (call.requestBody != null && call.requestBody!.size > 0) TextSpan(text: ' · ↑ ${formatBytes(call.requestBody!.size)}'),
+    ];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
+      padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 4, DurbunSpace.gutter, 12),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-        decoration: BoxDecoration(
-            color: c.cardBg,
-            borderRadius: BorderRadius.circular(DurbunRadius.lg),
-            border: Border.all(color: c.border)),
+        padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+        decoration: BoxDecoration(color: c.cardBg, borderRadius: BorderRadius.circular(DurbunRadius.lg), border: Border.all(color: c.border)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
@@ -1111,7 +1563,7 @@ class _Summary extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      if (host.isNotEmpty) Text(host, maxLines: 1, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle, height: 1.3)),
+                      if (host.isNotEmpty) Text(host, maxLines: 1, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: DurbunType.monoRow, color: c.textMuted, height: 1.35)),
                       const SizedBox(height: 2),
                       // The whole URL is on General and in the menu.
                       Text.rich(
@@ -1121,36 +1573,36 @@ class _Summary extends StatelessWidget {
                         ]),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
-                        style: DurbunType.monoStyle(size: 13.5, color: c.text, weight: FontWeight.w500, height: 1.35),
+                        style: DurbunType.monoStyle(size: 14, color: c.text, weight: FontWeight.w500, height: 1.4),
                       ),
                     ],
                   ),
                 ),
-                DIconButton(icon: Icons.copy_rounded, tooltip: t.copyUrl, onTap: onCopyUrl),
+                DIconButton(boxed: true, icon: Icons.copy_rounded, tooltip: t.copyUrl, onTap: onCopyUrl),
               ],
             ),
-            const SizedBox(height: 8),
-            // One row that scrolls: wrapped chips pushed the tabs off short
-            // screens.
-            EdgeFadeScroller(
+            Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: Row(
-                spacing: 6,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  if (call.state != InspectorCallState.pending)
-                    _Stat(
-                        icon: Icons.timer_outlined,
-                        text: formatDuration(call.duration),
-                        color: ms >= 3000
-                            ? c.danger
-                            : ms >= kSlowMs
-                                ? c.warning
-                                : null),
-                  if (call.responseBody != null) _Stat(icon: Icons.south_rounded, text: formatBytes(call.responseBody!.size)),
-                  if (call.requestBody != null && call.requestBody!.size > 0) _Stat(icon: Icons.north_rounded, text: formatBytes(call.requestBody!.size)),
-                  if (call.mocked) _Stat(icon: Icons.theater_comedy_outlined, text: t.mock, color: c.accentInk),
-                  _Stat(icon: Icons.hub_outlined, text: call.source),
-                  _Stat(icon: Icons.schedule_rounded, text: formatClock(call.ts)),
+                  if (phases) ...<Widget>[const SizedBox(height: 12), PhaseBar(call: call, height: 6)],
+                  const SizedBox(height: 10),
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    spacing: 12,
+                    runSpacing: 4,
+                    children: <Widget>[
+                      if (start.isNotEmpty) Text.rich(TextSpan(children: start), style: meta),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          if (call.mocked) ...<Widget>[DBadge(t.mock, tone: BadgeTone.accent), const SizedBox(width: 8)],
+                          Text('${call.source} · ${formatClock(call.ts)}', style: meta),
+                        ],
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -1161,35 +1613,46 @@ class _Summary extends StatelessWidget {
   }
 }
 
-/// A number of the request (time, size, source) as a small chip.
-class _Stat extends StatelessWidget {
-  const _Stat({required this.icon, required this.text, this.color});
+/// A request's phases (DNS, connect, TLS, send, wait, download) as one bar
+/// in order, each in its colour. Nothing when the phases are not known.
+class PhaseBar extends StatelessWidget {
+  const PhaseBar({super.key, required this.call, this.height = 10});
 
-  final IconData icon;
-  final String text;
-  final Color? color;
+  final InspectorCall call;
+  final double height;
+
+  static Color colorOf(DurbunColors c, String phase) => switch (phase) {
+        'queue' => c.textSubtle.withValues(alpha: 0.55),
+        'dns' => c.st3xx,
+        'connect' => c.pickOrange,
+        'tls' => c.pickViolet,
+        'send' => c.pickYellow,
+        'wait' => c.pickGreen,
+        _ => c.pickBlue,
+      };
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    final fg = color ?? c.textMuted;
-    return Container(
-      height: 24,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: BoxDecoration(
-          color: c.trackBg, borderRadius: BorderRadius.circular(DurbunRadius.sm)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(icon, size: 14, color: fg),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: DurbunType.monoStyle(size: 11.5, color: color ?? c.text, weight: FontWeight.w500, height: 1.2)),
+    final b = timingBreakdown(call);
+    final total = b.total;
+    if (!b.known || total == null || total <= 0) return const SizedBox.shrink();
+    return ExcludeSemantics(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(DurbunRadius.pill),
+        child: SizedBox(
+          height: height,
+          child: Row(
+            spacing: 2,
+            children: <Widget>[
+              for (final s in b.spans)
+                Expanded(
+                  flex: (s.ms / total * 1000).round().clamp(1, 1000),
+                  child: Container(color: colorOf(c, s.phase)),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1202,7 +1665,7 @@ EdgeInsets _pagePadding(BuildContext context) =>
 /// the body's view and copy on the right. One height for every part, so
 /// nothing jumps when the part changes.
 Widget _partsRow(Widget leading, [List<Widget> trailing = const <Widget>[]]) => Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
+      padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 0, 10, 0),
       child: SizedBox(
         height: kMinTapTarget,
         child: Row(
@@ -1914,9 +2377,9 @@ class _BodyPaneState extends State<BodyPane> {
           height: kMinTapTarget,
           child: Center(
             child: Container(
-              height: 32,
+              height: 34,
               padding: const EdgeInsets.only(left: 8, right: 4),
-              decoration: ShapeDecoration(color: c.cardBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.md), side: BorderSide(color: c.border))),
+              decoration: ShapeDecoration(color: c.chipBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DurbunRadius.md), side: BorderSide(color: c.border))),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
@@ -1931,9 +2394,10 @@ class _BodyPaneState extends State<BodyPane> {
     );
     final header = _partsRow(leading, <Widget>[
       const SizedBox(width: 4),
-      if (b.isText && !(mode == 0 && isImage)) DIconButton(icon: Icons.search_rounded, tooltip: t.find, active: _find, onTap: () => _find ? _closeFind() : setState(() => _find = true)),
+      if (b.isText && !(mode == 0 && isImage))
+        DIconButton(boxed: true, icon: Icons.search_rounded, tooltip: t.find, active: _find, onTap: () => _find ? _closeFind() : setState(() => _find = true)),
       viewMenu,
-      if (b.isText) DIconButton(icon: Icons.copy_rounded, tooltip: t.copy, onTap: () => copyText(context, pretty)),
+      if (b.isText) DIconButton(boxed: true, icon: Icons.copy_rounded, tooltip: t.copy, onTap: () => copyText(context, pretty)),
     ]);
     final Widget content;
     if (preparing && !(mode == 0 && isImage)) {
@@ -1960,7 +2424,7 @@ class _BodyPaneState extends State<BodyPane> {
           autoDepth: large ? 1 : 3,
           initialQuery: _query,
           onQueryChanged: (v) => _query = v,
-          padding: _pagePadding(context).copyWith(top: 4, left: 8));
+          padding: const EdgeInsets.fromLTRB(6, 10, 12, 16));
     } else if (mode == 0 && isImage) {
       content = ListView(
         padding: _pagePadding(context),
@@ -2043,7 +2507,7 @@ class _BodyPaneState extends State<BodyPane> {
               onCloseFind: _closeFind,
               initialQuery: _query,
               onQueryChanged: (v) => _query = v,
-              padding: _pagePadding(context).copyWith(left: 4, top: 2),
+              padding: const EdgeInsets.fromLTRB(4, 10, 12, 16),
               textStyle: style,
               prefixWidth: gutter + 8,
               buildLines: (_) => lines,
@@ -2072,11 +2536,30 @@ class _BodyPaneState extends State<BodyPane> {
         ],
       );
     }
+    // The body itself (tree, code, hex, image) in a card under the parts;
+    // form fields are cards of their own.
+    final carded = !preparing && content is! _PairsList;
+    final bottom = MediaQuery.paddingOf(context).bottom;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         header,
-        Expanded(child: content),
+        Expanded(
+          child: !carded
+              ? content
+              : Padding(
+                  padding: EdgeInsets.fromLTRB(DurbunSpace.gutter, 4, DurbunSpace.gutter, 12 + bottom),
+                  child: Container(
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: c.cardBg,
+                      borderRadius: BorderRadius.circular(DurbunRadius.lg),
+                      border: Border.all(color: c.border),
+                    ),
+                    child: MediaQuery.removePadding(context: context, removeBottom: true, child: content),
+                  ),
+                ),
+        ),
       ],
     );
   }
@@ -2117,15 +2600,7 @@ class _TimingTab extends StatelessWidget {
     final b = timingBreakdown(call);
     final total = b.total;
     final ms = call.duration?.inMilliseconds ?? 0;
-    Color phaseColor(String p) => switch (p) {
-          'queue' => c.textSubtle.withValues(alpha: 0.55),
-          'dns' => c.st3xx,
-          'connect' => c.pickOrange,
-          'tls' => c.pickViolet,
-          'send' => c.pickYellow,
-          'wait' => c.pickGreen,
-          _ => c.pickBlue,
-        };
+    Color phaseColor(String p) => PhaseBar.colorOf(c, p);
     final phases = b.known && total != null && total > 0;
     return ListView(
       padding: _pagePadding(context).copyWith(top: 2),
@@ -2150,21 +2625,7 @@ class _TimingTab extends StatelessWidget {
               if (phases) ...<Widget>[
                 const SizedBox(height: 12),
                 // Every phase in one bar, in order.
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(DurbunRadius.sm),
-                  child: SizedBox(
-                    height: 10,
-                    child: Row(
-                      children: <Widget>[
-                        for (final s in b.spans)
-                          Expanded(
-                            flex: (s.ms / total * 1000).round().clamp(1, 1000),
-                            child: Container(color: phaseColor(s.phase)),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
+                PhaseBar(call: call),
               ],
             ],
           ),

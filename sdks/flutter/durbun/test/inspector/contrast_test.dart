@@ -104,6 +104,118 @@ void main() {
       }
     });
 
+    test('$theme: request and log cards, plain and tinted', () {
+      final cards = <String, Color>{
+        'card': c.cardBg,
+        'warning card': over(c.lvWarnBg, c.cardBg),
+        'error card': over(c.lvErrorBg, c.cardBg),
+        'crash card': over(c.lvFatalBg, c.cardBg),
+      };
+      // Log cards take every tint; request cards only the error one.
+      for (final MapEntry(key: name, value: card) in cards.entries) {
+        expectAtLeast('text on a $name', c.text, card, 4.5);
+        expectAtLeast('textMuted on a $name', c.textMuted, card, 4.5);
+        expectAtLeast('error text on a $name', c.lvError, card, 4.5);
+        for (final (ink, tint) in <(Color, Color)>[
+          (c.accentInk, c.accentSoft),
+          (c.success, c.successSoft),
+          (c.info, c.infoSoft),
+          (c.warning, c.warningSoft),
+        ]) {
+          expectAtLeast('level pill $ink on a $name', ink, over(tint, card), 4.5);
+        }
+      }
+      for (final name in <String>['card', 'error card']) {
+        final card = cards[name]!;
+        for (final m in <String>['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']) {
+          expectAtLeast('$m on a $name', c.method(m), card, 4.5);
+        }
+        // Durations: plain, slow, failed.
+        for (final fg in <Color>[c.warning, c.danger]) {
+          expectAtLeast('duration $fg on a $name', fg, card, 4.5);
+        }
+        // The status pill: its colour on a 14 % tint. On an error card (a
+        // 5xx or a failure) the pill is solid: onDanger on danger.
+        if (name == 'card') {
+          for (final fg in <Color>[c.st2xx, c.st3xx, c.st4xx, c.st5xx, c.stPending]) {
+            expectAtLeast('status $fg on a $name', fg, over(fg.withValues(alpha: 0.14), card), 4.5);
+          }
+        }
+        // Tags: Mock, GraphQL, the client (its colour on a 12 % tint); the
+        // failure reason is outlined, its ink straight on the card.
+        for (final (ink, tint) in <(Color, Color)>[
+          (c.accentInk, c.accentSoft),
+          (c.info, c.infoSoft),
+          (c.sdkAndroid, c.sdkAndroid.withValues(alpha: 0.12)),
+          (c.sdkIos, c.sdkIos.withValues(alpha: 0.12)),
+          (c.sdkDart, c.sdkDart.withValues(alpha: 0.12)),
+        ]) {
+          expectAtLeast('tag $ink on a $name', ink, over(tint, card), 4.5);
+        }
+        expectAtLeast('failure reason on a $name', c.danger, card, 4.5);
+      }
+    });
+
+    test('$theme: bottom bar, header and summary tiles', () {
+      final bar = c.isDark ? c.bgElevated : c.bgPanel;
+      expectAtLeast('nav label on the bar', c.textMuted, bar, 4.5);
+      expectAtLeast('nav label on the active tile', c.onAccent, c.accentFill, 4.5);
+      for (final fg in <Color>[c.success, c.warning, c.danger]) {
+        expectAtLeast('FPS chip $fg', fg, over(fg.withValues(alpha: 0.12), c.bgApp), 4.5);
+      }
+      final errors = over(c.dangerSoft, c.bgApp);
+      expectAtLeast('Errors tile figure', c.danger, errors, 4.5);
+      expectAtLeast('Errors tile label', c.danger, errors, 4.5);
+      expectAtLeast('tile label', c.textMuted, c.cardBg, 4.5);
+    });
+
+    test('$theme: Tools page, Performance, Statistics and compare', () {
+      // Tools tiles: the icon on its tint (an icon: 3:1).
+      for (final (ink, tint) in <(Color, Color)>[
+        (c.info, c.infoSoft),
+        (c.accentInk, c.accentSoft),
+        (c.warning, c.warningSoft),
+        (c.success, c.successSoft),
+      ]) {
+        expectAtLeast('tile icon $ink', ink, over(tint, c.cardBg), 3);
+      }
+      expectAtLeast('version pill', c.textMuted, c.chipBg, 4.5);
+      // The red card of Clear, and a crash card of a saved run.
+      final danger = over(c.lvErrorBg, c.cardBg);
+      expectAtLeast('danger card title', c.danger, danger, 4.5);
+      expectAtLeast('danger card hint', c.textMuted, danger, 4.5);
+      expectAtLeast('danger card text', c.text, danger, 4.5);
+      // Performance: the figure and the ring in their state colour, the
+      // janky line, the tile notes and the chart notes (small mono text).
+      for (final fg in <Color>[c.success, c.warning, c.danger]) {
+        expectAtLeast('FPS figure $fg', fg, c.cardBg, 3);
+      }
+      expectAtLeast('janky line', c.warning, c.cardBg, 4.5);
+      for (final fg in <Color>[c.info, c.pickViolet, c.success, c.pickOrange]) {
+        expectAtLeast('note $fg', fg, c.cardBg, 4.5);
+      }
+      // Statistics: the success badge on its tint, the method labels.
+      for (final (ink, tint) in <(Color, Color)>[
+        (c.success, c.successSoft),
+        (c.warning, c.warningSoft),
+        (c.danger, c.dangerSoft),
+      ]) {
+        expectAtLeast('rate badge $ink', ink, over(tint, c.cardBg), 4.5);
+      }
+      for (final m in <String>['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']) {
+        expectAtLeast('method $m', c.method(m), c.cardBg, 4.5);
+      }
+      // Compare: the hidden-lines bar, the changed rows of a diff.
+      expectAtLeast('show hidden lines', c.accentInk, over(c.accentSoft, c.cardBg), 4.5);
+      expectAtLeast('removed line', c.text, over(c.danger.withValues(alpha: 0.12), c.cardBg), 4.5);
+      expectAtLeast('added line', c.text, over(c.success.withValues(alpha: 0.12), c.cardBg), 4.5);
+      expectAtLeast('changed field', c.text, over(c.warningSoft, c.cardBg), 4.5);
+      // Code: keywords and inline names.
+      expectAtLeast('code keyword', c.accentInk, c.cardBg, 4.5);
+      expectAtLeast('inline code', c.accentInk, c.bgApp, 4.5);
+      expectAtLeast('log error line', c.lvError, over(c.lvErrorBg, c.cardBg), 4.5);
+    });
+
     test('$theme: JSON colours in a body', () {
       final body = c.isDark ? c.bgSunken : c.bgPanel;
       for (final fg in <Color>[c.jsonKey, c.jsonString, c.jsonNumber, c.jsonBool, c.jsonNull]) {

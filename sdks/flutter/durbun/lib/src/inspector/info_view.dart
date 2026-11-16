@@ -13,7 +13,7 @@ import 'theme.dart';
 import 'tools.dart' show ToolPage;
 import 'widgets.dart';
 
-EdgeInsets _pad(BuildContext context) => EdgeInsets.fromLTRB(12, 12, 12, 20 + MediaQuery.paddingOf(context).bottom);
+EdgeInsets _pad(BuildContext context) => EdgeInsets.fromLTRB(16, 12, 16, 16 + MediaQuery.paddingOf(context).bottom);
 
 class MocksView extends StatelessWidget {
   const MocksView({super.key, required this.store});

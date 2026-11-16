@@ -1,7 +1,7 @@
-/// The tools sheet: the app and its desktop connection, then Mac connection,
-/// App tools, Mocks (while connected), Performance, Statistics and Device &
-/// SDK (each a page of its own), Export session, Previous run (with
-/// `keepPreviousRun`) and Clear.
+/// The Tools page of the panel: the app and its desktop connection; tiles
+/// for Statistics, Mac connection, App tools and Device & SDK (each a page
+/// of its own); Mocks (while connected), Export session and Previous run
+/// (with `keepPreviousRun`); and Clear in a red card.
 library;
 
 import 'package:flutter/material.dart';
@@ -11,28 +11,17 @@ import 'actions_view.dart';
 import 'connection_view.dart';
 import 'export_sheet.dart';
 import 'info_view.dart';
-import 'perf_view.dart';
 import 'previous_run_view.dart';
 import 'run_log.dart';
 import 'stats_view.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
-import 'widgets.dart' show ListRow;
+import '../core/protocol.dart' show kSdkVersion;
+import 'stats.dart' show computeNetworkStats;
+import 'widgets.dart' show BadgeTone, CardTone, ListRow, Pressable;
 
-Future<void> showToolsSheet(BuildContext context, DurbunInspectorStore store) {
-  FocusManager.instance.primaryFocus?.unfocus();
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    showDragHandle: true,
-    backgroundColor: DurbunColors.of(context).bgApp,
-    builder: (routeContext) => DurbunTheme.wrap(routeContext, _ToolsSheet(store: store)),
-  );
-}
-
-/// A page opened from the tools sheet (Mocks, Performance, Device & SDK).
+/// A page opened from Tools (Mocks, Statistics, Device & SDK).
 class ToolPage extends StatelessWidget {
   const ToolPage({super.key, required this.title, required this.child});
 
@@ -44,17 +33,14 @@ class ToolPage extends StatelessWidget {
     final c = DurbunColors.of(context);
     return Scaffold(
       backgroundColor: c.bgApp,
-      appBar: AppBar(
-        title: Text(title),
-        shape: Border(bottom: BorderSide(color: c.border)),
-      ),
+      appBar: AppBar(title: Text(title)),
       body: child,
     );
   }
 }
 
-class _ToolsSheet extends StatelessWidget {
-  const _ToolsSheet({required this.store});
+class ToolsView extends StatelessWidget {
+  const ToolsView({super.key, required this.store});
 
   final DurbunInspectorStore store;
 
@@ -63,9 +49,7 @@ class _ToolsSheet extends StatelessWidget {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     void open(String title, Widget page) {
-      final nav = Navigator.of(context);
-      nav.pop();
-      nav.push(MaterialPageRoute<void>(
+      Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (routeContext) => DurbunTheme.wrap(routeContext, ToolPage(title: title, child: page)),
       ));
     }
@@ -87,51 +71,89 @@ class _ToolsSheet extends StatelessWidget {
           final connected = Durbun.isConnected;
           final via = state?['via'] as String?;
           final rules = state?['mocks'] is List ? (state!['mocks'] as List).length : 0;
-          final m = store.lastMetric;
           final platform = switch ('${device?['platform'] ?? ''}') {
             'ios' => 'iOS',
             'android' => 'Android',
             final p => p,
           };
           final os = <String>[if (platform.isNotEmpty) platform, if (device?['osVersion'] != null) '${device!['osVersion']}'].join(' ');
-          final perf = m == null
-              ? t.noSamplesShort
-              : <String>[
-                  if (m.fps != null) '${m.fps!.round()} FPS',
-                  if (m.memoryMB != null) '${m.memoryMB!.round()} MB',
-                ].join(' · ');
+          final stats = computeNetworkStats(store.calls, topHosts: 0);
+          final finished = stats.requests - stats.pending;
+          final version = app?['version'] == null ? null : '${app!['version']}${app['build'] != null ? ' (${app['build']})' : ''}';
+          final tiles = <Widget>[
+            _ToolTile(
+              icon: Icons.bar_chart_rounded,
+              tone: BadgeTone.info,
+              label: t.statistics,
+              value: <String>[
+                t.requestCount(store.calls.length),
+                if (finished > 0) t.statsSuccessRate((stats.success * 100 / finished).round()),
+              ].join(' · '),
+              onTap: () => open(t.statistics, StatsView(store: store)),
+            ),
+            _ToolTile(
+              icon: Icons.link_rounded,
+              tone: BadgeTone.accent,
+              label: t.macConnection,
+              value: connectionShortText(t, report),
+              onTap: () => open(t.macConnection, ConnectionView(store: store)),
+            ),
+            _ToolTile(
+              icon: Icons.tune_rounded,
+              tone: BadgeTone.warning,
+              label: t.appTools,
+              value: tools == 0 ? t.appToolsHint : t.toolCount(tools),
+              onTap: () => open(t.appTools, const AppToolsView()),
+            ),
+            _ToolTile(
+              icon: Icons.smartphone_rounded,
+              tone: BadgeTone.success,
+              label: t.deviceAndSdk,
+              value: <String>[if (os.isNotEmpty) os, '${t.title} $kSdkVersion'].join(' · '),
+              onTap: () => open(t.deviceAndSdk, InfoView(store: store)),
+            ),
+          ];
           return ListView(
-            shrinkWrap: true,
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.paddingOf(context).bottom),
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom),
             children: <Widget>[
+              // The app: mark, name and version, the device, and the
+              // connection on a line of its own.
               _Group(children: <Widget>[
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      const DurbunLogo(size: 40),
-                      const SizedBox(width: 12),
+                      const DurbunLogo(size: 48),
+                      const SizedBox(width: 14),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
-                            Text(
-                              '${app?['name'] ?? t.title}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: DurbunType.title, fontWeight: FontWeight.w600, color: c.text, height: 1.25),
+                            Row(
+                              children: <Widget>[
+                                Expanded(
+                                  child: Text(
+                                    '${app?['name'] ?? t.title}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: DurbunType.heading(color: c.text).copyWith(height: 1.25),
+                                  ),
+                                ),
+                                if (version != null) ...<Widget>[const SizedBox(width: 8), _VersionPill(version)],
+                              ],
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              <String>[
-                                if (app?['version'] != null) '${app!['version']}${app['build'] != null ? ' (${app['build']})' : ''}',
-                                if (device?['model'] != null || device?['name'] != null) '${device!['model'] ?? device['name']}',
-                                if (os.isNotEmpty) os,
-                              ].join(' · '),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: DurbunType.ui(size: DurbunType.body, color: c.textMuted, height: 1.35),
-                            ),
+                            const SizedBox(height: 3),
+                            if (device?['model'] != null || device?['name'] != null || os.isNotEmpty)
+                              Text(
+                                <String>[
+                                  if (device?['model'] != null || device?['name'] != null) '${device!['model'] ?? device['name']}',
+                                  if (os.isNotEmpty) os,
+                                ].join(' · '),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: DurbunType.monoStyle(size: DurbunType.monoRow, color: c.textMuted, height: 1.4),
+                              ),
                             const SizedBox(height: 8),
                             _ConnectionStatus(
                               connected: connected,
@@ -148,23 +170,34 @@ class _ToolsSheet extends StatelessWidget {
                   ),
                 ),
               ]),
-              const SizedBox(height: 16),
-              _Group(children: <Widget>[
-                _ToolRow(
-                  icon: Icons.link_rounded,
-                  label: t.macConnection,
-                  value: connectionShortText(t, report),
-                  onTap: () => open(t.macConnection, ConnectionView(store: store)),
-                ),
-                _ToolRow(
-                  icon: Icons.tune_rounded,
-                  label: t.appTools,
-                  hint: t.appToolsHint,
-                  value: tools == 0 ? null : t.toolCount(tools),
-                  onTap: () => open(t.appTools, const AppToolsView()),
-                ),
-              ]),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+              // Two by two; one column when a tile would be too narrow.
+              LayoutBuilder(
+                builder: (context, box) {
+                  final columns = box.maxWidth / 2 >= 150 + 60 * (MediaQuery.textScalerOf(context).scale(10) / 10 - 1) ? 2 : 1;
+                  if (columns == 1) {
+                    return Column(children: <Widget>[for (final x in tiles) Padding(padding: const EdgeInsets.only(bottom: 12), child: x)]);
+                  }
+                  return Column(
+                    children: <Widget>[
+                      for (var i = 0; i < tiles.length; i += 2)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: <Widget>[
+                                Expanded(child: tiles[i]),
+                                const SizedBox(width: 12),
+                                Expanded(child: i + 1 < tiles.length ? tiles[i + 1] : const SizedBox.shrink()),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
               _Group(children: <Widget>[
                 // Rules come from the desktop and end with its connection.
                 if (connected)
@@ -175,35 +208,10 @@ class _ToolsSheet extends StatelessWidget {
                     onTap: () => open(t.mocks, MocksView(store: store)),
                   ),
                 _ToolRow(
-                  icon: Icons.speed_rounded,
-                  label: t.performance,
-                  value: perf,
-                  onTap: () => open(t.performance, PerformanceView(store: store)),
-                ),
-                _ToolRow(
-                  icon: Icons.bar_chart_rounded,
-                  label: t.statistics,
-                  value: t.requestCount(store.calls.length),
-                  onTap: () => open(t.statistics, StatsView(store: store)),
-                ),
-                _ToolRow(
-                  icon: Icons.smartphone_rounded,
-                  label: t.deviceAndSdk,
-                  value: os,
-                  onTap: () => open(t.deviceAndSdk, InfoView(store: store)),
-                ),
-              ]),
-              const SizedBox(height: 16),
-              _Group(children: <Widget>[
-                _ToolRow(
                   icon: Icons.file_upload_outlined,
                   label: t.exportSession,
                   hint: t.exportSessionHint,
-                  onTap: () {
-                    final nav = Navigator.of(context);
-                    nav.pop();
-                    showExportSheet(nav.context, store);
-                  },
+                  onTap: () => showExportSheet(context, store),
                 ),
                 // Always listed: off, it says so and how to turn it on.
                 _ToolRow(
@@ -217,34 +225,32 @@ class _ToolsSheet extends StatelessWidget {
                           : t.spanAgo(t.spanShort(DateTime.now().difference(previous.savedAt))),
                   onTap: () {
                     if (journal == null) return open(t.previousRun, const PreviousRunOffView());
-                    final nav = Navigator.of(context);
-                    nav.pop();
-                    nav.push(MaterialPageRoute<void>(
-                      builder: (routeContext) =>
-                          DurbunTheme.wrap(routeContext, PreviousRunPage(journal: journal, current: store)),
+                    Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (routeContext) => DurbunTheme.wrap(routeContext, PreviousRunPage(journal: journal, current: store)),
                     ));
                   },
                 ),
               ]),
-              const SizedBox(height: 16),
-              _Group(children: <Widget>[
-                _ToolRow(
-                  icon: Icons.cleaning_services_outlined,
-                  destructive: true,
-                  label: t.clearAll,
-                  hint: t.clearAllHint,
-                  chevron: false,
-                  onTap: () async {
-                    // Nothing comes back: ask first.
-                    final messenger = ScaffoldMessenger.maybeOf(context);
-                    final navigator = Navigator.of(context);
-                    if (!await confirmClear(context)) return;
-                    store.clear();
-                    if (navigator.canPop()) navigator.pop();
-                    messenger?.showSnackBar(SnackBar(content: Text(t.cleared), duration: const Duration(milliseconds: 1400)));
-                  },
-                ),
-              ]),
+              const SizedBox(height: 12),
+              // Nothing comes back from here: a red card of its own.
+              _Group(
+                tone: CardTone.danger,
+                children: <Widget>[
+                  _ToolRow(
+                    icon: Icons.delete_sweep_outlined,
+                    destructive: true,
+                    label: t.clearAll,
+                    hint: t.clearAllHint,
+                    chevron: false,
+                    onTap: () async {
+                      final messenger = ScaffoldMessenger.maybeOf(context);
+                      if (!await confirmClear(context)) return;
+                      store.clear();
+                      messenger?.showSnackBar(SnackBar(content: Text(t.cleared), duration: const Duration(milliseconds: 1400)));
+                    },
+                  ),
+                ],
+              ),
             ],
           );
         },
@@ -322,18 +328,22 @@ class _ConnectionStatus extends StatelessWidget {
 
 /// Rows in one rounded card, hairlines between them (inset grouped list).
 class _Group extends StatelessWidget {
-  const _Group({required this.children});
+  const _Group({required this.children, this.tone = CardTone.normal});
 
   final List<Widget> children;
+
+  /// [CardTone.danger]: the red card of a row that removes data.
+  final CardTone tone;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
+    final danger = tone == CardTone.danger;
     return Container(
       decoration: BoxDecoration(
-          color: c.cardBg,
+          color: danger ? Color.alphaBlend(c.lvErrorBg, c.cardBg) : c.cardBg,
           borderRadius: BorderRadius.circular(DurbunRadius.lg),
-          border: Border.all(color: c.border)),
+          border: Border.all(color: danger ? c.danger.withValues(alpha: 0.4) : c.border)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: <Widget>[
@@ -380,6 +390,86 @@ class _ToolRow extends StatelessWidget {
       value: value == null || value!.isEmpty ? null : value,
       chevron: chevron,
       onTap: onTap,
+    );
+  }
+}
+
+/// The app's version as a small outlined pill beside its name.
+class _VersionPill extends StatelessWidget {
+  const _VersionPill(this.version);
+
+  final String version;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 140),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(
+        color: c.chipBg,
+        borderRadius: BorderRadius.circular(DurbunRadius.pill),
+        border: Border.all(color: c.border),
+      ),
+      child: Text(version,
+          maxLines: 1, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: DurbunType.monoSm, color: c.textMuted, weight: FontWeight.w500, height: 1.3)),
+    );
+  }
+}
+
+/// A tool as a tile of the two-by-two grid: its icon on a tint of its
+/// colour, the name, and what it holds now.
+class _ToolTile extends StatelessWidget {
+  const _ToolTile({required this.icon, required this.tone, required this.label, required this.value, required this.onTap});
+
+  final IconData icon;
+  final BadgeTone tone;
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final (ink, tint) = switch (tone) {
+      BadgeTone.accent => (c.accentInk, c.accentSoft),
+      BadgeTone.success => (c.success, c.successSoft),
+      BadgeTone.warning => (c.warning, c.warningSoft),
+      BadgeTone.danger => (c.danger, c.dangerSoft),
+      BadgeTone.info => (c.info, c.infoSoft),
+      BadgeTone.neutral => (c.textMuted, c.bgActive),
+    };
+    return MergeSemantics(
+      child: Semantics(
+        button: true,
+        child: Pressable(
+          onTap: onTap,
+          builder: (pressed) => AnimatedContainer(
+            duration: DurbunMotion.of(context, DurbunMotion.fast),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: pressed ? Color.alphaBlend(c.text.withValues(alpha: 0.05), c.cardBg) : c.cardBg,
+              borderRadius: BorderRadius.circular(DurbunRadius.lg),
+              border: Border.all(color: c.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(color: Color.alphaBlend(tint, c.cardBg), borderRadius: BorderRadius.circular(DurbunRadius.md)),
+                  child: Icon(icon, size: 20, color: ink),
+                ),
+                const SizedBox(height: 14),
+                Text(label, style: DurbunType.heading(size: DurbunType.label, color: c.text).copyWith(height: 1.3)),
+                const SizedBox(height: 3),
+                Text(value, maxLines: 2, overflow: TextOverflow.ellipsis, style: DurbunType.ui(size: DurbunType.sm, color: c.textMuted, height: 1.35)),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

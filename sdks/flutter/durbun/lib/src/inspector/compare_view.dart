@@ -35,20 +35,25 @@ String _pathOf(InspectorCall c) {
 
 /// The A / B marker of the desktop.
 class _SideTag extends StatelessWidget {
-  const _SideTag(this.label);
+  const _SideTag(this.label, {this.big = false});
 
   final String label;
+
+  /// The size of the request cards at the top.
+  final bool big;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final color = label == 'A' ? c.danger : c.success;
+    final big = this.big;
     return Container(
-      width: 20,
-      height: 20,
+      width: big ? 28 : 20,
+      height: big ? 28 : 20,
       alignment: Alignment.center,
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(DurbunRadius.sm)),
-      child: Text(label, style: DurbunType.monoStyle(size: 11.5, color: color, weight: FontWeight.w600, height: 1)),
+      decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(big ? DurbunRadius.sm + 2 : DurbunRadius.sm)),
+      child: Text(label, style: DurbunType.monoStyle(size: big ? 13 : 11.5, color: color, weight: FontWeight.w600, height: 1)),
     );
   }
 }
@@ -64,13 +69,15 @@ class _SideSummary extends StatelessWidget {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     final failed = call.error != null && !call.cancelled;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+      decoration: BoxDecoration(
+          color: c.cardBg, borderRadius: BorderRadius.circular(DurbunRadius.lg), border: Border.all(color: c.border)),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
-          _SideTag(label),
-          const SizedBox(width: 8),
+          _SideTag(label, big: true),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -78,12 +85,13 @@ class _SideSummary extends StatelessWidget {
                 Wrap(
                   spacing: 6,
                   children: <Widget>[
-                    Text(call.method, style: DurbunType.monoStyle(size: 12, color: c.method(call.method), weight: FontWeight.w600, height: 1.3)),
-                    Text(_statusText(call, t), style: DurbunType.monoStyle(size: 12, color: call.cancelled ? c.textSubtle : c.status(call.status, failed: failed), weight: FontWeight.w600, height: 1.3)),
-                    Text('${formatClock(call.ts)} · ${formatDuration(call.duration)}', style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle, height: 1.3)),
+                    Text(call.method, style: DurbunType.monoStyle(size: DurbunType.monoRow, color: c.method(call.method), weight: FontWeight.w600, height: 1.4)),
+                    Text(_statusText(call, t), style: DurbunType.monoStyle(size: DurbunType.monoRow, color: call.cancelled ? c.textSubtle : c.status(call.status, failed: failed), weight: FontWeight.w600, height: 1.4)),
+                    Text('${formatClock(call.ts)} · ${formatDuration(call.duration)}', style: DurbunType.monoStyle(size: DurbunType.monoRow, color: c.textMuted, height: 1.4)),
                   ],
                 ),
-                Text(decodeUrlForDisplay(_pathOf(call)), maxLines: 2, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: 12, color: c.text, height: 1.3)),
+                const SizedBox(height: 2),
+                Text(decodeUrlForDisplay(_pathOf(call)), maxLines: 2, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: DurbunType.monoMd, color: c.text, height: 1.4)),
               ],
             ),
           ),
@@ -126,10 +134,9 @@ class _ComparePickerPageState extends State<ComparePickerPage> {
     return Scaffold(
       backgroundColor: c.bgApp,
       appBar: AppBar(
-        backgroundColor: c.bgPanel,
         surfaceTintColor: Colors.transparent,
         titleSpacing: 0,
-        title: Text(t.comparePickTitle, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
+        title: Text(t.comparePickTitle),
       ),
       body: ListenableBuilder(
         listenable: widget.store,
@@ -141,19 +148,17 @@ class _ComparePickerPageState extends State<ComparePickerPage> {
           final terms = freeTerms(_q);
           return Column(
             children: <Widget>[
-              Container(
-                color: c.bgPanel,
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     _SideSummary('A', widget.base),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
                     DSearchField(hint: t.netSearchHint, onChanged: (v) => setState(() => _q = parseQuery(v))),
                   ],
                 ),
               ),
-              Divider(height: 1, color: c.border),
               Expanded(
                 child: all.isEmpty
                     ? EmptyState(title: t.noOtherRequests, body: t.noOtherRequestsBody)
@@ -189,11 +194,10 @@ class _GroupTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    return Container(
-      width: double.infinity,
-      color: c.bgSunken,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.textMuted)),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+      child: Semantics(
+          header: true, child: Text(text, style: DurbunType.ui(size: DurbunType.body, weight: FontWeight.w600, color: c.textMuted))),
     );
   }
 }
@@ -230,25 +234,23 @@ class _CompareCallsPageState extends State<CompareCallsPage> {
     return Scaffold(
       backgroundColor: c.bgApp,
       appBar: AppBar(
-        backgroundColor: c.bgPanel,
         surfaceTintColor: Colors.transparent,
         titleSpacing: 0,
-        title: Text(t.compareTitle, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
+        title: Text(t.compareTitle),
         actions: <Widget>[
           DIconButton(icon: Icons.swap_vert_rounded, tooltip: t.swap, onTap: () => setState(() => _swapped = !_swapped)),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
         children: <Widget>[
-          Container(
-            color: c.bgPanel,
-            padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
-            child: Column(children: <Widget>[_SideSummary('A', _a), _SideSummary('B', _b)]),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Column(children: <Widget>[_SideSummary('A', _a), const SizedBox(height: 8), _SideSummary('B', _b)]),
           ),
           Expanded(
             child: ColoredBox(
-              color: c.bgPanel,
+              color: c.bgApp,
               child: MediaQuery.removePadding(
                 context: context,
                 removeTop: true,
@@ -285,7 +287,11 @@ class _CompareCallsPageState extends State<CompareCallsPage> {
 /// A field (or header) with A's and B's value under its name; changed ones
 /// are marked on the left.
 class _FieldBlock extends StatelessWidget {
-  const _FieldBlock({required this.name, required this.a, required this.b, required this.changed, this.monoName = false});
+  const _FieldBlock(
+      {required this.name, required this.a, required this.b, required this.changed, this.monoName = false, this.last = false});
+
+  /// The card's last row: no rule under it.
+  final bool last;
 
   final String name;
   final String? a;
@@ -313,12 +319,12 @@ class _FieldBlock extends StatelessWidget {
           ),
         );
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      padding: const EdgeInsets.fromLTRB(13, 10, 16, 10),
       decoration: BoxDecoration(
         color: changed ? c.warningSoft : null,
         border: Border(
           left: BorderSide(color: changed ? c.warning : Colors.transparent, width: 3),
-          bottom: BorderSide(color: c.border.withValues(alpha: 0.6)),
+          bottom: last ? BorderSide.none : BorderSide(color: c.hairline),
         ),
       ),
       child: Column(
@@ -367,12 +373,15 @@ class _GeneralDiff extends StatelessWidget {
     // Changed fields first: they are the point of comparing.
     final changed = fields.where((f) => f.$2 != f.$3).toList();
     final same = fields.where((f) => f.$2 == f.$3).toList();
+    final rows = <(String, String, String)>[...changed, ...same];
     return ListView(
-      padding: EdgeInsets.only(bottom: 16 + MediaQuery.paddingOf(context).bottom),
+      padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + MediaQuery.paddingOf(context).bottom),
       children: <Widget>[
-        for (final f in changed) _FieldBlock(name: f.$1, a: f.$2, b: f.$3, changed: true),
-        if (changed.isEmpty) Padding(padding: const EdgeInsets.all(12), child: Callout(title: t.fieldsSame)),
-        for (final f in same) _FieldBlock(name: f.$1, a: f.$2, b: f.$3, changed: false),
+        if (changed.isEmpty) Padding(padding: const EdgeInsets.only(bottom: 12), child: Callout(title: t.fieldsSame)),
+        _DiffCard(children: <Widget>[
+          for (var i = 0; i < rows.length; i++)
+            _FieldBlock(name: rows[i].$1, a: rows[i].$2, b: rows[i].$3, changed: i < changed.length, last: i == rows.length - 1),
+        ]),
       ],
     );
   }
@@ -385,12 +394,10 @@ class _OptionsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = DurbunColors.of(context);
     return Container(
-      color: c.bgPanel,
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: children),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: children),
     );
   }
 }
@@ -412,33 +419,37 @@ class _HeadersDiff extends StatelessWidget {
       final shown = onlyChanges ? rows.where((r) => r.state != HeaderDiffState.same).toList() : rows;
       return <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+          padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
           child: Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
-            Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.text)),
-            Text(t.headerStats(diff, rows.length), style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle)),
+            Text(title, style: DurbunType.heading(size: DurbunType.label, color: c.text)),
+            Text(t.headerStats(diff, rows.length), style: DurbunType.monoStyle(size: DurbunType.monoRow, color: c.textMuted)),
           ]),
         ),
         if (shown.isEmpty)
-          Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 4), child: Text(t.headersSame, style: TextStyle(fontSize: 13, color: c.textMuted)))
+          Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+              child: Text(t.headersSame, style: DurbunType.ui(size: DurbunType.body, color: c.textMuted)))
         else
-          for (final r in shown)
-            _FieldBlock(
-              name: r.name,
-              monoName: true,
-              a: r.a.isEmpty ? null : r.a.join('\n'),
-              b: r.b.isEmpty ? null : r.b.join('\n'),
-              changed: r.state != HeaderDiffState.same,
-            ),
+          _DiffCard(children: <Widget>[
+            for (var i = 0; i < shown.length; i++)
+              _FieldBlock(
+                name: shown[i].name,
+                monoName: true,
+                a: shown[i].a.isEmpty ? null : shown[i].a.join('\n'),
+                b: shown[i].b.isEmpty ? null : shown[i].b.join('\n'),
+                changed: shown[i].state != HeaderDiffState.same,
+                last: i == shown.length - 1,
+              ),
+          ]),
       ];
     }
 
     return Column(
       children: <Widget>[
         _OptionsBar(children: <Widget>[DToggle(label: t.onlyChanges, icon: Icons.difference_outlined, tonal: true, selected: onlyChanges, onTap: () => onOnlyChanges(!onlyChanges))]),
-        Divider(height: 1, color: c.border),
         Expanded(
           child: ListView(
-            padding: EdgeInsets.only(bottom: 16 + MediaQuery.paddingOf(context).bottom),
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.paddingOf(context).bottom),
             children: <Widget>[
               ...table(t.requestHeaders, diffHeaders(a.requestHeaders, b.requestHeaders)),
               ...table(t.responseHeaders, diffHeaders(a.responseHeaders, b.responseHeaders)),
@@ -508,7 +519,6 @@ class _BodyDiffState extends State<_BodyDiff> {
           DToggle(label: t.onlyChanges, icon: Icons.difference_outlined, tonal: true, selected: widget.onlyChanges, onTap: () => widget.onOnlyChanges(!widget.onlyChanges)),
           DToggle(label: t.sortKeys, icon: Icons.sort_by_alpha_rounded, tonal: true, selected: widget.sortKeys, onTap: () => widget.onSortKeys(!widget.sortKeys)),
         ]),
-        Divider(height: 1, color: c.border),
         Expanded(
           child: FutureBuilder<DiffResult>(
             future: _diff,
@@ -524,23 +534,32 @@ class _BodyDiffState extends State<_BodyDiff> {
                 if (r.truncated) t.diffTooLong,
               ];
               return ListView.builder(
-                padding: EdgeInsets.only(bottom: 16 + MediaQuery.paddingOf(context).bottom),
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.paddingOf(context).bottom),
                 itemCount: rows.length + 1,
                 itemBuilder: (context, i) {
                   if (i == 0) return _DiffStats(result: r, notes: notes);
                   final row = rows[i - 1];
+                  // The lines sit in one card: each row draws its slice.
+                  final first = i == 1;
+                  final last = i == rows.length;
+                  final Widget child;
                   if (row.op == null) {
-                    return InkWell(
+                    child = InkWell(
                       onTap: () => setState(() => _expanded.add(row.from)),
                       child: Container(
-                        color: c.bgSunken,
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        color: Color.alphaBlend(c.accentSoft, c.cardBg),
+                        constraints: const BoxConstraints(minHeight: 36),
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                         alignment: Alignment.center,
-                        child: Text(t.showHidden(row.hidden), style: TextStyle(fontSize: DurbunType.body, color: c.accentInk, fontWeight: FontWeight.w600)),
+                        child: Text(t.showHidden(row.hidden),
+                            textAlign: TextAlign.center,
+                            style: DurbunType.ui(size: DurbunType.body, color: c.accentInk, weight: FontWeight.w600)),
                       ),
                     );
+                  } else {
+                    child = _DiffLine(op: row.op!);
                   }
-                  return _DiffLine(op: row.op!);
+                  return _CardSlice(first: first, last: last, child: child);
                 },
               );
             },
@@ -562,7 +581,7 @@ class _DiffStats extends StatelessWidget {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+      padding: const EdgeInsets.fromLTRB(4, 10, 4, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -604,7 +623,7 @@ class _DiffLine extends StatelessWidget {
     final num = DurbunType.monoStyle(size: 11.5, color: c.textSubtle, height: 1.45);
     return Container(
       color: bg,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.fromLTRB(4, 2, 12, 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -621,6 +640,52 @@ class _DiffLine extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Rows in one card (fields, headers).
+class _DiffCard extends StatelessWidget {
+  const _DiffCard({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(color: c.cardBg, borderRadius: BorderRadius.circular(DurbunRadius.lg), border: Border.all(color: c.border)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+    );
+  }
+}
+
+/// One row of a card built lazily row by row (a long diff): the sides of
+/// the card, and its top or bottom edge on the first and last row.
+class _CardSlice extends StatelessWidget {
+  const _CardSlice({required this.first, required this.last, required this.child});
+
+  final bool first;
+  final bool last;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final side = BorderSide(color: c.border);
+    final radius = BorderRadius.vertical(
+      top: first ? const Radius.circular(DurbunRadius.lg) : Radius.zero,
+      bottom: last ? const Radius.circular(DurbunRadius.lg) : Radius.zero,
+    );
+    return Container(
+      clipBehavior: first || last ? Clip.antiAlias : Clip.none,
+      decoration: BoxDecoration(
+        color: c.cardBg,
+        borderRadius: first || last ? radius : null,
+        border: Border(left: side, right: side, top: first ? side : BorderSide.none, bottom: last ? side : BorderSide.none),
+      ),
+      child: child,
     );
   }
 }

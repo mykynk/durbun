@@ -54,7 +54,7 @@ void main() {
     expect(find.text('/v1/accounts'), findsOneWidget);
     expect(find.textContaining('/v0/b/app'), findsNothing);
     expect(find.text('2 on other hosts'), findsOneWidget, reason: 'nothing is hidden silently');
-    expect(find.text('1'), findsWidgets, reason: 'the tab badge counts listed requests only');
+    expect(find.text('1 request'), findsOneWidget, reason: 'the Total tile counts listed requests only');
 
     await tester.tap(find.text('2 on other hosts'));
     await tester.pumpAndSettle();

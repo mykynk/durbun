@@ -409,8 +409,6 @@ void main() {
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(s.logs, isNotEmpty, reason: 'cancel keeps everything');
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
 
       await askToClear();
       await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Clear')));

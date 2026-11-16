@@ -23,8 +23,16 @@ import 'widgets.dart';
 
 /// A row of the stream: a log line (with its repeat count) or a request.
 class StreamItem {
-  StreamItem.log(InspectorLog this.log) : call = null, ts = log.ts, key = 'l${log.seq}', seq = log.seq;
-  StreamItem.call(InspectorCall this.call) : log = null, ts = call.ts, key = 'c${call.key}', seq = call.seq;
+  StreamItem.log(InspectorLog this.log)
+      : call = null,
+        ts = log.ts,
+        key = 'l${log.seq}',
+        seq = log.seq;
+  StreamItem.call(InspectorCall this.call)
+      : log = null,
+        ts = call.ts,
+        key = 'c${call.key}',
+        seq = call.seq;
 
   final InspectorLog? log;
   final InspectorCall? call;
@@ -182,9 +190,12 @@ class _LogsMemory {
 final Expando<_LogsMemory> _logsMemories = Expando<_LogsMemory>('durbun.logs');
 
 class LogsView extends StatefulWidget {
-  const LogsView({super.key, required this.store, this.initialErrorsOnly = false});
+  const LogsView({super.key, required this.store, this.initialErrorsOnly = false, this.paused = false});
 
   final DurbunInspectorStore store;
+
+  /// The stream holds still (the header's pause button).
+  final bool paused;
 
   /// Turns "Errors only" on when the page opens.
   final bool initialErrorsOnly;
@@ -198,7 +209,6 @@ class _LogsViewState extends State<LogsView> {
   LogFilters get _f => _memory.filters;
   late final TextEditingController _search = TextEditingController(text: _memory.query);
   late List<QueryClause> _q = parseQuery(_memory.query);
-  bool _paused = false;
 
   @override
   void initState() {
@@ -237,9 +247,14 @@ class _LogsViewState extends State<LogsView> {
 
   void _openFilters() {
     final t = InspectorStrings.of(context);
+    final tags = <String>{
+      for (final l in widget.store.logs)
+        if (l.tag != null) l.tag!
+    };
     showFilterSheet(
       context,
       title: t.logFilters,
+      subtitle: '${t.logLineCount(widget.store.logs.length)} · ${t.tagCount(tags.length)}',
       onChanged: () => setState(() {}),
       onReset: _f.reset,
       build: (context, changed) {
@@ -276,22 +291,44 @@ class _LogsViewState extends State<LogsView> {
             ],
           ),
           const SizedBox(height: 8),
-          SheetSwitch(label: t.errorsOnly, hint: t.onlyErrorsHint, icon: Icons.warning_amber_rounded, value: _f.errorsOnly, onChanged: (v) {
-            _f.errorsOnly = v;
-            changed();
-          }),
-          SheetSwitch(label: t.crashes, hint: t.crashesHint, icon: Icons.bolt_rounded, value: _f.crashes, onChanged: (v) {
-            _f.crashes = v;
-            changed();
-          }),
-          SheetSwitch(label: t.events, hint: t.eventsHint, icon: Icons.outlined_flag_rounded, value: _f.events, onChanged: (v) {
-            _f.events = v;
-            changed();
-          }),
-          SheetSwitch(label: t.showRequests, hint: t.showRequestsHint, icon: Icons.swap_horiz_rounded, value: _f.network, onChanged: (v) {
-            _f.network = v;
-            changed();
-          }),
+          SheetSwitch(
+              label: t.errorsOnly,
+              hint: t.onlyErrorsHint,
+              icon: Icons.warning_amber_rounded,
+              iconColor: c.warning,
+              value: _f.errorsOnly,
+              onChanged: (v) {
+                _f.errorsOnly = v;
+                changed();
+              }),
+          SheetSwitch(
+              label: t.crashes,
+              hint: t.crashesHint,
+              icon: Icons.bolt_rounded,
+              iconColor: c.danger,
+              value: _f.crashes,
+              onChanged: (v) {
+                _f.crashes = v;
+                changed();
+              }),
+          SheetSwitch(
+              label: t.events,
+              hint: t.eventsHint,
+              icon: Icons.outlined_flag_rounded,
+              value: _f.events,
+              onChanged: (v) {
+                _f.events = v;
+                changed();
+              }),
+          SheetSwitch(
+              label: t.showRequests,
+              hint: t.showRequestsHint,
+              icon: Icons.swap_horiz_rounded,
+              value: _f.network,
+              onChanged: (v) {
+                _f.network = v;
+                changed();
+              }),
           if (_f.hiddenTags.isNotEmpty)
             SheetSection(
               title: t.hiddenTagsTitle,
@@ -342,12 +379,12 @@ class _LogsViewState extends State<LogsView> {
   List<Widget> _chips(InspectorStrings t, DurbunColors c) {
     final active = <Widget>[];
     final quick = <Widget>[];
-    void toggle(String label, IconData icon, bool on, void Function(bool) set) => on
+    void toggle(String label, IconData icon, Color? iconColor, bool on, void Function(bool) set) => on
         ? active.add(ActiveChip(label: label, onRemove: () => setState(() => set(false))))
-        : quick.add(DToggle(label: label, icon: icon, selected: false, onTap: () => setState(() => set(true))));
-    toggle(t.errorsOnly, Icons.warning_amber_rounded, _f.errorsOnly, (v) => _f.errorsOnly = v);
-    toggle(t.crashes, Icons.bolt_rounded, _f.crashes, (v) => _f.crashes = v);
-    toggle(t.events, Icons.outlined_flag_rounded, _f.events, (v) => _f.events = v);
+        : quick.add(DToggle(label: label, icon: icon, iconColor: iconColor, selected: false, onTap: () => setState(() => set(true))));
+    toggle(t.errorsOnly, Icons.warning_amber_rounded, c.warning, _f.errorsOnly, (v) => _f.errorsOnly = v);
+    toggle(t.crashes, Icons.bolt_rounded, c.danger, _f.crashes, (v) => _f.crashes = v);
+    toggle(t.events, Icons.outlined_flag_rounded, null, _f.events, (v) => _f.events = v);
     if (_f.source != 'all') active.add(ActiveChip(label: _f.source == 'native' ? t.nativeSource : t.flutterSource, onRemove: () => setState(() => _f.source = 'all')));
     if (!_f.network) active.add(ActiveChip(label: t.requestsHidden, onRemove: () => setState(() => _f.network = true)));
     if (_f.hiddenTags.isNotEmpty) active.add(ActiveChip(label: t.hiddenTags(_f.hiddenTags.length), onRemove: () => setState(_f.hiddenTags.clear)));
@@ -380,59 +417,52 @@ class _LogsViewState extends State<LogsView> {
         return Column(
           children: <Widget>[
             Container(
-              color: c.bgPanel,
-              padding: const EdgeInsets.fromLTRB(12, 8, 8, 0),
-              child: Row(
+              decoration: BoxDecoration(color: c.bgApp, border: Border(bottom: BorderSide(color: c.hairline))),
+              child: Column(
                 children: <Widget>[
-                  Expanded(
-                    child: DSearchField(
-                      hint: t.logSearchHint,
-                      controller: _search,
-                      onChanged: _setQuery,
-                      onHelp: () => showQueryHelp(context,
-                          hints: <QueryHint>[for (final (k, v) in t.logQueryHints) QueryHint(k, v)], controller: _search, onChanged: _setQuery),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(DurbunSpace.gutter, 2, DurbunSpace.gutter, 0),
+                    child: SizedBox(
+                      height: kMinTapTarget,
+                      child: Center(
+                        child: DSearchField(
+                          hint: t.logSearchHint,
+                          controller: _search,
+                          onChanged: _setQuery,
+                          onHelp: () => showQueryHelp(context,
+                              hints: <QueryHint>[for (final (k, v) in t.logQueryHints) QueryHint(k, v)], controller: _search, onChanged: _setQuery),
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 4),
-                  DIconButton(
-                    icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                    tooltip: _paused ? t.resume : t.pause,
-                    active: _paused,
-                    onTap: () => setState(() => _paused = !_paused),
-                  ),
+                  FilterRow(children: _chips(t, c)),
                 ],
               ),
             ),
-            FilterRow(children: _chips(t, c)),
-            Divider(height: 1, color: c.border),
             Expanded(
-              child: items.isEmpty
-                  ? EmptyState(
-                      title: nothing ? t.noLogsTitle : t.noMatchTitle,
-                      body: nothing ? t.noLogsBody : t.noMatchBody,
-                      actionLabel: nothing ? null : t.clearFilters,
-                      onAction: nothing ? null : _clearAll,
-                    )
-                  : LiveList<StreamItem>(
-                      items: items,
-                      keyOf: (x) => x.key,
-                      seqOf: (x) => x.seq,
-                      paused: _paused,
-                      filterKey: '${_f.signature}#${_search.text}',
-                      epoch: widget.store.clears,
-                      newText: t.newItems,
-                      itemBuilder: (context, it) => it.call != null
-                          ? CallRow(call: it.call!, store: widget.store, terms: terms, compact: true)
-                          : LogRow(item: it, terms: terms, onTagAction: _applyTagAction, store: widget.store),
-                    ),
-            ),
-            if (widget.store.droppedLogs > 0)
-              Container(
-                width: double.infinity,
-                color: c.bgPanel,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: Text(t.dropped(widget.store.droppedLogs), style: TextStyle(fontSize: 11, color: c.textSubtle)),
+              child: ListFootNote(
+                note: widget.store.droppedLogs > 0 ? t.dropped(widget.store.droppedLogs) : null,
+                child: items.isEmpty
+                    ? EmptyState(
+                        title: nothing ? t.noLogsTitle : t.noMatchTitle,
+                        body: nothing ? t.noLogsBody : t.noMatchBody,
+                        actionLabel: nothing ? null : t.clearFilters,
+                        onAction: nothing ? null : _clearAll,
+                      )
+                    : LiveList<StreamItem>(
+                        items: items,
+                        keyOf: (x) => x.key,
+                        seqOf: (x) => x.seq,
+                        paused: widget.paused,
+                        filterKey: '${_f.signature}#${_search.text}',
+                        epoch: widget.store.clears,
+                        newText: t.newItems,
+                        itemBuilder: (context, it) => it.call != null
+                            ? CallRow(call: it.call!, store: widget.store, terms: terms, compact: true)
+                            : LogRow(item: it, terms: terms, onTagAction: _applyTagAction, store: widget.store),
+                      ),
               ),
+            ),
           ],
         );
       },
@@ -474,12 +504,12 @@ List<String> textChunks(String text, {int size = 2000}) {
 /// `{ key: value, key2: … }` preview of a log's data, one line.
 String dataPreview(Object? data, {int max = 120}) {
   String one(Object? v) => switch (v) {
-    null => 'null',
-    final String s => '"${s.length > 40 ? '${s.substring(0, 40)}…' : s}"',
-    final Map<Object?, Object?> m => '{${m.length}}',
-    final List<Object?> l => '[${l.length}]',
-    _ => '$v',
-  };
+        null => 'null',
+        final String s => '"${s.length > 40 ? '${s.substring(0, 40)}…' : s}"',
+        final Map<Object?, Object?> m => '{${m.length}}',
+        final List<Object?> l => '[${l.length}]',
+        _ => '$v',
+      };
   final String s;
   if (data is Map) {
     s = '{ ${data.entries.map((e) => '${e.key}: ${one(e.value)}').join(', ')} }';
@@ -491,9 +521,33 @@ String dataPreview(Object? data, {int max = 120}) {
   return s.length > max ? '${s.substring(0, max)}…' : s;
 }
 
-/// One log line: the level as a word, the tag and any marks, the time on
-/// the right; under them the message (up to three lines), its data and
-/// the error's first line. Warnings, errors and crashes are tinted.
+/// The level of a log line as a pill: errors filled red, the others the
+/// level's colour on its tint; a crash and an event say so instead.
+class LevelPill extends StatelessWidget {
+  const LevelPill(this.log, {super.key});
+
+  final InspectorLog log;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = InspectorStrings.of(context);
+    final l = log;
+    if (l.isEvent) return DBadge(t.event, tone: BadgeTone.accent, icon: Icons.outlined_flag_rounded);
+    if (l.isCrash) return DBadge(t.crash, tone: BadgeTone.danger, icon: Icons.bolt_rounded, solid: true);
+    return switch (l.level) {
+      'error' || 'fatal' => DBadge(t.levelName(l.level), tone: BadgeTone.danger, solid: true),
+      'warn' => DBadge(t.levelName(l.level), tone: BadgeTone.warning),
+      'info' => DBadge(t.levelName(l.level), tone: BadgeTone.success),
+      'debug' => DBadge(t.levelName(l.level), tone: BadgeTone.info),
+      _ => DBadge(t.levelName(l.level)),
+    };
+  }
+}
+
+/// One log line as a card: the level pill, the tag and any marks, the time
+/// on the right; under them the message (up to three lines), its data and
+/// the error's first line in mono. Errors and crashes are red cards,
+/// warnings amber ones.
 class LogRow extends StatelessWidget {
   const LogRow({super.key, required this.item, this.terms = const <String>[], this.onTagAction, this.store});
 
@@ -511,77 +565,77 @@ class LogRow extends StatelessWidget {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     final l = item.log!;
-    final tint = l.isCrash ? c.lvFatalBg : c.levelBg(l.level);
-    // Subtle text is too faint on a tinted row.
-    final meta = tint == null ? c.textSubtle : c.textMuted;
-    final mono = DurbunType.monoStyle(size: DurbunType.monoBody, color: c.text, height: 1.45);
+    final tone = l.isCrash
+        ? CardTone.crash
+        : switch (l.level) {
+            'error' || 'fatal' => CardTone.danger,
+            'warn' => CardTone.warning,
+            _ => CardTone.normal,
+          };
+    // A crash or a Flutter error box is an error text: mono, like its error
+    // line. Other messages read as sentences.
+    final code = l.isCrash || l.kind == 'flutter-error';
+    final text = code
+        ? DurbunType.monoStyle(size: DurbunType.monoMd, color: c.text, height: 1.45)
+        : DurbunType.ui(size: DurbunType.bodyMd, color: c.text, height: 1.43, weight: l.isEvent ? FontWeight.w600 : FontWeight.w400);
+    final mono = DurbunType.monoStyle(size: DurbunType.monoRow, color: c.textMuted, height: 1.45);
     final errorLine = l.error == null ? null : errorHead(l.error!);
-    return Material(
-      color: tint ?? Colors.transparent,
-      child: InkWell(
-        onTap: () async {
-          // The keyboard would come back with the search field's focus.
-          FocusManager.instance.primaryFocus?.unfocus();
-          final action = await Navigator.of(context).push<(String, String)>(
-            MaterialPageRoute<(String, String)>(builder: (routeContext) => DurbunTheme.wrap(routeContext, LogDetailPage(log: l, repeats: item.repeats, store: store))),
-          );
-          if (action != null) onTagAction?.call(action.$1, action.$2);
-        },
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.hairline))),
-          child: Column(
+    return PanelCard(
+      tone: tone,
+      onTap: () async {
+        // The keyboard would come back with the search field's focus.
+        FocusManager.instance.primaryFocus?.unfocus();
+        final action = await Navigator.of(context).push<(String, String)>(
+          MaterialPageRoute<(String, String)>(
+              builder: (routeContext) => DurbunTheme.wrap(routeContext, LogDetailPage(log: l, repeats: item.repeats, store: store))),
+        );
+        if (action != null) onTagAction?.call(action.$1, action.$2);
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Expanded(
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: <Widget>[
-                        // A crash says so instead of its level.
-                        if (l.isEvent)
-                          DBadge(t.event, tone: BadgeTone.accent, icon: Icons.outlined_flag_rounded)
-                        else if (l.isCrash)
-                          DBadge(t.crash, tone: BadgeTone.danger, icon: Icons.bolt_rounded)
-                        else
-                          LevelBadge(l.level),
-                        if (l.tag != null) TagChip(l.tag!, maxWidth: 150),
-                        if (l.kind == 'flutter-error') const DBadge('Flutter', tone: BadgeTone.danger),
-                        if (l.native) DBadge(t.native, icon: Icons.memory_rounded),
-                        if (item.repeats > 1) DBadge('×${item.repeats}', tone: BadgeTone.info, mono: true),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(formatClock(l.ts), style: DurbunType.monoStyle(size: DurbunType.caption + 0.5, color: meta, height: 1.2)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text.rich(
-                TextSpan(
-                  children: <InlineSpan>[
-                    highlightTerms(rowPreview(l.message), terms, l.isEvent ? mono.copyWith(fontWeight: FontWeight.w600) : mono, c.hlMark),
-                    if (l.data != null) TextSpan(text: '  ${dataPreview(l.data)}', style: mono.copyWith(color: c.textMuted, fontSize: DurbunType.monoRow)),
+              Expanded(
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    LevelPill(l),
+                    if (l.tag != null) TagChip(l.tag!, maxWidth: 150),
+                    if (l.kind == 'flutter-error') const DBadge('Flutter', tone: BadgeTone.danger),
+                    if (l.native) DBadge(t.native, icon: Icons.memory_rounded),
+                    if (item.repeats > 1) DBadge('×${item.repeats}', tone: BadgeTone.info, mono: true),
                   ],
                 ),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
               ),
-              if (errorLine != null && errorLine.isNotEmpty && errorLine != l.message)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(errorLine, maxLines: 2, overflow: TextOverflow.ellipsis, style: mono.copyWith(color: c.lvError, fontSize: DurbunType.monoRow)),
-                ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(formatClock(l.ts), style: DurbunType.monoStyle(size: DurbunType.monoSm, color: c.textMuted, height: 1.2)),
+              ),
             ],
           ),
-        ),
+          const SizedBox(height: 6),
+          Text.rich(
+            TextSpan(
+              children: <InlineSpan>[
+                highlightTerms(rowPreview(l.message), terms, text, c.hlMark),
+                if (l.data != null) TextSpan(text: '  ${dataPreview(l.data)}', style: mono),
+              ],
+            ),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (errorLine != null && errorLine.isNotEmpty && errorLine != l.message)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(errorLine,
+                  maxLines: 2, overflow: TextOverflow.ellipsis, style: DurbunType.monoStyle(size: DurbunType.monoRow, color: c.lvError, height: 1.45)),
+            ),
+        ],
       ),
     );
   }
@@ -615,9 +669,8 @@ class _LogDetailPageState extends State<LogDetailPage> {
     final tabs = <String>[t.message, if (hasData) t.data, if (stack.isNotEmpty) t.stack];
     final pad = EdgeInsets.fromLTRB(16, 12, 16, 20 + MediaQuery.paddingOf(context).bottom);
     return Scaffold(
-      backgroundColor: c.bgPanel,
+      backgroundColor: c.bgApp,
       appBar: AppBar(
-        backgroundColor: c.bgPanel,
         surfaceTintColor: Colors.transparent,
         foregroundColor: c.text,
         titleSpacing: 0,
@@ -690,8 +743,20 @@ class _LogDetailPageState extends State<LogDetailPage> {
   }
   Widget _body(String name, InspectorLog l, String head, String stack, bool hasData, EdgeInsets pad, DurbunColors c, InspectorStrings t) {
     if (name == t.data) {
-      if (l.data is Map || l.data is List) return JsonTreeView(value: l.data, padding: pad.copyWith(top: 4, left: 8));
-      return swipeSafeSelection(ListView(padding: pad, children: <Widget>[Text(prettyValue(l.data), style: DurbunType.monoStyle(color: c.text))]));
+      // In a card, as a body on the request page.
+      final inset = MediaQuery.paddingOf(context).bottom;
+      final Widget content = l.data is Map || l.data is List
+          ? JsonTreeView(value: l.data, padding: const EdgeInsets.fromLTRB(6, 10, 12, 16))
+          : swipeSafeSelection(ListView(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+              children: <Widget>[Text(prettyValue(l.data), style: DurbunType.monoStyle(color: c.text))]));
+      return Container(
+        margin: EdgeInsets.fromLTRB(16, 4, 16, 12 + inset),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+            color: c.cardBg, borderRadius: BorderRadius.circular(DurbunRadius.lg), border: Border.all(color: c.border)),
+        child: MediaQuery.removePadding(context: context, removeBottom: true, child: content),
+      );
     }
     if (name == t.stack) return swipeSafeSelection(ListView(padding: pad, children: <Widget>[StackTraceView(stack: stack)]));
     final msgStyle = DurbunType.monoStyle(size: 13, color: c.text, weight: l.isEvent ? FontWeight.w600 : null);
@@ -707,22 +772,42 @@ class _LogDetailPageState extends State<LogDetailPage> {
               padding: const EdgeInsets.only(bottom: 10),
               child: Callout(title: t.messageCut(l.cutChars)),
             ),
-          for (final part in textChunks(l.message)) Text(part.endsWith('\n') ? part.substring(0, part.length - 1) : part, style: msgStyle),
-          if (head.isNotEmpty && head != l.message) ...<Widget>[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: c.dangerSoft, borderRadius: BorderRadius.circular(DurbunRadius.md)),
-              child: Text(head, style: DurbunType.monoStyle(size: 12.5, color: c.lvError)),
+          // The message in a card; the error's first line under it on red.
+          Container(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            decoration: BoxDecoration(
+                color: c.cardBg, borderRadius: BorderRadius.circular(DurbunRadius.lg), border: Border.all(color: c.border)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                for (final part in textChunks(l.message))
+                  Text(part.endsWith('\n') ? part.substring(0, part.length - 1) : part, style: msgStyle),
+                if (head.isNotEmpty && head != l.message) ...<Widget>[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    decoration: BoxDecoration(
+                        color: c.lvErrorBg,
+                        borderRadius: BorderRadius.circular(DurbunRadius.md),
+                        border: Border.all(color: c.danger.withValues(alpha: 0.3))),
+                    child: Text(head, style: DurbunType.monoStyle(size: DurbunType.monoRow, color: c.lvError)),
+                  ),
+                ],
+              ],
             ),
-          ],
+          ),
           if (stack.isNotEmpty) ...<Widget>[
             SectionTitle(t.stack),
             StackTraceView(stack: stack, maxFrames: 6),
           ],
           if (hasData) ...<Widget>[
             SectionTitle(t.data),
-            Text(dataPreview(l.data, max: 600), style: DurbunType.monoStyle(size: 12, color: c.textMuted)),
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              decoration: BoxDecoration(
+                  color: c.cardBg, borderRadius: BorderRadius.circular(DurbunRadius.lg), border: Border.all(color: c.border)),
+              child: Text(dataPreview(l.data, max: 600), style: DurbunType.monoStyle(size: DurbunType.monoRow, color: c.textMuted)),
+            ),
           ],
         ],
       ),
@@ -767,19 +852,30 @@ class StackTraceView extends StatelessWidget {
           CodeBlock(text: noSymbols.symbolizeCommand()),
           const SizedBox(height: DurbunSpace.md),
         ],
-        for (final line in lines)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 1.5),
-            child: Text(
-              line.trim(),
-              style: DurbunType.monoStyle(size: 11.5, color: isFrameworkFrame(line) ? c.textSubtle : c.text, height: 1.35),
-            ),
+        // The frames in a card.
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+          decoration: BoxDecoration(
+              color: c.cardBg, borderRadius: BorderRadius.circular(DurbunRadius.lg), border: Border.all(color: c.border)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              for (final line in lines)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text(
+                    line.trim(),
+                    style: DurbunType.monoStyle(size: 11.5, color: isFrameworkFrame(line) ? c.textMuted : c.text, height: 1.4),
+                  ),
+                ),
+              if (more > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(t.moreFrames(more), style: DurbunType.ui(size: DurbunType.sm, color: c.textMuted)),
+                ),
+            ],
           ),
-        if (more > 0)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(t.moreFrames(more), style: TextStyle(fontSize: 12, color: c.textSubtle)),
-          ),
+        ),
       ],
     );
   }

@@ -261,11 +261,11 @@ class _ReportSheetState extends State<_ReportSheet> {
                   children: <Widget>[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                      child: Text(widget.title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: c.text)),
+                      child: Text(widget.title, style: DurbunType.heading(color: c.text)),
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-                      child: Text(widget.description, style: TextStyle(fontSize: 13, height: 1.35, color: c.textSubtle)),
+                      child: Text(widget.description, style: DurbunType.ui(size: DurbunType.body, height: 1.4, color: c.textMuted)),
                     ),
                     ...widget.options,
                     Padding(
@@ -361,7 +361,7 @@ class _ShareActionsState extends State<ShareActions> {
     final webhook = canSendToSlack ? widget.store.slackWebhook ?? DurbunInspectorStore.existing?.slackWebhook : null;
     return Container(
       decoration: BoxDecoration(color: c.bgPanel, border: Border(top: BorderSide(color: c.hairline))),
-      padding: EdgeInsets.fromLTRB(12, 10, 12, 12 + bottom),
+      padding: EdgeInsets.fromLTRB(16, 10, 16, 12 + bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -29,7 +29,7 @@ class PreviousRunOffView extends StatelessWidget {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     return ListView(
-      padding: EdgeInsets.fromLTRB(20, 28, 20, 24 + MediaQuery.paddingOf(context).bottom),
+      padding: EdgeInsets.fromLTRB(16, 28, 16, 24 + MediaQuery.paddingOf(context).bottom),
       children: <Widget>[
         MaxWidth(
           width: 480,
@@ -37,21 +37,20 @@ class PreviousRunOffView extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               const Center(child: DurbunMark(size: 44)),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               Text(t.previousRunOffTitle,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: DurbunType.title, fontWeight: FontWeight.w600, color: c.text)),
-              const SizedBox(height: 6),
-              Text(t.previousRunOffBody,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: DurbunType.body + 1, height: 1.45, color: c.textMuted)),
+                  textAlign: TextAlign.center, style: DurbunType.heading(size: DurbunType.title, color: c.text)),
+              const SizedBox(height: 8),
+              Text.rich(
+                inlineCode(t.previousRunOffBody, base: DurbunType.ui(size: DurbunType.bodyMd, color: c.textMuted, height: 1.5), colors: c),
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 20),
               // The copy button sits in the snippet's corner.
               const CodeBlock(text: kKeepPreviousRunSnippet),
               const SizedBox(height: 16),
               Text(t.previousRunOffStorage,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: DurbunType.body, height: 1.4, color: c.textSubtle)),
+                  textAlign: TextAlign.center, style: DurbunType.ui(size: DurbunType.sm, height: 1.45, color: c.textMuted)),
             ],
           ),
         ),
@@ -129,7 +128,7 @@ class _PreviousRunPageState extends State<PreviousRunPage> {
         final loading = snapshot.connectionState != ConnectionState.done;
         return Scaffold(
           backgroundColor: c.bgApp,
-          appBar: AppBar(title: Text(t.previousRun), shape: Border(bottom: BorderSide(color: c.border))),
+          appBar: AppBar(title: Text(t.previousRun)),
           body: loading
               ? Center(
                   child: Column(
@@ -137,7 +136,7 @@ class _PreviousRunPageState extends State<PreviousRunPage> {
                     children: <Widget>[
                       const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)),
                       const SizedBox(height: 12),
-                      Text(t.previousRunReading, style: TextStyle(fontSize: 13, color: c.textMuted)),
+                      Text(t.previousRunReading, style: DurbunType.ui(size: DurbunType.body, color: c.textMuted)),
                     ],
                   ),
                 )
@@ -172,23 +171,28 @@ class _RunBanner extends StatelessWidget {
       if (start != null) t.previousRunStarted(_when(start)),
       if (app != null) app,
     ].join(' · ');
-    return Container(
-      decoration: BoxDecoration(color: c.bgPanel, border: Border(bottom: BorderSide(color: c.border))),
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Text(info,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.text)),
-          const SizedBox(height: 2),
-          Text(t.previousRunNote, style: TextStyle(fontSize: 12, color: c.textSubtle)),
-          if (crashes.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 8),
-            _CrashCallout(crash: crashes.last, count: crashes.length),
+    // A card above the page's own tools, as the live page's tiles.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+            color: c.cardBg, borderRadius: BorderRadius.circular(DurbunRadius.lg), border: Border.all(color: c.border)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(info,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: DurbunType.ui(size: DurbunType.body, weight: FontWeight.w600, color: c.text, height: 1.4)),
+            const SizedBox(height: 2),
+            Text(t.previousRunNote, style: DurbunType.ui(size: DurbunType.sm, color: c.textMuted, height: 1.4)),
+            if (crashes.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 10),
+              _CrashCallout(crash: crashes.last, count: crashes.length),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -212,13 +216,13 @@ class _CrashCallout extends StatelessWidget {
       label: '${t.previousRunCrashes(count)}, ${t.previousRunOpenCrash}',
       excludeSemantics: true,
       child: Material(
-        color: c.dangerSoft,
+        color: Color.alphaBlend(c.lvErrorBg, c.cardBg),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(DurbunRadius.lg),
-          side: BorderSide(color: c.danger.withValues(alpha: 0.3)),
+          borderRadius: BorderRadius.circular(DurbunRadius.md),
+          side: BorderSide(color: c.danger.withValues(alpha: 0.4)),
         ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(DurbunRadius.lg),
+          borderRadius: BorderRadius.circular(DurbunRadius.md),
           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (routeContext) => DurbunTheme.wrap(routeContext, LogDetailPage(log: crash)))),
           child: ConstrainedBox(
@@ -234,7 +238,7 @@ class _CrashCallout extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(t.previousRunCrashes(count),
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.text)),
+                            style: DurbunType.ui(size: DurbunType.body, weight: FontWeight.w600, color: c.text)),
                         if (head.isNotEmpty)
                           Text(head,
                               maxLines: 2,
@@ -245,7 +249,7 @@ class _CrashCallout extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                   Text(t.previousRunOpenCrash,
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.danger)),
+                      style: DurbunType.ui(size: DurbunType.body, weight: FontWeight.w600, color: c.danger)),
                   Icon(Icons.chevron_right_rounded, size: 20, color: c.danger),
                 ],
               ),
