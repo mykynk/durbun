@@ -158,10 +158,13 @@ Yakalanmayanlar:
   isolate'lerin `Durbun.attachIsolate()` çağrılana kadarki istekleri, Android'de package:http'nin
   `CronetClient`'ı ve `package:ok_http`. Dio'nun `NativeAdapter`'ı için
   [`durbun_dio`](https://pub.dev/packages/durbun_dio) gerekir.
-- **iOS:** arka plan URLSession'ları, WKWebView ve AVPlayer trafiği, URLSession kullanmayan WebSocket
-  kütüphaneleri (Starscream'in kendi motoru, SocketRocket).
-- **Android:** `HttpURLConnection` (Volley, Media3'ün varsayılan veri kaynağı, Ktor'un CIO motoru), Cronet,
-  WebView ve native kod. gRPC akışlarının yalnızca boyutu görünür; `client.newWebSocket` ile açılan bir
+- **iOS:** arka plan URLSession'ları, AVPlayer trafiği, URLSession kullanmayan WebSocket kütüphaneleri
+  (Starscream'in kendi motoru, SocketRocket). Bir `WKWebView` sayfasının fetch/XHR çağrıları ve console
+  satırları `DurbunWebView.attach(...)` sonrasında görünür; sayfa yüklemeleri ve görseller görünmez.
+- **Android:** `HttpURLConnection` (Volley, Media3'ün varsayılan veri kaynağı, Ktor'un CIO motoru), Cronet ve
+  native kod. Bir `WebView` sayfasının fetch/XHR çağrıları ve console satırları
+  `DurbunWebView.attach(webView)` sonrasında görünür; sayfa yüklemeleri ve görseller görünmez. gRPC akışlarının
+  yalnızca boyutu görünür; `client.newWebSocket` ile açılan bir
   WebSocket'in yalnızca el sıkışması görünür.
 - **React Native:** `<Image>` indirmeleri, native modüllerin yaptığı istekler ve global `WebSocket` yerine bir
   paketten gelen WebSocket sınıfları.

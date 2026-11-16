@@ -1,0 +1,371 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		195A639DBD84395044395F8B /* DurbunExampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CAF6750B865C5B0502513C7 /* DurbunExampleApp.swift */; };
+		1F980654FBBB7A6DBAA56556 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1239CE2C299EF81216AE231A /* ContentView.swift */; };
+		76F8E60167A8411FE4AA868F /* DemoServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AFA2DA74CDC80DF8F5B7B9D /* DemoServer.swift */; };
+		BB2579E5CAD53B28CC204EF7 /* WebPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C757C49D4ED128804412AFD /* WebPage.swift */; };
+		C84111683EA3440881D731CA /* WebViewScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A790FE540C83B274DCF9354F /* WebViewScreen.swift */; };
+		E1E23A90B03E35F674C534DD /* Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91ED23E3AF13CE7F1FC6E6A6 /* Demo.swift */; };
+		FE26F2C07A5F946BCF1042E3 /* Durbun in Frameworks */ = {isa = PBXBuildFile; productRef = 13D89B0EABD347B3F6D307DD /* Durbun */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1239CE2C299EF81216AE231A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		13690C55866118319A380263 /* DurbunExample.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DurbunExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2CAF6750B865C5B0502513C7 /* DurbunExampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurbunExampleApp.swift; sourceTree = "<group>"; };
+		3B591C0D0366C9C740C640C4 /* ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ios; path = ..; sourceTree = SOURCE_ROOT; };
+		5878D407A769CF6BE105D299 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		5C757C49D4ED128804412AFD /* WebPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPage.swift; sourceTree = "<group>"; };
+		6AFA2DA74CDC80DF8F5B7B9D /* DemoServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoServer.swift; sourceTree = "<group>"; };
+		91ED23E3AF13CE7F1FC6E6A6 /* Demo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Demo.swift; sourceTree = "<group>"; };
+		A790FE540C83B274DCF9354F /* WebViewScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewScreen.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9F35548C3C25552439AB2302 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FE26F2C07A5F946BCF1042E3 /* Durbun in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		4AEF277D7BDF03BABBC3E6EF /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				3B591C0D0366C9C740C640C4 /* ios */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		9AFF18A180CC0DB8D6B3BD94 /* DurbunExample */ = {
+			isa = PBXGroup;
+			children = (
+				1239CE2C299EF81216AE231A /* ContentView.swift */,
+				91ED23E3AF13CE7F1FC6E6A6 /* Demo.swift */,
+				6AFA2DA74CDC80DF8F5B7B9D /* DemoServer.swift */,
+				2CAF6750B865C5B0502513C7 /* DurbunExampleApp.swift */,
+				5878D407A769CF6BE105D299 /* Info.plist */,
+				5C757C49D4ED128804412AFD /* WebPage.swift */,
+				A790FE540C83B274DCF9354F /* WebViewScreen.swift */,
+			);
+			path = DurbunExample;
+			sourceTree = "<group>";
+		};
+		B949E8A941DC567CEB40E268 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				13690C55866118319A380263 /* DurbunExample.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		BE3656251D57FF406CD3DFC1 = {
+			isa = PBXGroup;
+			children = (
+				9AFF18A180CC0DB8D6B3BD94 /* DurbunExample */,
+				4AEF277D7BDF03BABBC3E6EF /* Packages */,
+				B949E8A941DC567CEB40E268 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		5E697425DE3498BDABACC78F /* DurbunExample */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 78991D7979A1A47DFBA0B557 /* Build configuration list for PBXNativeTarget "DurbunExample" */;
+			buildPhases = (
+				C9147794EF3A9A66B9BEA7D8 /* Sources */,
+				9F35548C3C25552439AB2302 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DurbunExample;
+			packageProductDependencies = (
+				13D89B0EABD347B3F6D307DD /* Durbun */,
+			);
+			productName = DurbunExample;
+			productReference = 13690C55866118319A380263 /* DurbunExample.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		410C6341E82DBA6BDA976152 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					5E697425DE3498BDABACC78F = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 6392A8198A03FD93870B1C4A /* Build configuration list for PBXProject "DurbunExample" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = BE3656251D57FF406CD3DFC1;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				8FD6578BDDD977FD6309E460 /* XCLocalSwiftPackageReference ".." */,
+			);
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				5E697425DE3498BDABACC78F /* DurbunExample */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C9147794EF3A9A66B9BEA7D8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1F980654FBBB7A6DBAA56556 /* ContentView.swift in Sources */,
+				E1E23A90B03E35F674C534DD /* Demo.swift in Sources */,
+				76F8E60167A8411FE4AA868F /* DemoServer.swift in Sources */,
+				195A639DBD84395044395F8B /* DurbunExampleApp.swift in Sources */,
+				BB2579E5CAD53B28CC204EF7 /* WebPage.swift in Sources */,
+				C84111683EA3440881D731CA /* WebViewScreen.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		10B153FEBE306EF2A5D48BB5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		34E21614CDC4BFDB650A3D99 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		459B400D74821690FA602C29 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DurbunExample/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Dürbün example";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.durbun.sample;
+				PRODUCT_NAME = DurbunExample;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		9E20A51D88923910AC6D16DC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DurbunExample/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Dürbün example";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.durbun.sample;
+				PRODUCT_NAME = DurbunExample;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		6392A8198A03FD93870B1C4A /* Build configuration list for PBXProject "DurbunExample" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				34E21614CDC4BFDB650A3D99 /* Debug */,
+				10B153FEBE306EF2A5D48BB5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		78991D7979A1A47DFBA0B557 /* Build configuration list for PBXNativeTarget "DurbunExample" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9E20A51D88923910AC6D16DC /* Debug */,
+				459B400D74821690FA602C29 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		8FD6578BDDD977FD6309E460 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		13D89B0EABD347B3F6D307DD /* Durbun */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Durbun;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 410C6341E82DBA6BDA976152 /* Project object */;
+}

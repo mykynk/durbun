@@ -154,10 +154,12 @@ Not captured:
   `DurbunNetwork.webSocket`), `print` in background isolates and their requests until they call
   `Durbun.attachIsolate()`, and on Android package:http's `CronetClient` and `package:ok_http`. Dio's
   `NativeAdapter` needs [`durbun_dio`](https://pub.dev/packages/durbun_dio).
-- **iOS:** background URLSessions, WKWebView and AVPlayer traffic, WebSocket libraries that do not use
-  URLSession (Starscream's own engine, SocketRocket).
-- **Android:** `HttpURLConnection` (Volley, Media3's default data source, Ktor's CIO engine), Cronet, WebView
-  and native code. gRPC streams show their size only; a WebSocket opened with `client.newWebSocket` shows its
+- **iOS:** background URLSessions, AVPlayer traffic, WebSocket libraries that do not use URLSession
+  (Starscream's own engine, SocketRocket). A `WKWebView` page shows its fetch/XHR calls and console lines
+  after `DurbunWebView.attach(...)`; its page loads and images do not show.
+- **Android:** `HttpURLConnection` (Volley, Media3's default data source, Ktor's CIO engine), Cronet and native
+  code. A `WebView` page shows its fetch/XHR calls and console lines after `DurbunWebView.attach(webView)`; its
+  page loads and images do not show. gRPC streams show their size only; a WebSocket opened with `client.newWebSocket` shows its
   handshake only.
 - **React Native:** `<Image>` downloads, requests made by native modules and WebSocket classes that come from
   a package instead of the global `WebSocket`.

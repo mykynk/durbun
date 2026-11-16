@@ -34,3 +34,14 @@
 -dontwarn okio.Timeout
 # Durbun.start() looks this class up by name to leave Flutter apps to package:durbun (no-op elsewhere).
 -keepnames class dev.durbun.flutter.DurbunFlutterPlugin
+# DurbunWebView: pages report through this method, which the WebView calls by name.
+-keepclassmembers class dev.durbun.internal.WebViewChannel {
+    @android.webkit.JavascriptInterface <methods>;
+}
+# DurbunWebView runs its script at document start through androidx.webkit when the app has it (looked up by name).
+-keep class androidx.webkit.WebViewFeature {
+    public static boolean isFeatureSupported(java.lang.String);
+}
+-keep class androidx.webkit.WebViewCompat {
+    public static ** addDocumentStartJavaScript(android.webkit.WebView, java.lang.String, java.util.Set);
+}

@@ -376,6 +376,13 @@ All notable changes to Dürbün are listed here. The format follows
   handlers and `async` calls both work, with no code change.
 - iOS SDK: Server-Sent Events over URLSession show one row per event (`event`, `id`, `retry` and the data) as
   they arrive; the stream is no longer held as a response body.
+- Android SDK and iOS SDK: `DurbunWebView.attach(...)` shows what a page inside a `WebView` / `WKWebView` does:
+  its fetch and XMLHttpRequest calls in Network (client `webview:fetch` / `webview:xhr`) and its console lines
+  and uncaught errors in Logs (tag `webview`). On Android the page is covered from its first request when the
+  app has androidx.webkit; without it, call `DurbunWebView.onPageStarted`. `durbun-noop` has the same API.
+- Android SDK and iOS SDK: sample apps (`sdks/android/sample`, `sdks/ios/Example`) tour every feature against a
+  built-in local server.
+- iOS SDK: an API reference (DocC catalog `Durbun.docc`), set up for Swift Package Index (`.spi.yml`).
 - Flutter SDK: WebSocket messages and Server-Sent Events from dart:io (`WebSocket.connect`,
   `IOWebSocketChannel`, `package:http`, Dio) with no code change, compressed messages decoded; background
   isolates included. `DurbunNetwork.webSocket(...)` and `DurbunHttpCall.eventStream(...)` report sockets and

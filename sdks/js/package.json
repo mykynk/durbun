@@ -65,7 +65,9 @@
     "prepack": "npm run build",
     "smoke": "node scripts/smoke-dist.mjs",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "webview:generate": "node scripts/gen-webview-bridge.mjs",
+    "webview:check": "node scripts/gen-webview-bridge.mjs --check"
   },
   "devDependencies": {
     "ws": "^8.22.1",

@@ -615,6 +615,9 @@ internal class DurbunCore(
 
     fun nextRequestId(): String = "okhttp-" + requestSeq.incrementAndGet()
 
+    /** Ids of requests a web view page reported (`DurbunWebView`). */
+    fun nextWebViewRequestId(): String = "webview-" + requestSeq.incrementAndGet()
+
     fun findMock(method: String, url: String): MockRule? =
         if (options.captureNetwork) MockMatcher.find(mockRules, method, url, env.appId) else null
 

@@ -76,6 +76,8 @@ final class DurbunCore {
     /// `DurbunOptions.captureBodies` / `maxBodyBytes`: the app's values win over the desktop's.
     private var bodyOverride: (captureBodies: Bool?, maxBodyBytes: Int?) = (nil, nil)
     private var running = false
+    /// A start waits for the signing check (`startIfDevelopmentSigned`).
+    private var signingCheckPending = false
     private var connected = false
     private var transport: Transport?
     private var config = SdkConfig.defaults
@@ -140,6 +142,8 @@ final class DurbunCore {
     // MARK: State accessors (thread-safe)
 
     var isRunning: Bool { lock.withLock { running } }
+    /// `DurbunWebView` may attach: the SDK runs, or a start is waiting for the signing check.
+    var webViewBridgeAllowed: Bool { lock.withLock { running || signingCheckPending } }
     var isConnected: Bool { lock.withLock { connected } }
     /// The desktop's config with the app's own body settings applied (what network capture uses).
     var sdkConfig: SdkConfig {
@@ -179,6 +183,14 @@ final class DurbunCore {
         lock.withLock { transport }?.snapshot
     }
 
+    /// Ids of requests a web view page reported (`DurbunWebView`).
+    func nextWebViewRequestId() -> String {
+        lock.withLock {
+            requestCounter += 1
+            return "webview-\(requestCounter)"
+        }
+    }
+
     func nextRequestId() -> String {
         lock.withLock {
             requestCounter += 1
@@ -208,7 +220,10 @@ final class DurbunCore {
     func start(options: DurbunOptions) {
         lifecycle.lock()
         defer { lifecycle.unlock() }
-        lock.withLock { startRequest += 1 }
+        lock.withLock {
+            startRequest += 1
+            signingCheckPending = false
+        }
         startLocked(options: options, developmentSigned: false)
     }
 
@@ -333,14 +348,22 @@ final class DurbunCore {
     /// for development (`get-task-allow`, read from the embedded profile off the calling thread). The SDK
     /// then starts a moment later, from that background queue, unless `start`/`stop` was called meanwhile.
     private func startIfDevelopmentSigned(options: DurbunOptions) {
-        let request = lock.withLock { startRequest }
+        let request = lock.withLock { () -> Int in
+            signingCheckPending = true
+            return startRequest
+        }
         let known = overrides.developmentSigned
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let signed = known ?? BuildSignals.provisioningAllowsDebugging()
             guard let self else { return }
             self.lifecycle.lock()
             defer { self.lifecycle.unlock() }
-            guard self.lock.withLock({ self.startRequest == request }) else { return }
+            let current = self.lock.withLock { () -> Bool in
+                guard self.startRequest == request else { return false }
+                self.signingCheckPending = false
+                return true
+            }
+            guard current else { return }
             if signed == true {
                 Diagnostics.notice("Dürbün runs in this build without DEBUG because the app is signed for development (get-task-allow).")
                 self.startLocked(options: options, developmentSigned: true)
@@ -477,6 +500,7 @@ final class DurbunCore {
             generation += 1
             startRequest += 1
             running = false
+            signingCheckPending = false
             connected = false
             self.relay = nil
             self.hostLink = nil

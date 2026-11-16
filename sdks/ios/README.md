@@ -22,6 +22,7 @@ crashes, URLSession network traffic and performance metrics live to the Dürbün
 | Crashes | Uncaught Objective-C exceptions **immediately** (`kind: crash`). Swift runtime traps (force-unwrapping `nil`, index out of range, `fatalError`), EXC_BAD_ACCESS and other fatal signals **on the next launch**, with the last console lines ("Fatal error: …") and a backtrace |
 | Earlier launches (MetricKit) | What iOS reports later: watchdog kills (0x8badf00d), main-thread hangs, CPU and disk-write exceptions, slow launches (see [Earlier launches](#earlier-launches-metrickit)) |
 | Network | `URLSession.shared` **and** your own sessions (Alamofire included): headers, bodies, redirects, timings (DNS/TCP/TLS/wait/receive), protocol (h2/h3), errors and cancellations; `URLSessionWebSocketTask` messages and Server-Sent Events (see [WebSockets and Server-Sent Events](#websockets-and-server-sent-events)) |
+| Web views | `DurbunWebView.attach(to: configuration)`: the page's `fetch` / `XMLHttpRequest` calls and `console` lines (see [Web views](#web-views)) |
 | Mocks | Rules defined in the Mac app: synthesized responses, latency, natural failures (timeout, connection, DNS, TLS) |
 | Performance | CPU (%), memory (phys_footprint, the number Xcode shows), thread count, FPS and janky frames (CADisplayLink), launch time |
 | Events | `Durbun.event("purchase", ["amount": 49.9])` |
@@ -164,7 +165,8 @@ own session.
   256 KB (at least 1.25 MB); larger ones are streamed through. A streamed body cannot be rewound: a 307/308
   redirect or an authentication retry that has to resend it fails for that request. Smaller bodies and
   `httpBody` are resent as usual.
-- WKWebView and AVPlayer traffic does not go through URLSession protocols.
+- WKWebView and AVPlayer traffic does not go through URLSession protocols. A web view page's own calls can be
+  reported with [`DurbunWebView`](#web-views).
 - `redactHeaders` masks header values as `••••`; `ignoredHosts` leaves hosts (and their subdomains) out.
 
 #### WebSockets and Server-Sent Events
@@ -188,6 +190,32 @@ When the Mac app asks for them (it does by default), each `URLSessionWebSocketTa
 - Sockets opened before the Mac app asked for messages appear when it does, with their real handshake times and the
   messages from then on; a stream that was shown is always ended.
 - To find the task class it hooks, the SDK creates one WebSocket task at start and never resumes it.
+
+#### Web views
+
+A `WKWebView` loads pages outside URLSession, so the network capture above never sees them. `DurbunWebView`
+adds a small script to the page instead: its `fetch` and `XMLHttpRequest` calls (method, URL, status, headers,
+bodies, timings) appear in the Network tab as client `webview:fetch` / `webview:xhr`, and its `console.*` lines
+and uncaught errors in the log stream with the tag `webview`.
+
+```swift
+let configuration = WKWebViewConfiguration()
+DurbunWebView.attach(to: configuration)          // before the web view is created
+let webView = WKWebView(frame: .zero, configuration: configuration)
+```
+
+- The script runs at document start in every frame, before the page's own scripts. For a web view that already
+  exists, `DurbunWebView.attach(webView)` covers the pages it loads from then on.
+- The page sees no difference: the originals run with the same arguments and return the same results, bodies
+  are read from copies, and the script's own errors are swallowed. Bodies are cut at 64 KB in the page and
+  then follow the SDK's capture settings; `ignoredHosts` and `redactHeaders` apply.
+- The script reports through one script message handler, which the page can post to as well: an entry from a
+  web view is whatever the page claims. Messages are limited in size and rate; when a page sends too many, the
+  Mac app shows one line saying how many were dropped.
+- Not captured: the page's WebSocket and EventSource connections, `navigator.sendBeacon`, and what the page
+  loads itself (documents, images, scripts, styles).
+- Call it on the main thread. Nothing happens while Dürbün is not running: `attach` returns false and the
+  configuration is not touched.
 
 ### Logs and events
 
@@ -455,6 +483,34 @@ node scripts/generate-mock-vectors.mjs   # regenerates the mock-matching test ca
 
 The Flutter plugin carries an exact copy of these sources: after changing them, run
 `dart run tool/sync_native.dart` in `sdks/flutter/durbun`.
+
+The web view script is written once, in `sdks/js/webview/bridge.ts`, with its tests in `sdks/js`.
+`DurbunWebView` embeds a generated copy (`Sources/Durbun/WebView/WebViewBridgeScript.swift`); after changing the
+script, run `npm run webview:generate -w @durbun/react-native` from the repository root (`webview:check` fails
+when a copy is out of date).
+
+### API reference
+
+The package has a DocC catalog (`Sources/Durbun/Durbun.docc`) with articles on setup, network capture,
+WebSockets and event streams, logs, app tools, options, web views and what is not captured. In Xcode choose
+**Product → Build Documentation**, or from the command line:
+
+```bash
+xcodebuild docbuild -scheme Durbun -destination 'generic/platform=iOS Simulator' -derivedDataPath .build/docs
+```
+
+### Example app
+
+`Example/DurbunExample.xcodeproj` is a small SwiftUI app that shows each part of the SDK: URLSession calls
+(success, 404, slow, failing), a WebSocket, a Server-Sent Events stream, a log line at each level, an event,
+crashes, app tools and a web view page with `DurbunWebView`. It talks to a tiny server it runs itself on
+127.0.0.1, so it needs no network, and it uses this folder's package by path. Open it in Xcode and run it on a
+simulator; for a device, choose your own team under Signing. From the command line:
+
+```bash
+cd sdks/ios/Example
+xcodebuild -project DurbunExample.xcodeproj -scheme DurbunExample -destination 'generic/platform=iOS Simulator' -quiet build
+```
 
 ### Unreleased changes from a clone
 

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The platform's Material theme (API 21+): no AndroidX needed. -->
+    <style name="SampleTheme" parent="@android:style/Theme.Material.Light.DarkActionBar">
+        <item name="android:colorPrimary">#5B4BE0</item>
+        <item name="android:colorPrimaryDark">#4B3BD0</item>
+        <item name="android:colorAccent">#5B4BE0</item>
+    </style>
+</resources>

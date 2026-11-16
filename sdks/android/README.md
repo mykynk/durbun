@@ -25,6 +25,7 @@ run code inside the app.
 | `Durbun.log(...)`, Timber | Sent by the SDK as structured entries: tag, level, JSON data and full stack trace |
 | The app's own logcat over Wi-Fi (no adb) | Read and forwarded by the SDK (multi-line messages are merged back) |
 | Network (OkHttp) | `DurbunInterceptor`; DNS / connect / TLS times with `DurbunEventListenerFactory`; WebSocket messages with `DurbunWebSocketFactory` |
+| Web views | `DurbunWebView.attach(webView)`: the page's `fetch` / `XMLHttpRequest` calls and `console` lines (see [Web views](#web-views)) |
 | Crashes | Uncaught exceptions; a crash that cannot reach the Mac app is sent on the next launch |
 | How earlier launches ended | ANRs, native crashes and kills by the system, on the next launch (Android 11+, see [Earlier launches](#earlier-launches-anrs-native-crashes-system-kills)) |
 
@@ -193,7 +194,8 @@ val client = OkHttpClient.Builder()
 Add it to the clients that Retrofit, Coil, Glide's OkHttp integration (`okhttp3-integration`) and Ktor's
 OkHttp engine build for themselves. Traffic over `HttpURLConnection` is not seen: Volley (`HurlStack`),
 ExoPlayer / Media3 `DefaultHttpDataSource`, Glide's default loader, Ktor's CIO and Android engines, Cronet,
-WebView and native (C/C++) code. When OkHttp is in the app but no `DurbunInterceptor` was created 30 seconds
+and native (C/C++) code. A `WebView` is not seen either, unless the page's calls are reported with
+[`DurbunWebView`](#web-views). When OkHttp is in the app but no `DurbunInterceptor` was created 30 seconds
 after start, the Mac app shows one line saying so, so an empty network list has a reason.
 
 #### WebSockets and Server-Sent Events
@@ -226,6 +228,38 @@ A long-lived connection is one entry in the network list, with its messages in t
   busy socket never pushes out logs or requests: when the SDK's buffer is full, the oldest stream messages are
   dropped first.
 - `durbun-noop` has the same factory: it opens the socket exactly as `client.newWebSocket(...)` would.
+
+#### Web views
+
+A `WebView` loads pages with its own network stack, so `DurbunInterceptor` never sees them. `DurbunWebView`
+adds a small script to the page instead: its `fetch` and `XMLHttpRequest` calls (method, URL, status, headers,
+bodies, timings) appear in the network list as client `webview:fetch` / `webview:xhr`, and its `console.*`
+lines and uncaught errors in the log stream with the tag `webview`.
+
+```kotlin
+webView.settings.javaScriptEnabled = true
+DurbunWebView.attach(webView)                 // before the first loadUrl
+webView.webViewClient = object : WebViewClient() {
+    override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+        DurbunWebView.onPageStarted(view)     // needed when the app does not have androidx.webkit
+    }
+}
+```
+
+- When the app has androidx.webkit (most apps do, through AppCompat or Compose) and the device's WebView
+  supports document-start scripts, the script runs in every frame before the page's own scripts. Otherwise
+  `onPageStarted` adds it to the main frame when a page starts loading, and requests made before that are
+  missed. Dürbün does not add androidx.webkit to your app.
+- The page sees no difference: the originals run with the same arguments and return the same results, bodies
+  are read from copies, and the script's own errors are swallowed. Bodies are cut at 64 KB in the page and
+  then follow the SDK's capture settings; `ignoredHosts` and `redactHeaders` apply.
+- The script reports through one JavaScript interface with a single method, which the page can call as well:
+  an entry from a web view is whatever the page claims. Messages are limited in size and rate; when a page
+  sends too many, the Mac app shows one line saying how many were dropped.
+- Not captured: the page's WebSocket and EventSource connections, `navigator.sendBeacon`, and what the page
+  loads itself (documents, images, scripts, styles).
+- Nothing happens while Dürbün is not running: `attach` returns false and the web view is not touched.
+  `durbun-noop` has the same object, doing nothing.
 
 ### Logs and events
 
@@ -525,6 +559,27 @@ reference `mockRuleMatches` function. To regenerate it, run this from the reposi
 After a build, run `python3 -I tools/check-binary-compat.py`. It checks `durbun` / `durbun-noop` API parity,
 binary compatibility with OkHttp 3.14 + Okio 1.x, and that the consumer R8 rules cover every referenced
 OkHttp/Okio class.
+
+The web view script is written once, in `sdks/js/webview/bridge.ts`, with its tests in `sdks/js`.
+`DurbunWebView` embeds a generated copy (`durbun/src/main/kotlin/dev/durbun/internal/WebViewBridgeScript.kt`);
+after changing the script, run `npm run webview:generate -w @durbun/react-native` from the repository root
+(`webview:check` fails when a copy is out of date).
+
+### Sample app
+
+`sample/` is a small app that shows each part of the SDK: OkHttp calls through `DurbunInterceptor` (success,
+404, slow, failing), a WebSocket through `DurbunWebSocketFactory`, a Server-Sent Events stream, a log line at
+each level, an event, a crash and app tools (`Durbun.addAction`), plus a web view page with `DurbunWebView`. It talks
+to a tiny server it runs itself on 127.0.0.1, so it needs no network. Its debug build uses `durbun`, its release
+build `durbun-noop`.
+
+```bash
+cd sdks/android
+./gradlew :sample:installDebug      # or :sample:assembleDebug
+```
+
+The sample is only part of the build when a `:sample:` task is asked for (or Android Studio syncs the project),
+so the commands above that build the SDK do not build it.
 
 ### Unreleased changes from a clone
 

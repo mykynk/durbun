@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Plain HTTP only to the demo server inside the app (127.0.0.1); everything else keeps ATS. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<!-- Only for Wi-Fi connections to the Mac (DurbunOptions.host); USB and the Simulator need no permission. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Sends this app's logs and network traffic to the Dürbün app on your Mac.</string>
+</dict>
+</plist>
