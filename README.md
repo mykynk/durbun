@@ -71,6 +71,12 @@ Download the DMG for your Mac from [GitHub Releases](https://github.com/mykynk/d
 `Durbun-<version>-arm64.dmg` for Apple silicon, `Durbun-<version>-x64.dmg` for Intel. Open it and drag
 Dürbün to Applications. Requires macOS 13 Ventura or later.
 
+Or with [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask mykynk/tap/durbun
+```
+
 Release builds are signed with a Developer ID and notarized by Apple, so they open like any other app.
 
 **Dürbün → Check for Updates…** looks for a new version. If one is out, Dürbün shows what is new and asks
@@ -334,6 +340,9 @@ Settings, mock rules, flows, environments and run history live in `~/.durbun`.
    - `~/Library/Saved Application State/dev.durbun.desktop.savedState`: the window state macOS saves, if
      present.
 4. Remove the SDK packages from your apps.
+
+Installed with Homebrew: `brew uninstall --cask durbun` does steps 1 and 2; add `--zap` to delete the data in step 3
+too.
 
 ## Contributing
 

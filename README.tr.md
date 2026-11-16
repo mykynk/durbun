@@ -72,6 +72,12 @@ Mac'inize uygun DMG'yi [GitHub Releases](https://github.com/mykynk/durbun/releas
 indirin: Apple silicon için `Durbun-<sürüm>-arm64.dmg`, Intel için `Durbun-<sürüm>-x64.dmg`. Açıp Dürbün'ü
 Uygulamalar klasörüne sürükleyin. macOS 13 Ventura veya üstü gerekir.
 
+Ya da [Homebrew](https://brew.sh) ile:
+
+```sh
+brew install --cask mykynk/tap/durbun
+```
+
 Yayın paketleri Developer ID ile imzalı ve Apple onaylıdır (notarized); her uygulama gibi açılır.
 
 **Dürbün → Güncellemeleri Denetle…** yeni bir sürüm olup olmadığına bakar. Varsa Dürbün yenilikleri gösterir
@@ -342,6 +348,9 @@ Ayarlar, mock kuralları, akışlar, ortamlar ve çalıştırma geçmişi `~/.du
    - `~/Library/Saved Application State/dev.durbun.desktop.savedState`: macOS'in kaydettiği pencere durumu
      (varsa).
 4. Uygulamalarınıza eklediğiniz SDK paketlerini kaldırın.
+
+Homebrew ile kurduysanız: `brew uninstall --cask durbun` 1. ve 2. adımları yapar; 3. adımdaki verileri de silmek
+için `--zap` ekleyin.
 
 ## Katkıda bulunma
 
