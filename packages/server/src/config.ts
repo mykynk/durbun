@@ -50,12 +50,12 @@ export const SETTINGS_LIMITS = {
 } as const;
 
 type NumericKey = keyof typeof SETTINGS_LIMITS;
-type BooleanKey = 'captureBodies' | 'autoAttachVmService' | 'allowLan';
+type BooleanKey = 'captureBodies' | 'captureStreams' | 'autoAttachVmService' | 'allowLan';
 type PathKey = 'adbPath' | 'idevicesyslogPath';
 type SettingsKey = keyof ServerSettings;
 
 const NUMERIC_KEYS = Object.keys(SETTINGS_LIMITS) as NumericKey[];
-const BOOLEAN_KEYS: BooleanKey[] = ['captureBodies', 'autoAttachVmService', 'allowLan'];
+const BOOLEAN_KEYS: BooleanKey[] = ['captureBodies', 'captureStreams', 'autoAttachVmService', 'allowLan'];
 const PATH_KEYS: PathKey[] = ['adbPath', 'idevicesyslogPath'];
 const ENUMS = {
   iosSimLogScope: ['apps', 'all'],

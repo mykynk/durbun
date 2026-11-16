@@ -161,7 +161,7 @@ function splitTarget(raw: string | undefined): { pathname: string; query: URLSea
   return { pathname: pathname.startsWith('/') ? pathname : `/${pathname}`, query: new URLSearchParams(q >= 0 ? target.slice(q + 1) : '') };
 }
 
-const SDK_CONFIG_KEYS = ['captureBodies', 'maxBodyBytes', 'metricsIntervalMs'] as const;
+const SDK_CONFIG_KEYS = ['captureBodies', 'maxBodyBytes', 'metricsIntervalMs', 'captureStreams'] as const;
 
 export function createHttpApp(deps: HttpAppDeps): HttpApp {
   const { hub, sdk, config, logger } = deps;
@@ -328,7 +328,12 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
         }
         if (SDK_CONFIG_KEYS.some((k) => settings[k] !== previous[k])) {
           try {
-            sdk.setConfig({ captureBodies: settings.captureBodies, maxBodyBytes: settings.maxBodyBytes, metricsIntervalMs: settings.metricsIntervalMs });
+            sdk.setConfig({
+              captureBodies: settings.captureBodies,
+              maxBodyBytes: settings.maxBodyBytes,
+              metricsIntervalMs: settings.metricsIntervalMs,
+              captureStreams: settings.captureStreams !== false,
+            });
           } catch (err) {
             logger.error(`sdk.setConfig failed: ${errorMessage(err)}`);
           }

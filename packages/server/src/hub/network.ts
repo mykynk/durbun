@@ -12,10 +12,27 @@ import type {
   SdkNetError,
   SdkNetRequest,
   SdkNetResponse,
+  SdkNetSse,
+  SdkNetWs,
+  StreamInfo,
+  StreamKind,
+  StreamMessage,
   WireBody,
 } from '@durbun/protocol';
 import { isTextContentType } from '@durbun/protocol';
 import { detectGraphql } from './graphql';
+import { capBody, StreamStore } from './streams';
+
+/** Error of the open streams of an app that disconnected (they cannot go on without it). */
+export const STREAM_APP_GONE = 'The app disconnected';
+/** Open streams the entry limit passes over (the connection the user watches stays) before it takes one anyway. */
+const MAX_PROTECTED_OPEN_STREAMS = 100;
+
+function newStream(kind: StreamKind, openTs: number | undefined): StreamInfo {
+  const info: StreamInfo = { kind, state: 'open', count: 0, in: 0, out: 0, control: 0, bytesIn: 0, bytesOut: 0, dropped: 0, lastSeq: 0 };
+  if (openTs !== undefined) info.openTs = openTs;
+  return info;
+}
 
 export const DISCONNECTED_ERROR = 'App disconnected before the response arrived';
 
@@ -29,7 +46,11 @@ export interface NetworkLimits {
   maxEntries: number;
   /** Total body budget in bytes (approximated by the in-memory string length of `data`). */
   maxBodyBytes: number;
+  /** Total budget of stream messages in bytes (hub/streams.ts). Absent: a quarter of the body budget. */
+  maxStreamBytes?: number;
 }
+
+const streamBudget = (l: NetworkLimits): number => l.maxStreamBytes ?? Math.floor(l.maxBodyBytes / 4);
 
 export function headerValue(headers: Header[] | undefined, name: string): string | undefined {
   if (!headers) return undefined;
@@ -112,6 +133,8 @@ export class NetworkStore {
   /** Change counter: bumped on every notified change; `revisions` holds each entry's latest (resume). */
   private changeSeq = 0;
   private readonly revisions = new Map<string, number>();
+  /** Messages of stream entries (created in the constructor: it reports drops into the entries). */
+  private readonly streams: StreamStore;
 
   constructor(
     private limits: NetworkLimits,
@@ -121,7 +144,19 @@ export class NetworkStore {
     private readonly onEvict?: (eviction: NetworkEviction) => void,
     /** Called once per request a mock rule answered (its response or failure arrived with `mockRuleId`). */
     private readonly onMockHit?: (entry: NetworkEntry) => void,
-  ) {}
+  ) {
+    this.streams = new StreamStore({ maxBytes: streamBudget(limits) }, (id, count) => {
+      const entry = this.entries.get(id);
+      if (!entry?.stream) return;
+      entry.stream = { ...entry.stream, dropped: entry.stream.dropped + count };
+      this.onChange(entry);
+    });
+  }
+
+  /** Bytes held by stream messages. */
+  get streamBytes(): number {
+    return this.streams.bytes;
+  }
 
   get size(): number {
     return this.entries.size;
@@ -169,20 +204,98 @@ export class NetworkStore {
     return this.entries.values();
   }
 
-  detail(id: string): NetworkDetail | undefined {
+  /** The entry with its bodies; `withMessages`: also its stream messages (export, HAR). */
+  detail(id: string, withMessages = false): NetworkDetail | undefined {
     const entry = this.entries.get(id);
     if (!entry) return undefined;
     const stored = this.bodies.get(id);
     const detail: NetworkDetail = { ...entry };
     if (stored?.request) detail.requestBody = stored.request;
     if (stored?.response) detail.responseBody = stored.response;
+    if (withMessages && this.streams.has(id)) detail.streamMessages = this.streams.all(id);
     return detail;
+  }
+
+  /** Stream messages of an entry with seq > `after` (undefined: no such entry). */
+  streamPage(id: string, after = 0, limit = 500): { messages: StreamMessage[]; more: boolean; stream?: StreamInfo } | undefined {
+    const entry = this.entries.get(id);
+    if (!entry) return undefined;
+    const page = this.streams.page(id, after, limit);
+    return entry.stream ? { ...page, stream: entry.stream } : page;
   }
 
   setLimits(limits: NetworkLimits): void {
     this.limits = limits;
     this.enforceEntryLimit();
     this.enforceBodyBudget();
+    this.streams.setLimits({ maxBytes: streamBudget(limits) });
+  }
+
+  /**
+   * Applies a `net.ws` / `net.sse` of entry `id` (the handshake request). Undefined when the entry is unknown
+   * (never seen, or already deleted): the message is ignored.
+   */
+  streamMessage(id: string, msg: SdkNetWs | SdkNetSse): NetworkEntry | undefined {
+    const entry = this.entries.get(id);
+    if (!entry) return undefined;
+    const kind: StreamKind = msg.type === 'net.ws' ? 'websocket' : 'sse';
+    const info: StreamInfo = entry.stream ? { ...entry.stream } : newStream(kind, entry.state === 'complete' ? entry.endTs : undefined);
+    if (msg.type === 'net.sse' && msg.end) {
+      if (info.state === 'open') {
+        info.state = 'closed';
+        info.closedTs = msg.ts;
+      }
+      entry.stream = info;
+      this.onChange(entry);
+      return entry;
+    }
+    const message: StreamMessage =
+      msg.type === 'net.ws'
+        ? { seq: info.lastSeq + 1, ts: msg.ts, dir: msg.dir, type: msg.opcode, size: msg.size }
+        : { seq: info.lastSeq + 1, ts: msg.ts, dir: 'in', type: 'event', size: msg.size ?? msg.body?.size ?? 0 };
+    if (msg.body) message.body = capBody(msg.body);
+    if (msg.type === 'net.ws') {
+      if (msg.closeCode !== undefined) message.closeCode = msg.closeCode;
+      if (msg.closeReason) message.closeReason = msg.closeReason;
+    } else {
+      if (msg.event) message.event = msg.event;
+      if (msg.eventId !== undefined) message.eventId = msg.eventId;
+      if (msg.retry !== undefined) message.retry = msg.retry;
+    }
+    info.lastSeq = message.seq;
+    info.lastTs = message.ts;
+    info.count++;
+    if (message.dir === 'in') {
+      info.in++;
+      info.bytesIn += message.size;
+    } else {
+      info.out++;
+      info.bytesOut += message.size;
+    }
+    if (message.type === 'ping' || message.type === 'pong') info.control++;
+    if (message.type === 'close' && info.state === 'open') {
+      info.state = 'closed';
+      info.closedTs = message.ts;
+      info.closedBy = message.dir;
+      if (message.closeCode !== undefined) info.closeCode = message.closeCode;
+      if (message.closeReason) info.closeReason = message.closeReason;
+    }
+    entry.stream = info;
+    this.streams.add(id, message);
+    this.onChange(entry);
+    return entry;
+  }
+
+  /** The app is gone: its open streams end (`failed`, STREAM_APP_GONE). */
+  endStreams(appId: string, ts: number): NetworkEntry[] {
+    const ended: NetworkEntry[] = [];
+    for (const entry of this.entries.values()) {
+      if (entry.appId !== appId || entry.stream?.state !== 'open') continue;
+      entry.stream = { ...entry.stream, state: 'failed', closedTs: Math.max(ts, entry.stream.lastTs ?? 0), error: STREAM_APP_GONE };
+      ended.push(entry);
+      this.onChange(entry);
+    }
+    return ended;
   }
 
   /**
@@ -258,6 +371,14 @@ export class NetworkStore {
     entry.mocked = msg.mocked || undefined;
     entry.mockRuleId = msg.mockRuleId;
     delete entry.error;
+    // A 101 is a WebSocket; SSE response headers without a body are a stream that has just opened (an SDK that
+    // reports the whole SSE body at the end is a plain response).
+    if (!entry.stream) {
+      if (msg.status === 101) entry.stream = newStream('websocket', msg.ts);
+      else if (!msg.body && entry.responseContentType?.toLowerCase().startsWith('text/event-stream')) entry.stream = newStream('sse', msg.ts);
+    } else if (entry.stream.openTs === undefined) {
+      entry.stream = { ...entry.stream, openTs: msg.ts };
+    }
     cleanUndefined(entry);
     if (msg.body) this.storeBody(id, 'response', msg.body);
     this.onChange(entry);
@@ -266,7 +387,20 @@ export class NetworkStore {
   }
 
   error(id: string, appId: string | undefined, deviceId: string, msg: SdkNetError): NetworkEntry {
-    const entry = this.entries.get(id) ?? this.placeholder(id, appId, deviceId, msg.ts);
+    const existing = this.entries.get(id);
+    // An opened stream that broke: the handshake stays complete, the stream failed.
+    if (existing?.stream && existing.state === 'complete') {
+      const stream = existing.stream;
+      if (stream.state === 'open') {
+        // Cancelled: the app closed it without a close frame (an SSE reader stopped); else the connection broke.
+        existing.stream = msg.cancelled
+          ? { ...stream, state: 'closed', closedTs: msg.ts, closedBy: 'out' }
+          : { ...stream, state: 'failed', closedTs: msg.ts, error: msg.error };
+        this.onChange(existing);
+      }
+      return existing;
+    }
+    const entry = existing ?? this.placeholder(id, appId, deviceId, msg.ts);
     const hit = isNewMockHit(entry, msg);
     entry.state = msg.cancelled ? 'cancelled' : 'failed';
     entry.error = msg.error;
@@ -308,7 +442,7 @@ export class NetworkStore {
 
   /** Inserts a fully-formed entry (desktop replay, import) with its bodies. */
   record(detail: NetworkDetail): NetworkEntry {
-    const { requestBody, responseBody, ...rest } = detail;
+    const { requestBody, responseBody, streamMessages, ...rest } = detail;
     const entry: NetworkEntry = { ...rest, requestHeaders: Array.isArray(rest.requestHeaders) ? rest.requestHeaders : [] };
     const { host, path } = rest.host || rest.path ? { host: rest.host, path: rest.path } : splitUrl(rest.url);
     entry.host = host ?? '';
@@ -328,6 +462,13 @@ export class NetworkStore {
     this.insert(entry);
     if (requestBody) this.storeBody(entry.id, 'request', requestBody);
     if (responseBody) this.storeBody(entry.id, 'response', responseBody);
+    if (entry.stream && streamMessages?.length) {
+      // Recorded messages keep their seq (gaps = what the recording had dropped); the store's limits apply as
+      // they arrive (what does not fit counts as dropped).
+      const sorted = [...streamMessages].sort((a, b) => a.seq - b.seq);
+      for (const m of sorted) this.streams.add(entry.id, m);
+      entry.stream = { ...entry.stream, lastSeq: Math.max(entry.stream.lastSeq, sorted.at(-1)!.seq) };
+    }
     this.onChange(entry);
     return entry;
   }
@@ -348,6 +489,7 @@ export class NetworkStore {
     this.revisions.clear();
     this.bodies.clear();
     this.storedBytes = 0;
+    this.streams.clear();
   }
 
   /** Ids whose URL, headers or text bodies contain `text`. */
@@ -394,7 +536,8 @@ export class NetworkStore {
     const headersHave = (headers: Header[] | undefined) => !!headers && headers.some(([k, v]) => has(`${k}: ${v}`));
     if (has(e.url) || has(e.error) || headersHave(e.requestHeaders) || headersHave(e.responseHeaders)) return true;
     const stored = this.bodies.get(e.id);
-    return has(bodyText(stored?.request, e.requestContentType)) || has(bodyText(stored?.response, e.responseContentType));
+    if (has(bodyText(stored?.request, e.requestContentType)) || has(bodyText(stored?.response, e.responseContentType))) return true;
+    return e.stream !== undefined && this.streams.matches(e.id, has);
   }
 
   private placeholder(id: string, appId: string | undefined, deviceId: string, ts: number): NetworkEntry {
@@ -425,6 +568,7 @@ export class NetworkStore {
   private remove(id: string): void {
     if (!this.entries.delete(id)) return;
     this.revisions.delete(id);
+    this.streams.forget(id);
     const stored = this.bodies.get(id);
     if (stored) {
       this.storedBytes -= stored.bytes;
@@ -435,10 +579,21 @@ export class NetworkStore {
   private enforceEntryLimit(): void {
     const max = Math.max(1, Math.floor(this.limits.maxEntries));
     while (this.entries.size > max) {
-      const oldest = this.entries.entries().next();
-      if (oldest.done) break;
-      this.remove(oldest.value[0]);
-      this.evicted({ kind: 'entry', entry: oldest.value[1] });
+      // The oldest entry, passing over open streams (a chat socket opened an hour ago is the one being watched).
+      let victim: NetworkEntry | undefined;
+      let passed = 0;
+      for (const e of this.entries.values()) {
+        if (e.stream?.state === 'open' && passed < MAX_PROTECTED_OPEN_STREAMS) {
+          passed++;
+          continue;
+        }
+        victim = e;
+        break;
+      }
+      victim ??= this.entries.values().next().value;
+      if (!victim) break;
+      this.remove(victim.id);
+      this.evicted({ kind: 'entry', entry: victim });
     }
   }
 

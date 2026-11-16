@@ -315,7 +315,8 @@ export interface DeviceApp {
 
 export type SdkPlatform = 'flutter' | 'android' | 'ios' | 'react-native' | 'js' | 'dart-vm' | 'demo';
 export type Transport = 'adb-reverse' | 'usbmux' | 'tcp' | 'websocket' | 'vm-service' | 'demo' | 'import';
-export type SdkCapability = 'logs' | 'network' | 'mocks' | 'metrics' | 'events' | 'crash' | 'commands';
+/** `streams`: the SDK can send `net.ws` / `net.sse` (it still sends them only when `config.captureStreams` is true). */
+export type SdkCapability = 'logs' | 'network' | 'mocks' | 'metrics' | 'events' | 'crash' | 'commands' | 'streams';
 /**
  * Layers inside the app that feed one session (SPEC §10.6): 'dart' = the Flutter / Dart side; 'android' /
  * 'ios' = the plugin's native core is attached (native logs, native crashes, OkHttp via DurbunInterceptor /
@@ -496,12 +497,116 @@ export interface NetworkEntry {
    * keeps what could be read (method, URL) without headers or body.
    */
   tooLarge?: { part: 'request' | 'response'; bytes: number; limit: number };
+  /**
+   * A WebSocket (101 handshake) or Server-Sent Events stream: its state and message counts. The messages
+   * themselves: GET /api/network/:id/messages (StreamMessage). Optional for older servers.
+   */
+  stream?: StreamInfo;
 }
 
 export interface NetworkDetail extends NetworkEntry {
   requestBody?: WireBody;
   responseBody?: WireBody;
+  /**
+   * The stream's messages the server still holds, oldest first (session export / import and HAR only; the
+   * request's REST detail leaves them out: page through GET /api/network/:id/messages instead).
+   */
+  streamMessages?: StreamMessage[];
 }
+
+/* ────────────────────────────── Stream messages (WebSocket, Server-Sent Events) ────────────────────────────── */
+/*
+ * A long-lived connection is ONE network entry (the handshake request; its response is the 101 / the SSE
+ * response headers) plus its messages. SDKs send them as `net.ws` / `net.sse` (SDK wire protocol below,
+ * SPEC §6.1.1); the server numbers them per connection (`seq`) in arrival order and keeps them within limits.
+ *
+ * gRPC (and other HTTP/2 streams) is out on purpose: a call there is a sequence of length-prefixed protobuf
+ * messages inside one request / response body, each side able to stream, ended by trailers (grpc-status,
+ * grpc-message). It would need a `net.grpc` message per message (dir, compressed flag, protobuf bytes),
+ * trailers on the entry and a schema (descriptor set / reflection) to show anything better than bytes.
+ */
+
+/** What kind of long-lived connection an entry is. */
+export type StreamKind = 'websocket' | 'sse';
+
+/** WebSocket frame opcodes Dürbün keeps (continuation frames are joined into one message by the SDK). */
+export type WsOpcode = 'text' | 'binary' | 'ping' | 'pong' | 'close';
+
+/** One WebSocket message or one SSE event of a stream entry, as the server keeps it. */
+export interface StreamMessage {
+  /**
+   * Position in the connection, 1-based, assigned by the server in arrival order. Order by it (not by `ts`):
+   * a gap means the limits dropped the messages in between (StreamInfo.dropped).
+   */
+  seq: number;
+  /** Device clock, epoch ms. "Time since open" = ts − StreamInfo.openTs. */
+  ts: number;
+  /** 'out' = the app sent it, 'in' = the app received it (SSE events are always 'in'). */
+  dir: 'in' | 'out';
+  /** WebSocket opcode, or 'event' for one SSE event. */
+  type: WsOpcode | 'event';
+  /** Full payload size in bytes, also when `body` was cut or left out. */
+  size: number;
+  /**
+   * The payload (text → utf8, binary → base64), capped at SdkConfig.maxStreamMessageBytes (`truncated`).
+   * Absent when payloads are not captured (captureBodies off) or the frame had none.
+   */
+  body?: WireBody;
+  /** type 'close': the close code (1000 normal, 1001 going away, …) and reason, when the frame carried them. */
+  closeCode?: number;
+  closeReason?: string;
+  /** SSE: the `event:` field (absent = the default "message"). */
+  event?: string;
+  /** SSE: the `id:` field. */
+  eventId?: string;
+  /** SSE: the `retry:` field, ms. */
+  retry?: number;
+}
+
+/** A stream entry's state and counts (NetworkEntry.stream). Counts include messages the limits dropped since. */
+export interface StreamInfo {
+  kind: StreamKind;
+  /**
+   * 'open' until a close frame (either side) / the SSE end / an error; 'failed' when the connection broke
+   * (`error`); an app that disconnects closes its open streams.
+   */
+  state: 'open' | 'closed' | 'failed';
+  /** The handshake's response (101 / SSE headers), epoch ms. */
+  openTs?: number;
+  closedTs?: number;
+  /** Who closed first: 'out' the app, 'in' the server. Absent when the connection just went away. */
+  closedBy?: 'in' | 'out';
+  closeCode?: number;
+  closeReason?: string;
+  /** Why the stream failed (the SDK's `net.error` after the connection opened). */
+  error?: string;
+  /** Every message received so far, dropped ones included. */
+  count: number;
+  in: number;
+  out: number;
+  /** Ping / pong frames among `count` (keep-alive noise the view can hide). */
+  control: number;
+  /** Full payload bytes received / sent. */
+  bytesIn: number;
+  bytesOut: number;
+  /** Messages the limits deleted (oldest first; the first STREAM_HEAD_KEPT of a connection are kept longest). */
+  dropped: number;
+  /** `seq` of the newest message (0 = none yet): fetch the messages after the seq you hold. */
+  lastSeq: number;
+  lastTs?: number;
+}
+
+/** Answer of GET /api/network/:id/messages?after=<seq>&limit=<n> (seq order, oldest first). */
+export interface StreamMessagesPage {
+  messages: StreamMessage[];
+  /** The entry's stream (counts and state at the time of the answer). */
+  stream?: StreamInfo;
+  /** More messages after the last one returned: ask again with `after` = its seq. */
+  more: boolean;
+}
+
+/** Limits of stream messages: the server keeps these first messages of a connection longest (handshake, auth, subscribe). */
+export const STREAM_HEAD_KEPT = 100;
 
 /* ────────────────────────────── Metrics ────────────────────────────── */
 
@@ -769,6 +874,12 @@ export interface ServerSettings {
   /** Total in-memory body budget on the server. */
   maxBodyStoreMB: number;
   captureBodies: boolean;
+  /**
+   * Capture WebSocket messages and SSE events of the apps (SDKs with the `streams` capability). Their payloads
+   * follow `captureBodies`; one payload is kept up to min(maxBodyBytes, 64 KiB). Optional for older servers
+   * (absent = on).
+   */
+  captureStreams?: boolean;
   /** Lines of existing logcat history to load when a device connects. */
   logcatTail: number;
   iosSimLogScope: 'apps' | 'all';
@@ -795,6 +906,7 @@ export const DEFAULT_SETTINGS: ServerSettings = {
   maxBodyBytes: 1_048_576,
   maxBodyStoreMB: 256,
   captureBodies: true,
+  captureStreams: true,
   logcatTail: 2_000,
   iosSimLogScope: 'apps',
   iosSimLogLevel: 'info',
@@ -1166,6 +1278,50 @@ export interface SdkNetError {
   mockRuleId?: string;
 }
 
+/**
+ * One WebSocket message of the connection whose handshake was `net.request` `id` (SPEC §6.1.1). Send it only
+ * while `config.captureStreams` is true (an older server leaves it out of the config and would count the message
+ * as an unknown type). Continuation frames are joined: one message per text / binary message.
+ */
+export interface SdkNetWs {
+  type: 'net.ws';
+  /** The handshake request's id (the `net.request` that got the 101). */
+  id: string;
+  ts: number;
+  dir: 'in' | 'out';
+  opcode: WsOpcode;
+  /** Full payload size in bytes. */
+  size: number;
+  /** Payload capped at `config.maxStreamMessageBytes` (text utf8, binary base64); none when captureBodies is off. */
+  body?: WireBody;
+  /** opcode 'close': the code and reason of the close frame. */
+  closeCode?: number;
+  closeReason?: string;
+}
+
+/**
+ * One Server-Sent Events event of the response to `net.request` `id` (send the `net.response` as soon as the
+ * headers arrive, without a body), or `end: true` when the stream ended normally (a broken stream: `net.error`).
+ * Same gating as `net.ws`.
+ */
+export interface SdkNetSse {
+  type: 'net.sse';
+  id: string;
+  ts: number;
+  /** `event:` field (omit for the default "message"). */
+  event?: string;
+  /** `id:` field. */
+  eventId?: string;
+  /** `retry:` field, ms. */
+  retry?: number;
+  /** Full size of `data` in bytes (UTF-8). */
+  size?: number;
+  /** The `data:` lines joined with "\n", utf8, capped like `net.ws`. */
+  body?: WireBody;
+  /** The stream ended normally (no other field needed). */
+  end?: boolean;
+}
+
 export interface SdkEvent {
   type: 'event';
   ts: number;
@@ -1210,6 +1366,8 @@ export type SdkToServer =
   | SdkNetRequest
   | SdkNetResponse
   | SdkNetError
+  | SdkNetWs
+  | SdkNetSse
   | SdkEvent
   | SdkMetric
   | SdkCommandResult
@@ -1222,6 +1380,12 @@ export interface SdkConfig {
   metricsIntervalMs: number;
   /** The desktop already receives this device's logs (stdout of the app included where the OS logs it). */
   deviceLogsAvailable: boolean;
+  /**
+   * Send `net.ws` / `net.sse` messages. Absent (an older server) or false: send none. Optional for older servers.
+   */
+  captureStreams?: boolean;
+  /** Payload cap of one stream message in bytes (0: send none, only sizes). Optional for older servers. */
+  maxStreamMessageBytes?: number;
 }
 
 export interface ServerWelcome {

@@ -41,6 +41,9 @@ export type TypeChecks = [
   Assert<Equals<W.SdkNetRequest, P.SdkNetRequest>>,
   Assert<Equals<W.SdkNetResponse, P.SdkNetResponse>>,
   Assert<Equals<W.SdkNetError, P.SdkNetError>>,
+  Assert<Equals<W.WsOpcode, P.WsOpcode>>,
+  Assert<Equals<W.SdkNetWs, P.SdkNetWs>>,
+  Assert<Equals<W.SdkNetSse, P.SdkNetSse>>,
   Assert<Equals<W.SdkEvent, P.SdkEvent>>,
   Assert<Equals<W.SdkMetric, P.SdkMetric>>,
   Assert<Equals<W.SdkCommandResult, P.SdkCommandResult>>,
@@ -219,7 +222,8 @@ describe('the copy covers the protocol', () => {
 
   it('every runtime export of the copy is compared below', () => {
     expect(Object.keys(W).sort()).toEqual(['DEFAULT_HTTP_PORT', 'DEFAULT_SDK_CONFIG', 'LOG_LEVELS', 'MAX_FRAME_BYTES', 'PROTOCOL_VERSION', 'isTextContentType']);
-    // Every config field the desktop sends is defaulted, and from the desktop's own defaults where it has one.
+    // Every required config field is defaulted, from the desktop's own defaults where it has one. The stream
+    // fields stay absent until a desktop sends them: absent means "send no stream messages".
     expect(Object.keys(W.DEFAULT_SDK_CONFIG).sort()).toEqual(['captureBodies', 'deviceLogsAvailable', 'maxBodyBytes', 'metricsIntervalMs']);
     expect(W.DEFAULT_SDK_CONFIG.deviceLogsAvailable).toBe(false);
     expect(W.DEFAULT_HTTP_PORT).toBe(P.DEFAULT_PORTS.http);

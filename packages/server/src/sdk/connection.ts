@@ -88,7 +88,7 @@ export function metricSourceFor(transport: Transport): MetricSample['source'] {
 }
 
 export function configKey(config: SdkConfig): string {
-  return `${config.captureBodies}|${config.maxBodyBytes}|${config.metricsIntervalMs}|${config.deviceLogsAvailable}`;
+  return `${config.captureBodies}|${config.maxBodyBytes}|${config.metricsIntervalMs}|${config.deviceLogsAvailable}|${config.captureStreams}|${config.maxStreamMessageBytes}`;
 }
 
 let connectionSeq = 1;
@@ -268,6 +268,10 @@ export class SdkConnection {
         return;
       case 'net.error':
         hub.netError(appId, msg);
+        return;
+      case 'net.ws':
+      case 'net.sse':
+        hub.netStream?.(appId, msg);
         return;
       case 'event':
         hub.pushAppLog(appId, { ts: msg.ts, level: 'info', tag: 'event', message: msg.name, data: msg.props, kind: 'event' });

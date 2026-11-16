@@ -12,6 +12,8 @@ import type {
   LogSource,
   NetworkDetail,
   SdkLayer,
+  StreamInfo,
+  StreamMessage,
   WireBody,
 } from '@durbun/protocol';
 import { LOG_LEVELS } from '@durbun/protocol';
@@ -139,6 +141,62 @@ export function sanitizeBody(v: unknown): WireBody | undefined {
   const body: WireBody = { encoding, data: v.data, size: Math.max(0, size) };
   if (v.truncated === true) body.truncated = true;
   return body;
+}
+
+const STREAM_KINDS = new Set<string>(['websocket', 'sse']);
+const STREAM_TYPES = new Set<string>(['text', 'binary', 'ping', 'pong', 'close', 'event']);
+const STREAM_COUNTS = ['count', 'in', 'out', 'control', 'bytesIn', 'bytesOut', 'dropped', 'lastSeq'] as const;
+
+/** An imported NetworkEntry.stream: a recording is history, so an open stream comes in closed. */
+export function sanitizeImportedStream(v: unknown): StreamInfo | undefined {
+  if (!isRecord(v) || typeof v.kind !== 'string' || !STREAM_KINDS.has(v.kind)) return undefined;
+  const state = v.state === 'failed' ? 'failed' : 'closed';
+  const info: StreamInfo = { kind: v.kind as StreamInfo['kind'], state, count: 0, in: 0, out: 0, control: 0, bytesIn: 0, bytesOut: 0, dropped: 0, lastSeq: 0 };
+  for (const key of STREAM_COUNTS) {
+    const n = finite(v[key]);
+    if (n !== undefined && n >= 0) info[key] = Math.floor(n);
+  }
+  for (const key of ['openTs', 'closedTs', 'closeCode', 'lastTs'] as const) {
+    const n = finite(v[key]);
+    if (n !== undefined) info[key] = n;
+  }
+  for (const key of ['closeReason', 'error'] as const) {
+    const t = str(v[key]);
+    if (t) info[key] = t.slice(0, 1024);
+  }
+  if (v.closedBy === 'in' || v.closedBy === 'out') info.closedBy = v.closedBy;
+  return info;
+}
+
+/** Imported stream messages (seq kept; unusable ones left out), oldest first. */
+export function sanitizeImportedStreamMessages(v: unknown): StreamMessage[] {
+  if (!Array.isArray(v)) return [];
+  const out: StreamMessage[] = [];
+  for (const raw of v) {
+    if (!isRecord(raw)) continue;
+    const seq = finite(raw.seq);
+    const ts = finite(raw.ts);
+    if (seq === undefined || seq < 1 || ts === undefined || typeof raw.type !== 'string' || !STREAM_TYPES.has(raw.type)) continue;
+    const m: StreamMessage = {
+      seq: Math.floor(seq),
+      ts,
+      dir: raw.dir === 'out' ? 'out' : 'in',
+      type: raw.type as StreamMessage['type'],
+      size: Math.max(0, finite(raw.size) ?? 0),
+    };
+    const body = sanitizeBody(raw.body);
+    if (body) m.body = body;
+    const closeCode = finite(raw.closeCode);
+    if (closeCode !== undefined) m.closeCode = closeCode;
+    for (const key of ['closeReason', 'event', 'eventId'] as const) {
+      const t = str(raw[key]);
+      if (t !== undefined) m[key] = t.slice(0, 1024);
+    }
+    const retry = finite(raw.retry);
+    if (retry !== undefined) m.retry = retry;
+    out.push(m);
+  }
+  return out.sort((a, b) => a.seq - b.seq);
 }
 
 /** An imported log line (ids/devices are remapped by the caller); undefined when unusable. */
@@ -311,5 +369,11 @@ export function sanitizeImportedNetwork(v: unknown): NetworkDetail | undefined {
   if (requestBody) detail.requestBody = requestBody;
   const responseBody = sanitizeBody(v.responseBody);
   if (responseBody) detail.responseBody = responseBody;
+  const stream = sanitizeImportedStream(v.stream);
+  if (stream) {
+    detail.stream = stream;
+    const messages = sanitizeImportedStreamMessages(v.streamMessages);
+    if (messages.length) detail.streamMessages = messages;
+  }
   return detail;
 }

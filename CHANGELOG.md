@@ -333,6 +333,11 @@ All notable changes to Dürbün are listed here. The format follows
   (the launch request on Android 13+) to the first drawn frame. Prewarmed iOS launches say so and carry no
   duration.
 - Android SDK: UI-thread and RenderThread time per frame (Android 7+).
+- Wire protocol and server: WebSocket messages and Server-Sent Events have a contract (`net.ws`, `net.sse`,
+  capability `streams`, asked for by the server's `captureStreams`). The server keeps them per connection
+  within limits and counts what it drops; session export / import and HAR files (`_webSocketMessages`,
+  `_eventSourceMessages`) carry them, masked like bodies. The SDKs do not send them and the Network tab does
+  not show them yet.
 
 ## [0.2.0] - 2026-11-12
 

@@ -30,6 +30,7 @@ import { type FailureKind, type HttpOutcome, type HttpPlan, json, type SimBody }
 import { androidLine, iosLine } from './noise';
 import { petThumbnailPng } from './png';
 import { round, Walk } from './rng';
+import { DemoQueueStream } from './streams';
 
 const API = 'https://api.pati.app/v1';
 const CDN = 'https://cdn.pati.app';
@@ -108,7 +109,7 @@ export class PatiApp extends DemoApp {
         // The plugin's native core is attached (native logs / crashes, OkHttp / URLSession): SPEC §10.6.
         sdk: { name: 'durbun', version: '0.2.0', platform: 'flutter', layers: ['dart', ios ? 'ios' : 'android'] },
         source: 'dart:io',
-        capabilities: ['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands'],
+        capabilities: ['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands', 'streams'],
         device:
           variant.device ??
           (ios
@@ -454,6 +455,9 @@ export class PatiApp extends DemoApp {
     this.screen = 'Splash';
     this.page = 1;
     this.startup();
+    // Live clinic queue over Server-Sent Events (events only while the server asks for them).
+    const queueUrl = `${API}/clinics/34/queue/stream`;
+    new DemoQueueStream(this.streamHost(), queueUrl, () => this.baseHeaders(new URL(queueUrl)), this.identity.source).start(firstLaunch ? 6000 : 2500);
     this.every(430, () => this.backgroundLog());
     this.every(1500, () => this.printLine());
     if (!this.ios) this.periodically(980, 1020, () => this.appTimeStats());

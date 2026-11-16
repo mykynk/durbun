@@ -685,6 +685,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     app.disconnectedAt = Date.now();
     const failed = network.failPending(id, DISCONNECTED_ERROR, appLastTs.get(id));
     for (const entry of failed) settleNetRow(entry);
+    network.endStreams(id, appLastTs.get(id) ?? app.disconnectedAt);
     appLastTs.delete(id); // only needed for requests still pending; a reconnect notes it again
     consoleEcho.sessionEnded(id);
     batcher.appChanged(app);
@@ -698,7 +699,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     const networkList: NetworkDetail[] = [];
     for (const e of network.values()) {
       if (!scope.network(e)) continue;
-      const detail = network.detail(e.id);
+      const detail = network.detail(e.id, true);
       if (detail) networkList.push(detail);
     }
     const device = devices.get(deviceId);
@@ -853,6 +854,13 @@ export function createHub(opts: CreateHubOptions): Hub {
       settleNetRow(network.error(`${appId}:${msg.id}`, appId, app.deviceId, msg));
     },
 
+    netStream(appId, msg) {
+      const app = apps.get(appId);
+      if (!app || !msg || disposed) return;
+      noteAppTs(appId, msg.ts);
+      network.streamMessage(`${appId}:${msg.id}`, msg);
+    },
+
     netTooLarge(appId, input) {
       const app = apps.get(appId);
       if (!app || !input || typeof input.id !== 'string' || !input.id || disposed) return;
@@ -961,6 +969,10 @@ export function createHub(opts: CreateHubOptions): Hub {
     },
     getNetwork: () => network.list().map((e) => ({ ...e })),
     getNetworkDetail: (id) => network.detail(id),
+    getStreamMessages: (id, opts = {}) => {
+      const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? 500)), 2_000);
+      return network.streamPage(id, Math.max(0, Math.floor(opts.after ?? 0)), limit);
+    },
     searchNetwork: (text, opts) => network.search(typeof text === 'string' ? text : '', opts ?? {}),
     searchNetworkAsync: (text, opts) => network.searchAsync(typeof text === 'string' ? text : '', opts ?? {}),
     getMetrics: () => metrics.all(),
@@ -1086,7 +1098,7 @@ export function createHub(opts: CreateHubOptions): Hub {
       const networkList: NetworkDetail[] = [];
       for (const e of network.values()) {
         if (!inScope(e)) continue;
-        const detail = network.detail(e.id);
+        const detail = network.detail(e.id, true);
         if (detail) networkList.push(detail);
       }
       const appList = [...apps.values()]

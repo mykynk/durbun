@@ -238,6 +238,17 @@ describe('demo driver (fast-forwarded virtual time)', () => {
     expect(logs.some((l) => l.code === 'app.reconnected')).toBe(true);
     const blip = hub.getNetwork().find((n) => n.url.endsWith('/feed?cursor=eyJvZmZzZXQiOjQwfQ'));
     expect(blip?.state).toBe('complete');
+    // Streams: Mahalle's chat socket and Pati's live queue (SSE ends now and then and reconnects with Last-Event-ID).
+    const sockets = hub.getNetwork().filter((n) => n.stream?.kind === 'websocket');
+    expect(sockets.some((n) => n.status === 101 && n.stream!.count > 10 && n.stream!.in > 0 && n.stream!.out > 0)).toBe(true);
+    const chat = sockets.find((n) => n.stream!.count > 10)!;
+    const messages = hub.getStreamMessages!(chat.id)!.messages;
+    expect(messages[0]).toMatchObject({ seq: 1, dir: 'out', type: 'text' });
+    expect(messages[0]!.body!.data).toContain('"auth"');
+    const sse = hub.getNetwork().filter((n) => n.stream?.kind === 'sse');
+    expect(sse.length).toBeGreaterThanOrEqual(2);
+    expect(sse.some((n) => n.stream!.state === 'closed' && n.stream!.count > 0)).toBe(true);
+    expect(sse.some((n) => n.requestHeaders.some(([k]) => k === 'Last-Event-ID'))).toBe(true);
     // lifecycle lines for app processes
     expect(logs.some((l) => l.code === 'process.died')).toBe(true);
     expect(logs.some((l) => l.code === 'process.started')).toBe(true);

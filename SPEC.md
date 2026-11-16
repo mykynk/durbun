@@ -478,6 +478,42 @@ others → ok).
   device logs, so SDKs that would otherwise capture stdout/print should not duplicate it (Flutter print
   capture follows this flag; native iOS `print` is never in syslog, so iOS captures stdout regardless).
 
+### 6.1.1 Stream messages: WebSocket and Server-Sent Events (capability `streams`)
+
+A long-lived connection is one network entry (its handshake `net.request` / `net.response`) plus its messages.
+Types: `SdkNetWs`, `SdkNetSse`, `StreamMessage`, `StreamInfo` in the protocol file.
+
+- **Negotiation.** Add `streams` to `hello.capabilities` when the SDK can capture them. Send `net.ws` / `net.sse`
+  only while the latest `welcome.config` / `config` has `captureStreams: true`. An older server leaves the field out:
+  send nothing then (it would ignore the messages but count each as an unknown type in the log). Stop or start
+  at once when a `config` message changes the flag; never buffer messages from before it.
+- **Handshake.** WebSocket: `net.request` (GET, the `ws(s)://` URL, upgrade headers) then `net.response` with
+  status 101 when the upgrade succeeds (a failed upgrade is a normal response or `net.error`). SSE: send
+  `net.response` as soon as the headers arrive, with no body; never send the event stream again as a body.
+  Messages use the handshake request's `id`; send them after its `net.request` (ideally after the response).
+- **`net.ws`** `{ id, ts, dir: 'in' | 'out', opcode: 'text' | 'binary' | 'ping' | 'pong' | 'close', size, body?,
+  closeCode?, closeReason? }`. One message per text / binary message (join continuation frames). `size` = full
+  payload bytes. `body`: text → utf8, binary → base64, cut at `config.maxStreamMessageBytes` (`truncated`,
+  `size` stays the full size). With `maxStreamMessageBytes` 0 (body capture off), send no `body`, only sizes.
+  Ping / pong: send them only when the stack exposes them; never invent them. Close: one `close` per close
+  frame, either side (`dir` says who), with the code and reason when the frame had them.
+- **`net.sse`** `{ id, ts, event?, eventId?, retry?, size?, body? }` per dispatched event (`event:` field,
+  omitted for "message"; `id:`; `retry:`; `data:` lines joined with `\n` in a utf8 `body`, capped as above).
+  Comments (`:` lines) are not sent. The server ends the stream normally: `{ id, ts, end: true }`.
+- **End and failure.** A connection that breaks after it opened: `net.error` with the handshake `id` (the
+  entry stays complete, its stream turns `failed`); the app closing an SSE reader without an end: `net.error`
+  with `cancelled: true`. A reconnect is a new `net.request` with a new `id` (SSE: `Last-Event-ID` header).
+- **Order and time.** Send in the order the app saw them; the server numbers messages per connection
+  (`seq`) in arrival order and the UI orders by it. `ts` is the device clock; the UI shows time since the
+  stream opened (the 101 / SSE headers).
+- **Never break the app.** Tee, never consume the app's own stream; bounded queues as for requests (drop
+  oldest messages first under pressure, never block the socket's thread).
+- **Server side.** Per connection: the first `STREAM_HEAD_KEPT` (100) and the newest messages up to 2 000; a
+  total budget of a quarter of the body store (least recently active connection gives first); every message
+  removed counts into `StreamInfo.dropped` (gaps in `seq`). The entry carries the counts (UI batches); the
+  messages are paged from `GET /api/network/:id/messages?after=<seq>&limit=<n>`. Session export / import carry
+  them (`NetworkDetail.streamMessages`), HAR as `_webSocketMessages` / `_eventSourceMessages`, masked like bodies.
+
 ### 6.2 Flutter (`sdks/flutter/durbun`, package `durbun`)
 
 ```dart

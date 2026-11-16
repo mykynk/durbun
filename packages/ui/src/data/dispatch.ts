@@ -13,6 +13,7 @@ import { emitNotice, emitResync, emitServerMessage } from './events';
 import { forgetResume, noteEpoch, noteNetSeq, resumeEpoch } from './resume';
 import { setStoreEvictions, setStoreLimits } from './stores/limits';
 import { setMockHitsFromBatch, setMockHitsFromSnapshot } from './stores/mockHits';
+import { streamMessages } from './streamMessages';
 
 /** The server's limits (its `limits` when it sends them, else the settings): the window holds no more than it. */
 function applyLimits(settings: ServerSettings, limits?: StoreLimits): void {
@@ -146,6 +147,7 @@ export function handleServerMessage(msg: ServerToUi): void {
         logStore.reset();
         networkStore.reset();
         setStoreEvictions(null);
+        streamMessages.reset();
       }
       metricsStore.reset();
       hubActions.replaceAll({
@@ -204,6 +206,7 @@ export function handleServerMessage(msg: ServerToUi): void {
       // Hub semantics: `cleared` comes first; with target 'all' (no appId) the server also drops devices that
       // are gone / imported / desktop — those arrive afterwards as `batch.removedDevices`.
       clearStores(msg);
+      streamMessages.reset();
       applyEvictions(msg.evictions);
       noteEpoch(msg.epoch);
       break;

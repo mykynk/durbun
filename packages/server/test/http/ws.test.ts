@@ -537,7 +537,7 @@ describe('WS /ui commands', () => {
     await a.waitFor((m) => m.type === 'notice' && m.code === 'settings.adjusted');
     await b.waitFor((m) => m.type === 'settings' && m.settings.logcatTail === 500);
     expect(t.hub.settings.logcatTail).toBe(500);
-    expect(t.sdk.configPatches.at(-1)).toEqual({ captureBodies: true, maxBodyBytes: 1_024, metricsIntervalMs: 1_000 });
+    expect(t.sdk.configPatches.at(-1)).toEqual({ captureBodies: true, maxBodyBytes: 1_024, metricsIntervalMs: 1_000, captureStreams: true });
     await t.config.flush();
     const onDisk = JSON.parse(await readFile(path.join(t.config.dataDir, 'settings.json'), 'utf8'));
     expect(onDisk).toEqual({ maxBodyBytes: 1_024, logcatTail: 500, watchedApps: ['com.pati'] });

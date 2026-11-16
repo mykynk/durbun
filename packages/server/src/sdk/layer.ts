@@ -12,6 +12,7 @@ import type { CreateSdkLayerOptions, Hub, HubChange, SdkAttachMeta, SdkLayer, Vi
 import { configKey, type ConnectionHost, DEFAULT_SDK_TIMINGS, SdkConnection, type SdkTimings } from './connection';
 import { findDeviceRunningApp, isSdkPlaceholder, NET_DEVICE_PREFIX } from './devices';
 import { OVERSIZE_HEAD_BYTES } from './diagnostics';
+import { STREAM_MESSAGE_CAP } from '../hub/streams';
 import { NdjsonDecoder } from './ndjson';
 import { rawDataToBuffer, streamWire, virtualWire, webSocketWire } from './wires';
 
@@ -111,13 +112,17 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
 
     configFor(deviceId: string): SdkConfig {
       const s = currentSettings();
-      return {
+      const config: SdkConfig = {
         captureBodies: s.captureBodies,
         maxBodyBytes: s.maxBodyBytes,
         metricsIntervalMs: s.metricsIntervalMs,
         deviceLogsAvailable: hub.getDevice(deviceId)?.logs.status === 'streaming',
+        captureStreams: s.captureStreams !== false,
         ...configOverride,
       };
+      // Stream payloads follow body capture; one payload is kept up to min(maxBodyBytes, STREAM_MESSAGE_CAP).
+      config.maxStreamMessageBytes = config.captureBodies ? Math.min(Math.max(0, config.maxBodyBytes), STREAM_MESSAGE_CAP) : 0;
+      return config;
     },
 
     mocksFor(bundleId: string): MockRule[] {
@@ -624,6 +629,7 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
         clean.metricsIntervalMs = patch.metricsIntervalMs;
       }
       if (typeof patch?.deviceLogsAvailable === 'boolean') clean.deviceLogsAvailable = patch.deviceLogsAvailable;
+      if (typeof patch?.captureStreams === 'boolean') clean.captureStreams = patch.captureStreams;
       configOverride = { ...configOverride, ...clean };
       for (const conn of established()) {
         const config = host.configFor(conn.deviceId ?? '');

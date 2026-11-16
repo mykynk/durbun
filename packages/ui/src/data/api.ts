@@ -11,6 +11,7 @@ import type {
   FlowRunRequest,
   FlowSummary,
   NetworkDetail,
+  StreamMessagesPage,
   PackageConflict,
   PackageExportRequest,
   PackageImportRequest,
@@ -98,6 +99,21 @@ export function health(signal?: AbortSignal): Promise<{ ok: boolean; name: strin
 /** Full network entry with bodies (`GET /api/network/:id`). */
 export function getNetworkDetail(id: string, signal?: AbortSignal): Promise<NetworkDetail> {
   return json(`/api/network/${enc(id)}`, { signal });
+}
+
+/**
+ * Messages of a stream entry (WebSocket / SSE) after `after` (seq), oldest first, at most `limit` (server cap
+ * 2000). A server without stream support answers 404 (`api.notFound`).
+ */
+export async function getStreamMessages(id: string, opts: { after?: number; limit?: number; signal?: AbortSignal } = {}): Promise<StreamMessagesPage> {
+  const q = new URLSearchParams();
+  if (opts.after) q.set('after', String(opts.after));
+  if (opts.limit) q.set('limit', String(opts.limit));
+  const qs = q.toString();
+  const res = await json<Partial<StreamMessagesPage>>(`/api/network/${enc(id)}/messages${qs ? `?${qs}` : ''}`, { signal: opts.signal });
+  const page: StreamMessagesPage = { messages: Array.isArray(res.messages) ? res.messages : [], more: res.more === true };
+  if (res.stream) page.stream = res.stream;
+  return page;
 }
 
 /** URL of a raw body (original Content-Type). `download` adds Content-Disposition. */

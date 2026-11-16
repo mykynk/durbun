@@ -34,6 +34,9 @@ import type {
   SdkConfig,
   SdkLog,
   SdkNetError,
+  SdkNetSse,
+  SdkNetWs,
+  StreamMessagesPage,
   SdkNetRequest,
   SdkNetResponse,
   SdkToServer,
@@ -175,6 +178,11 @@ export interface Hub extends HubSink {
    * dropped response or error ends the request as failed instead of leaving it pending.
    */
   netTooLarge?(appId: string, input: NetTooLargeInput): void;
+  /**
+   * A `net.ws` / `net.sse` of this app: one message of the stream entry `<appId>:<msg.id>` (ignored when that
+   * entry is unknown). Optional for hubs without stream support.
+   */
+  netStream?(appId: string, msg: SdkNetWs | SdkNetSse): void;
   pushAppMetrics(appId: string, sample: Omit<MetricSample, 'deviceId' | 'appId'>): void;
   /** A request performed by the desktop itself (replay) on the virtual 'desktop' device. */
   recordDesktopRequest(detail: NetworkDetail): NetworkEntry;
@@ -184,6 +192,8 @@ export interface Hub extends HubSink {
   getLogCount(): number;
   getNetwork(): NetworkEntry[];
   getNetworkDetail(id: string): NetworkDetail | undefined;
+  /** Stream messages of an entry after `after` (seq), at most `limit` (≤ 2000); undefined for an unknown entry. */
+  getStreamMessages?(id: string, opts?: { after?: number; limit?: number }): StreamMessagesPage | undefined;
   /** Search URL, headers and bodies; returns matching network ids. */
   searchNetwork(text: string, opts?: { ids?: string[]; caseSensitive?: boolean }): string[];
   /**

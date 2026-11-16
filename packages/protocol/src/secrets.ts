@@ -4,7 +4,7 @@
  * product: "create a flow from requests" moves the same values into secret environment variables.
  * Masked values become SECRET_MASK; names, cookie names and the auth scheme ("Bearer") stay readable.
  */
-import type { Header, LogEntry, NetworkDetail, WireBody } from './index';
+import type { Header, LogEntry, NetworkDetail, StreamMessage, WireBody } from './index';
 
 /** What a masked value is replaced by (the flows' MASK too). */
 export const SECRET_MASK = '••••';
@@ -146,7 +146,17 @@ export function maskNetworkDetail(d: NetworkDetail): NetworkDetail {
   if (requestBody) out.requestBody = requestBody;
   const responseBody = maskBody(d.responseBody, d.responseContentType ?? headerOf(d.responseHeaders, 'content-type'));
   if (responseBody) out.responseBody = responseBody;
+  if (d.streamMessages) out.streamMessages = d.streamMessages.map(maskStreamMessage);
   return out;
+}
+
+/**
+ * A stream message with secret-looking fields of a JSON / form payload masked (a chat socket's auth message,
+ * a token in an event); other text and binary payloads unchanged.
+ */
+export function maskStreamMessage(m: StreamMessage): StreamMessage {
+  const body = maskBody(m.body, undefined);
+  return body === m.body ? m : { ...m, body };
 }
 
 /** A log row with the secrets of a network row's "METHOD URL" text masked (other rows unchanged). */

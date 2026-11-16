@@ -5,6 +5,7 @@
  *   GET  /api/summary                             { devices, apps } connected right now (menu-bar line)
  *   GET  /api/network/:id                         NetworkDetail
  *   GET  /api/network/:id/body/(request|response) raw bytes, original Content-Type (?download=1)
+ *   GET  /api/network/:id/messages?after&limit    StreamMessagesPage (WebSocket / SSE messages after a seq)
  *   POST /api/network/search                      { text, ids?, caseSensitive? } → { ids }
  *   POST /api/har                                 { ids? } → HAR 1.2 download
  *   GET  /api/export?deviceId=&appId=&bundleId=&fromTs=&toTs=&mask=0   SessionExport download (masked unless mask=0)
@@ -22,7 +23,7 @@ import { randomBytes } from 'node:crypto';
 import { createWriteStream, promises as fsp } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
-import { PRODUCT_NAME, type NetworkDetail, type SessionExport, type ToolCheck } from '@durbun/protocol';
+import { PRODUCT_NAME, type NetworkDetail, type SessionExport, type StreamMessage, type StreamMessagesPage, type ToolCheck } from '@durbun/protocol';
 import { isPlainObject } from '../config';
 import { sessionVersionProblem } from '../hub/sanitize';
 import type { Hub, Logger } from '../types';
@@ -264,6 +265,36 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
     sendJson(res, 200, d);
   }
 
+  /** The detail with every stream message the hub holds (HAR). */
+  function withStreamMessages(d: NetworkDetail): NetworkDetail {
+    const messages: StreamMessage[] = [];
+    let after = 0;
+    for (;;) {
+      const page = deps.hub.getStreamMessages?.(d.id, { after, limit: 2_000 });
+      if (!page || page.messages.length === 0) break;
+      messages.push(...page.messages);
+      after = page.messages.at(-1)!.seq;
+      if (!page.more) break;
+    }
+    return messages.length ? { ...d, streamMessages: messages } : d;
+  }
+
+  /** GET /api/network/:id/messages?after=<seq>&limit=<n>: the stream's messages after a seq (StreamMessagesPage). */
+  function streamMessages(res: ServerResponse, id: string, query: URLSearchParams): void {
+    const after = Number(query.get('after') ?? 0);
+    const limit = Number(query.get('limit') ?? 500);
+    if (!Number.isFinite(after) || after < 0 || !Number.isFinite(limit) || limit < 1) {
+      throw new HttpError(400, 'after must be a seq (0 or more) and limit a positive number', 'params.invalid', { field: !Number.isFinite(after) || after < 0 ? 'after' : 'limit' });
+    }
+    const page = deps.hub.getStreamMessages?.(id, { after, limit });
+    if (!page) {
+      if (!deps.hub.getNetworkDetail(id)) throw new HttpError(404, `Request ${id} not found`, 'net.unknown');
+      sendJson(res, 200, { messages: [], more: false } satisfies StreamMessagesPage);
+      return;
+    }
+    sendJson(res, 200, page satisfies StreamMessagesPage);
+  }
+
   function networkBody(req: IncomingMessage, res: ServerResponse, id: string, which: 'request' | 'response', query: URLSearchParams): void {
     const d = deps.hub.getNetworkDetail(id);
     if (!d) throw new HttpError(404, `Request ${id} not found`, 'net.unknown');
@@ -351,7 +382,7 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
     const details: NetworkDetail[] = [];
     for (const id of ids ?? deps.hub.getNetwork().map((e) => e.id)) {
       const d = deps.hub.getNetworkDetail(id);
-      if (d) details.push(d);
+      if (d) details.push(d.stream ? withStreamMessages(d) : d);
     }
     const doc = buildHar(cleanHarDetails(details, { mask }), { name: PRODUCT_NAME, version: deps.version });
     if (mask) doc.log._durbun = { ...doc.log._durbun, masked: true };
@@ -585,6 +616,10 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
         if (segs.length === 2) {
           requireMethod(req, 'GET', 'HEAD');
           return networkDetail(res, second);
+        }
+        if (segs.length === 3 && third === 'messages') {
+          requireMethod(req, 'GET', 'HEAD');
+          return streamMessages(res, second, query);
         }
         if (segs.length === 4 && third === 'body' && (fourth === 'request' || fourth === 'response')) {
           requireMethod(req, 'GET', 'HEAD');

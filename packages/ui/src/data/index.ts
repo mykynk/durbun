@@ -92,6 +92,9 @@ export type { CompiledScope, ScopeTarget, ScopeEvictions, ScopeMockHit } from '.
 export { useMockHits } from './stores/mockHits';
 export type { MockHitsState } from './stores/mockHits';
 export { compileNoiseRules } from './noise';
+/* stream messages (WebSocket / SSE) of one network entry */
+export { useStreamMessages, streamMessages, streamGaps, MAX_CLIENT_STREAM_MESSAGES } from './streamMessages';
+export type { StreamMessagesState } from './streamMessages';
 
 /* wire */
 export { sendCommand, sendCommandDetailed, CommandError, LOCAL_ERROR_CODES, defaultCommandTimeout } from './commands';

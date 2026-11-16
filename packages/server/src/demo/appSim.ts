@@ -12,6 +12,7 @@ import type {
   LogLevel,
   MockRule,
   SdkCapability,
+  SdkConfig,
   SdkIdentity,
   SdkToServer,
   ServerToSdk,
@@ -21,6 +22,7 @@ import { PROTOCOL_VERSION } from '@durbun/protocol';
 import type { DeviceLogInput, DriverContext, Logger, VirtualSdkSession } from '../types';
 import { type FailureKind, type HttpOutcome, HttpSim } from './http';
 import type { Rng } from './rng';
+import type { StreamHost } from './streams';
 import type { Scheduler } from './scheduler';
 
 export interface AppDeps {
@@ -115,6 +117,8 @@ export abstract class DemoApp implements SimApp {
   protected mocks: MockRule[] = [];
   protected metricsIntervalMs = 1000;
   protected deviceLogsAvailable = true;
+  /** `config.captureStreams` / `maxStreamMessageBytes` (an SDK sends no stream messages before the server asks). */
+  private streamCapture = { on: false, cap: 0 };
   protected readonly http: HttpSim;
   private session: VirtualSdkSession | undefined;
   private online = false;
@@ -330,10 +334,24 @@ export abstract class DemoApp implements SimApp {
     }
   }
 
-  private applyConfig(config: { metricsIntervalMs: number; deviceLogsAvailable: boolean }): void {
+  private applyConfig(config: SdkConfig): void {
     const interval = Number.isFinite(config.metricsIntervalMs) ? Math.min(60_000, Math.max(250, config.metricsIntervalMs)) : 1000;
     this.metricsIntervalMs = interval;
     this.deviceLogsAvailable = config.deviceLogsAvailable;
+    this.streamCapture = { on: config.captureStreams === true && !this.viaVmService, cap: Math.max(0, config.maxStreamMessageBytes ?? 0) };
+  }
+
+  /** What the demo stream simulations (streams.ts) send through. */
+  protected streamHost(): StreamHost {
+    const gen = this.gen;
+    return {
+      send: (m) => this.send(m),
+      after: (ms, fn) => this.after(ms, fn),
+      now: () => this.now(),
+      rng: this.rng,
+      capture: () => this.streamCapture,
+      alive: () => gen === this.gen && this.running,
+    };
   }
 
   /** Sends through the SDK session; buffers (bounded) while the session is reconnecting. */

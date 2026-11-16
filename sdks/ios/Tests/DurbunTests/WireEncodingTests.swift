@@ -195,6 +195,13 @@ final class WireEncodingTests: XCTestCase {
         }
         XCTAssertEqual(config.maxBodyBytes, 10)
         XCTAssertTrue(config.captureBodies, "missing fields keep defaults")
+        XCTAssertFalse(config.captureStreams, "a desktop that never sends the field asks for no stream messages")
+        XCTAssertEqual(config.maxStreamMessageBytes, 0)
+        var streaming = SdkConfig(json: ["captureStreams": true, "maxStreamMessageBytes": 65_536])
+        XCTAssertTrue(streaming.captureStreams)
+        XCTAssertEqual(streaming.maxStreamMessageBytes, 65_536)
+        streaming = SdkConfig(json: ["maxBodyBytes": 10], fallback: streaming)
+        XCTAssertFalse(streaming.captureStreams, "an older desktop after a newer one: absent turns it off again")
         guard case let .mocks(rules)? = ServerMessage.parse(Data(#"{"type":"mocks","rules":[{"id":"x"}]}"#.utf8)) else {
             return XCTFail("mocks")
         }
@@ -359,7 +366,8 @@ final class WireEncodingTests: XCTestCase {
         }
 
         // Fields the SDK reads from the server.
-        XCTAssertEqual(tsFields(source, "SdkConfig")?.all, ["captureBodies", "maxBodyBytes", "metricsIntervalMs", "deviceLogsAvailable"])
+        XCTAssertEqual(tsFields(source, "SdkConfig")?.all, ["captureBodies", "maxBodyBytes", "metricsIntervalMs", "deviceLogsAvailable",
+                                                             "captureStreams", "maxStreamMessageBytes"])
         XCTAssertEqual(tsFields(source, "ServerWelcome")?.all, ["type", "protocol", "server", "appId", "config", "mocks"])
         XCTAssertEqual(tsFields(source, "MockRule")?.all, ["id", "enabled", "name", "method", "url", "match", "apps", "action", "createdAt"])
         XCTAssertTrue(source.contains("deviceSdkFirst: 9752"), "device listener range")

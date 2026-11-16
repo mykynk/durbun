@@ -6,6 +6,11 @@ struct SdkConfig: Equatable {
     var maxBodyBytes: Int = 1_048_576
     var metricsIntervalMs: Int = 1000
     var deviceLogsAvailable: Bool = false
+    /// The desktop asks for WebSocket messages and Server-Sent Events (`net.ws` / `net.sse`). An older desktop
+    /// never sends the field: absent means "send none", whatever an earlier config said.
+    var captureStreams: Bool = false
+    /// Payload cap of one stream message in bytes (0: sizes only).
+    var maxStreamMessageBytes: Int = 0
 
     static let defaults = SdkConfig()
 
@@ -15,6 +20,8 @@ struct SdkConfig: Equatable {
         maxBodyBytes = max(0, JSONRead.int(json["maxBodyBytes"]) ?? fallback.maxBodyBytes)
         metricsIntervalMs = max(100, JSONRead.int(json["metricsIntervalMs"]) ?? fallback.metricsIntervalMs)
         deviceLogsAvailable = JSONRead.bool(json["deviceLogsAvailable"]) ?? fallback.deviceLogsAvailable
+        captureStreams = JSONRead.bool(json["captureStreams"]) ?? false
+        maxStreamMessageBytes = max(0, JSONRead.int(json["maxStreamMessageBytes"]) ?? 0)
     }
 
     init() {}

@@ -48,7 +48,8 @@ export interface ErrorInfo {
 
 export type DevicePlatform = 'android' | 'ios' | 'other';
 export type SdkPlatform = 'flutter' | 'android' | 'ios' | 'react-native' | 'js' | 'dart-vm' | 'demo';
-export type SdkCapability = 'logs' | 'network' | 'mocks' | 'metrics' | 'events' | 'crash' | 'commands';
+/** `streams`: the SDK can send `net.ws` / `net.sse` (only while `config.captureStreams` is true). */
+export type SdkCapability = 'logs' | 'network' | 'mocks' | 'metrics' | 'events' | 'crash' | 'commands' | 'streams';
 /** Layers inside the app that feed one session ('dart' + 'android' / 'ios' for the Flutter plugin). */
 export type SdkLayer = 'dart' | 'android' | 'ios';
 /** `hello.sdk`. */
@@ -193,6 +194,45 @@ export interface SdkNetError {
   mockRuleId?: string;
 }
 
+/** WebSocket frame opcodes Dürbün keeps (continuation frames are joined into one message). */
+export type WsOpcode = 'text' | 'binary' | 'ping' | 'pong' | 'close';
+
+/** One WebSocket message of the connection whose handshake was `net.request` `id`. */
+export interface SdkNetWs {
+  type: 'net.ws';
+  /** The handshake request's id (the `net.request` that got the 101). */
+  id: string;
+  ts: number;
+  dir: 'in' | 'out';
+  opcode: WsOpcode;
+  /** Full payload size in bytes. */
+  size: number;
+  /** Payload capped at `config.maxStreamMessageBytes` (text utf8, binary base64). */
+  body?: WireBody;
+  /** opcode 'close': the code and reason of the close frame. */
+  closeCode?: number;
+  closeReason?: string;
+}
+
+/** One Server-Sent Events event of the response to `net.request` `id`, or `end: true` at a normal end. */
+export interface SdkNetSse {
+  type: 'net.sse';
+  id: string;
+  ts: number;
+  /** `event:` field (omit for the default "message"). */
+  event?: string;
+  /** `id:` field. */
+  eventId?: string;
+  /** `retry:` field, ms. */
+  retry?: number;
+  /** Full size of `data` in bytes (UTF-8). */
+  size?: number;
+  /** The `data:` lines joined with "\n", utf8, capped like `net.ws`. */
+  body?: WireBody;
+  /** The stream ended normally (no other field needed). */
+  end?: boolean;
+}
+
 export interface SdkEvent {
   type: 'event';
   ts: number;
@@ -237,6 +277,8 @@ export type SdkToServer =
   | SdkNetRequest
   | SdkNetResponse
   | SdkNetError
+  | SdkNetWs
+  | SdkNetSse
   | SdkEvent
   | SdkMetric
   | SdkCommandResult
@@ -249,6 +291,10 @@ export interface SdkConfig {
   metricsIntervalMs: number;
   /** The desktop already receives this device's logs (stdout of the app included where the OS logs it). */
   deviceLogsAvailable: boolean;
+  /** Send `net.ws` / `net.sse` messages. Absent (an older desktop) or false: send none. */
+  captureStreams?: boolean;
+  /** Payload cap of one stream message in bytes (0: send none, only sizes). */
+  maxStreamMessageBytes?: number;
 }
 
 export interface ServerWelcome {

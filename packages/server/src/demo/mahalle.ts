@@ -12,6 +12,7 @@ import { type FailureKind, type HttpOutcome, type HttpPlan, json, type SimBody }
 import { androidAnrLine, androidLine } from './noise';
 import { petThumbnailPng } from './png';
 import { round, Walk } from './rng';
+import { DemoChatSocket } from './streams';
 
 type Env = 'prod' | 'staging' | 'dev';
 const API_BASE: Record<Env, string> = {
@@ -56,7 +57,7 @@ export class MahalleApp extends DemoApp {
         processName: 'com.mykynk.mahalle',
         sdk: { name: 'durbun-android', version: '0.2.0', platform: 'android' },
         source: 'okhttp',
-        capabilities: ['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands'],
+        capabilities: ['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands', 'streams'],
         device: { model: 'Pixel 8', name: 'Pixel 8', osVersion: '15', apiLevel: 35, manufacturer: 'Google' },
       },
       6612,
@@ -250,6 +251,9 @@ export class MahalleApp extends DemoApp {
     this.log('info', 'MahalleApp', `Uygulama başlatıldı (cold start ${this.rng.int(380, 640)} ms)`, { data: { env: this.env, versionCode: 5120, sdkInt: 35 } });
     this.after(80, () => this.campaigns());
     this.after(220, () => this.stores());
+    // Seller chat over a WebSocket (its messages only while the server asks for them: config.captureStreams).
+    const chatUrl = `wss://chat.${this.env === 'prod' ? '' : 'staging.'}mahalle.app/v2/socket?client=android`;
+    new DemoChatSocket(this.streamHost(), chatUrl, () => this.baseHeaders(new URL(chatUrl))).start(firstLaunch ? 2500 : 1200);
     this.every(950, () => this.backgroundLog());
     if (firstLaunch) {
       const steps: [number, () => void][] = [

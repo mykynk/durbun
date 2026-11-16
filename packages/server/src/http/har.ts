@@ -3,8 +3,28 @@
  * Text bodies are embedded as text; binary bodies as base64 (`content.encoding: 'base64'`, and the same
  * convention on postData). Unknown timing phases are -1 (optional ones) or derived so that
  * send + wait + receive matches the measured duration. Dürbün-specific fields live under `_durbun`.
+ * WebSocket messages: `_webSocketMessages` (the format browsers' developer tools write and read: type
+ * send / receive, time in seconds, opcode 1 text / 2 binary (base64 data) / 8 close / 9 ping / 10 pong). SSE
+ * events: `_eventSourceMessages` ({ time, eventName, eventId, data }, Dürbün's own extension in the same style).
  */
-import type { Header, NetworkDetail, WireBody } from '@durbun/protocol';
+import type { Header, NetworkDetail, StreamMessage, WireBody } from '@durbun/protocol';
+
+export interface HarWebSocketMessage {
+  type: 'send' | 'receive';
+  /** Epoch seconds. */
+  time: number;
+  opcode: number;
+  data: string;
+}
+
+export interface HarEventSourceMessage {
+  time: number;
+  eventName: string;
+  eventId: string;
+  data: string;
+}
+
+const OPCODES: Record<string, number> = { text: 1, binary: 2, close: 8, ping: 9, pong: 10 };
 
 export interface HarNameValue {
   name: string;
@@ -92,7 +112,10 @@ export interface HarEntry {
     mocked?: boolean;
     mockRuleId?: string;
     graphql?: NetworkDetail['graphql'];
+    stream?: NetworkDetail['stream'];
   };
+  _webSocketMessages?: HarWebSocketMessage[];
+  _eventSourceMessages?: HarEventSourceMessage[];
 }
 
 export interface Har {
@@ -302,7 +325,24 @@ export function harEntry(d: NetworkDetail): HarEntry {
     entry.comment = `Mocked by Dürbün${d.mockRuleId ? ` (rule ${d.mockRuleId})` : ''}`;
   }
   if (d.graphql) entry._durbun.graphql = d.graphql;
+  if (d.stream) {
+    entry._durbun.stream = d.stream;
+    const messages = d.streamMessages ?? [];
+    if (d.stream.kind === 'websocket') entry._webSocketMessages = messages.map(harWebSocketMessage);
+    else entry._eventSourceMessages = messages.filter((m) => m.type === 'event').map(harEventSourceMessage);
+  }
   return entry;
+}
+
+const seconds = (ts: number) => Math.round(ts) / 1000;
+
+function harWebSocketMessage(m: StreamMessage): HarWebSocketMessage {
+  const data = m.body?.data ?? (m.type === 'close' ? [m.closeCode, m.closeReason].filter((v) => v !== undefined && v !== '').join(' ') : '');
+  return { type: m.dir === 'out' ? 'send' : 'receive', time: seconds(m.ts), opcode: OPCODES[m.type] ?? 1, data };
+}
+
+function harEventSourceMessage(m: StreamMessage): HarEventSourceMessage {
+  return { time: seconds(m.ts), eventName: m.event ?? 'message', eventId: m.eventId ?? '', data: m.body?.data ?? '' };
 }
 
 export function buildHar(details: NetworkDetail[], creator: { name: string; version: string }): Har {

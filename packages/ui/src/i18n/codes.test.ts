@@ -438,6 +438,8 @@ describe('server codes → i18n', () => {
       'net.replay',
       'net.request',
       'net.response',
+      'net.sse', // SDK → server message types (stream messages), not codes
+      'net.ws',
       'preflight.action.unsupported', // examples in a doc comment (the real codes: preflight.action.<where>, preflight.sdk.notConnected)
       'preflight.sdk.missing',
       'sdk.close',

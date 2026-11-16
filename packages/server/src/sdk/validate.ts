@@ -17,6 +17,8 @@ import type {
   SdkNetError,
   SdkNetRequest,
   SdkNetResponse,
+  SdkNetSse,
+  SdkNetWs,
   SdkPlatform,
   SdkToServer,
   Timings,
@@ -29,7 +31,8 @@ import { normSdkLayers } from '../hub/sanitize';
 const LEVELS = new Set<string>(LOG_LEVELS);
 const SDK_PLATFORMS = new Set<string>(['flutter', 'android', 'ios', 'react-native', 'js', 'dart-vm', 'demo']);
 const DEVICE_PLATFORMS = new Set<string>(['android', 'ios', 'other']);
-const CAPABILITIES = new Set<string>(['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands']);
+const CAPABILITIES = new Set<string>(['logs', 'network', 'mocks', 'metrics', 'events', 'crash', 'commands', 'streams']);
+const WS_OPCODES = new Set<string>(['text', 'binary', 'ping', 'pong', 'close']);
 const LOG_KINDS = new Set<string>(['text', 'crash', 'flutter-error']);
 const ACTION_KINDS = new Set<string>(['toggle', 'select', 'button']);
 const TIMING_KEYS = ['dns', 'connect', 'tls', 'send', 'wait', 'receive'] as const;
@@ -275,6 +278,46 @@ export function parseSdkMessage(value: unknown): SdkToServer | undefined {
       if (v.mocked === true) msg.mocked = true;
       const mockRuleId = idOf(v.mockRuleId);
       if (mockRuleId) msg.mockRuleId = mockRuleId;
+      return msg;
+    }
+    case 'net.ws': {
+      const id = idOf(v.id);
+      if (!id || typeof v.opcode !== 'string' || !WS_OPCODES.has(v.opcode)) return undefined;
+      const body = parseBody(v.body);
+      const size = num(v.size);
+      const msg: SdkNetWs = {
+        type: 'net.ws',
+        id,
+        ts: tsOf(v.ts),
+        dir: v.dir === 'out' ? 'out' : 'in',
+        opcode: v.opcode as SdkNetWs['opcode'],
+        size: size !== undefined && size >= 0 ? Math.floor(size) : (body?.size ?? 0),
+      };
+      if (body) msg.body = body;
+      const closeCode = num(v.closeCode);
+      if (closeCode !== undefined) msg.closeCode = Math.floor(closeCode);
+      const closeReason = short(v.closeReason, 256);
+      if (closeReason) msg.closeReason = closeReason;
+      return msg;
+    }
+    case 'net.sse': {
+      const id = idOf(v.id);
+      if (!id) return undefined;
+      const msg: SdkNetSse = { type: 'net.sse', id, ts: tsOf(v.ts) };
+      if (v.end === true) {
+        msg.end = true;
+        return msg;
+      }
+      const body = parseBody(v.body);
+      if (body) msg.body = body;
+      const size = num(v.size);
+      msg.size = size !== undefined && size >= 0 ? Math.floor(size) : (body?.size ?? 0);
+      const event = short(v.event, 256);
+      if (event) msg.event = event;
+      const eventId = short(v.eventId, 256);
+      if (eventId !== undefined) msg.eventId = eventId;
+      const retry = num(v.retry);
+      if (retry !== undefined && retry >= 0) msg.retry = Math.floor(retry);
       return msg;
     }
     case 'event': {

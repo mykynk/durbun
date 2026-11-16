@@ -18,6 +18,8 @@ export const KNOWN_SDK_TYPES: ReadonlySet<string> = new Set([
   'net.request',
   'net.response',
   'net.error',
+  'net.ws',
+  'net.sse',
   'event',
   'metric',
   'command.result',
