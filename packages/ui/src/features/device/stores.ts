@@ -1,6 +1,7 @@
 /**
- * Session-scoped Device view state that must survive tab switches and device changes but not reloads:
- * the screenshot / recording gallery, running screen recordings and the installed-apps cache per device.
+ * Session-scoped Device view state that must survive tab switches and device changes but not reloads: running
+ * screen recordings, the installed-apps cache per device and device reports. The screenshot / recording gallery
+ * is the server's media library (`media/store.ts`), which survives reloads and restarts.
  */
 import { create } from 'zustand';
 import type { DeviceInfo, InstalledApp } from '@durbun/protocol';
@@ -8,59 +9,17 @@ import { toast } from '../../components';
 import { sendCommand } from '../../data';
 import { t } from '../../i18n';
 import { codeText, describeError } from './codes';
+import { addFromReply, loadMedia, openMedia } from './media/store';
 import { deviceReportResult, parseInstalledApps, recordResult, selectedUserId } from './model';
 
 /* ───────────── Media gallery ───────────── */
 
-export interface Shot {
-  id: string;
-  deviceId: string;
-  url: string;
-  file?: string;
-  width?: number;
-  height?: number;
-  ts: number;
-}
-
-export interface Recording {
-  id: string;
-  deviceId: string;
-  url: string;
-  file?: string;
-  ts: number;
-  durationSec: number;
-}
-
-interface MediaState {
-  shots: Shot[];
-  recordings: Recording[];
-  /** Screenshot shown in the lightbox (null = closed). */
-  openShotId: string | null;
-}
-
-export const useMedia = create<MediaState>()(() => ({ shots: [], recordings: [], openShotId: null }));
-
-export function openShot(id: string | null): void {
-  useMedia.setState({ openShotId: id });
-}
-
-let mediaSeq = 0;
-const MAX_SHOTS = 60;
-
-export function addShot(shot: Omit<Shot, 'id'>): Shot {
-  const full = { ...shot, id: `shot-${++mediaSeq}` };
-  useMedia.setState((s) => ({ shots: [full, ...s.shots].slice(0, MAX_SHOTS) }));
-  return full;
-}
-
-export function removeShot(id: string): void {
-  useMedia.setState((s) => ({ shots: s.shots.filter((x) => x.id !== id), openShotId: s.openShotId === id ? null : s.openShotId }));
-}
-
-export function addRecording(rec: Omit<Recording, 'id'>): Recording {
-  const full = { ...rec, id: `rec-${++mediaSeq}` };
-  useMedia.setState((s) => ({ recordings: [full, ...s.recordings].slice(0, 20) }));
-  return full;
+/**
+ * A screenshot taken elsewhere (Report a bug): the server already kept it in the media library (any window's
+ * `screenshot` goes there), so the gallery only needs to load the list again.
+ */
+export function addShot(_shot: { deviceId: string; url: string; file?: string; width?: number; height?: number; ts: number }): void {
+  void loadMedia();
 }
 
 /* ───────────── Screen recording ───────────── */
@@ -156,19 +115,24 @@ export async function stopRecording(deviceId: string, since?: number): Promise<v
   }
 }
 
+/** Recording files this window already announced (start and stop reply carry the same one). */
+const announced = new Set<string>();
+
 function recordingReady(deviceId: string, data: unknown, startedAt: number): void {
   const m = recordResult(data);
   if (!m) {
     toast.error(t('device.record.failed'), { description: codeText('action.invalidResult') });
     return;
   }
-  // Both the start and the stop reply carry the file: the first one adds it.
-  if (useMedia.getState().recordings.some((r) => r.url === m.url)) return;
+  // Both the start and the stop reply carry the file: the first one adds it and says so.
+  if (announced.has(m.url)) return;
+  announced.add(m.url);
   const durationSec = m.durationSec ?? Math.max(1, Math.round((Date.now() - startedAt) / 1000));
-  const rec = addRecording({ deviceId, url: m.url, file: m.file, ts: startedAt, durationSec });
+  const rec = addFromReply(deviceId, 'recording', data, { ts: startedAt, durationSec });
+  if (!rec) return;
   toast.success(t('device.record.done'), {
     description: m.endedBy === 'limit' ? t('device.record.limitReached') : undefined,
-    action: { label: t('device.record.open'), onClick: () => window.open(rec.url, '_blank', 'noopener') },
+    action: { label: t('device.record.open'), onClick: () => openMedia(rec.id) },
   });
 }
 

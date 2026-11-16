@@ -1,0 +1,219 @@
+/* Media library: gallery tiles, the viewer, the library dialog (loaded with any of them, also from Logs). */
+
+.md-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.md-thumbs--wide {
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+}
+.md-thumbs__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.md-thumbs__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.md-thumbs__meta--stack {
+  flex-direction: column;
+  gap: 0;
+}
+.md-thumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 9 / 19.5;
+  max-height: 200px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease);
+}
+.md-thumb:hover {
+  border-color: var(--border-strong);
+}
+.md-thumb img,
+.md-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+.md-thumb__play {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--overlay-bg);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+}
+.md-thumb__badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+}
+.md-thumb.is-gone {
+  border-style: dashed;
+  cursor: default;
+}
+.md-thumb__gone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.md-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.md-policy {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+}
+.md-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-width: 0;
+}
+.md-foot--end {
+  justify-content: flex-end;
+}
+.md-foot .md-policy {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+/* ───────────── viewer ───────────── */
+.md-viewer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.md-viewer__nav {
+  flex-shrink: 0;
+}
+.md-viewer__frame {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+  max-height: 70vh;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+.md-viewer__frame img,
+.md-viewer__frame video {
+  max-width: 100%;
+  max-height: calc(70vh - 16px);
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: var(--shadow-pop);
+}
+.md-viewer__frame img.is-loading {
+  opacity: 0;
+}
+.md-viewer__spinner {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+}
+.md-viewer__state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+}
+.md-viewer__note {
+  margin: 10px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+/* ───────────── library dialog ───────────── */
+.md-lib {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 320px;
+}
+.md-lib__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.md-lib__bar .md-policy {
+  max-width: 360px;
+  text-align: right;
+}
+.md-lib__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.md-lib__group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.md-lib__day {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.md-lib__more {
+  align-self: center;
+}
+@media (max-width: 960px) {
+  .md-lib__bar .md-policy {
+    max-width: none;
+    text-align: left;
+    flex-basis: 100%;
+  }
+}

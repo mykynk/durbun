@@ -6,7 +6,8 @@ import { __resetCommandsForTests, handleReply, setCommandTransport } from '../..
 import { FeatureContext } from '../../components';
 import { setLanguage } from '../../i18n';
 import DeviceView from './index';
-import { useMedia, useRecorder } from './stores';
+import { useRecorder } from './stores';
+import { useMediaLibrary } from './media/store';
 import { useStickyDefault } from './useAction';
 
 const PIXEL: DeviceInfo = {
@@ -80,7 +81,7 @@ afterEach(() => {
   cleanup();
   setCommandTransport(null);
   __resetCommandsForTests();
-  useMedia.setState({ shots: [], recordings: [], openShotId: null });
+  useMediaLibrary.setState({ status: 'idle', items: [], usedBytes: 0, total: 0, pendingDelete: {}, error: undefined });
   useRecorder.setState({ runs: {}, errors: {} });
   hubActions.reset();
   setScope({ kind: 'all' });
@@ -159,9 +160,9 @@ describe('DeviceView', () => {
       handleReply({ type: 'reply', requestId: sent[0]!.requestId, ok: true, data });
     });
     act(() => hubActions.upsertDevices([sim]));
-    const list = screen.getByRole('list', { name: 'Bu oturumun kayıtları' });
+    const list = screen.getByRole('list', { name: 'Bu cihazın kayıtları' });
     expect(within(list).getAllByRole('listitem')).toHaveLength(1);
-    expect(within(list).getByText('· 0:12')).toBeTruthy();
+    expect(within(list).getByText('0:12')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Kaydı başlat' })).toBeTruthy();
   });
 
@@ -178,7 +179,7 @@ describe('DeviceView', () => {
       handleReply({ type: 'reply', requestId: sent[0]!.requestId, ok: true, data: { url: '/api/files/old.mov', durationSec: 66 } });
     });
     act(() => hubActions.upsertDevices([sim]));
-    expect(within(screen.getByRole('list', { name: 'Bu oturumun kayıtları' })).getByText('· 1:06')).toBeTruthy();
+    expect(within(screen.getByRole('list', { name: 'Bu cihazın kayıtları' })).getByText('1:06')).toBeTruthy();
     expect(useRecorder.getState().runs).toEqual({});
   });
 

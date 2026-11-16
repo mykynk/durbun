@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeftRight, Camera, Link as LinkIcon, Moon, Plug, RotateCcw, Smartphone, Sun } from 'lucide-react';
+import { ArrowLeftRight, Camera, Images, Link as LinkIcon, Moon, Plug, RotateCcw, Smartphone, Sun, Wifi } from 'lucide-react';
 import type { AppSession, DeviceActionId, DeviceInfo } from '@durbun/protocol';
 import { sendCommand, useDevice, useDevices, useHub, useScope } from '../../data';
 import {
   Button,
   Callout,
+  CountBadge,
   EmptyState,
   PlatformIcon,
   StatusDot,
@@ -29,7 +30,9 @@ import { InputCard } from './InputCard';
 import { LocationCard } from './LocationCard';
 import { deviceColumns, hasAction, hasAnyAction, isReadOnlyDevice, osLine, type DeviceSectionId } from './model';
 import { JUMP_STRIP_MIN, JumpStrip } from './JumpStrip';
-import { hiddenDeviceActions, hiddenDeviceCards } from '../../data/explain';
+import { hiddenDeviceActions, hiddenDeviceCards, showsIphoneReportGuide, wirelessPairingAvailable } from '../../data/explain';
+import { openPairDialog, PairDialogHost } from './wireless/PairDialog';
+import { IphoneReportCard } from './IphoneReportCard';
 import { OpenUrlCard } from './OpenUrlCard';
 import { ProcessesCard } from './ProcessesCard';
 import { PushCard } from './PushCard';
@@ -37,7 +40,9 @@ import { RecordCard } from './RecordCard';
 import { consumeDeviceRequest, flashDeviceSection, requestDeviceSection, revealDeviceCard, useDeviceRequest } from './request';
 import { ScreenshotCard, captureScreenshot } from './ScreenshotCard';
 import { LogsCard, StatusBarCard } from './SmallCards';
-import { useMedia } from './stores';
+import { useMediaLibrary, ensureMedia } from './media/store';
+import { MediaViewerHost } from './media/ViewerHost';
+import { LibraryDialog, openLibrary } from './media/LibraryDialog';
 import { VmCard } from './VmCard';
 import { HiddenCardsCard } from './HiddenCards';
 import { OverridesCard } from './OverridesCard';
@@ -104,6 +109,9 @@ export default function DeviceView() {
   const chosen = typeof storedChoice === 'string' ? storedChoice : null;
   const [picking, setPicking] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const mediaCount = useMediaLibrary((s) => s.items.length);
+  const canPair = useHub((s) => wirelessPairingAvailable(s.drivers));
+  useEffect(() => ensureMedia(), []);
 
   const candidates = useMemo(() => devices.filter((d) => d.id !== 'desktop'), [devices]);
   let deviceId: string | undefined;
@@ -189,6 +197,17 @@ export default function DeviceView() {
       <Toolbar aria-label={t('device.title')}>
         {device && !showPicker ? <DeviceTitle device={device} /> : <span className="dv-toolbar-title">{t('device.title')}</span>}
         <ToolbarSpacer />
+        {canPair ? (
+          <Button size="sm" variant="ghost" icon={Wifi} onClick={openPairDialog} title={t('device.wireless.buttonHint')} aria-label={t('device.wireless.button')} className="dv-media-btn">
+            <span className="dv-media-btn__label">{t('device.wireless.button')}</span>
+          </Button>
+        ) : null}
+        {mediaCount > 0 ? (
+          <Button size="sm" variant="ghost" icon={Images} onClick={() => openLibrary()} title={t('media.libraryDesc')} aria-label={`${t('media.libraryButton')} · ${mediaCount}`} className="dv-media-btn">
+            <span className="dv-media-btn__label">{t('media.libraryButton')}</span>
+            <CountBadge count={mediaCount} />
+          </Button>
+        ) : null}
         {scope.kind === 'all' && candidates.length > 1 && device ? (
           <Button size="sm" variant={showPicker ? 'subtle' : 'ghost'} icon={ArrowLeftRight} onClick={() => setPicking((p) => !p)} aria-pressed={showPicker}>
             {t('device.picker.change')}
@@ -217,9 +236,33 @@ export default function DeviceView() {
         ) : device ? (
           <DevicePage key={device.id} device={device} apps={apps} preferredAppId={preferredAppId} active={active} />
         ) : (
-          <EmptyState icon={Smartphone} size="lg" title={t('device.picker.noDevices')} description={t('device.picker.noDevicesHint')} />
+          <EmptyState
+            icon={Smartphone}
+            size="lg"
+            title={t('device.picker.noDevices')}
+            description={t('device.picker.noDevicesHint')}
+            actions={
+              canPair || mediaCount > 0 ? (
+                <>
+                  {canPair ? (
+                    <Button icon={Wifi} onClick={openPairDialog} title={t('device.wireless.buttonHint')}>
+                      {t('device.wireless.button')}
+                    </Button>
+                  ) : null}
+                  {mediaCount > 0 ? (
+                    <Button icon={Images} onClick={() => openLibrary()}>
+                      {`${t('media.libraryButton')} · ${mediaCount}`}
+                    </Button>
+                  ) : null}
+                </>
+              ) : undefined
+            }
+          />
         )}
       </div>
+      <LibraryDialog />
+      <MediaViewerHost />
+      <PairDialogHost />
     </div>
   );
 }
@@ -228,8 +271,8 @@ function DevicePage({ device, apps, preferredAppId, active }: { device: DeviceIn
   const t = useT();
   const sessions = useMemo(() => Object.values(apps).filter((a) => a.deviceId === device.id), [apps, device.id]);
   const appRows = useAppRows(device, sessions);
-  const hasShots = useMedia((s) => s.shots.some((x) => x.deviceId === device.id));
-  const hasRecordings = useMedia((s) => s.recordings.some((x) => x.deviceId === device.id));
+  const hasShots = useMediaLibrary((s) => s.items.some((x) => x.deviceId === device.id && x.kind === 'screenshot'));
+  const hasRecordings = useMediaLibrary((s) => s.items.some((x) => x.deviceId === device.id && x.kind === 'recording'));
   const processesKnown = useHub((s) => Object.keys(s.processes[device.id] ?? {}).length > 0);
   const imported = device.id.startsWith('import:');
   const readOnly = isReadOnlyDevice(device);
@@ -252,6 +295,7 @@ function DevicePage({ device, apps, preferredAppId, active }: { device: DeviceIn
       processesKnown && { section: 'processes', node: <ProcessesCard device={device} sessions={sessions} canWatch={online && canPoll(device)} /> },
       canAny(LOG_ACTIONS) && { section: 'logs', node: <LogsCard device={device} /> },
       (shows(REPORT_ACTIONS) || Boolean(device.bugReport)) && { section: 'bug-report', node: <DeviceReportCard device={device} /> },
+      !readOnly && showsIphoneReportGuide(device) && { section: 'bug-report', node: <IphoneReportCard device={device} /> },
       // What a tester does to the device.
       online && Boolean(device.settingOverrides?.length) && { section: 'overrides', node: <OverridesCard device={device} apps={appRows} /> },
       (can('screenshot') || hasShots) && { section: 'screenshot', node: <ScreenshotCard device={device} canTake={can('screenshot')} /> },

@@ -1,0 +1,10 @@
+# NOT captured from a device or a real network: the shape of `adb mdns services` written from adb's sources
+# (name<TAB>type<TAB>host:port), with lines the parser must skip. Replace with real output once taken.
+List of discovered mdns services
+adb-R5CT20XK9QM-x7Kp2a	_adb-tls-connect._tcp	192.168.1.20:41235
+adb-R5CT20XK9QM-x7Kp2a	_adb-tls-pairing._tcp	192.168.1.20:37099
+adb-RF8N30ABCD-Qw3rTy	_adb-tls-connect._tcp.	192.168.1.31:39573
+adb-RF8N30ABCD-Qw3rTy	_adb-tls-connect._tcp.	192.168.1.31:39573
+some-printer	_ipp._tcp	192.168.1.5:631
+adb-ZY22-legacy	_adb._tcp	192.168.1.40:5555
+adb-V6-AbCdEf	_adb-tls-connect._tcp	[fe80::1c2b:3aff:fe4d:5e6f]:40001

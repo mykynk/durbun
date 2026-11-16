@@ -1,0 +1,22 @@
+/* "Open" on a media marker in the Logs list (sits in the marker's accent band). */
+.md-marker-open {
+  flex: none;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--bg-panel);
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 16px;
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.md-marker-open:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}

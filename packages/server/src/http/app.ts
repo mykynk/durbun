@@ -12,6 +12,7 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import os from 'node:os';
+import path from 'node:path';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import {
@@ -25,11 +26,13 @@ import {
   type ToolCheck,
   type UiNotice,
 } from '@durbun/protocol';
-import { cleanTempDir, TEMP_CLEAN_INTERVAL_MS, TEMP_KEEP_WHILE_RUNNING, TEMP_MAX_AGE_MS, type ConfigStore } from '../config';
+import { cleanTempDir, MEDIA_DIR_NAME, TEMP_CLEAN_INTERVAL_MS, TEMP_KEEP_WHILE_RUNNING, TEMP_MAX_AGE_MS, type ConfigStore } from '../config';
 import { runDoctor as runDoctorChecks, type PortState } from '../doctor';
 import type { ClearEvent, DeviceDriver, DriverContext, FlutterVmModule, Hub, HubChange, Logger, SdkLayer } from '../types';
 import { SERVER_VERSION } from '../version';
 import { createApiHandler } from './api';
+import { MediaLibrary } from './media';
+import { createWirelessModule } from './androidWireless';
 import { SlackStore } from './slack';
 import { createFlowsModule } from '../flows/module';
 import { CommandError, createCommandRouter, withTimeout } from './commands';
@@ -224,7 +227,10 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
 
   /* ───────────── UI channel + commands ───────────── */
 
+  const media = new MediaLibrary({ dir: path.join(config.dataDir, MEDIA_DIR_NAME), tempDir: config.tempDir, hub, logger: logger.child('media') });
+
   const router = createCommandRouter({
+    media,
     hub,
     sdk,
     config,
@@ -472,7 +478,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     uploadLimitBytes: deps.uploadLimitBytes,
     importLimitBytes: deps.importLimitBytes,
     slack,
-    modules: [flowsModule],
+    modules: [flowsModule, media.module(), createWirelessModule({ drivers: () => deps.drivers, devices: () => hub.getDevices() })],
   });
 
   async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -659,6 +665,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     closed = true;
     clearInterval(driverTimer);
     clearInterval(tempTimer);
+    media.dispose();
     await flowsModule.dispose().catch((err) => logger.warn(`flows did not stop cleanly: ${errorMessage(err)}`));
     for (const u of unsubscribers) {
       try {

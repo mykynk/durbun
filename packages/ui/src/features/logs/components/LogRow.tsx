@@ -44,6 +44,7 @@ import { appLifecycleOf, exitReportMessage, exitReportOf, isExitAnr, launchOf, n
 import { sdkNoteText } from '../model/sdkNotes';
 import { entrySourceText, isDeviceCrashRecord } from '../../../sources/text';
 import type { TimeFormat } from '../../../data';
+import { MediaMarkerIcon, MediaMarkerOpen, mediaRefOf } from '../../device/media/marker';
 
 /** Expansion bits per row. */
 export const EXPAND_LINES = 1;
@@ -747,9 +748,10 @@ function MarkerRow({ row, selected, flash }: LogRowProps) {
     <div className={clsx('lg-marker', selected && 'is-selected', flash && 'is-flash')} data-row={row.id}>
       <span className="lg-marker__rule" />
       <span className="lg-marker__label">
-        <Bookmark size={12} aria-hidden />
+        {mediaRefOf(e) ? <MediaMarkerIcon entry={e} /> : <Bookmark size={12} aria-hidden />}
         <span className="lg-marker__text">{systemText(e)}</span>
         <span className="lg-marker__time tnum">{formatClock(e.ts)}</span>
+        <MediaMarkerOpen entry={e} />
       </span>
       <span className="lg-marker__rule" />
     </div>

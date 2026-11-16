@@ -65,6 +65,8 @@ export interface CommandDeps {
   ownPorts?: () => number[];
   /** Temp directory of POST /api/upload: an uploaded install file is deleted once its app-install ends. */
   tempDir?: string;
+  /** Keeps screenshots and recordings a UI window took (media.ts); flow runs (client id < 0) keep their own. */
+  media?: { ingest(deviceId: string, action: string, result: DeviceActionResult): Promise<DeviceActionResult> };
 }
 
 const CLEAR_TARGETS: ClearTarget[] = ['logs', 'network', 'metrics', 'all'];
@@ -124,6 +126,8 @@ export function actionTimeoutMs(action: string, params: Record<string, unknown>)
   // A device report replies when it is written and copied (the driver's own limit is 15 min).
   if (action === 'bug-report') return 17 * 60_000;
   if (action === 'bug-report-cancel') return 2 * 60_000;
+  // An app's data copy stops itself after 10 min (APP_DATA_TIMEOUT_MS).
+  if (action === 'app-data') return 12 * 60_000;
   return DEFAULT_ACTION_TIMEOUT_MS;
 }
 
@@ -209,7 +213,7 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
     }
   }
 
-  async function deviceAction(cmd: Record<string, unknown>): Promise<CommandReply> {
+  async function deviceAction(cmd: Record<string, unknown>, client?: CommandClient): Promise<CommandReply> {
     const deviceId = reqString(cmd.deviceId, 'deviceId');
     const action = reqString(cmd.action, 'action', 100);
     const params = optParams(cmd.params);
@@ -221,7 +225,11 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
         connection: 'wifi',
       });
     }
-    const running = Promise.resolve().then(() => driver.runAction(deviceId, action as DeviceActionId, params));
+    const media = deps.media && client && client.id >= 0 ? deps.media : undefined;
+    // Kept even when the reply times out: the file and its log marker do not depend on the window waiting.
+    const running = Promise.resolve()
+      .then(() => driver.runAction(deviceId, action as DeviceActionId, params))
+      .then((r) => (media ? media.ingest(deviceId, action, r) : r));
     // The UI uploads the file for each install: it is not needed once the install ends (even after our timeout).
     const upload = action === 'app-install' && deps.tempDir && typeof params.file === 'string' && isUploadedFile(deps.tempDir, params.file) ? params.file : undefined;
     if (upload) {
@@ -361,7 +369,7 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
           return ok(deps.hub.addMarker(label, deviceId));
         }
         case 'device.action':
-          return await deviceAction(cmd);
+          return await deviceAction(cmd, client);
         case 'app.action':
           return await appAction(cmd);
         case 'mocks.set': {

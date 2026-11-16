@@ -1,6 +1,8 @@
 import { registerMessages } from '../../i18n';
 import './codes';
 import './i18nTester';
+import './i18nAppData';
+import './wireless/i18n';
 
 /** Device view dictionary (`device.*`; server codes live in codes.ts under `device.codes.*`). */
 registerMessages('device', {
@@ -85,8 +87,8 @@ registerMessages('device', {
       take: 'Ekran görüntüsü al',
       done: 'Ekran görüntüsü alındı',
       failed: 'Ekran görüntüsü alınamadı',
-      empty: 'Bu oturumda henüz ekran görüntüsü yok. Aldıklarınız burada birikir.',
-      gallery: 'Bu oturumun ekran görüntüleri',
+      empty: 'Henüz ekran görüntüsü yok.',
+      gallery: 'Bu cihazın ekran görüntüleri',
       open: 'Büyüt',
       download: 'İndir',
       copy: 'Panoya kopyala',
@@ -115,12 +117,12 @@ registerMessages('device', {
       limitReached: 'Süre sınırına ulaştığı için kendiliğinden durdu.',
       failed: 'Ekran kaydı alınamadı',
       stopFailed: 'Ekran kaydı durdurulamadı',
-      hint: 'Kayıt siz durdurana kadar sürer; dosya hazır olunca burada açılır. Kayıt sürerken başka sekmelere geçebilirsiniz.',
+      hint: 'Kayıt siz durdurana kadar sürer; dosya hazır olunca burada açılır ve Loglar’da o ana bir işaret düşer. Kayıt sürerken başka sekmelere geçebilirsiniz.',
       open: 'Kaydı aç',
       download: 'İndir',
       seconds: '{n} sn',
       minutes: '{n} dk',
-      list: 'Bu oturumun kayıtları',
+      list: 'Bu cihazın kayıtları',
     },
     url: {
       title: 'Bağlantı / deep link aç',
@@ -540,8 +542,8 @@ registerMessages('device', {
       take: 'Take screenshot',
       done: 'Screenshot captured',
       failed: 'Could not take a screenshot',
-      empty: 'No screenshots in this session yet. The ones you take collect here.',
-      gallery: 'Screenshots of this session',
+      empty: 'No screenshots yet.',
+      gallery: 'Screenshots of this device',
       open: 'Enlarge',
       download: 'Download',
       copy: 'Copy to clipboard',
@@ -570,12 +572,12 @@ registerMessages('device', {
       limitReached: 'It reached the time limit and stopped by itself.',
       failed: 'Could not record the screen',
       stopFailed: 'Could not stop the screen recording',
-      hint: 'The recording runs until you stop it; the file opens here when it is ready. You can switch tabs while it records.',
+      hint: 'The recording runs until you stop it; the file shows up here when it is ready and leaves a marker at that moment in Logs. You can switch tabs while it records.',
       open: 'Open recording',
       download: 'Download',
       seconds: '{n} s',
       minutes: '{n} min',
-      list: 'Recordings of this session',
+      list: 'Recordings of this device',
     },
     url: {
       title: 'Open URL / deep link',

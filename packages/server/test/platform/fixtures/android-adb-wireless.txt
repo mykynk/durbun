@@ -1,0 +1,19 @@
+# NOT captured from a device. What `adb pair` / `adb connect` print, written from adb's own sources
+# (packages/modules/adb: client/adb_wifi.cpp "Successfully paired to …", "Failed: …"; socket_spec.cpp and
+# client/commandline.cpp for connect) and adb's usual socket errors. Replace with real lines once taken.
+# <command><TAB><expected code><TAB><text, \n for a line break>
+pair	adb.wireless.paired	Successfully paired to 192.168.1.20:37099 [guid=adb-R5CT20XK9QM-x7Kp2a]
+pair	adb.wireless.wrongCode	Failed: Wrong password or connection was dropped.
+pair	adb.wireless.unreachable	Failed: Unable to start pairing client.
+pair	adb.wireless.badAddress	Failed to parse address for pairing: failed to parse address '192.168.1.20:'
+pair	adb.wireless.badAddress	Invalid port while parsing address [192.168.1.20:0]
+pair	adb.wireless.adbTooOld	adb: unknown command pair
+pair	adb.wireless.failed	error: protocol fault (couldn't read status message): Undefined error: 0
+connect	adb.wireless.connected	connected to 192.168.1.20:41235
+connect	adb.wireless.connected	already connected to 192.168.1.20:41235
+connect	adb.wireless.notPaired	failed to authenticate to 192.168.1.20:41235
+connect	adb.wireless.refused	failed to connect to '192.168.1.20:41235': Connection refused
+connect	adb.wireless.unreachable	failed to connect to '192.168.1.20:41235': Operation timed out
+connect	adb.wireless.unreachable	failed to connect to '10.0.0.9:5555': No route to host
+connect	adb.wireless.badAddress	cannot resolve host 'phone.local' and port 41235: nodename nor servname provided, or not known
+connect	adb.wireless.failed	unexpected reply

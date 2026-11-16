@@ -38,6 +38,7 @@ import {
   type AdbServerConflict,
 } from './parsers';
 import { AndroidDeviceSession } from './session';
+import { AdbWireless } from './wireless';
 
 const POLL_MS = 2000;
 /** While the device stream is live: the server's version is checked this often (a socket call, no process). */
@@ -272,6 +273,11 @@ export class AndroidDriver implements DeviceDriver {
     if (!r.port) throw new Error(`adb forward to device port ${devicePort} failed: ${r.error ?? 'unknown error'}`);
     const port = r.port;
     return { host: '127.0.0.1', port, dispose: async () => void (await adb.forwardRemove(serial, port)) };
+  }
+
+  /** Wireless debugging (pair, connect, discovery) with the adb this driver uses; undefined while there is none. */
+  wireless(): AdbWireless | undefined {
+    return this.adb ? new AdbWireless(this.adb) : undefined;
   }
 
   /* ───────────── adb binary & server ───────────── */

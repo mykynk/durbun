@@ -3,14 +3,16 @@
  * Dürbün UI dev mock — a stand-in for the real server so the UI can be built and judged without
  * hardware. Node + `ws` only.
  *
- *   node packages/ui/dev/mock-server.mjs [--port 9799] [--empty] [--no-flows] [--rate 30]
+ *   node packages/ui/dev/mock-server.mjs [--port 9799] [--empty] [--no-flows] [--no-media] [--sample-video <.mp4>] [--rate 30]
  *   DURBUN_SERVER=http://127.0.0.1:9799 npx vite --port 5179     (from packages/ui)
  *
+ * REST /api/android/wireless[/pair|/connect]: pairing over Wi-Fi (code 123456 works; see dev/mock-wireless.mjs).
  * WS /ui: hello → snapshot (4 devices, 4 apps + an older session, device apps, mocks, drivers) → ~2000
  * history logs → live batches (logs, network, metrics, device apps, occasional device/app changes). Every
  * command gets {ok: true} with plausible data. REST: /api/health, /api/doctor, /api/network/:id (+ bodies),
  * /api/network/search, /api/export, /api/import, /api/har, /api/bug-report, /api/upload, /api/files/crash/:udid/:name,
- * /api/slack (+ /send: printed to stdout, never posted).
+ * /api/slack (+ /send: printed to stdout, never posted), /api/media (mock-media.mjs: the media library, seeded unless
+ * `--no-media`; screenshots and recordings taken here are added with their log marker).
  * SPEC §10: apps without the SDK (`snapshot.deviceApps`: a Play build, a Firebase build, an APK
  * installed by hand, a TestFlight build next to an Xcode build — both "Runner" — on a USB iPhone), exact
  * log origins, dropbox / .ips crash records (one marked `duplicateOf`, one with a downloadable .ips),
@@ -32,6 +34,9 @@ import http from 'node:http';
 import zlib from 'node:zlib';
 import { WebSocketServer } from 'ws';
 import { flowSummaries, handleFlowsApi } from './mock-flows.mjs';
+import { createMockMedia, mediaClock } from './mock-media.mjs';
+import { appDataArchive, appDataReply } from './mock-app-data.mjs';
+import { createMockWireless } from './mock-wireless.mjs';
 
 const args = process.argv.slice(2);
 const argValue = (name, fallback) => {
@@ -83,8 +88,8 @@ const server = () => ({
   platform: 'darwin',
 });
 
-const ANDROID_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'logs-clear-buffer', 'logs-restart', 'appearance', 'font-scale', 'animations', 'input-text', 'key-event', 'screen-record', 'screen-record-stop', 'app-permission', 'app-settings', 'app-locale', 'airplane-mode', 'wifi', 'mobile-data', 'rotation', 'dont-keep-activities', 'bug-report', 'bug-report-cancel'];
-const SIM_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'appearance', 'font-scale', 'push-notification', 'location', 'status-bar', 'logs-restart', 'screen-record', 'screen-record-stop', 'app-permission', 'keychain-reset'];
+const ANDROID_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'logs-clear-buffer', 'logs-restart', 'appearance', 'font-scale', 'animations', 'input-text', 'key-event', 'screen-record', 'screen-record-stop', 'app-permission', 'app-settings', 'app-locale', 'airplane-mode', 'wifi', 'mobile-data', 'rotation', 'dont-keep-activities', 'bug-report', 'bug-report-cancel', 'app-data'];
+const SIM_ACTIONS = ['screenshot', 'open-url', 'list-apps', 'app-launch', 'app-stop', 'app-restart', 'app-clear-data', 'app-uninstall', 'app-install', 'appearance', 'font-scale', 'push-notification', 'location', 'status-bar', 'logs-restart', 'screen-record', 'screen-record-stop', 'app-permission', 'keychain-reset', 'app-data'];
 
 function baseDevices() {
   return [
@@ -164,6 +169,7 @@ function baseDevices() {
         { action: 'screen-record-stop', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)' } },
         { action: 'app-install', code: 'action.developerModeOff' },
         { action: 'app-uninstall', code: 'action.developerModeOff' },
+        { action: 'app-data', code: 'action.appData.iphoneUnsupported' },
       ],
       readers: {
         crashReports: { status: 'ok', lastOk: Date.now() },
@@ -1439,6 +1445,23 @@ function enableDemo(on) {
   for (const ws of clients) syncClient(ws);
 }
 
+/* ───────────── media library (like server http/media.ts) ───────────── */
+const media = createMockMedia({ png: screenshotPng, sampleVideo: argValue('--sample-video'), devices: baseDevices() });
+const wireless = createMockWireless();
+if (!args.includes('--no-media')) media.seed();
+
+/** Keep a screenshot / recording and put its marker on the device's log timeline (as the server does for a window). */
+function keepMedia(deviceId, kind, extra) {
+  const d = devices.find((x) => x.id === deviceId) ?? { id: deviceId, name: deviceId, platform: 'android' };
+  const params = kind === 'screenshot' ? { device: d.name } : { device: d.name, duration: mediaClock(extra.durationSec ?? 0) };
+  const message = kind === 'screenshot' ? `Screenshot · ${d.name}` : `Screen recording · ${d.name} · ${params.duration}`;
+  const entry = logEntry({ ts: Date.now(), deviceId, source: 'system', level: 'info', tag: 'durbun', kind: 'marker', code: `media.${kind}`, params, message });
+  const item = media.add(d, kind, { ...extra, logId: entry.id });
+  entry.data = { media: { id: item.id, kind } };
+  pushLogs([entry]);
+  return item;
+}
+
 /* ───────────── screen recordings ───────────── */
 /** deviceId → running recording: the replies waiting for its file (screen-record, then screen-record-stop). */
 const recordings = new Map();
@@ -1455,7 +1478,8 @@ function endRecording(deviceId) {
     queue.devices.push(d);
   }
   const durationSec = Math.max(1, Math.round((Date.now() - rec.startedAt) / 1000));
-  for (const reply of rec.replies) reply({ url: '/api/files/recording.mov', file: '/tmp/recording.mov', durationSec, endedBy: rec.endedBy });
+  const item = keepMedia(deviceId, 'recording', { ts: rec.startedAt, durationSec });
+  for (const reply of rec.replies) reply({ url: '/api/files/recording.mov', file: '/tmp/recording.mov', durationSec, endedBy: rec.endedBy, media: item });
 }
 
 /** Like the server: records until screen-record-stop or the platform limit, then "copies" the file for 1.5 s. */
@@ -1579,6 +1603,25 @@ function bugReport(d, command, reply) {
   bugReports.set(d.id, run);
 }
 
+/**
+ * `app-data` like the drivers: a few seconds of copying, then the .tar.gz. "com.mykynk.kumbara" is not a debug build
+ * (run-as refuses it); an app id containing "empty" has no data.
+ */
+const appDataRuns = new Set();
+function appData(d, command, reply) {
+  const appId = command.params?.appId;
+  if (typeof appId !== 'string' || !/^[A-Za-z0-9_][A-Za-z0-9_.\-:]*$/.test(appId)) return reply(undefined, false, 'A valid package name (appId) is required', 'action.invalidParams', { param: 'appId', expected: 'appId' });
+  if (appDataRuns.has(d.id)) return reply(undefined, false, "This device's app data is already being copied", 'action.appData.busy');
+  appDataRuns.add(d.id);
+  const startedAt = Date.now();
+  setTimeout(() => {
+    appDataRuns.delete(d.id);
+    if (d.platform === 'android' && appId === 'com.mykynk.kumbara') return reply(undefined, false, `${appId} is not debuggable (not a debug build)`, 'action.appData.notDebuggable', { appId });
+    if (/empty/.test(appId)) return reply(undefined, false, `${appId} has no data to copy`, 'action.appData.empty');
+    reply(appDataReply(d, appId, startedAt), true, undefined, 'action.appData.saved');
+  }, d.platform === 'android' ? 4200 : 1800);
+}
+
 /** Install with the server's refusal over an installed copy: a file named "*other-sig*" was signed with another key. */
 function installApp(command, reply) {
   const p = command.params ?? {};
@@ -1606,6 +1649,7 @@ function testerAction(command, reply) {
   if (d.users && p.userId !== undefined && !d.users.some((u) => u.id === p.userId)) return reply(undefined, false, 'userId is not a user of this phone', 'action.invalidParams', { param: 'userId', expected: 'user' });
   if (command.action === 'app-install') return installApp(command, reply);
   if (command.action === 'bug-report' || command.action === 'bug-report-cancel') return bugReport(d, command, reply);
+  if (command.action === 'app-data') return appData(d, command, reply);
   if (d.platform === 'ios' && command.action === 'app-permission') {
     if (typeof p.appId !== 'string' || !p.appId) return reply(undefined, false, 'A bundle id (appId) is required', 'action.invalidParams', { param: 'appId', expected: 'appId' });
     if (p.restore === true) return reply(null, true, undefined, 'action.permissionReset');
@@ -1669,9 +1713,9 @@ function handleCommand(ws, { requestId, command }) {
       enableDemo(Boolean(command.enabled));
       return;
     case 'device.action':
-      if (command.action === 'screenshot') return reply({ url: `/api/files/shot.png?t=${now}`, file: '/tmp/shot.png', width: 270, height: 585 });
+      if (command.action === 'screenshot') return reply({ url: `/api/files/shot.png?t=${now}`, file: '/tmp/shot.png', width: 270, height: 585, media: keepMedia(command.deviceId, 'screenshot', { ts: now }) });
       if (command.action === 'screen-record' || command.action === 'screen-record-stop') return screenRecord(command, reply);
-      if (command.action === 'list-apps') return reply([{ id: 'com.mykynk.pati', name: 'Pati', version: '1.4.2', debuggable: true }, { id: 'com.mykynk.kasa', name: 'Kasa', version: '2.0.1' }]);
+      if (command.action === 'list-apps') return reply([{ id: 'com.mykynk.pati', name: 'Pati', version: '1.4.2', debuggable: true }, { id: 'com.mykynk.kasa', name: 'Kasa', version: '2.0.1' }, { id: 'com.mykynk.kumbara', name: 'Kumbara', version: '3.1.0', debuggable: false }]);
       return testerAction(command, reply);
     case 'app.action':
       return reply(null);
@@ -1924,6 +1968,13 @@ const httpServer = http.createServer(async (req, res) => {
         queue.network.push(strip(e));
       }
       return json(res, 200, { deviceIds: [id] });
+    }
+    if (media.handle(req, res, p, url)) return;
+    if (await wireless.handle(req, res, p)) return;
+    if (p === '/api/files/app-data.tar.gz' && req.method === 'GET') {
+      const appId = url.searchParams.get('app') || 'com.mykynk.pati';
+      res.writeHead(200, { 'Content-Type': 'application/gzip', 'Content-Disposition': `attachment; filename="app-data-${appId.replace(/[^A-Za-z0-9._-]/g, '-')}.tar.gz"` });
+      return res.end(appDataArchive(appId));
     }
     if (p === '/api/files/shot.png' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });

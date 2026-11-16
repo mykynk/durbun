@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Circle, Download, ExternalLink, Square, Video } from 'lucide-react';
+import { Circle, Images, Square, Video } from 'lucide-react';
 import type { DeviceInfo } from '@durbun/protocol';
-import { Button, downloadUrl, formatClock } from '../../components';
+import { Button } from '../../components';
 import { useT } from '../../i18n';
 import { describeError } from './codes';
-import { mediaFileName, recordClock, recordLimitSec } from './model';
-import { clearRecordingError, startRecording, stopRecording, useMedia, useRecorder } from './stores';
+import { GalleryStatus, MediaGrid, useDeviceMedia } from './media/Gallery';
+import { openLibrary } from './media/LibraryDialog';
+import { recordClock, recordLimitSec } from './model';
+import { clearRecordingError, startRecording, stopRecording, useRecorder } from './stores';
+
+/** Recordings shown on the card; the rest are one click away in the library. */
+const CARD_RECORDINGS = 4;
 import { ActionErrorCallout, DeviceCard, type ActionError } from './useAction';
 
 function useClock(enabled: boolean, ms = 250): number {
@@ -37,8 +42,8 @@ export function RecordCard({ device }: { device: DeviceInfo }) {
   // Stopped (by the user or the limit): the device finishes the file and Dürbün copies it.
   const finishing = !!run?.stopping || (active && elapsed >= limitSec * 1000);
   const canRecord = device.actions.includes('screen-record');
-  const all = useMedia((s) => s.recordings);
-  const recordings = useMemo(() => all.filter((r) => r.deviceId === device.id), [all, device.id]);
+  const media = useDeviceMedia(device.id, 'recording');
+  const recordings = media.items;
 
   const span = (sec: number) => (sec < 60 ? t('device.record.seconds', { n: sec }) : t('device.record.minutes', { n: Math.round(sec / 60) }));
   const error: ActionError | null = useMemo(() => {
@@ -83,27 +88,18 @@ export function RecordCard({ device }: { device: DeviceInfo }) {
           <span className="dv-progress__fill is-indeterminate" />
         </div>
       ) : null}
-      {recordings.length > 0 ? (
-        <ul className="dv-recs" aria-label={t('device.record.list')}>
-          {recordings.map((r) => (
-            <li key={r.id} className="dv-rec">
-              <video className="dv-rec__video" src={r.url} controls preload="metadata" />
-              <div className="dv-rec__meta">
-                <span className="tnum">{formatClock(r.ts, { ms: false })}</span>
-                <span className="subtle tnum">· {recordClock(r.durationSec * 1000)}</span>
-                <span className="grow" />
-                <a className="btn btn--ghost btn--sm" href={r.url} target="_blank" rel="noopener noreferrer">
-                  <ExternalLink size={14} aria-hidden />
-                  <span className="btn__label">{t('device.record.open')}</span>
-                </a>
-                <Button size="sm" variant="ghost" icon={Download} onClick={() => downloadUrl(r.url, mediaFileName('recording', device, r.ts, r.file))}>
-                  {t('device.record.download')}
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      <GalleryStatus status={media.status} error={media.error} hasItems={recordings.length > 0}>
+        {recordings.length > 0 ? (
+          <>
+            <MediaGrid items={recordings.slice(0, CARD_RECORDINGS)} label={t('device.record.list')} wide />
+            <div className="md-foot md-foot--end">
+              <Button size="sm" variant="ghost" icon={Images} onClick={() => openLibrary({ deviceId: device.id, kind: 'recording' })}>
+                {recordings.length > CARD_RECORDINGS ? t('media.showAll', { count: recordings.length }) : t('media.libraryButton')}
+              </Button>
+            </div>
+          </>
+        ) : null}
+      </GalleryStatus>
     </DeviceCard>
   );
 }

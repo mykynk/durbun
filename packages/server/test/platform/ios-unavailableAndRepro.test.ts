@@ -56,6 +56,7 @@ describe('why an iPhone action is missing', () => {
       ['screenshot', 'action.developerModeOff'],
       ['screen-record', 'action.developerModeOff'],
       ['screen-record-stop', 'action.developerModeOff'],
+      ['app-data', 'action.appData.iphoneUnsupported'],
     ]);
   });
 
@@ -70,6 +71,7 @@ describe('why an iPhone action is missing', () => {
     expect(unavailable).toEqual([
       { action: 'screen-record', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)', from: 'Xcode' } },
       { action: 'screen-record-stop', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)', from: 'Xcode' } },
+      { action: 'app-data', code: 'action.appData.iphoneUnsupported' },
     ]);
   });
 });

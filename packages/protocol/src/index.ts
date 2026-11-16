@@ -762,6 +762,14 @@ export function findMockRule(rules: MockRule[], method: string, url: string, app
  *      (`action.bugReport.busy`).
  *  bug-report-cancel {}                   stops it (`action.bugReport.cancelled` on the `bug-report` reply;
  *      `action.bugReport.notRunning` when none runs).
+ *  app-data { appId*, userId? }           → data: AppDataPullData. A copy of the app's own data folder (shared
+ *      preferences, databases, files; cache folders left out) as one .tar.gz in the temp folder. Android: debuggable
+ *      apps through `run-as` (`action.appData.notDebuggable`, `action.appData.notInstalled`, `action.appData.locked`
+ *      before the first unlock, `action.appData.noTar`); iOS simulator: the app's data container
+ *      (`action.appNotFound`). Not on a physical iPhone (`action.appData.iphoneUnsupported` in `unavailable`).
+ *      Past 1 GiB of data (before compression) it stops with `action.appData.tooLarge` {limit}; an app without
+ *      data gives `action.appData.empty`; a stream cut short `action.appData.incomplete`; past 10 minutes
+ *      `action.appData.timeout` {minutes}. One pull per device at a time (`action.appData.busy`).
  */
 export type DeviceActionId =
   | 'screenshot'
@@ -804,7 +812,8 @@ export type DeviceActionId =
   | 'dont-keep-activities'
   | 'keychain-reset'
   | 'bug-report'
-  | 'bug-report-cancel';
+  | 'bug-report-cancel'
+  | 'app-data';
 
 /** Reply data of a refused `app-install` the installed copy is in the way of (see `replace: true`). */
 export interface InstallRefusalData {
@@ -821,6 +830,22 @@ export interface BugReportData {
   /** Server-side path. */
   file: string;
   bytes: number;
+  durationSec: number;
+}
+
+/** Reply data of `app-data`: the app's data folder as one .tar.gz. */
+export interface AppDataPullData {
+  /** Same-origin URL of the .tar.gz. */
+  url: string;
+  /** Server-side path. */
+  file: string;
+  /** File name for a download ("app-data-com.example.shop-Pixel-8-20261116-141502.tar.gz"). */
+  fileName: string;
+  appId: string;
+  /** Size of the .tar.gz. */
+  bytes: number;
+  /** Size of the data before compression. */
+  rawBytes: number;
   durationSec: number;
 }
 
@@ -842,6 +867,111 @@ export interface ScreenRecordData {
   durationSec?: number;
   /** 'limit' = it stopped by itself at `DeviceRecording.limitSec`. */
   endedBy?: 'stop' | 'limit';
+  /** The copy kept in the media library (absent: the server keeps none, e.g. a flow run's own recording). */
+  media?: MediaItem;
+}
+
+/* ────────────────────────────── Media library (screenshots, recordings) ────────────────────────────── */
+
+export type MediaKind = 'screenshot' | 'recording';
+
+/**
+ * A screenshot or screen recording a window took, kept on disk under `<dataDir>/media/` (GET /api/media). The
+ * `screenshot` reply data and ScreenRecordData carry it as `media`; the device's log timeline gets a marker line
+ * (`code: 'media.screenshot' | 'media.recording'`, `data.media: MediaRef`).
+ */
+export interface MediaItem {
+  id: string;
+  kind: MediaKind;
+  deviceId: string;
+  /** Device name when it was taken (the device may be gone later). */
+  deviceName?: string;
+  platform?: DevicePlatform;
+  /** Taken at (a recording: when it started), epoch ms (Mac clock). */
+  ts: number;
+  /** Recording: when it ended. */
+  endTs?: number;
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  bytes: number;
+  /** Same-origin URL of the file (`/api/media/<id>`; `?download=1` for a download). */
+  url: string;
+  /** File name for a download ("screenshot-Pixel-8-20261116-140210.png"). */
+  fileName: string;
+  /** Id of the marker line on the device's log timeline (while the logs still hold it). */
+  logId?: number;
+}
+
+/** `data.media` of a marker line: which library item it points at. */
+export interface MediaRef {
+  id: string;
+  kind: MediaKind;
+}
+
+/** How long the media library keeps files: the oldest go first past any limit. */
+export interface MediaPolicy {
+  maxAgeDays: number;
+  maxBytes: number;
+  maxItems: number;
+}
+
+/** GET /api/media[?deviceId=] — newest first. */
+export interface MediaList {
+  items: MediaItem[];
+  policy: MediaPolicy;
+  /** Bytes the whole library uses (every device). */
+  usedBytes: number;
+  /** Items in the whole library (every device). */
+  total: number;
+}
+
+/* ────────────────────────────── Android wireless debugging (pair over Wi-Fi) ────────────────────────────── */
+
+/** A phone on this network that advertises wireless debugging (`adb mdns services`). */
+export interface AdbWirelessService {
+  /** mDNS instance name ("adb-R5CT20XK9QM-x7Kp2a"). */
+  name: string;
+  /** 'pairing': the phone shows its "Pair device with pairing code" screen; 'connect': wireless debugging is on. */
+  kind: 'pairing' | 'connect';
+  host: string;
+  port: number;
+  /** The phone's serial number, from the name. */
+  serial?: string;
+  /** adb already has this phone connected over Wi-Fi. */
+  connected?: boolean;
+}
+
+/**
+ * GET /api/android/wireless — what the pairing screen can offer. `adb: false` when adb is missing (code
+ * `action.toolMissing`); `discovery: 'unavailable'` when this adb cannot list mDNS services (pairing by typing the
+ * address still works).
+ */
+export interface AdbWirelessState {
+  adb: boolean;
+  discovery: 'ok' | 'unavailable';
+  services: AdbWirelessService[];
+  /** Why discovery is unavailable (adb's own words). */
+  detail?: string;
+}
+
+/**
+ * POST /api/android/wireless/pair { host, port, code } and /connect { host, port } reply. A refused pairing or
+ * connection is HTTP 200 with `ok: false` and a code (`adb.wireless.wrongCode`, `.unreachable`, `.refused`,
+ * `.notPaired`, `.badAddress`, `.timeout`, `.adbTooOld`, `.failed` {detail}); bad input is HTTP 400.
+ * After a pairing the server looks for the phone's connect service and connects to it (`connected`).
+ */
+export interface AdbWirelessResult {
+  ok: boolean;
+  code: string;
+  message: string;
+  params?: I18nParams;
+  /** pair: the address it paired with; connect: the address connected to. */
+  address?: string;
+  /** connect (or pair + automatic connect): adb's serial of the phone. */
+  serial?: string;
+  /** pair: whether it was connected afterwards, and where; absent when no connect service was found. */
+  connected?: { ok: boolean; address: string; code: string; message?: string };
 }
 
 export interface InstalledApp {

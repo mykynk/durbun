@@ -20,6 +20,8 @@ import {
 import { sigintRecording, type RecordingProcess, type ScreenRecorder } from '../shared/screenRecord';
 import { tailLines } from '../shared/text';
 import { appBundleId } from './bundleInfo';
+import { appDataResult, appDataTarget, oncePerDevice, SIM_SKIPPED, writeTarGz } from '../shared/appData';
+import { tarDirectory } from '../shared/tarStream';
 import { contentSizeForScale, CONTENT_SIZES, parseListApps, simctl, XCRUN } from './simctl';
 import type { RunOptions, RunResult } from '../exec';
 
@@ -43,6 +45,7 @@ export const SIM_ACTIONS: DeviceActionId[] = [
   'screen-record-stop',
   'app-permission',
   'keychain-reset',
+  'app-data',
 ];
 
 /** Services `simctl privacy` grants, revokes and resets. */
@@ -172,6 +175,12 @@ export async function runSimAction(
 
     case 'app-install':
       return installApp(t, str(params, 'file'), params.replace === true);
+
+    case 'app-data': {
+      const appId = needApp();
+      if (typeof appId !== 'string') return appId;
+      return oncePerDevice(t.deviceId, () => pullSimAppData(t, appId));
+    }
 
     case 'app-permission': {
       const appId = needApp();
@@ -405,4 +414,27 @@ async function startRecording(t: SimActionTarget): Promise<RecordingProcess> {
     }
     return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file });
   });
+}
+
+/**
+ * `app-data` on a simulator: the app's data container (Documents, Library with Preferences and Application Support,
+ * tmp) is a folder on this Mac; it is streamed as tar, without caches, snapshots and tmp.
+ */
+export async function pullSimAppData(t: Pick<SimActionTarget, 'udid' | 'label' | 'ctx' | 'simctl'>, appId: string): Promise<DeviceActionResult> {
+  const c = await simOf(t)(['get_app_container', t.udid, appId, 'data']);
+  if (!c.ok) return fail(`${appId} is not installed on this simulator`, 'action.appNotFound');
+  const dir = c.stdout.trim().split('\n')[0]?.trim() ?? '';
+  const st = path.isAbsolute(dir) ? await fs.promises.lstat(dir).catch(() => undefined) : undefined;
+  if (!st?.isDirectory()) return fail(`The data container of ${appId} was not found`, 'action.appData.failed', undefined, { detail: dir || 'no path' });
+  const startedAt = Date.now();
+  let files = 0;
+  const skipped = new Set<string>(SIM_SKIPPED);
+  const entries = tarDirectory(dir, { exclude: (rel) => skipped.has(rel), onFile: () => (files += 1) });
+  const target = await appDataTarget(t.ctx, t.label, appId);
+  const out = await writeTarGz(entries, target.file);
+  if (out.ok && files === 0) {
+    await fs.promises.rm(target.file, { force: true }).catch(() => undefined);
+    return fail(`${appId} has no data to copy`, 'action.appData.empty');
+  }
+  return appDataResult(t.ctx, target, appId, startedAt, out);
 }

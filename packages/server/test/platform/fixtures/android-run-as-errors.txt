@@ -1,0 +1,16 @@
+# NOT captured from a device. What `adb exec-out "run-as <pkg> …"` prints when run-as refuses, written from the
+# error() calls in AOSP system/core/run-as/run-as.cpp (Android 7+) and the older run-as.c wording (Android 5-6),
+# plus adb's own client errors. Replace with real lines once taken from a phone.
+# <expected code><TAB><text, \n for a line break>
+action.appData.notInstalled	run-as: unknown package: com.example.shop
+action.appData.notDebuggable	run-as: package not debuggable: com.example.shop
+action.appData.notInstalled	run-as: Package 'com.example.shop' is unknown
+action.appData.notDebuggable	run-as: Package 'com.example.shop' is not debuggable
+action.appData.locked	run-as: couldn't chdir to package's data directory '/data/user/0/com.example.shop': Required key not available
+action.appData.failed	run-as: package has corrupt installation: com.example.shop
+action.appData.failed	run-as: package not an application: com.example.shop
+action.deviceOffline	error: device offline
+action.deviceOffline	adb: device 'R5CT10ABCDE' not found
+action.appData.noTar	durbun-no-tar
+action.appData.empty	durbun-empty
+action.appData.empty	

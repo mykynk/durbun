@@ -988,6 +988,7 @@ export const DEVICE_ACTION_SUPPORT: Readonly<Record<DeviceActionId, DeviceSuppor
   'keychain-reset': { android: 'none', iosSimulator: true, iosDevice: false },
   'bug-report': { android: 'all', iosSimulator: false, iosDevice: false },
   'bug-report-cancel': { android: 'all', iosSimulator: false, iosDevice: false },
+  'app-data': { android: 'all', iosSimulator: true, iosDevice: false },
 };
 
 /** Does a device of this platform/kind support the action? */

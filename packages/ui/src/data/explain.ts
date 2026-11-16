@@ -6,7 +6,7 @@
  * the sidebar badges, the "Neler görünüyor?" panel and the Network / Performance / Mocks empty states all
  * render from it so they can never disagree.
  */
-import type { AppInstallSource, AppSession, DeviceActionId, DeviceApp, DeviceInfo, DeviceReaderState, DeviceUnavailableAction, NetworkEntry, SdkLayer, SdkPlatform } from '@durbun/protocol';
+import type { AppInstallSource, AppSession, DeviceActionId, DeviceApp, DeviceInfo, DriverStatus, DeviceReaderState, DeviceUnavailableAction, NetworkEntry, SdkLayer, SdkPlatform } from '@durbun/protocol';
 
 /** One row of the matrix. */
 export type ExplainCapability = 'logs' | 'network' | 'metrics' | 'crashes' | 'mocks' | 'tools';
@@ -684,6 +684,33 @@ export function actionAvailability(device: Pick<DeviceInfo, 'state' | 'actions'>
   if (device.actions.includes(action)) return { state: 'yes' };
   const why = device.unavailableActions?.find((u) => u.action === action);
   return why ? { state: 'blocked', code: why.code, ...(why.params ? { params: why.params } : {}) } : { state: 'no' };
+}
+
+/**
+ * Copying an app's data folder (`app-data`) for the selected app: the action's availability, plus `notDebug` when
+ * the phone's app list does not mark the app debuggable (Android gives `run-as` access to debug builds only). The
+ * list can miss the flag, so `notDebug` is a heads-up next to the button, not a lock.
+ */
+export function appDataAvailability(
+  device: Pick<DeviceInfo, 'state' | 'actions' | 'platform'> & Partial<Pick<DeviceInfo, 'unavailableActions'>>,
+  app: { debuggable?: boolean; listed?: boolean } | undefined,
+): { availability: ActionAvailability; notDebug: boolean } {
+  const availability = actionAvailability(device, 'app-data');
+  const notDebug = availability.state === 'yes' && device.platform === 'android' && app?.listed !== false && app?.debuggable === false;
+  return { availability, notDebug };
+}
+
+/**
+ * A physical iPhone has no full-report action (iOS starts its own sysdiagnose only from the phone's buttons): the
+ * Device tab says how instead, while the iPhone is connected.
+ */
+export function showsIphoneReportGuide(device: Pick<DeviceInfo, 'id' | 'platform' | 'kind' | 'state'>): boolean {
+  return device.platform === 'ios' && device.kind === 'physical' && device.state === 'online' && !device.id.startsWith('import:');
+}
+
+/** "Pair over Wi-Fi" (Android 11+ wireless debugging) is offered while the Android driver has a usable adb. */
+export function wirelessPairingAvailable(drivers: readonly Pick<DriverStatus, 'id' | 'available'>[]): boolean {
+  return drivers.some((d) => d.id === 'android' && d.available);
 }
 
 /** A card (a group of actions) is worth showing when one of its actions runs or is blocked for a reason to show. */

@@ -46,6 +46,8 @@ const SYSTEM_SAMPLES: [code: string, params: Record<string, string | number>][] 
   ['process.died', { process: 'Runner', pid: 48213 }],
   ['marker', { label: '', n: 3 }],
   ['marker', { label: 'Ödeme akışı testi', n: 4 }],
+  ['media.screenshot', { device: 'Pixel 8' }],
+  ['media.recording', { device: 'Pixel 8', duration: '0:42' }],
   ['logs.streamStarted', { via: 'logcat' }],
   ['logs.streamStopped', { via: 'idevicesyslog' }],
   ['logs.streamError', { via: 'simctl log stream', detail: 'log stream exited (exit code 1): boom — restarting' }],

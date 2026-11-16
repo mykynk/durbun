@@ -15,6 +15,8 @@
  *   POST /api/upload?name=<file>                  raw body (≤ 2 GB) → { file, name, size }
  *   GET  /api/files/:name                         a file from the temp directory (?download=1)
  *   GET  /api/files/crash/:udid/:name             a copied iOS crash report (<tempDir>/crash/<udid>/*.ips), as a download
+ *   GET|DELETE /api/media[?deviceId=], GET|DELETE /api/media/:id   screenshots and recordings kept on disk (media.ts)
+ *   GET /api/android/wireless, POST /api/android/wireless/pair|connect   Android pairing over Wi-Fi (androidWireless.ts)
  *   GET|PUT /api/slack, POST /api/slack/send       Send to Slack (slack.ts)
  *   /api/flows…, /api/flow-runs…, /api/flow-environments, /api/packages…, /api/backup…, /api/ui-prefs
  *                                                 flows and Dürbün packages (flows/module.ts)

@@ -96,6 +96,7 @@ import { NoLogsState, NoMatchState, type ActiveFilter } from './components/Empty
 import { ClockSkewNote, CrashRecordsNote, ExplainEmpty, NotRunningNote, crashReaderText, crashRecordsState, useIosSystemLinesHidden } from '../../sources';
 import { markApplying } from './hangGuard';
 import { HighlightRulesDialog, NoiseRulesDialog, SavedFiltersDialog, undoToast } from './components/RulesDialogs';
+import { MediaViewerHost } from '../device/media/marker';
 
 const ALL_SOURCES: SourceToggles = { device: true, app: true, system: true };
 const NO_MARKS: ReadonlySet<number> = new Set();
@@ -1485,6 +1486,7 @@ export default function LogsView() {
       <NoiseRulesDialog open={dialog === 'noise'} onClose={() => setDialog(null)} keepsCrashLines={iosAppsScope && hiddenIphones.length > 0} />
       <HighlightRulesDialog open={dialog === 'highlight'} onClose={() => setDialog(null)} />
       <SavedFiltersDialog open={dialog === 'saved'} onClose={() => setDialog(null)} saved={saved} onChange={(next) => setSaved(next)} onApply={setQueryUser} />
+      <MediaViewerHost />
     </div>
   );
 }

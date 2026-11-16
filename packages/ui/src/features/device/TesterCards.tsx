@@ -19,7 +19,7 @@ export const SCREEN_ACTIONS: readonly DeviceActionId[] = ['rotation'];
 export const DEV_OPTION_ACTIONS: readonly DeviceActionId[] = ['dont-keep-activities'];
 export const REPORT_ACTIONS: readonly DeviceActionId[] = ['bug-report'];
 /** Actions these cards explain themselves when blocked: the "unavailable actions" card leaves them out. */
-export const TESTER_ACTIONS: ReadonlySet<DeviceActionId> = new Set([...APP_ACCESS_ACTIONS, ...CONNECTION_ACTIONS, ...SCREEN_ACTIONS, ...DEV_OPTION_ACTIONS, ...REPORT_ACTIONS, 'bug-report-cancel']);
+export const TESTER_ACTIONS: ReadonlySet<DeviceActionId> = new Set([...APP_ACCESS_ACTIONS, ...CONNECTION_ACTIONS, ...SCREEN_ACTIONS, ...DEV_OPTION_ACTIONS, ...REPORT_ACTIONS, 'bug-report-cancel', 'app-data']);
 
 export const showsCard = (device: DeviceInfo, actions: readonly DeviceActionId[]) => anyActionShown(device, actions);
 

@@ -77,6 +77,34 @@ import { registerMessages, useT } from '../../i18n';
 - Settings → Network → "Capture WebSocket and SSE messages" (`captureStreams`, absent = on) is shown only when
   the server reports the key.
 
+### 1.2 Device: media library, app data, Wi-Fi pairing
+
+- **Media library** (`features/device/media/`): screenshots and recordings a window takes are kept by the server
+  under `<dataDir>/media` (`GET|DELETE /api/media[?deviceId=]`, `GET|DELETE /api/media/:id`, `MediaList`; 30 days,
+  2 GB, 1000 items, oldest first past a limit). `store.ts` holds the list (`useMediaLibrary`, `ensureMedia`,
+  `loadMedia`), the deferred delete with Undo (`deleteMedia`, 6 s, sent on `pagehide`) and the viewer state
+  (`openMedia`, `openMediaRef`); it refreshes on the `media.*` log markers and on resync. `addFromReply` takes the
+  `screenshot` / `screen-record` reply (`data.media`; an older server without it gives a window-only item).
+  `Gallery.tsx` (tiles, status, policy line), `LibraryDialog.tsx` (all devices, device + kind filter, day groups,
+  delete a device's items) and the lazy `MediaViewer.tsx` (newer / older, download, copy, delete, "Show in Logs";
+  states: loading, gone, file missing, cannot play) are the only views. Logs: a marker line with
+  `code: 'media.screenshot' | 'media.recording'` and `data.media` gets a camera / video icon and an "Open" button
+  (`media/marker.tsx`, used by `LogRow`'s `MarkerRow`); `MediaViewerHost` is mounted in the Device and Logs views.
+- **App data** (`AppData.tsx`, under the app actions): `app-data` copies the selected app's data folder into one
+  `.tar.gz` (`AppDataPullData`; temp folder, 24 h). One copy per device at a time; the run, the last files and the
+  last refusal live in `useAppDataPulls` (survive device switches). `appDataAvailability(device, app)` in
+  `data/explain.ts` decides the row: blocked on a physical iPhone (Xcode's way said in its place), a "not a debug
+  build" heads-up on Android (a hint, not a lock: the app list can miss the flag). Refusals about the phone or the
+  app (`notDebuggable`, `notInstalled`, `locked`, `empty`) are a warning, others an error.
+- **iPhone full report** (`IphoneReportCard.tsx`): text only — how to start sysdiagnose with the phone's buttons and
+  where it lands; shown by `showsIphoneReportGuide(device)` in the "Report" section.
+- **Pair over Wi-Fi** (`wireless/PairDialog.tsx`, Device toolbar and the no-device state while
+  `wirelessPairingAvailable(drivers)`): `GET /api/android/wireless` (`AdbWirelessState`, read every 3 s while open),
+  `POST …/pair` and `…/connect` (`AdbWirelessResult`: a refusal is 200 with `ok: false` and a code, bad input 400,
+  no adb 503). After a pairing without an automatic connection it asks for the connection address. Dev mock:
+  `dev/mock-wireless.mjs` (code `123456` pairs, `000000` is wrong, `10.*` is unreachable, `192.168.1.77` pairs
+  without a connect service).
+
 ## 2. Running
 
 ```bash

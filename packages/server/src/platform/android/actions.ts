@@ -13,12 +13,14 @@ import type {
 } from '@durbun/protocol';
 import type { DriverContext } from '../../types';
 import { failureText, killProcess, run } from '../exec';
+import { oncePerDevice } from '../shared/appData';
 import { bool, done, ensureDir, fail, isPng, num, saveScreenshot, str, tempFileName, validAppId } from '../shared/files';
 import type { RecordingProcess, ScreenRecorder } from '../shared/screenRecord';
 import { shellQuote } from '../shared/text';
 import { sleep } from '../shared/timing';
 import type { Adb } from './adb';
 import { apkPackageId } from './apkManifest';
+import { pullAndroidAppData } from './appData';
 import type { BugReporter } from './bugReport';
 import { changeSetting, type SettingOverrides } from './deviceSettings';
 import { androidPackageKind, chooseSplits, installFailure, listFiles, parseDeviceSpec } from './install';
@@ -104,6 +106,8 @@ export function androidActionAvailability(opts: AndroidActionState): { actions: 
   // `adb bugreport <file>.zip` (bugreportz) since Android 7.
   fromApi('bug-report', 24);
   fromApi('bug-report-cancel', 24);
+  // `run-as` + the phone's tar over `adb exec-out`; debuggable apps only (the reply says when not).
+  actions.push('app-data');
   return { actions, unavailable };
 }
 
@@ -259,6 +263,14 @@ export async function runAndroidAction(
       const out = textOf(r);
       if (!r.ok || /^Error:/m.test(out)) return fail(`Could not open the settings of ${appId}: ${/^Error:.*$/m.exec(out)?.[0] ?? failureText(r)}`);
       return done(`Opened the settings of ${appId} on the phone`);
+    }
+
+    case 'app-data': {
+      const appId = needApp();
+      if (typeof appId !== 'string') return appId;
+      return oncePerDevice(t.deviceId, () =>
+        pullAndroidAppData({ ctx: t.ctx, label: t.label, spawn: (cmd) => adb.spawn(['-s', serial, 'exec-out', cmd]) }, appId, user),
+      );
     }
 
     case 'bug-report':

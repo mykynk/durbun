@@ -111,6 +111,8 @@ export function iosDeviceActionAvailability(o: IosDeviceActionState): { actions:
   }
   if (o.syslog) actions.push('logs-restart');
   else unavailable.push({ action: 'logs-restart', code: 'logs.idevicesyslogMissing', params: { tool: 'idevicesyslog' } });
+  // An app's data container on a physical iPhone: no command-line tool of Xcode copies it; Xcode's own window does.
+  unavailable.push({ action: 'app-data', code: 'action.appData.iphoneUnsupported' });
   return { actions, unavailable };
 }
 

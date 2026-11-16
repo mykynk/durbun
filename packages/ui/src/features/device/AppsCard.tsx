@@ -20,6 +20,7 @@ import {
   usePersistentState,
 } from '../../components';
 import { useT } from '../../i18n';
+import { AppDataRow } from './AppData';
 import { describeError } from './codes';
 import { checkInstallFile, filterApps, hasAction, installAccept, installRefusal, installTarget, mergeApps, type AppRow } from './model';
 import { loadInstalledApps, setDeviceUser, useInstalledApps, useSelectedUser } from './stores';
@@ -225,6 +226,7 @@ export function AppsCard({ device, sessions, preferredAppId, active }: { device:
           <p className="dv-muted">{t('device.apps.choose')}</p>
         )
       ) : null}
+      {sel ? <AppDataRow device={device} app={sel} userId={userId} /> : null}
       {hasAction(device, 'app-install') ? <InstallDrop device={device} userId={userId} onInstalled={() => canList && reload()} /> : null}
     </DeviceCard>
   );

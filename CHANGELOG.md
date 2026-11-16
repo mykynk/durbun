@@ -407,6 +407,16 @@ All notable changes to Dürbün are listed here. The format follows
   and stays under **Deleted flows** for 30 days.
 - Logs: saved filters travel with backups and packages and follow your other windows; an import adds them to
   the filters already there.
+- Device: screenshots and screen recordings are kept in a library on this Mac (30 days, up to 2 GB or 1000
+  items, oldest removed first) and survive a reload and a restart. Each one leaves a line on the device's log
+  timeline that opens it.
+- Device: **Pull app data** saves a debuggable Android app's data folder, or a simulator app's data
+  container, as one `.tar.gz` (up to 1 GiB, caches left out). Each refusal says why: not a debug build, not
+  installed, phone locked, too large.
+- Device: **Pair over Wi-Fi** connects an Android 11+ phone without a cable: the steps for the phone, the
+  phones seen on the network, the address and the six-digit code.
+- Device: an iPhone gets a step-by-step guide for its full diagnostic report (sysdiagnose) and where to find
+  it.
 ## [0.2.0] - 2026-11-12
 
 ### Added

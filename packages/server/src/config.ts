@@ -4,6 +4,7 @@
  *   mocks.json     MockRule[]
  *   tmp/           uploads, screenshots, recordings, crash report copies (entries older than 24 h are removed
  *                  at start, and every hour while running except crash/: see TEMP_CLEAN_INTERVAL_MS)
+ *   media/         screenshots and recordings a window took + index.json (MEDIA_* limits, http/media.ts)
  *
  * Everything read from disk or received from the UI is validated: wrong types fall back to the default
  * (on load) or are rejected (UI patches), out-of-range numbers are clamped. Writes are atomic
@@ -37,6 +38,16 @@ export const TEMP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const TEMP_CLEAN_INTERVAL_MS = 60 * 60 * 1000;
 /** Top-level temp entries the running cleanup skips (see TEMP_CLEAN_INTERVAL_MS). */
 export const TEMP_KEEP_WHILE_RUNNING: ReadonlySet<string> = new Set(['crash']);
+
+/**
+ * Media library (`<dataDir>/media/`, http/media.ts): screenshots and screen recordings a window took stay past
+ * the temp cleanup. Bounded three ways; past any limit the oldest go first (checked at start, after each new
+ * item and hourly). The user deletes items or a device's whole set at any time.
+ */
+export const MEDIA_DIR_NAME = 'media';
+export const MEDIA_MAX_AGE_DAYS = 30;
+export const MEDIA_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+export const MEDIA_MAX_ITEMS = 1_000;
 
 /** Inclusive ranges for numeric settings (values outside are clamped). */
 export const SETTINGS_LIMITS = {

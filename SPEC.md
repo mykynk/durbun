@@ -325,7 +325,14 @@ every failure is reported as data (device `logs.status`, `DriverStatus`, `ToolCh
   `input-text` (escape for `input text`), `key-event`, `location` (emulator: `emu geo fix lon lat`),
   `screen-record` (optional: `adb shell 'echo $$; exec screenrecord --time-limit 180 …'` until
   `screen-record-stop` sends SIGINT to that pid on the device, then pull; a screen whose long side is over
-  1920 px is recorded with `--size` scaled to 1920, since encoders refuse more: "Encoder failed (err=-38)").
+  1920 px is recorded with `--size` scaled to 1920, since encoders refuse more: "Encoder failed (err=-38)"),
+  `app-data` (`exec-out "run-as [--user N] <pkg> sh -c '… tar -cf - <data dir entries except cache, code_cache,
+  lib>'"`: debuggable apps only; the first 512 bytes tell a tar from run-as's error text; gzipped as it streams
+  into the temp folder, stopped past 1 GiB or 10 min; a stream that ends without tar's zero blocks is refused).
+- Wireless debugging (Android 11+, `android/wireless.ts`, `GET /api/android/wireless`, `POST …/pair|connect`):
+  `adb pair HOST:PORT CODE`, `adb connect HOST:PORT`, `adb mdns services` (`_adb-tls-pairing._tcp` /
+  `_adb-tls-connect._tcp`); after a pairing the server connects to the phone's connect service on the same
+  host when mDNS lists it. Output wording from adb's sources, matched loosely (unverified on a phone).
 - Metrics (`watchMetrics`): every 2 s `top -b -n 1 -p <pid> -o %CPU,RES` (verify toybox columns) or
   `dumpsys meminfo <pid>` (TOTAL PSS) → `pushMetrics` (`source: 'adb'`).
 
@@ -347,7 +354,9 @@ every failure is reported as data (device `logs.status`, `DriverStatus`, `ToolCh
   `font-scale` (`ui <udid> content_size` mapping), `push-notification` (`push <udid> <bundle> <json file>`),
   `location` (`location <udid> set lat,lon`), `status-bar` (`status_bar override --time 9:41
   --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3` / `clear`), `logs-restart`,
-  `screen-record` (optional: `io <udid> recordVideo` until SIGINT).
+  `screen-record` (optional: `io <udid> recordVideo` until SIGINT), `app-data` (`get_app_container <udid>
+  <bundle> data`, streamed as tar from Node without `Library/Caches`, `Library/SplashBoard`, `tmp`; symlinks stored,
+  never followed).
 
 **iOS physical (`ios-device` driver)**
 - usbmux client in Node (`/var/run/usbmuxd`, 16-byte little-endian header + XML plist, message type 8):
@@ -366,10 +375,15 @@ every failure is reported as data (device `logs.status`, `DriverStatus`, `ToolCh
   (`device process launch`), `app-stop`, `app-restart`, `app-install` (`device install app`),
   `app-uninstall`, `open-url` (`device process launch --payload-url`), `screenshot` (try
   `idevicescreenshot`; report a clear error when the device refuses), `screen-record` (`device capture
-  screen-record` without `--duration`, until SIGINT; needs a devicectl that has it).
+  screen-record` without `--duration`, until SIGINT; needs a devicectl that has it). `app-data` is not offered
+  (`unavailable`: `action.appData.iphoneUnsupported`, the UI points at Xcode's Download Container); the full
+  report (sysdiagnose) is started from the phone's buttons, so the Device tab only says how.
 - Screen recording (all platforms, `platform/shared/screenRecord.ts`): one per device, from `screen-record`
   until `screen-record-stop`, the optional `durationSec` or the platform limit (Android 180 s, iOS 600 s);
-  both replies carry the file and `DeviceInfo.recording` is set while it runs.
+  both replies carry the file and `DeviceInfo.recording` is set while it runs. Screenshots and recordings a UI
+  window took are linked into `<dataDir>/media` (`http/media.ts`; `GET|DELETE /api/media…`; 30 days, 2 GB, 1000
+  items, oldest first) with a marker line on the device's log (`media.screenshot|recording`, `data.media`);
+  flow runs keep their own copies and are not added.
 
 **PlatformServices.forwardToDevice(deviceId, devicePort)** — Android: `adb forward tcp:0 tcp:<port>`
 (parse the allocated port; dispose → `adb forward --remove`). iOS simulator: identity

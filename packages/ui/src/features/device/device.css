@@ -1132,3 +1132,51 @@
 .dv-replace {
   margin-top: 8px;
 }
+
+/* ───────────── Media library button (toolbar) ───────────── */
+.dv-media-btn .btn__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 1180px) {
+  .dv-media-btn__label {
+    display: none;
+  }
+}
+
+/* App data (under the app actions). */
+.dv-appdata {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dv-appdata__note {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 4px;
+  color: var(--text-muted);
+}
+.dv-appdata__note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.dv-appdata__status {
+  font-size: var(--fs-sm);
+}
+
+/* Numbered how-to steps (the iPhone's own full report). */
+.dv-steps {
+  margin: 0;
+  padding-left: 22px;
+  list-style: decimal;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  line-height: 1.5;
+}
+.dv-steps li::marker {
+  color: var(--text-muted);
+}
