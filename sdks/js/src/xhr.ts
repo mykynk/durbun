@@ -30,6 +30,7 @@ import { describeMockFailure, mockDelayMs, statusText, type RespondAction } from
 import { fetchGuard, type NetworkHost } from './network.js';
 import { patchMethod, type Patch } from './patch.js';
 import type { Header, MockRule, SdkNetRequest, Timings, WireBody } from './protocol.js';
+import { isEventStream, SseTap } from './streams.js';
 import {
   attempt,
   clearTimer,
@@ -69,6 +70,8 @@ interface XhrRecord {
   waiting?: boolean;
   overrides?: Override[];
   listeners?: Array<[string, (ev: unknown) => void]>;
+  /** An event stream being read as Server-Sent Events. */
+  sse?: { tap: SseTap; listeners: Array<[string, (ev: unknown) => void]> };
 }
 
 const THROWS = {};
@@ -470,7 +473,8 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
   const completeStreaming = (xhr: AnyRecord, rec: XhrRecord): boolean => {
     if (rec.done) return true;
     const headers = parseRawHeaders(attempt<unknown>(() => xhr.getAllResponseHeaders(), ''));
-    if (!isStreamingContentType(findHeader(headers, 'content-type'))) return false;
+    const contentType = findHeader(headers, 'content-type');
+    if (!isStreamingContentType(contentType)) return false;
     rec.done = true;
     unwatch(xhr, rec);
     const ts = Date.now();
@@ -478,6 +482,11 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
     const text = attempt(() => String(xhr.statusText || ''), '');
     const declared = Number(findHeader(headers, 'content-length'));
     const startTs = rec.startTs as number;
+    const responseType = attempt(() => String(xhr.responseType || ''), '');
+    // Server-Sent Events read as text: its events are reported one by one (while the desktop asks for
+    // streams), so the response carries no body.
+    const sse = isEventStream(contentType) && (responseType === '' || responseType === 'text') && status >= 200 && status < 300;
+    const asStream = sse && host.streamCapture() !== undefined;
     after(rec, undefined, () =>
       host.emit({
         type: 'net.response',
@@ -486,12 +495,102 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
         status,
         ...(text ? { statusText: text } : {}),
         headers,
-        ...(isFinite(declared) && declared > 0 ? { body: sizeOnly(declared) } : {}),
+        ...(!asStream && isFinite(declared) && declared > 0 ? { body: sizeOnly(declared) } : {}),
         timings: { wait: Math.max(0, ts - startTs), receive: 0 },
         ...mockFields(rec),
       }),
     );
+    if (sse) {
+      try {
+        tapEventStream(xhr, rec);
+      } catch (e) {
+        host.debug('xhr event stream', e);
+      }
+    }
     return true;
+  };
+
+  /**
+   * Reads the growing `responseText` of an event stream as the app's own SSE library does (it reads the same
+   * text): new text on every readystatechange / progress, the end on load / abort / error. Only listeners are
+   * added; the request and its response stay the app's.
+   */
+  const tapEventStream = (xhr: AnyRecord, rec: XhrRecord) => {
+    if (typeof xhr.addEventListener !== 'function') return;
+    const tap = new SseTap(host, rec.id as string, (msg) => after(rec, undefined, () => host.emit(msg)));
+    const sse: NonNullable<XhrRecord['sse']> = { tap, listeners: [] };
+    rec.sse = sse;
+    let offset = 0;
+    /** `final`: the load event (the whole text). Otherwise only while LOADING: on an error React Native puts
+     * the error message where the text was. */
+    const pump = (final = false) => {
+      if (!final && attempt(() => Number(xhr.readyState) || 0, 0) !== 3) return;
+      const text = attempt<unknown>(() => xhr.responseText, '');
+      // Shorter than before: the runtime reset it (abort); never read it twice.
+      if (typeof text === 'string' && text.length > offset) {
+        const chunk = text.slice(offset);
+        offset = text.length;
+        tap.text(chunk);
+      }
+    };
+    const stop = (end: () => void) => {
+      if (tap.finished) return;
+      for (const [type, fn] of sse.listeners) {
+        try {
+          xhr.removeEventListener(type, fn);
+        } catch {
+          // ignore
+        }
+      }
+      sse.listeners = [];
+      end();
+    };
+    const incremental = attempt<unknown>(() => xhr._incrementalEvents, undefined);
+    const add = (type: string, fn: () => void) => {
+      const listener = () => {
+        try {
+          fn();
+        } catch (e) {
+          host.debug('xhr event stream', e);
+        }
+      };
+      try {
+        xhr.addEventListener(type, listener);
+        sse.listeners.push([type, listener]);
+      } catch {
+        // ignore
+      }
+    };
+    add('readystatechange', () => pump());
+    add('progress', () => pump());
+    if (typeof incremental === 'boolean') {
+      try {
+        xhr._incrementalEvents = incremental;
+      } catch {
+        // ignore
+      }
+    }
+    add('load', () => {
+      pump(true);
+      stop(() => tap.end());
+    });
+    add('abort', () => stop(() => tap.cancel()));
+    add('error', () => {
+      const detail = attempt(() => (typeof xhr._response === 'string' ? xhr._response : ''), '');
+      stop(() => tap.fail(detail || 'Network request failed'));
+    });
+    add('timeout', () => {
+      const timeout = attempt(() => Number(xhr.timeout) || 0, 0);
+      stop(() => tap.fail(timeout > 0 ? `Request timed out after ${timeout} ms` : 'Request timed out'));
+    });
+    add('loadend', () => {
+      if (attempt(() => Number(xhr.status) || 0, 0) > 0) {
+        pump(true);
+        stop(() => tap.end());
+      } else stop(() => tap.fail('Network request failed'));
+    });
+    // Text that arrived with the headers.
+    pump();
   };
 
   const watch = (xhr: AnyRecord, rec: XhrRecord) => {
@@ -725,6 +824,17 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
       rec.mockTimer = undefined;
     }
     unwatch(xhr, rec);
+    const sse = rec.sse;
+    if (sse && !sse.tap.finished) {
+      for (const [type, fn] of sse.listeners) {
+        try {
+          xhr.removeEventListener(type, fn);
+        } catch {
+          // ignore
+        }
+      }
+      sse.tap.cancel();
+    }
     if (rec.id !== undefined && !rec.done) {
       rec.done = true;
       after(rec, undefined, () =>

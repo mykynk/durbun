@@ -7,14 +7,17 @@
  * Bodies are read from `response.clone()` / `request.clone()` (a tee), never from the app's own stream;
  * reading stops at the body limit so a large body is not pulled further than the app itself would.
  * Streams that never end on their own (SSE, NDJSON, gRPC, media) are reported as soon as the headers
- * arrive, with their size only.
+ * arrive, with their size only. While the desktop asks for streams, a Server-Sent Events response is handed
+ * to the app as a Response over the same body that reads the events as the app reads them (see
+ * `tapEventStream`).
  */
 import { bodyFromBytes, captureRequestBody, inferContentType, isStreamingContentType, utf8Encode, base64Decode, type BodyConfig } from './body.js';
 import { findHeader, headersFromInit } from './headers.js';
 import { describeMockFailure, mockDelayMs, statusText, type FailAction, type RespondAction } from './mocks.js';
 import { fetchGuard, type NetworkHost } from './network.js';
 import { patchMethod, type Patch } from './patch.js';
-import type { Header, MockRule, SdkNetRequest, WireBody } from './protocol.js';
+import type { Header, MockRule, SdkNetError, SdkNetRequest, SdkNetSse, WireBody } from './protocol.js';
+import { isEventStream, SseTap } from './streams.js';
 import { errorMessage, g, hostOfUrl, isPromiseLike, resolveUrl, setTimer, clearTimer, type AnyRecord } from './util.js';
 import type { Runtime } from './env.js';
 
@@ -296,6 +299,63 @@ async function requestBodyFrom(info: RequestInfo, cfg: BodyConfig): Promise<Wire
   return isPromiseLike(captured) ? await captured : captured;
 }
 
+/**
+ * An event-stream response as a new Response whose body passes the original body's chunks through as the app
+ * pulls them (nothing is read ahead: highWaterMark 0) and feeds them to the SSE parser. Cancelling it cancels
+ * the original (the connection closes like before); every Response method works on it. Undefined when this
+ * runtime cannot build one: the original is returned untouched then.
+ */
+function tapEventStream(response: AnyRecord, tap: SseTap): unknown {
+  const RS = g.ReadableStream;
+  const ResponseCtor = g.Response;
+  const body = response.body;
+  if (typeof RS !== 'function' || typeof ResponseCtor !== 'function' || !body || typeof body.getReader !== 'function') return undefined;
+  let reader: AnyRecord | undefined;
+  const stream = new RS(
+    {
+      pull(controller: AnyRecord) {
+        if (!reader) reader = body.getReader() as AnyRecord;
+        return reader.read().then(
+          (step: { done: boolean; value?: unknown }) => {
+            if (step.done) {
+              tap.end();
+              controller.close();
+              return;
+            }
+            tap.bytes(step.value);
+            controller.enqueue(step.value);
+          },
+          (err: unknown) => {
+            if (isAbortError(err)) tap.cancel();
+            else tap.fail(describeFetchError(err));
+            controller.error(err);
+          },
+        );
+      },
+      cancel(reason: unknown) {
+        tap.cancel();
+        return reader ? reader.cancel(reason) : body.cancel(reason);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  let wrapped: AnyRecord;
+  try {
+    wrapped = new ResponseCtor(stream, { status: response.status, statusText: response.statusText, headers: response.headers });
+  } catch {
+    return undefined;
+  }
+  for (const key of ['url', 'redirected', 'type']) {
+    try {
+      const value = response[key];
+      if (wrapped[key] !== value) Object.defineProperty(wrapped, key, { value, configurable: true, enumerable: true });
+    } catch {
+      // ignore
+    }
+  }
+  return wrapped;
+}
+
 export function installFetchPatch(host: NetworkHost, runtime: Runtime): Patch[] {
   const current = g.fetch;
   if (typeof current !== 'function') return [];
@@ -410,6 +470,30 @@ export function installFetchPatch(host: NetworkHost, runtime: Runtime): Patch[] 
           headers = headersFromInit(response.headers);
         } catch {
           // exotic response object
+        }
+        if (isEventStream(findHeader(headers, 'content-type')) && status >= 200 && status < 300 && host.streamCapture() !== undefined) {
+          const tap = new SseTap(host, id, (msg: SdkNetSse | SdkNetError) => afterRequest(() => host.emit(msg)));
+          let wrapped: unknown;
+          try {
+            wrapped = tapEventStream(response, tap);
+          } catch (e) {
+            host.debug('fetch event stream', e);
+          }
+          if (wrapped) {
+            afterRequest(() =>
+              host.emit({
+                type: 'net.response',
+                id,
+                ts: headersAt,
+                status,
+                ...(text ? { statusText: text } : {}),
+                headers,
+                timings: { wait: headersAt - startTs, receive: 0 },
+                ...mockInfo,
+              }),
+            );
+            return wrapped;
+          }
         }
         captureResponseBody(response, headers, host.bodyConfig)
           .then(undefined, () => undefined)

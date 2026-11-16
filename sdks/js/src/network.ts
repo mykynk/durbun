@@ -1,11 +1,16 @@
 import type { BodyConfig } from './body.js';
-import type { MockRule, SdkNetError, SdkNetRequest, SdkNetResponse } from './protocol.js';
+import type { MockRule, SdkNetError, SdkNetRequest, SdkNetResponse, SdkNetSse, SdkNetWs } from './protocol.js';
 
 /** What the XHR / fetch patches need from the client. */
 export interface NetworkHost {
   readonly bodyConfig: BodyConfig;
   nextRequestId(): string;
-  emit(message: SdkNetRequest | SdkNetResponse | SdkNetError): void;
+  emit(message: SdkNetRequest | SdkNetResponse | SdkNetError | SdkNetWs | SdkNetSse): void;
+  /**
+   * While the desktop asks for WebSocket / SSE messages (`config.captureStreams`): the payload cap in bytes
+   * (0 = sizes only). Undefined = send no stream messages (SPEC §6.1.1).
+   */
+  streamCapture(): number | undefined;
   /** A warning row on the desktop (tag "durbun"), e.g. a mock rule that could not be applied. */
   notice(message: string): void;
   /**

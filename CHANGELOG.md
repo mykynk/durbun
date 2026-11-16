@@ -344,8 +344,12 @@ All notable changes to Dürbün are listed here. The format follows
 - Wire protocol and server: WebSocket messages and Server-Sent Events have a contract (`net.ws`, `net.sse`,
   capability `streams`, asked for by the server's `captureStreams`). The server keeps them per connection
   within limits and counts what it drops; session export / import and HAR files (`_webSocketMessages`,
-  `_eventSourceMessages`) carry them, masked like bodies. The SDKs do not send them and the Network tab does
-  not show them yet.
+  `_eventSourceMessages`) carry them, masked like bodies. The Network tab does not show them yet.
+- React Native / JavaScript SDK: WebSocket messages and server-sent events. Each connection is one entry in
+  Network with its messages in the order the app saw them (both directions, text and binary, close codes and
+  reasons); SSE from `XMLHttpRequest`-based libraries such as `react-native-sse`, from `fetch` streams and from
+  the browser's `EventSource`. They are sent only while the Mac app asks for them, and their payloads follow the
+  body settings.
 
 ## [0.2.0] - 2026-11-12
 

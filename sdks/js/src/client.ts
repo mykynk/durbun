@@ -10,6 +10,7 @@ import { installConsolePatch, quietly, type ConsoleMethod } from './console.js';
 import { CrashStore, previousLaunchLog, toStoredCrash } from './crashStore.js';
 import { describeEnvironment, detectRuntime, devServerOrigin, isDevBuild, type EnvironmentInfo, type Runtime } from './env.js';
 import { installErrorHandlers, isRejectionWarning, type ErrorReport } from './errors.js';
+import { installEventSourcePatch } from './eventSource.js';
 import { installFetchPatch } from './fetch.js';
 import { formatArgs } from './format.js';
 import { connectionHint } from './hints.js';
@@ -38,6 +39,7 @@ import {
 import { RingBuffer } from './ringBuffer.js';
 import { clearRepeating, clearTimer, errorMessage, g, originOfUrl, randomId, setRepeating, setTimer, type AnyRecord, type TimerHandle } from './util.js';
 import { SDK_NAME, SDK_VERSION } from './version.js';
+import { installWebSocketPatch } from './websocket.js';
 import { installXhrPatch } from './xhr.js';
 
 export interface LogOptions {
@@ -50,6 +52,8 @@ export interface LogOptions {
 
 interface Buffered {
   text: string;
+  /** Position among everything buffered (the message buffer and the stream buffer flush in this order). */
+  seq: number;
   /** Console lines buffered before the desktop told us whether it already has device logs. */
   consoleLevel?: LogLevel;
   /** The same message without its body data, used first when the buffer is over its size limit. */
@@ -67,6 +71,14 @@ const REDACTED = '••••';
  * first (the request row stays, its body shows as truncated), then the oldest messages.
  */
 export const MAX_BUFFERED_CHARS = 8 * 1024 * 1024;
+/**
+ * WebSocket / SSE messages waiting to be sent are kept apart (at most this many, about 2 MB): a busy socket
+ * then drops its own oldest messages (bodies first) instead of pushing logs and requests out of the buffer.
+ */
+const MAX_BUFFERED_STREAM_MESSAGES = 1_000;
+const MAX_BUFFERED_STREAM_CHARS = 2 * 1024 * 1024;
+/** Stream payload cap when a desktop asks for streams without saying (the desktop's own default). */
+const DEFAULT_STREAM_MESSAGE_BYTES = 64 * 1024;
 /** Before the first welcome, a request made while the desktop is answering waits this long for its mock rules. */
 const HANDSHAKE_WAIT_MS = 800;
 
@@ -80,6 +92,13 @@ function sanitizeConfig(input: unknown, previous: SdkConfig): SdkConfig {
     next.metricsIntervalMs = Math.min(60_000, Math.max(250, c.metricsIntervalMs));
   }
   if (typeof c.deviceLogsAvailable === 'boolean') next.deviceLogsAvailable = c.deviceLogsAvailable;
+  // Every welcome / config carries the whole config: a desktop that leaves the stream fields out (an older
+  // one) wants no stream messages.
+  if (typeof c.captureStreams === 'boolean') next.captureStreams = c.captureStreams;
+  else delete next.captureStreams;
+  if (typeof c.maxStreamMessageBytes === 'number' && isFinite(c.maxStreamMessageBytes) && c.maxStreamMessageBytes >= 0) {
+    next.maxStreamMessageBytes = Math.floor(c.maxStreamMessageBytes);
+  } else delete next.maxStreamMessageBytes;
   return next;
 }
 
@@ -94,6 +113,9 @@ export class DurbunClient implements NetworkHost {
   private env: EnvironmentInfo;
   private conn: Connection | undefined;
   private readonly buffer: RingBuffer<Buffered>;
+  private streamBuffer: RingBuffer<Buffered> | undefined;
+  private bufferSeq = 0;
+  private streamsCaptured = false;
   private patches: Patch[] = [];
   private started = false;
   private config: SdkConfig = { ...DEFAULT_SDK_CONFIG };
@@ -129,7 +151,7 @@ export class DurbunClient implements NetworkHost {
     this.runtime = detectRuntime();
     this.opts = resolveOptions(options, this.runtime);
     this.buffer = new RingBuffer<Buffered>(this.opts.maxBufferedMessages, MAX_BUFFERED_CHARS, (item) =>
-      item.lite !== undefined ? { item: { text: item.lite, consoleLevel: item.consoleLevel }, weight: item.lite.length } : undefined,
+      item.lite !== undefined ? { item: { text: item.lite, consoleLevel: item.consoleLevel, seq: item.seq }, weight: item.lite.length } : undefined,
     );
     this.env = describeEnvironment(this.overrides(), this.runtime);
   }
@@ -187,6 +209,10 @@ export class DurbunClient implements NetworkHost {
       const xhr = install('XMLHttpRequest', () => installXhrPatch(this));
       const fetchPatches = install('fetch', () => installFetchPatch(this, this.runtime));
       this.networkCaptured = xhr.length > 0 || fetchPatches.length > 0;
+      // `WS` above is the original constructor: the SDK's own connection is never captured.
+      const sockets = install('WebSocket', () => installWebSocketPatch(this, this.runtime));
+      const sources = install('EventSource', () => installEventSourcePatch(this));
+      this.streamsCaptured = this.networkCaptured || sockets.length > 0 || sources.length > 0;
     }
     if (this.opts.captureErrors) this.errorsCaptured = install('error', () => installErrorHandlers(this, this.runtime, g)).length > 0;
     if (this.errorsCaptured) this.loadPreviousCrashes();
@@ -247,6 +273,8 @@ export class DurbunClient implements NetworkHost {
     }
     this.conn = undefined;
     this.buffer.clear();
+    this.streamBuffer = undefined;
+    this.streamsCaptured = false;
   }
 
   /* ────────────────────────────── public logging API ────────────────────────────── */
@@ -416,6 +444,17 @@ export class DurbunClient implements NetworkHost {
     return Date.now() - this.desktopSeenAt < (this.timing.noDesktopGraceMs ?? DEFAULT_TIMING.noDesktopGraceMs ?? 30_000);
   }
 
+  /**
+   * The payload cap of stream messages while the desktop asks for them (`config.captureStreams`), else
+   * undefined. Like bodies, they are captured only while a desktop is (or was just) there.
+   */
+  streamCapture(): number | undefined {
+    const c = this.config;
+    if (!this.started || c.captureStreams !== true || !this.bodiesWanted()) return undefined;
+    if (!c.captureBodies) return 0;
+    return typeof c.maxStreamMessageBytes === 'number' ? c.maxStreamMessageBytes : Math.min(c.maxBodyBytes, DEFAULT_STREAM_MESSAGE_BYTES);
+  }
+
   nextRequestId(): string {
     return String(++this.requestSeq);
   }
@@ -488,6 +527,9 @@ export class DurbunClient implements NetworkHost {
   /** Serializes and sends (or buffers) one message. */
   emit(message: SdkToServer, consoleLevel?: LogLevel): void {
     if (!this.started) return;
+    const stream = message.type === 'net.ws' || message.type === 'net.sse';
+    // Stream messages only while the desktop asks for them (SPEC §6.1.1).
+    if (stream && this.streamCapture() === undefined) return;
     quietly(() => {
       message = this.redacted(message);
       let text: string;
@@ -504,20 +546,40 @@ export class DurbunClient implements NetworkHost {
       }
       if (text.length * 3 > MAX_FRAME_BYTES && utf8Length(text) > MAX_FRAME_BYTES) text = this.shrink(message);
       const conn = this.conn;
-      if (conn && conn.isActive && this.buffer.size === 0 && conn.bufferedAmount < HIGH_WATER_BYTES) {
+      if (conn && conn.isActive && this.buffer.size === 0 && !this.streamBuffer?.size && conn.bufferedAmount < HIGH_WATER_BYTES) {
         if (conn.send(text)) return;
       }
-      this.buffer.push({ text, consoleLevel, lite: this.liteText(message) }, text.length);
+      const item: Buffered = { text, consoleLevel, lite: this.liteText(message), seq: ++this.bufferSeq };
+      if (stream) this.streamQueue().push(item, text.length);
+      else this.buffer.push(item, text.length);
       if (conn && conn.isActive) this.scheduleFlush(conn.bufferedAmount >= HIGH_WATER_BYTES ? 50 : 0);
     });
   }
 
-  /** A request / response with body data, serialized without the data (size kept, marked truncated). */
+  private streamQueue(): RingBuffer<Buffered> {
+    if (!this.streamBuffer) {
+      this.streamBuffer = new RingBuffer<Buffered>(
+        Math.min(MAX_BUFFERED_STREAM_MESSAGES, this.opts.maxBufferedMessages),
+        MAX_BUFFERED_STREAM_CHARS,
+        (item) => (item.lite !== undefined ? { item: { text: item.lite, seq: item.seq }, weight: item.lite.length } : undefined),
+      );
+    }
+    return this.streamBuffer;
+  }
+
+  /**
+   * A request / response with body data, serialized without the data (size kept, marked truncated); a stream
+   * message without its payload (the size stays).
+   */
   private liteText(message: SdkToServer): string | undefined {
-    if (message.type !== 'net.request' && message.type !== 'net.response') return undefined;
+    if (message.type !== 'net.request' && message.type !== 'net.response' && message.type !== 'net.ws' && message.type !== 'net.sse') return undefined;
     const body = message.body;
     if (!body || !body.data) return undefined;
     try {
+      if (message.type === 'net.ws' || message.type === 'net.sse') {
+        const { body: _payload, ...rest } = message;
+        return JSON.stringify(rest);
+      }
       return JSON.stringify({ ...message, body: { encoding: 'utf8', data: '', size: body.size, truncated: true } });
     } catch {
       return undefined;
@@ -561,7 +623,9 @@ export class DurbunClient implements NetworkHost {
     if (!this.started || !conn || !conn.isActive) return;
     quietly(() => {
       let sent = 0;
-      while (this.buffer.size > 0) {
+      for (;;) {
+        const queue = this.nextQueue();
+        if (!queue) break;
         if (sent >= FLUSH_CHUNK) {
           this.scheduleFlush(0);
           return;
@@ -570,14 +634,30 @@ export class DurbunClient implements NetworkHost {
           this.scheduleFlush(50);
           return;
         }
-        const item = this.buffer.peek() as Buffered;
+        const item = queue.peek() as Buffered;
         if (item.consoleLevel && !this.consoleAllowed(item.consoleLevel)) {
-          this.buffer.shift();
+          queue.shift();
+          continue;
+        }
+        // Stream messages kept for a desktop that (now) does not ask for them are dropped.
+        if (queue === this.streamBuffer && this.streamCapture() === undefined) {
+          queue.shift();
           continue;
         }
         if (!conn.send(item.text)) return; // connection lost: keep the rest for the next one
-        this.buffer.shift();
+        queue.shift();
         sent++;
+      }
+      const droppedStream = this.streamBuffer ? this.streamBuffer.takeDropped() : 0;
+      if (droppedStream > 0) {
+        this.emit({
+          type: 'log',
+          ts: Date.now(),
+          level: 'warn',
+          tag: 'durbun',
+          message: `Dürbün: ${droppedStream} WebSocket / SSE message${droppedStream === 1 ? ' was' : 's were'} dropped while the desktop was not connected or busy (the oldest go first).`,
+          data: { dropped: droppedStream, bufferLimit: this.streamBuffer?.capacity },
+        });
       }
       const dropped = this.buffer.takeDropped();
       if (dropped > 0) {
@@ -593,6 +673,14 @@ export class DurbunClient implements NetworkHost {
     });
   }
 
+  /** The buffer whose oldest message was emitted first, or undefined when both are empty. */
+  private nextQueue(): RingBuffer<Buffered> | undefined {
+    const main = this.buffer.size > 0 ? this.buffer : undefined;
+    const streams = this.streamBuffer && this.streamBuffer.size > 0 ? this.streamBuffer : undefined;
+    if (!main || !streams) return main || streams;
+    return (main.peek() as Buffered).seq < (streams.peek() as Buffered).seq ? main : streams;
+  }
+
   /* ────────────────────────────── server messages ────────────────────────────── */
 
   private overrides() {
@@ -604,6 +692,7 @@ export class DurbunClient implements NetworkHost {
     if (this.networkCaptured) caps.push('network', 'mocks');
     if (this.errorsCaptured) caps.push('crash');
     if (this.opts.captureMetrics && metricsSupported()) caps.push('metrics');
+    if (this.streamsCaptured) caps.push('streams');
     return caps;
   }
 

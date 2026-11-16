@@ -8,8 +8,8 @@
 ## What you get
 
 `@durbun/react-native` streams **all logs** (console, your own logs, errors and crashes), **all network traffic**
-(fetch, axios, XMLHttpRequest) and JS performance samples of your app to the Dürbün Mac app, live. It also
-applies Dürbün's mock rules (fake responses, latency, failures) inside the app.
+(fetch, axios, XMLHttpRequest, WebSocket messages, server-sent events) and JS performance samples of your app to
+the Dürbün Mac app, live. It also applies Dürbün's mock rules (fake responses, latency, failures) inside the app.
 
 - **Zero runtime dependencies**; works in React Native (Hermes/JSC), browsers and Node.
 - **No-op in release builds** (`enabled` defaults to `__DEV__`).
@@ -105,9 +105,10 @@ Everything that goes through `XMLHttpRequest`: React Native `fetch`, axios and o
 request and response bodies (text/JSON as text, binary as base64, FormData field summary, Blobs), status code,
 timings (wait / receive), errors, timeouts and cancellations. In browsers and Node, native `fetch` is captured
 too; each request is reported **once**. Body limits come from the Mac app's settings (default 1 MB). Responses
-that stay open (server-sent events, NDJSON, media streams) are shown as soon as their headers arrive, with the
-size only. In React Native, text responses that arrive as a `Blob` (what `fetch` uses) are decoded by the
-platform (`FileReader.readAsText`), not on the JS thread. Metro's and Dürbün's own traffic is ignored.
+that stay open (NDJSON, media streams) are shown as soon as their headers arrive, with the size only; server-sent
+events are shown event by event (see below). In React Native, text responses that arrive as a `Blob` (what
+`fetch` uses) are decoded by the platform (`FileReader.readAsText`), not on the JS thread. Metro's and Dürbün's
+own traffic is ignored.
 
 `redactHeaders` masks header values as `••••`; `ignoreUrls` leaves URLs out.
 
@@ -116,6 +117,32 @@ similar) never pass through the JS layer, so they are not captured (report your 
 `Durbun.network.begin`, see below). Requests that were opened (`open()` called)
 before `Durbun.start()` are not captured either. The app's stdout and system logs still show up in device logs
 without the SDK.
+
+#### WebSocket messages and server-sent events
+
+Each WebSocket connection and each server-sent events (SSE) response is one entry: its handshake (`101` for a
+WebSocket, the response headers for SSE), then every message or event in the order the app saw it, with its size
+and payload (text as text, binary as base64, cut at the Mac app's limit; sizes only when body capture is off). A
+connection that fails before it opens is a failed request; one that breaks later shows as failed, one the app
+closes as closed. They are sent only while the Mac app asks for them: an older Mac app gets none, and turning
+the setting on or off takes effect at once (a socket that was already open shows up from then on).
+
+| Runtime | WebSocket | Server-sent events |
+|---|---|---|
+| React Native (iOS, Android; Hermes or JSC) | The global `WebSocket`: messages both ways (text, `ArrayBuffer`, `Blob`), close frames with code and reason, the protocols and `headers` you pass | Libraries built on `XMLHttpRequest` (`react-native-sse` and others): each event (`event`, `id`, `retry`, data), the end, a close by the app |
+| Browsers | The global `WebSocket`, as above | `fetch` responses and the browser's own `EventSource` |
+| Node 18+ | The global `WebSocket` (Node 22+) | `fetch` responses (libraries on the global `fetch` included) |
+
+Messages and events are read as they pass, never consumed: the app receives exactly what it did before. An SSE
+`fetch` response is handed to the app as a `Response` over the same body (`body`, `text()`, `clone()` and
+cancelling work as usual).
+
+**Not shown:** ping / pong frames the runtime handles without telling JavaScript (all of them in browsers; in
+React Native only the app's own `ws.ping()` shows); sockets from a WebSocket class imported from a package
+instead of the global one (Node's `ws`, for example); with the browser's own `EventSource`, `retry:` fields and
+named events the app does not listen to (the browser never hands them to JavaScript), and a reconnect starts
+when the previous connection dropped. Mock rules do not apply to WebSocket connections. The SDK's own connection
+to the Mac app, Metro's and React DevTools' are never captured.
 
 #### Reporting other clients yourself
 
@@ -272,7 +299,7 @@ If you deliberately enable it in release builds (`enabled: true`), Android needs
 
 ### Size with Dürbün off
 
-The SDK's code is still in the release bundle (about 180 KB before minification) when it is imported
+The SDK's code is still in the release bundle (about 240 KB before minification) when it is imported
 statically. To leave it out, import it through one file and pick the no-op entry when `__DEV__` is false;
 Metro folds the condition in release builds, so only the branch that is used ends up in the bundle:
 
