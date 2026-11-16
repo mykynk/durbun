@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { clsx } from 'clsx';
 import { BookOpen, ChevronDown, CircleCheck, CircleDashed, CircleMinus, Clock, Info, Lightbulb, Play, Settings2, Stethoscope, type LucideIcon } from 'lucide-react';
-import { useT } from '../i18n';
+import { hasMessage, useT } from '../i18n';
 import { deviceDisplayName, logStatusText } from '../i18n/codes';
 import type { AppSession, DeviceInfo } from '@durbun/protocol';
 import type { BuildBadge, ExplainAction, ExplainBadge, ExplainCapability, ExplainReason, ExplainRow, ExplainStatus } from '../data/explain';
@@ -35,17 +35,22 @@ import {
   type ReasonTextOptions,
 } from './text';
 import { idleApp, pickEmptyReason, useAppExplain, useCrashRecordsState, useIdleApp, useIosSystemLinesHidden, useScopeExplain, type EmptyExplanation, type ExplainedApp } from './model';
-import { actionAvailable, runExplainAction } from './actions';
+import { actionAvailable, guideTabFor, runExplainAction } from './actions';
+import { useWasCleared } from './cleared';
 import { clockSkewOf, clockSkewText, protocolMismatchText, protocolText } from './session';
 import './sources.css';
 
 /* ───────────── badges ───────────── */
 
 /** SDK / VM Service / Yalnızca cihaz logu — where the app's data comes from (`short` for narrow sidebar rows). */
-export function SourceBadge({ badge, short, className }: { badge: ExplainBadge; short?: boolean; className?: string }) {
+/** `away`: the SDK of this build connected in this session and is not connected right now (`ExplainContext.sdkAway`). */
+export function SourceBadge({ badge, short, away, className }: { badge: ExplainBadge; short?: boolean; away?: boolean; className?: string }) {
+  const t = useT();
+  const awayText = away ? t('sources.session.away') : '';
+  const tip = away ? `${badgeLabel(badge)} · ${t('sources.badgeHint.sdkAway')}` : short ? badgeTooltip(badge) : badgeHint(badge);
   return (
-    <Tooltip content={short ? badgeTooltip(badge) : badgeHint(badge)}>
-      <span className={clsx('src-badge', `src-badge--${badge}`, className)} tabIndex={-1} aria-label={badgeLabel(badge)}>
+    <Tooltip content={tip}>
+      <span className={clsx('src-badge', `src-badge--${badge}`, away && 'src-badge--away', className)} tabIndex={-1} aria-label={away ? `${badgeLabel(badge)}, ${awayText}` : badgeLabel(badge)}>
         {badgeLabel(badge, { short })}
       </span>
     </Tooltip>
@@ -211,7 +216,7 @@ function PanelHeader({ item }: { item: ExplainedApp }) {
         {version ? <span className="src-panel__ver tnum">{version}</span> : null}
       </div>
       <div className="src-panel__badges">
-        <SourceBadge badge={item.result.badge} />
+        <SourceBadge badge={item.result.badge} away={ctx?.sdkAway} />
         {build ? <BuildBadgeChip badge={build} installer={da?.install.installer} /> : null}
         <span className={clsx('src-panel__run', item.group.running && 'is-on')}>
           {item.group.running ? t('sources.running') : item.group.lastActivity ? t('sources.lastSeen', { ago: formatRelative(item.group.lastActivity) }) : t('sources.notRunningShort')}
@@ -222,18 +227,19 @@ function PanelHeader({ item }: { item: ExplainedApp }) {
         <span className="mono truncate selectable">{item.group.bundleId}</span>
         {da?.crashReports ? <span>{t('sources.crashReports', { count: da.crashReports })}</span> : null}
       </div>
-      {item.group.latest ? <SdkLine session={item.group.latest} /> : null}
+      {item.group.latest ? <SdkLine session={item.group.latest} away={ctx?.sdkAway} /> : null}
     </div>
   );
 }
 
 /** "Flutter · durbun 0.3.0 · protokol 2", with a badge when the SDK and Dürbün speak different protocols. */
-function SdkLine({ session }: { session: AppSession }) {
+function SdkLine({ session, away }: { session: AppSession; away?: boolean }) {
+  const t = useT();
   const mismatch = protocolMismatchText(session);
   const proto = protocolText(session);
   return (
     <div className="src-panel__sub src-panel__sdk">
-      <span className="truncate">{[sdkLabel(session.sdk.platform), `${session.sdk.name} ${session.sdk.version}`, proto].filter(Boolean).join(' · ')}</span>
+      <span className="truncate">{[sdkLabel(session.sdk.platform), `${session.sdk.name} ${session.sdk.version}`, proto, away ? t('sources.session.away') : ''].filter(Boolean).join(' · ')}</span>
       {mismatch ? (
         <Tooltip content={mismatch.body}>
           <span className="src-mismatch" tabIndex={0}>
@@ -431,12 +437,26 @@ export function ExplainEmpty({ capability, icon, fallback, includePartial, onAct
       </NotRunningEmpty>
     );
   }
+  // One connected app with nothing in the list: say whether the list was cleared or the app has not sent anything yet.
+  if (!pick.structural && scope.kind !== 'none' && pick.single && liveEmptyFor(capability, pick)) {
+    return (
+      <ConnectedEmpty item={pick.single} capability={capability} icon={icon} size={size}>
+        {children}
+      </ConnectedEmpty>
+    );
+  }
   // 'partial' over several apps (e.g. CPU/memory by polling on a whole device) is better served by the view's own empty state.
   if (!pick.structural || scope.kind === 'none' || (pick.status === 'partial' && !pick.single)) return <>{fallback}</>;
   const single = pick.single;
   const ctx = single?.result.context;
   const app = ctx?.appName || single?.group.bundleId;
-  const titleKey = capability === 'metrics' && pick.status === 'no' ? 'sources.empty.metrics.noTitle' : `sources.empty.${capability}.title`;
+  const awayKey = `sources.empty.${capability}.awayTitle`;
+  const titleKey =
+    single && pick.reasons.includes('sdkDisconnected') && hasMessage(awayKey)
+      ? awayKey
+      : capability === 'metrics' && pick.status === 'no'
+        ? 'sources.empty.metrics.noTitle'
+        : `sources.empty.${capability}.title`;
   const title = single ? t(titleKey, { app }) : t(`sources.empty.${capability}.deviceTitle`);
   const items = single ? [single] : pick.rows.filter((r) => r.row.status !== 'yes').map((r) => r.item).slice(0, 4);
   // The device itself is the reason (waiting for «Güven», unplugged…): say it once, not per app.
@@ -481,6 +501,51 @@ export function ExplainEmpty({ capability, icon, fallback, includePartial, onAct
         <BookOpen size={13} aria-hidden />
         {t('sources.general')}
       </button>
+    </EmptyState>
+  );
+}
+
+/** Capabilities whose empty list has a "connected: cleared / nothing yet" text of its own. */
+const LIVE_EMPTY: ReadonlySet<ExplainCapability> = new Set<ExplainCapability>(['network']);
+
+function liveEmptyFor(capability: ExplainCapability, pick: EmptyExplanation): boolean {
+  const item = pick.single;
+  if (!item || !LIVE_EMPTY.has(capability) || !item.group.connected || item.result.context?.sdkAway) return false;
+  const row = pick.rows[0]?.row;
+  return row?.status === 'yes';
+}
+
+/**
+ * Empty list of one connected app: "the list was cleared" after the user's clear, otherwise "has not sent anything
+ * yet". Either way new data shows up as it comes, so no setup steps lead the text.
+ */
+function ConnectedEmpty({ item, capability, icon, size, children }: { item: ExplainedApp; capability: ExplainCapability; icon?: IconType; size: 'sm' | 'md' | 'lg'; children?: ReactNode }) {
+  const t = useT();
+  const cleared = useWasCleared(item.group, capability === 'network' ? 'network' : capability === 'metrics' ? 'metrics' : 'logs');
+  const ctx = item.result.context;
+  const app = ctx?.appName || item.group.bundleId;
+  const state = cleared ? 'cleared' : 'waiting';
+  const viaSdk = ctx?.transport !== 'vm-service';
+  return (
+    <EmptyState
+      size={size}
+      icon={icon}
+      title={t(`sources.empty.${capability}.${state}.title`, { app })}
+      description={
+        <div className="src-empty src-empty--center">
+          <p className="src-empty__lead">{t(`sources.empty.${capability}.${state}.body`, { app })}</p>
+          {!cleared && viaSdk ? <p className="src-empty__hint">{t(`sources.empty.${capability}.waiting.hint`)}</p> : null}
+        </div>
+      }
+      actions={
+        !cleared && viaSdk ? (
+          <Button variant="ghost" size="md" icon={BookOpen} onClick={() => ui.openSdkGuide(guideTabFor(ctx))}>
+            {t('sources.empty.sdkGuide')}
+          </Button>
+        ) : undefined
+      }
+    >
+      {children}
     </EmptyState>
   );
 }

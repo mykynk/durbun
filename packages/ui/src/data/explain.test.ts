@@ -280,6 +280,30 @@ describe('explainSources — lifecycle and recordings', () => {
     expect(row(r, 'network').status).toBe('no');
   });
 
+  it('the SDK of this same build connected earlier and is away now: still SDK, live rows wait for it, no build advice', () => {
+    const da = deviceApp(PIXEL, { id: 'com.mykynk.kasa', name: 'Kasa', version: '2.0.1', build: '201', buildType: 'debug', source: 'adb' });
+    const away = session(PIXEL, { connected: false, platform: 'android', app: { name: 'Kasa', id: 'com.mykynk.kasa', version: '2.0.1', build: '201', debug: true } });
+    const r = ex({ device: PIXEL, deviceApp: da, sessions: [away] });
+    expect(r.badge).toBe('sdk');
+    expect(r.context).toMatchObject({ transport: 'sdk', sdkAway: true, running: true });
+    expect(r.notes).toEqual(['sdkDisconnected']);
+    expect(row(r, 'logs')).toMatchObject({ status: 'partial', sources: ['logcat'], reasons: ['sdkDisconnected'] });
+    expect(row(r, 'network')).toEqual({ capability: 'network', status: 'no', sources: [], reasons: ['sdkDisconnected'], actions: [] });
+    expect(row(r, 'mocks')).toMatchObject({ status: 'no', reasons: ['sdkDisconnected'], actions: [] });
+    expect(row(r, 'tools')).toMatchObject({ status: 'no', reasons: ['sdkDisconnected', 'deviceToolsAvailable'], actions: [] });
+    expect(row(r, 'metrics')).toMatchObject({ status: 'partial', reasons: ['sdkDisconnected', 'frameStatsApproximate'] });
+    // No sentence anywhere says the build lacks the SDK.
+    for (const x of r.rows) expect(x.reasons).not.toEqual(expect.arrayContaining(['noSdk']));
+    // Another build runs now (a new version was installed): the old session says nothing about it.
+    const newer = ex({ device: PIXEL, deviceApp: { ...da, version: '2.0.2', build: '202' }, sessions: [away] });
+    expect(newer.badge).toBe('device-only');
+    expect(newer.context?.sdkAway).toBeUndefined();
+    // Connected again: the usual SDK rows.
+    expect(ex({ device: PIXEL, deviceApp: da, sessions: [{ ...away, connected: true }] }).context?.sdkAway).toBeUndefined();
+    // The app stopped: "not running", not "away".
+    expect(ex({ device: PIXEL, deviceApp: { ...da, running: false, pids: [] }, sessions: [away] }).notes).toEqual(['notRunning']);
+  });
+
   it('a connected SDK session wins over a VM-service one', () => {
     const r = ex({ device: PIXEL, sessions: [session(PIXEL, { id: 'app:2', transport: 'vm-service', connectedAt: 200 }), session(PIXEL, { id: 'app:1', connectedAt: 100 })] });
     expect(r.badge).toBe('sdk');

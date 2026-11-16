@@ -440,7 +440,7 @@ All accept `className`. Icons are lucide-react components (`IconType`), 16 px, s
 | `Toolbar`, `ToolbarSeparator`, `ToolbarSpacer`, `ToolbarGroup` | 40 px feature header row (`dense` → 34 px) |
 | `SearchInput` | `value`, `onChange`, `placeholder`, `shortcut` (e.g. `['/', 'Mod+F']`), `shortcutEnabled`, `matches: {current,total}`, `onNext`, `onPrev`, `onSubmit`, `invalid`, `trailing`, `inputRef`, `mono`, `size` — Esc clears, then blurs |
 | `Field`, `Input`, `Select`, `Textarea` | form primitives (`Input`: `size`, `mono`, `icon`, `trailing`, `invalid`; `Select`: `options`) |
-| `Card`, `Callout`, `EmptyState` | `Callout tone: 'info'|'success'|'warn'|'danger'`, `title`, `actions`, `compact`; `EmptyState icon, title, description, actions, size, tone` |
+| `Card`, `Callout`, `EmptyState` | `Callout tone: 'info'|'success'|'warn'|'danger'`, `title`, `actions`, `compact`; `EmptyState icon, title, description, actions, size, tone ('neutral'|'accent'|'danger'|'success': success when the message is that nothing is wrong)` |
 | `KeyValueTable` | `rows: KeyValueRow[] | [k, v][]` (headers), `filterable`, `copyAll`, `mono`, `keyWidth`, `onRowContextMenu` |
 | `JsonTree` | `data`, `rootLabel` ('data' → `data.items[0].id`), `defaultExpandDepth` (1), `search`, `toolbar`, `pageSize` (100), `maxStringLength` — lazy children, paging for 10k+ nodes, copy value/path (hover, right-click, Mod+C), ↑↓→← navigation |
 | `CodeView` | `code`, `language: 'json'|'xml'|'html'|'javascript'|'css'|'plain'|'auto'`, `contentType`, `lineNumbers`, `wrap`/`defaultWrap`/`onWrapChange`, `toolbar` (true or extra node), `findable` (Mod+F), `maxHeight`, `highlightLimit` (150 000 chars) — virtualized above 1 500 lines |
@@ -502,7 +502,9 @@ view (Vite bundles it). **Use tokens only — never hard-coded colors.**
 `--st-2xx…pending`, `--json-key/string/number/bool/null`, `--tag-l/--tag-c/--tag-bg-a`, `--radius-sm/--radius/--radius-lg`,
 `--shadow-pop/--shadow-modal`, `--font-ui/--font-mono`, `--fs-xs…xl`, `--log-fs`, `--row-h`, `--sidebar-w`,
 `--topbar-h`, `--statusbar-h`. Foundation extensions: `--success/--warning/--danger/--info` (+ `-soft`),
-`--text-on-accent`, `--overlay-bg`, `--hl-mark`, `--hl-mark-current`, `--focus-ring`, `--input-bg`,
+`--text-on-accent`, `--accent-fill`/`-hover` and `--danger-fill`/`-hover` + `--text-on-danger` (filled controls with
+text on them: primary / danger buttons, numbered badges; AA in both themes, `badgeContrast.test.ts` reads the
+button rules), `--overlay-bg`, `--hl-mark`, `--hl-mark-current`, `--focus-ring`, `--input-bg`,
 `--tooltip-bg/-text/-border`, `--code-keyword/fn/tag/attr/builtin/comment`, `--sdk-flutter|android|ios|rn|js|dart|demo`,
 `--pick-red|orange|yellow|green|blue|violet|pink`, `--dur` (120 ms), `--ease`, `--z-sticky/overlay-panel/dialog/popover/tooltip/toast/drop`.
 
@@ -556,7 +558,24 @@ monospace content at `var(--log-fs)`, row height `var(--row-h)`. Detail panes: `
   the first error, the logs and the requests of that range (`rangeContents`).
 - Flows: one-click starter flows live in `features/flows/model/starters.ts` (each must pass `validateFlow`);
   `model/aiFeedback.ts` turns import problems into English text for the AI and diffs an imported flow against the
-  one it replaces.
+  one it replaces. Pinned runs (`model/pins.ts`, `setRunPinned`): the run history popover pins and unpins, a 409
+  `flowRun.pinLimit` is said with `errorText`; the `flows` broadcast carries no run headers, so lists follow
+  `usePinRevision` and read the runs again. "Clear history" (`api.clearFlowRunHistory`) keeps pinned runs and says so.
+  "Flow from requests" reads the focus's `visibleIds` / `filterLabel` / `from`: where the requests came from, and
+  "select the N visible" when the caller's list was filtered.
+- Package notices (`features/transfer/notices.ts`, `packageNoticeText`): `package.flow.invalid` / `.problems` are
+  worded from `params.issue` (a flow check code) and `package.mock.invalid` from `field` + `expected`, never from the
+  English `problem`.
+- Sidebar fit (`shell/sidebarFit.ts`): below 1000 px the sidebar folds to its rail by itself and opens again with
+  room; below 900 it is an overlay. A toggle on a tight window holds until the width crosses 1000 again and is not
+  saved; `sidebarCollapsed` is the wide-window choice and always wins.
+- "SDK away" (`ExplainContext.sdkAway`, reason `sdkDisconnected`): the same build's SDK connected earlier in this
+  session and the app still runs. Badge stays SDK (outlined), the rows say what comes back on reconnect, no build
+  advice; a different version / build or debug-vs-release falls back to the device-only explanation.
+- Empty Network list of one app, four cases: connected and cleared ("liste temizlendi", from the server's `cleared`
+  messages kept in `sources/cleared.ts`), connected with nothing yet ("henüz ağ isteği göndermedi" + a setup hint),
+  SDK away (`awayTitle` + what comes on reconnect), no SDK (the structural reasons). The view's own "no
+  DurbunInterceptor" state still comes first.
 - Mac app prefs: `shell/desktopPrefs.ts` reads `window.durbunDesktop.prefs` (`get` / `set`, refreshed on the
   `durbun:command` event `prefs-changed`; `null` = not asked yet). Without the bridge the Settings rows are hidden.
 - Mac app server settings: `shell/desktopConfig.ts` reads `window.durbunDesktop.config` (`get` / `set` with a

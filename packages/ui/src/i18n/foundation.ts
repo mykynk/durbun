@@ -264,6 +264,7 @@ registerMessages('shell', {
       olderSessions: { one: '{count} önceki oturum', other: '{count} önceki oturum' },
       appLive: 'Bağlı (canlı)',
       appGone: 'Bağlantı kesildi',
+      sdkAway: 'SDK şu an bağlı değil',
       thisSession: 'şu anki',
     },
     device: {
@@ -1028,6 +1029,7 @@ registerMessages('shell', {
       olderSessions: { one: '{count} earlier session', other: '{count} earlier sessions' },
       appLive: 'Connected (live)',
       appGone: 'Disconnected',
+      sdkAway: 'SDK not connected right now',
       thisSession: 'current',
     },
     device: {

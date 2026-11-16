@@ -32,6 +32,11 @@
   box-shadow: inset 0 0 0 1px var(--border-strong);
   font-weight: 500;
 }
+.src-badge--away {
+  /* The SDK is in this build but not connected right now: an outline in its colour instead of a fill. */
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--src) 55%, transparent);
+}
 .src-badge--demo {
   --src: var(--badge-accent);
 }
@@ -306,6 +311,14 @@
 .src-empty__lead {
   margin: 0;
 }
+.src-empty--center {
+  text-align: center;
+}
+.src-empty__hint {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
 .src-empty__apps {
   list-style: none;
   margin: 0;
@@ -450,7 +463,13 @@
 
 /* The SDK line under an app's header, and its protocol notes. */
 .src-panel__sdk {
-  gap: 6px;
+  gap: 2px 6px;
+  /* "Android · durbun-android 0.2.0 · protokol 2 · şu an bağlı değil" + the update badge: wrap, never cut. */
+  flex-wrap: wrap;
+}
+.src-panel__sdk > .truncate {
+  white-space: normal;
+  overflow: visible;
 }
 .src-mismatch {
   flex: none;

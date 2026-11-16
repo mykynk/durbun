@@ -37,6 +37,7 @@ import { usePersistentState } from '../hooks';
 import { formatClock, formatCompact } from '../lib/format';
 import { appVersion, connectionLabel, deviceSubtitle, importLabel, isNetworkOnly, stateTone } from './labels';
 import { setDemo, toggleSidebar } from './actions';
+import { useSidebarCompact } from './sidebarFit';
 import { createHoldMemory, isGroupSelected, layoutDeviceApps, orderDevices, twinSuffixes, type HoldMemory } from './sidebarModel';
 
 const SECTION_ORDER: DeviceGroup[] = ['live', 'demo', 'import', 'other'];
@@ -44,7 +45,8 @@ const SECTION_ORDER: DeviceGroup[] = ['live', 'demo', 'import', 'other'];
 /** Left navigation: "All devices", devices with their app sessions, footer links. */
 export function Sidebar() {
   const t = useT();
-  const collapsedPref = usePrefs((s) => s.sidebarCollapsed);
+  // Folds by itself on a tight window; the user's own choice wins (sidebarFit).
+  const collapsedPref = useSidebarCompact(usePrefs((s) => s.sidebarCollapsed));
   const { narrow, overlay } = useUi(useShallow((s) => ({ narrow: s.narrow, overlay: s.sidebarOverlay })));
   const compact = narrow ? !overlay : collapsedPref;
   const deviceMap = useHub((s) => s.devices);
@@ -452,10 +454,21 @@ function AppNode({ group, device, scope }: { group: AppGroup; device: DeviceInfo
   const older = group.sessions.length - 1;
   const selectSession = (s: AppSession) => setScope({ kind: 'app', appId: s.id, exact: true }, hint);
   const input = { device, deviceApp: group.deviceApp, sessions: group.sessions };
-  const badge = explainSources(input).badge;
+  const explained = explainSources(input);
+  const badge = explained.badge;
+  // The SDK of this build was here a moment ago (`sdkAway`): the badge stays SDK, outlined, and the row says so.
+  const away = Boolean(explained.context?.sdkAway);
   const build = buildBadgeOf(input);
   const live = group.running;
-  const stateText = group.connected ? t('shell.sidebar.appLive') : live ? t('sources.running') : latest ? t('shell.sidebar.appGone') : t('sources.notRunningShort');
+  const stateText = group.connected
+    ? t('shell.sidebar.appLive')
+    : away
+      ? `${t('sources.running')} · ${t('shell.sidebar.sdkAway')}`
+      : live
+        ? t('sources.running')
+        : latest
+          ? t('shell.sidebar.appGone')
+          : t('sources.notRunningShort');
   const select = () =>
     latest ? setScope({ kind: 'app', appId: latest.id }, hint) : setScope({ kind: 'deviceApp', deviceId: group.deviceId, bundleId: group.bundleId }, hint);
 
@@ -494,7 +507,7 @@ function AppNode({ group, device, scope }: { group: AppGroup; device: DeviceInfo
               {version ? <span className="sb-app__ver truncate">{version}</span> : null}
             </span>
             <span className="sb-row__subtitle sb-app__badges">
-              <SourceBadge badge={badge} short />
+              <SourceBadge badge={badge} short away={away} />
               {build ? <BuildBadgeChip badge={build} installer={group.deviceApp?.install.installer} short /> : null}
             </span>
           </span>

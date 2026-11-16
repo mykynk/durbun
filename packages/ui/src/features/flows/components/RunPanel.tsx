@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
-import { ArrowLeft, Ban, ChevronDown, CircleAlert, CircleCheck, CircleSlash, CircleX, Clock, Copy, ExternalLink, FileDown, Globe, Play, RotateCcw, Smartphone, Square, Trash, X } from 'lucide-react';
+import { ArrowLeft, Ban, ChevronDown, CircleAlert, CircleCheck, CircleSlash, CircleX, Clock, Copy, ExternalLink, FileDown, Globe, Pin, PinOff, Play, RotateCcw, Smartphone, Square, Trash, X } from 'lucide-react';
 import type { FlowDoc, FlowRun, FlowRunHeader, FlowRunStep } from '@durbun/protocol';
-import { Button, Callout, CopyButton, DropdownMenu, IconButton, JsonTree, SlackButton, Spinner, Tooltip, confirm, copyText, downloadText, formatDuration, formatRelative, toast, type MenuItem } from '../../../components';
+import { Button, Callout, CopyButton, IconButton, JsonTree, Popover, SlackButton, Spinner, Tooltip, confirm, copyText, downloadText, formatDuration, formatRelative, toast } from '../../../components';
 import { api, rememberFlowRun, ui, useFlows, useNow } from '../../../data';
 import { forgetFlowRuns } from '../../../data/stores/flows';
-import { tCode, useLanguage, useT } from '../../../i18n';
+import { errorText, tCode, useLanguage, useT } from '../../../i18n';
 import { flowErrorText } from '../model/errors';
+import { setRunPinned, usePinRevision } from '../model/pins';
 import { reportFileName, runErrorText, runReport, statusKey, stepError, stepText } from '../model/run';
 import { stepName } from '../model/text';
 import { Evidence } from './Evidence';
@@ -180,6 +181,14 @@ function RunHeader({ run, flow, onRunId, onRerun, onClose, report }: { run: Flow
           </span>
         ) : null}
         {run.trigger.kind === 'event' ? <span className="fl-chip is-accent">{t('flows.runPanel.automatic')}</span> : null}
+        {run.pinned ? (
+          <Tooltip content={t('flows.pin.doneHint')}>
+            <span className="fl-chip is-accent fl-chip--pin" tabIndex={0}>
+              <Pin size={11} aria-hidden />
+              {t('flows.pin.pinned')}
+            </span>
+          </Tooltip>
+        ) : null}
       </div>
       <span className="grow" />
       {run.status === 'running' ? (
@@ -214,6 +223,7 @@ function RunHeader({ run, flow, onRunId, onRerun, onClose, report }: { run: Flow
             />
           </Tooltip>
           <IconButton icon={FileDown} label={t('flows.runPanel.downloadReport')} onClick={() => downloadText(report(), reportFileName(run), 'text/markdown;charset=utf-8')} />
+          <PinButton run={run} />
           <SlackButton report={report()} />
           <Button size="sm" variant="secondary" icon={RotateCcw} onClick={onRerun}>
             {t('flows.runPanel.rerun')}
@@ -346,8 +356,12 @@ function StepDetail({ step, flow }: { step: FlowRunStep; flow: FlowDoc }) {
 
 function History({ flow, current, onPick }: { flow: FlowDoc; current: string; onPick(id: string | null): void }) {
   const t = useT();
+  const ref = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
   const [runs, setRuns] = useState<FlowRunHeader[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const lastRunId = useFlows((s) => s.summaries.find((f) => f.id === flow.id)?.lastRun?.id);
+  const pinRev = usePinRevision((s) => s.rev);
   // The list is fetched when a run starts; the store keeps that run's status and counts current.
   const live = useFlows((s) => s.runs);
   const load = () =>
@@ -355,62 +369,141 @@ function History({ flow, current, onPick }: { flow: FlowDoc; current: string; on
       (r) => setRuns([...r.running, ...r.runs]),
       () => setRuns([]),
     );
+  // Read again on open too: runs started elsewhere (another window, an automation) are listed without waiting.
   useEffect(() => {
-    void load();
+    if (open) void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flow.id, lastRunId]);
-  const items = (): MenuItem[] => {
-    const list: MenuItem[] = (runs ?? []).map((h) => {
-      const now = live[h.id];
-      return now ? { ...h, status: now.status, counts: now.counts, durationMs: now.durationMs } : h;
-    }).map((r) => ({
-      label: (
-        <span className="fl-history__item">
-          <StatusIcon status={r.status} size={13} />
-          <span>{formatRelative(r.startedAt)}</span>
-          <span className="fl-history__meta tnum">
-            {t('flows.runPanel.counts', { passed: r.counts.passed, total: r.counts.total })}
-            {r.durationMs !== undefined ? ` · ${formatDuration(r.durationMs)}` : ''}
-          </span>
-        </span>
-      ),
-      hint: [r.environment?.tls === 'unverified' ? t('flows.runPanel.tls.unverified') : '', r.trigger.kind === 'event' ? t('flows.runPanel.automatic') : r.target?.deviceName].filter(Boolean).join(' · ') || undefined,
-      checked: r.id === current,
-      onSelect: () => onPick(r.id),
-    }));
-    if (!list.length) list.push({ type: 'label', label: t('flows.history.empty') });
-    else {
-      list.push({ type: 'separator' });
-      list.push({
-        label: t('flows.history.clear'),
-        icon: Trash,
-        danger: true,
-        onSelect: async () => {
-          const ok = await confirm({ title: t('flows.history.clearTitle'), message: t('flows.history.clearMessage', { name: flow.name }), confirmLabel: t('flows.history.clearConfirm'), danger: true });
-          if (!ok) return;
-          try {
-            const n = await api.clearFlowRuns(flow.id);
-            // The canvas and "last run" must not keep showing what was deleted.
-            forgetFlowRuns(flow.id);
-            toast.success(t('flows.history.cleared', { count: n }));
-            onPick(null);
-            void load();
-          } catch (err) {
-            toast.error(t('flows.history.clearFailed'), { description: flowErrorText(err) });
-          }
-        },
-      });
+  }, [flow.id, lastRunId, pinRev, open]);
+  const list = (runs ?? []).map((h) => {
+    const now = live[h.id];
+    return now ? { ...h, status: now.status, counts: now.counts, durationMs: now.durationMs } : h;
+  });
+  const pinnedCount = list.filter((r) => r.pinned).length;
+
+  const togglePin = async (r: FlowRunHeader) => {
+    setBusy(r.id);
+    try {
+      await setRunPinned(r.id, !r.pinned);
+    } catch (err) {
+      toast.error(r.pinned ? t('flows.pin.unpinFailed') : t('flows.pin.failed'), { description: errorText(err) });
+    } finally {
+      setBusy(null);
     }
-    return list;
   };
+
+  const clear = async () => {
+    setOpen(false);
+    const message = pinnedCount ? `${t('flows.history.clearMessage', { name: flow.name })} ${t('flows.pin.clearKeeps', { count: pinnedCount })}` : t('flows.history.clearMessage', { name: flow.name });
+    const ok = await confirm({ title: t('flows.history.clearTitle'), message, confirmLabel: t('flows.history.clearConfirm'), danger: true });
+    if (!ok) return;
+    try {
+      const { removed, keptPinned } = await api.clearFlowRunHistory(flow.id);
+      // The canvas and "last run" must not keep showing what was deleted (a pinned open run stays open).
+      forgetFlowRuns(flow.id);
+      toast.success(t('flows.history.cleared', { count: removed }), keptPinned ? { description: t('flows.pin.kept', { count: keptPinned }) } : undefined);
+      if (!list.some((r) => r.id === current && r.pinned)) onPick(null);
+      void load();
+    } catch (err) {
+      toast.error(t('flows.history.clearFailed'), { description: flowErrorText(err) });
+    }
+  };
+
   return (
-    <DropdownMenu items={items} minWidth={320} align="end" aria-label={t('flows.history.title')}>
-      {(p) => (
-        <Button size="sm" variant="ghost" icon={Clock} iconRight={ChevronDown} {...p}>
-          {t('flows.history.title')}
-        </Button>
-      )}
-    </DropdownMenu>
+    <>
+      <Button ref={ref} size="sm" variant="ghost" icon={Clock} iconRight={ChevronDown} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((o) => !o)}>
+        {t('flows.history.title')}
+      </Button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={ref} side="bottom" align="end" width={380} role="dialog" aria-label={t('flows.history.title')}>
+        <div className="fl-history">
+          {runs === null ? (
+            <div className="fl-history__empty">
+              <Spinner size={14} />
+            </div>
+          ) : !list.length ? (
+            <div className="fl-history__empty">{t('flows.history.empty')}</div>
+          ) : (
+            <ul className="fl-history__list" aria-label={t('flows.history.title')}>
+              {list.map((r) => {
+                const when = formatRelative(r.startedAt);
+                const hint = [r.environment?.tls === 'unverified' ? t('flows.runPanel.tls.unverified') : '', r.trigger.kind === 'event' ? t('flows.runPanel.automatic') : r.target?.deviceName].filter(Boolean).join(' · ');
+                return (
+                  <li key={r.id} className={clsx('fl-history__row', r.id === current && 'is-current', r.pinned && 'is-pinned')}>
+                    <button
+                      type="button"
+                      className="fl-history__open"
+                      aria-current={r.id === current || undefined}
+                      onClick={() => {
+                        setOpen(false);
+                        onPick(r.id);
+                      }}
+                    >
+                      <StatusIcon status={r.status} size={13} />
+                      <span className="fl-history__when">{when}</span>
+                      <span className="fl-history__meta tnum">
+                        {t('flows.runPanel.counts', { passed: r.counts.passed, total: r.counts.total })}
+                        {r.durationMs !== undefined ? ` · ${formatDuration(r.durationMs)}` : ''}
+                        {hint ? ` · ${hint}` : ''}
+                      </span>
+                      {r.pinned ? <span className="fl-history__pinned">{t('flows.pin.pinned')}</span> : null}
+                    </button>
+                    {r.status === 'running' ? null : busy === r.id ? (
+                      <span className="fl-history__busy">
+                        <Spinner size={12} />
+                      </span>
+                    ) : (
+                      <IconButton
+                        size="sm"
+                        icon={r.pinned ? PinOff : Pin}
+                        active={!!r.pinned}
+                        tone={r.pinned ? 'accent' : 'default'}
+                        label={r.pinned ? t('flows.pin.unpinRun', { when }) : t('flows.pin.pinRun', { when })}
+                        disabled={!!busy}
+                        onClick={() => void togglePin(r)}
+                      />
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="fl-history__foot">
+            <span className="fl-history__note">{pinnedCount ? t('flows.pin.note', { count: pinnedCount }) : t('flows.pin.noneHint')}</span>
+            {list.some((r) => r.status !== 'running' && !r.pinned) ? (
+              <Button size="sm" variant="ghost" icon={Trash} className="fl-history__clear" onClick={() => void clear()}>
+                {t('flows.history.clear')}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </Popover>
+    </>
+  );
+}
+
+/** The open run's pin, next to its report actions. */
+function PinButton({ run }: { run: FlowRun }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const pinned = !!run.pinned;
+  return (
+    <IconButton
+      icon={pinned ? PinOff : Pin}
+      active={pinned}
+      tone={pinned ? 'accent' : 'default'}
+      label={pinned ? t('flows.pin.unpin') : t('flows.pin.pin')}
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await setRunPinned(run.id, !pinned);
+          if (!pinned) toast.success(t('flows.pin.done'), { description: t('flows.pin.doneHint') });
+        } catch (err) {
+          toast.error(pinned ? t('flows.pin.unpinFailed') : t('flows.pin.failed'), { description: errorText(err) });
+        } finally {
+          setBusy(false);
+        }
+      }}
+    />
   );
 }
 

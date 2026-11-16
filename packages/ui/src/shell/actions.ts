@@ -11,6 +11,7 @@ import { pickFiles } from '../lib/download';
 import { t } from '../i18n/core';
 import { errorText } from '../i18n/codes';
 import { toast } from '../components/Toast';
+import { toggleTightSidebar } from './sidebarFit';
 import { confirm } from '../components/Dialog';
 
 /** Human message for a failed command/request (localized for known codes). */
@@ -334,6 +335,8 @@ export function toggleLanguage(): void {
 
 export function toggleSidebar(): void {
   const ui = useUi.getState();
+  const collapsed = usePrefs.getState().sidebarCollapsed;
   if (ui.narrow) useUi.setState({ sidebarOverlay: !ui.sidebarOverlay });
-  else usePrefs.getState().setPref('sidebarCollapsed', !usePrefs.getState().sidebarCollapsed);
+  // A tight window folds it by itself: opening or closing it by hand there holds for now and is not saved.
+  else if (!toggleTightSidebar(collapsed)) usePrefs.getState().setPref('sidebarCollapsed', !collapsed);
 }

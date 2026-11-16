@@ -51,6 +51,16 @@ function tintOf(rule: string, variable: string): number {
   return Number(m![1]) / 100;
 }
 
+/** The token a components.css rule paints `prop` with (`.btn--primary`, 'background' → '--accent-fill'). */
+function tokenOf(rule: string, prop: 'background' | 'color'): string {
+  const start = componentsCss.indexOf(`${rule} {`);
+  expect(start, rule).toBeGreaterThanOrEqual(0);
+  const body = componentsCss.slice(start, componentsCss.indexOf('}', start));
+  const m = new RegExp(`(?:^|\\n)\\s*${prop}:\\s*var\\((--[a-z0-9-]+)\\)`).exec(body);
+  expect(m, `${rule} ${prop}`).not.toBeNull();
+  return m![1]!;
+}
+
 const over = (top: Rgb, alpha: number, below: Rgb): Rgb => [0, 1, 2].map((i) => top[i]! * alpha + below[i]! * (1 - alpha)) as Rgb;
 const lay = (paint: Paint, below: Rgb): Rgb => over(paint.rgb, paint.alpha, below);
 
@@ -159,9 +169,26 @@ for (const [name, selector] of Object.entries(THEMES)) {
     it('button and tooltip text read on their fill', () => {
       failures.length = 0;
       check('--tooltip-text on --tooltip-bg', color('--tooltip-text'), color('--tooltip-bg'));
-      // White on the dark theme's violet stays at 3:1 (large-text level): the same token is also the accent text
-      // color on dark surfaces, which needs the opposite direction.
-      check('--text-on-accent on --accent', color('--text-on-accent'), color('--accent'), name === 'light' ? 4.5 : 3);
+      // Filled buttons and the count on an icon button carry text: AA on the fill and on the hover fill, read from
+      // the rules components.css actually paints them with.
+      const filled: [rule: string, hover: string | null][] = [
+        ['.btn--primary', '.btn--primary:not(:disabled):hover'],
+        ['.btn--danger', '.btn--danger:not(:disabled):hover'],
+        ['.icon-btn__badge--count', null],
+      ];
+      for (const [rule, hover] of filled) {
+        const fg = color(tokenOf(rule, 'color'));
+        check(`${rule} text on its fill`, fg, color(tokenOf(rule, 'background')));
+        if (hover) check(`${rule} text on its hover fill`, fg, color(tokenOf(hover, 'background')));
+      }
+      // The fill tokens are what any other filled control uses too.
+      check('--text-on-accent on --accent-fill', color('--text-on-accent'), color('--accent-fill'));
+      check('--text-on-danger on --danger-fill', color('--text-on-danger'), color('--danger-fill'));
+      // The switch thumb and the checkbox mark on --accent are icons (3:1); --accent is also a text colour on dark
+      // surfaces, so it is not darkened for them.
+      check('--text-on-accent mark on --accent', color('--text-on-accent'), color('--accent'), 3);
+      // A filled button is still told apart from the panel it sits on.
+      for (const fill of ['--accent-fill', '--danger-fill']) check(`${fill} against bg-panel`, color(fill), panel, 3);
       expect(failures).toEqual([]);
     });
   });

@@ -5,6 +5,14 @@ const calls = vi.hoisted(() => ({ sessions: [] as string[], flows: [] as string[
 vi.mock('../data/api', async (orig) => ({
   ...(await orig<typeof import('../data/api')>()),
   importSession: vi.fn(async (input: File) => {
+    if (input.name.startsWith('broken')) {
+      const { ApiError } = await orig<typeof import('../data/api')>();
+      throw new ApiError(400, 'Session file is missing the "logs" list', 'import.invalid', { error: 'Session file is missing the "logs" list', code: 'import.invalid', params: { field: 'logs' } });
+    }
+    if (input.name.startsWith('future')) {
+      const { ApiError } = await orig<typeof import('../data/api')>();
+      throw new ApiError(400, 'Unsupported session version 9', 'import.version', { error: 'Unsupported session version 9', code: 'import.version', params: { version: '9' } });
+    }
     calls.sessions.push(input.name);
     return { deviceIds: [`import:${calls.sessions.length}`] };
   }),
@@ -22,8 +30,8 @@ vi.mock('../components/Toast', () => {
   return { toast };
 });
 
-import '../i18n';
-import { classifyImport, importFiles } from './actions';
+import { setLanguage } from '../i18n';
+import { classifyImport, importFile, importFiles } from './actions';
 
 const file = (name: string, body: string) => new File([body], name, { type: 'application/json' });
 const flow = (id: string) => file(`${id}.durbun-flow.json`, JSON.stringify({ format: 'durbun-flow', version: 1, id, name: id, nodes: [], edges: [] }));
@@ -52,5 +60,19 @@ describe('importing several files', () => {
     expect(summary).toHaveLength(1);
     expect(summary[0]!.kind).toBe('warn');
     expect(summary[0]!.description).toContain('app.apk');
+  });
+});
+
+describe('a session file the server turns down', () => {
+  it('says why in the UI language, from the code and its params', async () => {
+    setLanguage('tr');
+    try {
+      await importFile(session('broken.durbun.json'));
+      await importFile(session('future.durbun.json'));
+    } finally {
+      setLanguage('en');
+    }
+    const errors = calls.toasts.filter((x) => x.kind === 'error').map((x) => x.description);
+    expect(errors).toEqual(['Oturum dosyasındaki “logs” listesi eksik ya da bozuk', 'Bu oturum dosyasının sürümü (9) tanınmıyor']);
   });
 });

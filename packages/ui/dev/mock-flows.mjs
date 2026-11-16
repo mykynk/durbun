@@ -10,6 +10,8 @@ const flows = new Map();
 /** Newest first, with their steps. */
 const runs = [];
 let runSeq = 0;
+/** Pinned runs allowed at once (small here, so the limit can be seen; the server allows more). */
+const MAX_PINNED = 3;
 let environments = {
   format: 'durbun-environments',
   version: 1,
@@ -135,11 +137,14 @@ function seedRuns() {
     endedAt: at2 + 3_100,
     durationMs: 3_100,
     trigger: { kind: 'manual' },
-    error: 'Step "Get cart" failed: HTTP 401',
+    // Coded like the engine's: the UI words it from the code (never the English text inside Turkish).
+    error: 'Expected status 2xx, got 401 (GET https://api.example.com/cart)',
+    errorCode: 'flow.http.status',
+    errorParams: { method: 'GET', url: 'https://api.example.com/cart', status: 401, expected: '2xx' },
     steps: [
       { id: 1, nodeId: 'start', type: 'trigger.manual', flowId: 'checkout', depth: 0, status: 'passed', startedAt: at2, endedAt: at2 + 5, durationMs: 5, port: 'out' },
       { id: 2, nodeId: 'login', type: 'flow.call', label: 'Log in', flowId: 'checkout', depth: 0, status: 'passed', startedAt: at2 + 5, endedAt: at2 + 2_400, durationMs: 2_395, port: 'out' },
-      { id: 3, nodeId: 'cart', type: 'http.request', label: 'Get cart', flowId: 'checkout', depth: 0, status: 'failed', startedAt: at2 + 2_400, endedAt: at2 + 3_100, durationMs: 700, error: 'HTTP 401 Unauthorized' },
+      { id: 3, nodeId: 'cart', type: 'http.request', label: 'Get cart', flowId: 'checkout', depth: 0, status: 'failed', startedAt: at2 + 2_400, endedAt: at2 + 3_100, durationMs: 700, error: 'Expected status 2xx, got 401 (GET https://api.example.com/cart)', errorCode: 'flow.http.status', params: { method: 'GET', url: 'https://api.example.com/cart', status: 401, expected: '2xx' } },
     ],
     counts: { passed: 2, failed: 1, skipped: 0, total: 3 },
   });
@@ -474,10 +479,12 @@ async function route(req, res, p, { json, readBody, broadcast }) {
       return json(res, 200, { running: list.filter((r) => r.status === 'running'), runs: list.filter((r) => r.status !== 'running') }), true;
     }
     if (p === '/api/flow-runs' && m === 'DELETE') {
-      const keep = runs.filter((r) => !mine(r) || r.status === 'running');
+      // Like the server: pinned runs stay, and the answer says how many of this flow's did.
+      const keep = runs.filter((r) => !mine(r) || r.status === 'running' || r.pinned);
       const removed = runs.length - keep.length;
+      const keptPinned = keep.filter((r) => mine(r) && r.pinned).length;
       runs.splice(0, runs.length, ...keep);
-      return json(res, 200, { removed }), true;
+      return json(res, 200, { removed, keptPinned }), true;
     }
     const runRoute = /^\/api\/flow-runs\/([^/]+)(\/cancel)?$/.exec(p);
     const run = runRoute && runs.find((r) => r.id === decodeURIComponent(runRoute[1]));
@@ -486,6 +493,15 @@ async function route(req, res, p, { json, readBody, broadcast }) {
       if (run.status === 'running') Object.assign(run, { status: 'cancelled', endedAt: now(), durationMs: now() - run.startedAt });
       broadcast?.({ type: 'flowRun', run: runHeader(run), steps: [] });
       return res.writeHead(204).end(), true;
+    }
+    if (m === 'PATCH') {
+      const { pinned } = await body();
+      if (pinned === true && !run.pinned && runs.filter((r) => r.pinned).length >= MAX_PINNED) {
+        return json(res, 409, { error: `At most ${MAX_PINNED} runs can be pinned`, code: 'flowRun.pinLimit', params: { max: MAX_PINNED } }), true;
+      }
+      if (pinned === true) run.pinned = true;
+      else delete run.pinned;
+      return json(res, 200, runHeader(run)), true;
     }
     if (m === 'DELETE') return runs.splice(runs.indexOf(run), 1), res.writeHead(204).end(), true;
     return json(res, 200, run), true;

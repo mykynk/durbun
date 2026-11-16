@@ -98,7 +98,13 @@ export type ExplainReason =
    * Probably not one of the team's apps (no SDK / VM session or developer install ever, no shared bundle prefix;
    * `ExplainInput.own`): only what the device shows from outside, without build advice.
    */
-  | 'notOwnApp';
+  | 'notOwnApp'
+  /**
+   * This build's SDK connected earlier in this Dürbün session and is not connected now while the app keeps running
+   * (`ExplainContext.sdkAway`: it went to the background, the network blinked). The build has the SDK: its data
+   * comes back when it reconnects, so no build advice.
+   */
+  | 'sdkDisconnected';
 
 /** A button the UI can offer next to a reason. */
 export type ExplainAction =
@@ -178,6 +184,11 @@ export interface ExplainContext {
   own?: boolean;
   /** Not running and no SDK / VM-service session ever seen: the build's SDK is unknown until it runs. */
   unseen?: boolean;
+  /**
+   * The SDK of this same build (version and build number) connected in this session and is not connected now,
+   * while the device reports the app running. `transport` stays 'sdk' (the build has it); live rows say it is away.
+   */
+  sdkAway?: boolean;
 }
 
 export interface ExplainResult {
@@ -349,18 +360,32 @@ function noSdkActions(b: ExplainBuild, platform: ExplainPlatform): ExplainAction
   return ['openSdkGuide'];
 }
 
+/**
+ * The running build is the one the session came from: same version, build number and debug / release kind
+ * (whatever either side does not report counts as the same). A debug session and a release install are two builds.
+ */
+function sameBuild(session: AppSession, da: DeviceApp): boolean {
+  const same = (a: string | undefined, b: string | undefined) => !a || !b || a === b;
+  const kind = session.app.debug === true ? 'debug' : session.app.debug === false ? 'release' : undefined;
+  const daKind = da.buildType === 'debug' || da.buildType === 'release' ? da.buildType : undefined;
+  return same(session.app.version, da.version) && same(session.app.build, da.build) && same(kind, daKind);
+}
+
 export function explainContext(input: ExplainInput): ExplainContext {
   const device = input.device;
   const da = input.deviceApp;
   const session = pickSession(input.sessions);
   const platform = platformOf(device);
   const connected = input.sessions.some((s) => s.connected);
+  // The SDK of this very build was here a moment ago: the app has the SDK, it is just not connected right now.
+  const away =
+    !!session && !connected && !!da?.running && session.transport !== 'vm-service' && session.sdk.platform !== 'dart-vm' && device?.state === 'online' && sameBuild(session, da) && !isImport(input);
   // The demo stands for real devices and builds (its lines carry realistic origins): it is explained like
   // them, its simulated SDK sessions as SDK sessions; `demo` marks it (a note says so).
   let transport: ExplainTransport;
   if (isImport(input)) transport = 'import';
   else if (!session) transport = 'none';
-  else if (!session.connected && da?.running) transport = 'none'; // this run has no SDK (the old session ended)
+  else if (!session.connected && da?.running && !away) transport = 'none'; // another build runs now (the old session ended)
   else transport = session.transport === 'vm-service' || session.sdk.platform === 'dart-vm' ? 'vm-service' : 'sdk';
   const layers = Array.isArray(session?.sdk.layers) ? session.sdk.layers.filter((l): l is SdkLayer => l === 'dart' || l === 'android' || l === 'ios') : undefined;
   let deviceLogs: ExplainContext['deviceLogs'] = 'none';
@@ -389,6 +414,7 @@ export function explainContext(input: ExplainInput): ExplainContext {
     ...(input.own === false ? { own: false } : {}),
     // Only an online device can say an app is not running (a disconnected one marks every app stopped).
     ...(transport === 'none' && !connected && da && !da.running && input.sessions.length === 0 && device?.state === 'online' ? { unseen: true } : {}),
+    ...(away ? { sdkAway: true } : {}),
   };
 }
 
@@ -456,14 +482,19 @@ export function explainSources(input: ExplainInput): ExplainResult {
     return { badge, rows: explainRecorded(input), notes: ['readOnly'], context: ctx };
   }
 
+  // The SDK is away for now: rows are what still comes without it (the device's own data), with no build advice.
+  const away = Boolean(ctx.sdkAway);
+  const live: ExplainTransport = away ? 'none' : ctx.transport;
+
   /* app-level notes */
+  if (away) notes.push('sdkDisconnected');
   if (input.device && !ctx.deviceOnline) {
     // Gone or offline: what came before stays. A device waiting for "Trust" / USB debugging is attached: its rows
     // say what to do, and nothing is known about its apps yet.
     if (ctx.deviceState !== 'unauthorized') notes.push('readOnly');
   } else if (!ctx.running && (input.deviceApp || input.sessions.length > 0)) notes.push('notRunning');
-  if (ctx.transport === 'sdk' && isStoreLike(ctx.build) && !ctx.demo) notes.push('sdkInStoreBuild');
-  const native = nativeLayerOf(ctx);
+  if (live === 'sdk' && isStoreLike(ctx.build) && !ctx.demo) notes.push('sdkInStoreBuild');
+  const native = away ? undefined : nativeLayerOf(ctx);
   if (native === 'active') notes.push('nativeLayerActive');
   else if (native === 'missing') notes.push('nativeLayerMissing');
   if (ctx.demo) notes.push('demoData');
@@ -481,13 +512,13 @@ export function explainSources(input: ExplainInput): ExplainResult {
   const gone = Boolean(input.device) && ctx.deviceState === 'disconnected' && !netOnly;
   const own = input.own !== false;
 
-  const appSrc: ExplainSource | undefined = ctx.transport === 'sdk' ? 'sdk' : ctx.transport === 'vm-service' ? 'vm-service' : undefined;
+  const appSrc: ExplainSource | undefined = live === 'sdk' ? 'sdk' : live === 'vm-service' ? 'vm-service' : undefined;
   const nativeSrc: ExplainSource[] = native === 'active' ? ['native-layer'] : [];
   // Without the app's own data: an app that is not the team's gets no build advice; an app that has not run yet
   // gets no claim about its build (the team may have turned the SDK on in any build, store builds included).
-  const buildReason: ExplainReason = !own ? 'notOwnApp' : ctx.unseen ? 'notSeenYet' : noSdkReason(ctx.build);
+  const buildReason: ExplainReason = away ? 'sdkDisconnected' : !own ? 'notOwnApp' : ctx.unseen ? 'notSeenYet' : noSdkReason(ctx.build);
   const launch: ExplainAction[] = ctx.unseen && ctx.deviceOnline && input.device?.actions.includes('app-launch') ? ['launchApp'] : [];
-  const buildActions: ExplainAction[] = own ? [...(buildReason === 'notSeenYet' ? launch : []), ...noSdkActions(ctx.build, p)] : [];
+  const buildActions: ExplainAction[] = own && !away ? [...(buildReason === 'notSeenYet' ? launch : []), ...noSdkActions(ctx.build, p)] : [];
   const androidNative = p === 'android' && (ctx.sdkPlatform === 'flutter' || ctx.sdkPlatform === 'android' || ctx.transport === 'vm-service');
 
   /* logs */
@@ -497,7 +528,7 @@ export function explainSources(input: ExplainInput): ExplainResult {
     const partial = logProblems.reasons.length > 0;
     rows.push(row('logs', partial ? 'partial' : 'yes', [appSrc, ...nativeSrc, ...(logSrc ? [logSrc] : [])], reasons, logProblems.actions));
   } else if (logSrc) {
-    rows.push(row('logs', 'yes', [logSrc], isReleaseLike(ctx.build) ? ['releaseLogsDependOnApp'] : []));
+    rows.push(away ? row('logs', 'partial', [logSrc], ['sdkDisconnected']) : row('logs', 'yes', [logSrc], isReleaseLike(ctx.build) ? ['releaseLogsDependOnApp'] : []));
   } else if (gone && deviceLogSource(p)) {
     rows.push(row('logs', 'partial', [deviceLogSource(p)!], ['readOnly']));
   } else {
@@ -506,7 +537,7 @@ export function explainSources(input: ExplainInput): ExplainResult {
   }
 
   /* network */
-  if (ctx.transport === 'sdk') {
+  if (live === 'sdk') {
     if (has('network')) {
       const reasons: ExplainReason[] = ['thirdPartyTraffic'];
       const actions: ExplainAction[] = [];
@@ -518,10 +549,10 @@ export function explainSources(input: ExplainInput): ExplainResult {
       // iOS: the native layer captures URLSession by itself.
       rows.push(row('network', 'yes', ['sdk', ...(p === 'android' ? [] : nativeSrc)], reasons, actions));
     } else rows.push(row('network', 'no', [], ['sdkLacksCapability'], ['openSdkGuide']));
-  } else if (ctx.transport === 'vm-service') {
+  } else if (live === 'vm-service') {
     rows.push(row('network', 'yes', ['vm-service'], ['nativeNetworkNeedsInterceptor'], ['openSdkGuide']));
   } else {
-    rows.push(row('network', 'no', [], [buildReason, 'noOutsideNetwork'], buildActions));
+    rows.push(row('network', 'no', [], away ? [buildReason] : [buildReason, 'noOutsideNetwork'], buildActions));
   }
 
   /* metrics */
@@ -535,15 +566,16 @@ export function explainSources(input: ExplainInput): ExplainResult {
     if (p === 'ios-simulator') return row('metrics', 'partial', ['host-ps'], ['fpsNeedsApp'], poll);
     return undefined;
   };
-  if (appSrc && (ctx.transport === 'vm-service' || has('metrics'))) {
+  if (appSrc && (live === 'vm-service' || has('metrics'))) {
     rows.push(row('metrics', 'yes', [appSrc]));
-  } else if (ctx.transport === 'sdk') {
+  } else if (live === 'sdk') {
     const o = outside();
     if (o) rows.push({ ...o, reasons: uniq(['sdkLacksCapability', ...o.reasons]) });
     else rows.push(row('metrics', 'no', [], p === 'ios-device' ? ['sdkLacksCapability', 'iosNoDeviceMetrics'] : ['sdkLacksCapability'], ['openSdkGuide']));
   } else {
     const o = outside();
-    if (o) rows.push(o);
+    if (o) rows.push(away ? { ...o, reasons: uniq<ExplainReason>(['sdkDisconnected', ...o.reasons]) } : o);
+    else if (away) rows.push(row('metrics', 'no', [], ['sdkDisconnected', ...(p === 'ios-device' ? (['iosNoDeviceMetrics'] as ExplainReason[]) : [])]));
     else if (p === 'ios-device') rows.push(row('metrics', 'no', [], ['iosNoDeviceMetrics'], !own ? [] : isDebugLike(ctx.build) ? ['openSdkGuide', 'attachVm'] : isStoreLike(ctx.build) ? ['useDebugBuild'] : ['buildWithDurbunFlag']));
     else rows.push(row('metrics', 'no', [], [buildReason], buildActions));
   }
@@ -574,10 +606,10 @@ export function explainSources(input: ExplainInput): ExplainResult {
   if (offline) {
     // Rules run inside a connected app: none is here now, whatever the build.
     rows.push(row('mocks', 'no', [], ['readOnly']));
-  } else if (ctx.transport === 'sdk') {
+  } else if (live === 'sdk') {
     if (has('mocks')) rows.push(row('mocks', 'yes', ['sdk']));
     else rows.push(row('mocks', 'no', [], ['sdkLacksCapability'], ['openSdkGuide']));
-  } else if (ctx.transport === 'vm-service') {
+  } else if (live === 'vm-service') {
     rows.push(row('mocks', 'no', [], ['vmServiceNoMocks'], ['openSdkGuide']));
   } else {
     rows.push(row('mocks', 'no', [], [buildReason], buildActions));
@@ -587,10 +619,10 @@ export function explainSources(input: ExplainInput): ExplainResult {
   const deviceTools: ExplainReason[] = input.device && !netOnly ? ['deviceToolsAvailable'] : [];
   if (offline) {
     rows.push(row('tools', 'no', [], ['readOnly']));
-  } else if (ctx.transport === 'sdk') {
+  } else if (live === 'sdk') {
     if (has('commands') || (session?.actions.length ?? 0) > 0) rows.push(row('tools', 'yes', ['sdk']));
     else rows.push(row('tools', 'no', [], ['sdkLacksCapability', ...deviceTools], ['openSdkGuide']));
-  } else if (ctx.transport === 'vm-service') {
+  } else if (live === 'vm-service') {
     rows.push(row('tools', 'yes', ['vm-service']));
   } else {
     rows.push(row('tools', 'no', [], [buildReason, ...deviceTools], buildActions));

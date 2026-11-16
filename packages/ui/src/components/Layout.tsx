@@ -109,7 +109,8 @@ export interface EmptyStateProps {
   /** Extra content under the actions (cards, lists…). */
   children?: ReactNode;
   size?: 'sm' | 'md' | 'lg';
-  tone?: 'neutral' | 'accent' | 'danger';
+  /** 'success': the message is that nothing is wrong ("no crashes", "identical"). */
+  tone?: 'neutral' | 'accent' | 'danger' | 'success';
   className?: string;
 }
 

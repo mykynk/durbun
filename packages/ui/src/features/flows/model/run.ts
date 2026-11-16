@@ -38,7 +38,9 @@ export function lastOutputs(run: FlowRun | undefined): Record<string, unknown> {
 }
 
 export function stepText(step: FlowRunStep): string {
-  return tCode(step.code, step.params, step.summary ?? step.error ?? '');
+  if (step.code || step.summary) return tCode(step.code, step.params, step.summary ?? step.error ?? '');
+  // A step that only failed has no summary: its error code words it (never the English `error` inside Turkish text).
+  return stepError(step) ?? '';
 }
 
 export function stepError(step: FlowRunStep): string | undefined {

@@ -70,6 +70,7 @@ import { requestFlowIntent } from '../features/flows/intent';
 import { automatedFlows, pauseAutomations, resumable, resumeAutomations, usePausedAutomations, type BulkResult } from '../features/flows/model/automations';
 import { requestDeviceSection } from '../features/device/request';
 import { addMarker, clearEverything, exportHar, exportSession, pickAndImport, setDemo, setTheme, toggleLanguage, toggleSidebar } from './actions';
+import { useSidebarCompact } from './sidebarFit';
 
 const TAB_KEYWORDS: Record<TabId, string[]> = {
   logs: ['logs', 'loglar', 'logcat', 'syslog'],
@@ -111,7 +112,7 @@ export function useGlobalCommands(): void {
   const demo = useDemoActive();
   const theme = usePrefs((s) => s.theme);
   const lang = usePrefs((s) => s.language);
-  const sidebarCollapsed = usePrefs((s) => s.sidebarCollapsed);
+  const sidebarCollapsed = useSidebarCompact(usePrefs((s) => s.sidebarCollapsed));
   const tab = useUi((s) => s.tab);
   const scope = useScope();
   const flows = useFlows((s) => s.summaries);

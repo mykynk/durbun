@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FlowRunStep } from '@durbun/protocol';
 import { setLanguage } from '../../../i18n';
-import { stepError } from './run';
+import { stepError, stepText } from './run';
 
 afterEach(() => setLanguage('en'));
 
@@ -23,5 +23,25 @@ describe('step error text', () => {
     expect(stepError(step)).toMatch(/Wi-Fi üzerinden bağlı.*USB/);
     setLanguage('en');
     expect(stepError(step)).toMatch(/over Wi-Fi.*USB/);
+  });
+});
+
+describe('step text', () => {
+  it('words a step that only failed from its error code, not the English error', () => {
+    const step = {
+      id: 4,
+      nodeId: 'login',
+      type: 'http.request',
+      flowId: 'f',
+      depth: 0,
+      status: 'failed',
+      startedAt: 0,
+      error: 'Expected status 200, got 500 (POST /login)',
+      errorCode: 'flow.http.status',
+      params: { method: 'POST', url: '/login', status: 500, expected: '200', duration: '120 ms' },
+    } as FlowRunStep;
+    setLanguage('tr');
+    expect(stepText(step)).toBe(stepError(step));
+    expect(stepText(step)).toMatch(/^Durum kodu 500 geldi, 200 bekleniyordu/);
   });
 });

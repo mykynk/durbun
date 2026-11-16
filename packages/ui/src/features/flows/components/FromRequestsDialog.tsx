@@ -1,15 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
-import { ListPlus, RefreshCw, SearchX, X } from 'lucide-react';
+import { Filter, ListChecks, ListPlus, RefreshCw, SearchX, X } from 'lucide-react';
 import type { NetworkEntry } from '@durbun/protocol';
 import { Button, Checkbox, Dialog, EmptyState, IconButton, Input, MethodBadge, SearchInput, StatusBadge, Toggle, formatClock, toast } from '../../../components';
-import { api, networkStore, useCompiledScope, useHub, useNetworkVersion } from '../../../data';
+import { api, networkStore, useCompiledScope, useHub, useNetworkVersion, type FlowFromRequestsSource } from '../../../data';
 import { deviceDisplayName, errorText, useT } from '../../../i18n';
 
 export interface FromRequestsDialogProps {
   open: boolean;
   /** Requests to start with (the Network tab's "Create a flow"). */
   initialIds?: readonly string[];
+  /** The requests the caller's list showed (its order), so the dialog can offer that same set. */
+  visibleIds?: readonly string[];
+  /** The caller's filter in words ("POST · /login"). */
+  filterLabel?: string;
+  /** Where the user started. */
+  from?: FlowFromRequestsSource;
   onClose(): void;
   onCreated(id: string): void;
 }
@@ -28,6 +34,10 @@ function sameSource(e: NetworkEntry, s: Source): boolean {
 const CHOSEN_SHOWN = 6;
 
 const MAX_ROWS = 400;
+/** The server builds a flow from at most this many requests (it drops the rest). */
+const MAX_PICK = 200;
+/** "Select the N visible" is offered up to this many: a longer list is better narrowed where it was filtered. */
+const PICK_VISIBLE_MAX = 50;
 const ASSET_RE = /\.(png|jpe?g|gif|webp|svg|ico|css|js|mjs|map|woff2?|ttf|otf|mp4|mp3|webm)(\?|$)/i;
 
 function isAsset(e: NetworkEntry): boolean {
@@ -35,7 +45,7 @@ function isAsset(e: NetworkEntry): boolean {
 }
 
 /** Pick captured requests (Network tab) → a flow that repeats them in order, linking values between steps. */
-export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: FromRequestsDialogProps) {
+export function FromRequestsDialog({ open, initialIds, visibleIds, filterLabel, from, onClose, onCreated }: FromRequestsDialogProps) {
   const t = useT();
   const scope = useCompiledScope();
   const version = useNetworkVersion({ enabled: open, throttleMs: 500 });
@@ -47,6 +57,7 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
   const [busy, setBusy] = useState(false);
   const [source, setSource] = useState<Source | null>(null);
   const [onlySource, setOnlySource] = useState(true);
+  const [onlyVisible, setOnlyVisible] = useState(false);
   const anchor = useRef<string | null>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
   const apps = useHub((s) => s.apps);
@@ -66,14 +77,42 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
     const first = initialIds?.length ? networkStore.get(initialIds[0]!) : undefined;
     setSource(first ? { deviceId: first.deviceId, ...(first.appId ? { appId: first.appId } : {}) } : null);
     setOnlySource(true);
+    setOnlyVisible(false);
   }, [open, initialIds]);
   const filterSource = onlySource ? source : null;
+
+  /** The caller's visible requests that can still become steps (the memory limit may have dropped some). */
+  const visible = useMemo(() => {
+    if (!open || !visibleIds?.length) return [] as string[];
+    const out: string[] = [];
+    for (const id of visibleIds) {
+      const e = networkStore.get(id);
+      if (e && e.method !== '?' && e.source !== 'flow' && scope.network(e)) out.push(id);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, visibleIds, scope, version]);
+  const visibleSet = useMemo(() => new Set(visible), [visible]);
+  const filterVisible = onlyVisible && visible.length > 0;
+  const visibleUnpicked = visible.reduce((n, id) => n + (picked.has(id) ? 0 : 1), 0);
+  const pickVisible = () => {
+    const next = new Set(picked);
+    for (const id of visible) next.add(id);
+    setPicked(next);
+    // The list shows what was picked: the visible set may hold other apps' requests or hidden files.
+    setOnlyVisible(true);
+  };
 
   // The request the dialog was opened with is in view (it may sit far down a long list).
   useEffect(() => {
     if (!open || !initialIds?.length) return;
     const id = initialIds[0]!;
-    const raf = requestAnimationFrame(() => rowsRef.current?.querySelector<HTMLElement>(`[data-req-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center' }));
+    // Only the list scrolls: scrollIntoView would also scroll the dialog and hide where the requests came from.
+    const raf = requestAnimationFrame(() => {
+      const box = rowsRef.current;
+      const row = box?.querySelector<HTMLElement>(`[data-req-id="${CSS.escape(id)}"]`);
+      if (box && row) box.scrollTop = row.offsetTop - (box.clientHeight - row.offsetHeight) / 2;
+    });
     return () => cancelAnimationFrame(raf);
   }, [open, initialIds, snapshot]);
 
@@ -85,14 +124,15 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
     for (let i = list.length - 1; i >= 0 && out.length < MAX_ROWS; i--) {
       const e = list[i]!;
       if (!snapshot.has(e.id) || e.method === '?' || e.source === 'flow' || !scope.network(e)) continue;
-      if (filterSource && !sameSource(e, filterSource) && !picked.has(e.id)) continue;
+      if (filterVisible && !visibleSet.has(e.id) && !picked.has(e.id)) continue;
+      if (!filterVisible && filterSource && !sameSource(e, filterSource) && !picked.has(e.id)) continue;
       if (hideAssets && isAsset(e) && !picked.has(e.id)) continue;
       if (q && !`${e.method} ${e.url} ${e.status ?? ''}`.toLowerCase().includes(q)) continue;
       out.push(e);
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, version, scope, query, hideAssets, snapshot, filterSource]);
+  }, [open, version, scope, query, hideAssets, snapshot, filterSource, filterVisible, visibleSet]);
 
   /** Something was captured at all (in scope): an empty list then comes from the search or the asset filter. */
   const hasAny = useMemo(() => {
@@ -199,13 +239,37 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
           <Button variant="ghost" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button variant="primary" icon={ListPlus} loading={busy} disabled={!chosen.length} onClick={() => void create()}>
+          {chosen.length > MAX_PICK ? <span className="fl-fromreq__toomany">{t('flows.fromRequests.tooMany', { max: MAX_PICK })}</span> : null}
+          <Button variant="primary" icon={ListPlus} loading={busy} disabled={!chosen.length || chosen.length > MAX_PICK} onClick={() => void create()}>
             {chosen.length ? t('flows.fromRequests.create', { count: chosen.length }) : t('flows.fromRequests.createNone')}
           </Button>
         </>
       }
     >
       <div className="fl-fromreq">
+        {from === 'network' || from === 'logs' || filterLabel ? (
+          // Where these requests came from, and (when the list there was filtered) the same set in one tap.
+          <div className="fl-fromreq__origin" role="note">
+            <Filter size={14} aria-hidden className="fl-fromreq__origin-icon" />
+            <span className="fl-fromreq__origin-text">
+              {from === 'logs' ? t('flows.fromRequests.fromLogs') : t('flows.fromRequests.fromNetwork')}
+              {filterLabel ? (
+                <>
+                  {' · '}
+                  {t('flows.fromRequests.filter')} <span className="fl-fromreq__origin-filter">{filterLabel}</span>
+                </>
+              ) : null}
+              {visible.length ? <span className="fl-fromreq__origin-count">{' · '}{t('flows.fromRequests.visibleThere', { count: visible.length })}</span> : null}
+              {visible.length > PICK_VISIBLE_MAX ? <span className="fl-fromreq__origin-hint">{t('flows.fromRequests.narrowThere')}</span> : null}
+            </span>
+            {visible.length > 1 && visible.length <= PICK_VISIBLE_MAX && visibleUnpicked > 0 ? (
+              <Button size="sm" variant="secondary" icon={ListChecks} onClick={pickVisible}>
+                {t('flows.fromRequests.pickVisible', { count: visible.length })}
+              </Button>
+            ) : null}
+            {visible.length > 0 ? <Toggle size="sm" checked={onlyVisible} onChange={setOnlyVisible} label={t('flows.fromRequests.onlyVisible')} /> : null}
+          </div>
+        ) : null}
         <label className="fl-fromreq__namerow">
           <span>{t('flows.fromRequests.name')}</span>
           <Input size="sm" value={name} onChange={(e) => setName(e.target.value)} placeholder={defaultName} wrapperClassName="fl-fromreq__name" />
@@ -225,7 +289,7 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
             aria-label={t('flows.fromRequests.selectAll')}
           />
           <SearchInput value={query} onChange={setQuery} placeholder={t('flows.fromRequests.search')} size="sm" className="fl-fromreq__search" />
-          {source ? <Toggle size="sm" checked={onlySource} onChange={setOnlySource} label={t('flows.fromRequests.onlySource', { source: sourceLabel })} /> : null}
+          {source && !filterVisible ? <Toggle size="sm" checked={onlySource} onChange={setOnlySource} label={t('flows.fromRequests.onlySource', { source: sourceLabel })} /> : null}
           <Toggle size="sm" checked={hideAssets} onChange={setHideAssets} label={t('flows.fromRequests.hideAssets')} />
           <span className="grow" />
           {newer > 0 ? (
@@ -257,7 +321,7 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
         ) : null}
         {rows.length === 0 ? (
           // Requests were captured but the search (or a filter) hides them all: say so, and undo it.
-          (query.trim() || hideAssets || filterSource) && hasAny ? (
+          (query.trim() || hideAssets || filterSource || filterVisible) && hasAny ? (
             <EmptyState
               size="sm"
               icon={SearchX}
@@ -270,7 +334,12 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
                       {t('flows.fromRequests.clearSearch')}
                     </Button>
                   ) : null}
-                  {filterSource ? (
+                  {filterVisible ? (
+                    <Button size="sm" variant="secondary" onClick={() => setOnlyVisible(false)}>
+                      {t('flows.fromRequests.allRequests')}
+                    </Button>
+                  ) : null}
+                  {filterSource && !filterVisible ? (
                     <Button size="sm" variant="secondary" onClick={() => setOnlySource(false)}>
                       {t('flows.fromRequests.allApps')}
                     </Button>

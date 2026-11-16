@@ -28,7 +28,7 @@ import {
   Workflow,
 } from 'lucide-react';
 import { FLOW_FORMAT, FLOW_VERSION, flowNodeSpec, type FlowDoc, type FlowPort, type FlowPreflight } from '@durbun/protocol';
-import { ApiError, api, isConnected, isEditConflict, latestRunOf, rememberFlowRun, setFlowSummaries, ui, useConnection, useFlows, useHub, useUi } from '../../data';
+import { ApiError, api, isConnected, type FlowFromRequestsSource, isEditConflict, latestRunOf, rememberFlowRun, setFlowSummaries, ui, useConnection, useFlows, useHub, useUi } from '../../data';
 import {
   Button,
   Callout,
@@ -100,7 +100,7 @@ import { loadEnvironments, useEnvironments } from './model/envStore';
 import './i18n';
 import './flows.css';
 
-type DialogState = { kind: 'env' } | { kind: 'import'; text: string | null } | { kind: 'ai'; flowId: string | null; fix?: boolean } | { kind: 'requests'; ids?: string[]; from?: 'network' } | null;
+type DialogState = { kind: 'env' } | { kind: 'import'; text: string | null } | { kind: 'ai'; flowId: string | null; fix?: boolean } | { kind: 'requests'; ids?: string[]; visibleIds?: string[]; filterLabel?: string; from?: FlowFromRequestsSource } | null;
 
 /** Inputs typed for each flow in this window (never stored: they may hold passwords). */
 const lastInputs = new Map<string, Record<string, string>>();
@@ -277,8 +277,8 @@ export default function FlowsView() {
   useEffect(() => {
     if (focus?.kind === 'flowFromRequests') {
       ui.consumeFocus(focus.seq);
-      // Only the Network tab asks for this: Cancel takes the user back there.
-      setDialog({ kind: 'requests', ids: focus.ids, from: 'network' });
+      // Cancel takes the user back to the tab that asked (Network when the caller did not say).
+      setDialog({ kind: 'requests', ids: focus.ids, visibleIds: focus.visibleIds, filterLabel: focus.filterLabel, from: focus.from ?? 'network' });
       return;
     }
     if (focus?.kind === 'flowImport') {
@@ -970,6 +970,13 @@ export default function FlowsView() {
                       <IconButton icon={MapIcon} label={t('flows.canvas.minimap')} active={showMinimap} onClick={() => setShowMinimap((v) => !v)} />
                     </div>
                     {flow.nodes.length <= 1 ? <div className="fl-ui fl-stage__hint">{t('flows.canvas.startHint')}</div> : null}
+                    {!panel.open && overlayRun ? (
+                      // Inside the canvas, between the zoom bar and the minimap (never over them).
+                      <button type="button" className={clsx('fl-ui fl-lastrun', `is-${overlayRun.status}`, showMinimap && flow.nodes.length > 0 && 'has-minimap')} onClick={() => setPanel({ runId: overlayRun.id, open: true })}>
+                        {overlayRun.status === 'running' ? <Spinner size={12} /> : overlayRun.status === 'passed' ? <CircleCheck size={13} aria-hidden /> : <CircleAlert size={13} aria-hidden />}
+                        <span className="fl-lastrun__text">{t('flows.runPanel.show', { status: t(`flows.status.${overlayRun.status}`) })}</span>
+                      </button>
+                    ) : null}
                   </div>
                   {panel.open && panel.runId ? (
                     <RunPanel
@@ -1023,12 +1030,6 @@ export default function FlowsView() {
                   <span />
                 )}
               </SplitPane>
-              {!panel.open && overlayRun ? (
-                <button type="button" className={clsx('fl-ui fl-lastrun', `is-${overlayRun.status}`)} onClick={() => setPanel({ runId: overlayRun.id, open: true })}>
-                  {overlayRun.status === 'running' ? <Spinner size={12} /> : overlayRun.status === 'passed' ? <CircleCheck size={13} aria-hidden /> : <CircleAlert size={13} aria-hidden />}
-                  {t('flows.runPanel.show', { status: t(`flows.status.${overlayRun.status}`) })}
-                </button>
-              ) : null}
               <NodePicker
                 open={!!picker}
                 at={picker?.client ?? null}
@@ -1086,10 +1087,13 @@ export default function FlowsView() {
       <FromRequestsDialog
         open={dialog?.kind === 'requests'}
         initialIds={dialog?.kind === 'requests' ? dialog.ids : undefined}
+        visibleIds={dialog?.kind === 'requests' ? dialog.visibleIds : undefined}
+        filterLabel={dialog?.kind === 'requests' ? dialog.filterLabel : undefined}
+        from={dialog?.kind === 'requests' ? dialog.from : undefined}
         onClose={() => {
           const from = dialog?.kind === 'requests' ? dialog.from : undefined;
           setDialog(null);
-          if (from) ui.setTab(from);
+          if (from === 'network' || from === 'logs') ui.setTab(from);
         }}
         onCreated={(id) => {
           setDialog(null);

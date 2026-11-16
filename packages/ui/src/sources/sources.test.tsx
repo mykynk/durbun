@@ -14,6 +14,8 @@ import { CrashRecordsNote, ExplainEmpty, FrameStatsNote, IosLogScopeNote, NotRun
 import { setServerSettingsFromServer, useServerSettings } from '../data/stores/server';
 import { DEFAULT_SETTINGS } from '@durbun/protocol';
 import { DataSourcesExplainer } from './DataSourcesDialog';
+import { resetCleared } from './cleared';
+import { emitServerMessage } from '../data/events';
 import { groupApps } from '../data/stores/hub';
 
 const PIXEL_ID = 'android:R5CT20XK9QM';
@@ -123,7 +125,7 @@ describe('reason sentences', () => {
       'noSdk', 'releaseWithoutSdk', 'storeBuild', 'noOutsideNetwork', 'vmServiceNoMocks', 'sdkLacksCapability', 'iosNoDeviceMetrics', 'frameStatsApproximate',
       'deviceLogsUnavailable', 'toolMissing', 'releaseLogsDependOnApp', 'nativeNetworkNeedsInterceptor', 'thirdPartyTraffic', 'crashesUnsymbolicated', 'notRunning',
       'readOnly', 'fpsNeedsApp', 'networkOnly', 'deviceToolsAvailable', 'sdkInStoreBuild', 'crashReportsUnavailable', 'frameStatsUnavailable',
-      'nativeLayerActive', 'nativeLayerMissing', 'demoData', 'notSeenYet', 'notOwnApp',
+      'nativeLayerActive', 'nativeLayerMissing', 'demoData', 'notSeenYet', 'notOwnApp', 'sdkDisconnected',
     ];
     const caps: (ExplainCapability | undefined)[] = ['logs', 'network', 'metrics', 'crashes', 'mocks', 'tools', undefined];
     const contexts: (ExplainContext | undefined)[] = [
@@ -229,6 +231,29 @@ describe('reason sentences', () => {
 
 describe('sentences for disconnected devices, apps that have not run, other apps', () => {
   beforeEach(() => setLanguage('tr'));
+
+  // Regression: the popover said «Yalnızca cihaz logu» and «SDK yok ya da bu derlemede kapalı» next to the SDK's own
+  // version line, while the sidebar showed an SDK badge.
+  it('an SDK that connected earlier in this session and is away now: one story in the popover and the sidebar', () => {
+    const da = deviceApp(PIXEL_ID, 'com.mykynk.kasa', { name: 'Kasa', version: '2.0.1', build: '201', buildType: 'debug', install: { source: 'adb' } });
+    const away = session(PIXEL_ID, { connected: false, sdk: { name: 'durbun-android', version: '0.2.0', platform: 'android' }, app: { name: 'Kasa', id: 'com.mykynk.kasa', version: '2.0.1', build: '201', pid: 13002, debug: true } });
+    const r = explained({ device: device(PIXEL_ID), deviceApp: da, sessions: [away] });
+    expect(r.result.badge).toBe('sdk');
+    expect(summaryText(r.result.badge, r.result.context)).toBe(
+      'Kasa verilerini içindeki Dürbün SDK’sıyla gönderir; SDK şu an bağlı değil, bu arada yalnızca cihazın kendi kayıtları görünür.',
+    );
+    const { container } = render(<SourcesPanel item={r} />);
+    const text = container.textContent ?? '';
+    expect(text).not.toMatch(/Yalnızca cihaz logu|SDK yok|bağlanmadı/);
+    expect(text).toContain('durbun-android 0.2.0 · şu an bağlı değil');
+    expect(container.querySelector('.src-badge--away')).not.toBeNull();
+    cleanup();
+    hubActions.replaceAll({ devices: [device(PIXEL_ID)], apps: [away], drivers: [], processes: [], deviceApps: [da] });
+    const sb = render(<Sidebar />);
+    const row = sb.container.querySelector('.sb-row--app [aria-label^="Kasa"]');
+    expect(row?.getAttribute('aria-label')).toContain('SDK şu an bağlı değil');
+    expect(sb.container.querySelector('.sb-row--app .src-badge--sdk.src-badge--away')).not.toBeNull();
+  });
 
   it('a disconnected device: one note, and each row says what stays readable', () => {
     const r = explained({ device: device(IPHONE_ID, { state: 'disconnected' }), deviceApp: deviceApp(IPHONE_ID, 'com.mykynk.kumbara', { install: { source: 'store-or-testflight' }, running: false, pids: [] }), sessions: [] });
@@ -563,10 +588,70 @@ describe('scope-specific empty states', () => {
     expect(container.textContent).not.toContain('generic');
   });
 
-  it('an SDK app that simply sent nothing yet keeps the generic text', () => {
-    act(() => setScope({ kind: 'app', appId: 'app:2' }));
-    const { container } = render(<ExplainEmpty capability="network" fallback={<p>generic</p>} />);
-    expect(container.textContent).toBe('generic');
+  // Regression: a connected app whose list the user had just cleared read «… SDK yeniden bağlanınca yine görünür».
+  describe('an empty network list says what is true for the app', () => {
+    afterEach(() => resetCleared());
+
+    it('connected, nothing sent yet: "has not sent a request yet", not a setup text', () => {
+      act(() => setScope({ kind: 'app', appId: 'app:2' }));
+      const { container } = render(<ExplainEmpty capability="network" fallback={<p>generic</p>} />);
+      const text = container.textContent ?? '';
+      expect(text).toContain('Pati henüz ağ isteği göndermedi');
+      expect(text).toContain('Pati bağlı; bir istek yaptığında burada hemen görünür.');
+      expect(text).not.toMatch(/generic|yeniden bağlan|temizlendi/);
+      expect(screen.getByRole('button', { name: 'SDK kurulumu' })).toBeTruthy();
+    });
+
+    it('connected and cleared: "the list was cleared", with the server’s app or device-app clear', () => {
+      act(() => setScope({ kind: 'app', appId: 'app:2' }));
+      act(() => emitServerMessage({ type: 'cleared', target: 'network', deviceId: PIXEL_ID, appId: 'app:2' }));
+      const { container } = render(<ExplainEmpty capability="network" fallback={<p>generic</p>} />);
+      expect(container.textContent).toContain('Pati için ağ listesi temizlendi');
+      expect(container.textContent).toContain('Pati bağlı; yeni istekler geldikçe burada görünür.');
+      expect(container.textContent).not.toMatch(/henüz|yeniden bağlan/);
+      expect(screen.queryByRole('button', { name: 'SDK kurulumu' })).toBeNull();
+      cleanup();
+      // A clear of another app or of logs only does not count; a whole "clear everything" does.
+      resetCleared();
+      act(() => emitServerMessage({ type: 'cleared', target: 'logs', deviceId: PIXEL_ID, appId: 'app:2' }));
+      act(() => emitServerMessage({ type: 'cleared', target: 'network', deviceId: PIXEL_ID, bundleId: 'com.mykynk.other' }));
+      expect(render(<ExplainEmpty capability="network" fallback={<p>generic</p>} />).container.textContent).toContain('henüz ağ isteği göndermedi');
+      cleanup();
+      act(() => emitServerMessage({ type: 'cleared', target: 'all' }));
+      setLanguage('en');
+      const en = render(<ExplainEmpty capability="network" fallback={<p>generic</p>} />).container.textContent ?? '';
+      expect(en).toContain('Network list cleared for Pati');
+      expect(en).toContain('Pati is connected; new requests show up here as they come.');
+    });
+
+    it('SDK not connected right now: says so and when new requests come, without "again"', () => {
+      const da = deviceApp(PIXEL_ID, 'com.mykynk.pati', { name: 'Pati', version: '2.4.0', build: '88', buildType: 'debug', install: { source: 'adb' } });
+      act(() => {
+        hubActions.replaceAll({ devices: [device(PIXEL_ID)], apps: [session(PIXEL_ID, { connected: false })], drivers: [], processes: [], deviceApps: [da] });
+        setScope({ kind: 'deviceApp', deviceId: PIXEL_ID, bundleId: 'com.mykynk.pati' });
+      });
+      act(() => emitServerMessage({ type: 'cleared', target: 'network', deviceId: PIXEL_ID, appId: 'app:2' }));
+      const text = render(<ExplainEmpty capability="network" fallback={<p>generic</p>} />).container.textContent ?? '';
+      expect(text).toContain('Pati uygulamasının SDK’sı şu an bağlı değil');
+      expect(text).toContain('SDK yeniden bağlandığında yeni istekler burada görünür.');
+      expect(text).not.toMatch(/yine görünür|temizlendi|henüz/);
+      cleanup();
+      setLanguage('en');
+      const en = render(<ExplainEmpty capability="network" fallback={<p>generic</p>} />).container.textContent ?? '';
+      expect(en).toContain('The SDK in Pati is not connected right now');
+      expect(en).toContain('once the SDK reconnects, new requests show up here.');
+    });
+
+    it('no SDK: the structural reason, cleared or not', () => {
+      act(() => {
+        hubActions.replaceAll({ devices: [device(PIXEL_ID)], apps: [], drivers: [], processes: [], deviceApps: [deviceApp(PIXEL_ID, 'com.mykynk.kumbara')] });
+        setScope({ kind: 'deviceApp', deviceId: PIXEL_ID, bundleId: 'com.mykynk.kumbara' });
+      });
+      act(() => emitServerMessage({ type: 'cleared', target: 'all' }));
+      const text = render(<ExplainEmpty capability="network" fallback={<p>generic</p>} />).container.textContent ?? '';
+      expect(text).toContain('Kumbara için ağ istekleri görünmüyor');
+      expect(text).not.toMatch(/temizlendi|henüz ağ isteği|şu an bağlı değil/);
+    });
   });
 
   it('"all devices" keeps the generic text', () => {

@@ -96,6 +96,8 @@ registerMessages('sources', {
       'device-only': 'Uygulamanın içinden veri gelmiyor: Dürbün yalnızca cihazın kendi kayıtlarını (log, çökme) okuyor. Ağ istekleri görünmez, mock’lar çalışmaz.',
       demo: 'Demo verisi.',
       import: 'İçe aktarılan bir kayıt; yalnızca kaydedilenler görünür.',
+      /** The SDK of this build connected in this session and is away right now. */
+      sdkAway: 'Bu derlemede Dürbün SDK’sı var ama şu an bağlı değil; yeniden bağlanınca uygulamanın verileri yine gelir.',
     },
     build: {
       debug: 'Debug',
@@ -157,6 +159,11 @@ registerMessages('sources', {
       otherApp: ['{app} için yalnızca cihazın kendisinden okunanlar görünür: cihaz logu ve çökme kayıtları.', 'Yalnızca cihazın kendisinden okunanlar görünür: cihaz logu ve çökme kayıtları.'],
       demo: 'Demo verisi: gerçek bir cihaz ya da uygulama yok.',
       import: 'İçe aktarılan bir kayıt: yalnızca kaydedilenler görünür.',
+      /** The SDK connected in this session and is away right now (the app keeps running). */
+      sdkAway: [
+        '{app} verilerini içindeki Dürbün SDK’sıyla gönderir; SDK şu an bağlı değil, bu arada yalnızca cihazın kendi kayıtları görünür.',
+        'Uygulama verilerini içindeki Dürbün SDK’sıyla gönderir; SDK şu an bağlı değil, bu arada yalnızca cihazın kendi kayıtları görünür.',
+      ],
     },
     reasons: {
       noSdk: ['{appv} bu cihazda Dürbün SDK’sıyla bağlanmadı.', 'Bu uygulama Dürbün SDK’sıyla bağlanmadı.'],
@@ -218,6 +225,10 @@ registerMessages('sources', {
         ios: 'Bu oturuma yalnızca Dart katmanı bağlı: Swift / Objective-C logları, native çökmeler ve URLSession istekleri bu oturumdan gelmez.',
       },
       demoData: 'Bu bir demo: cihaz ve uygulama Dürbün’ün ürettiği örnek veriler. Gerçek bir cihazda da aynı kaynaklar aynı şekilde çalışır.',
+      sdkDisconnected: [
+        '{app} uygulamasının SDK’sı bu oturumda bağlıydı, şu an bağlı değil: uygulama arka plana geçmiş ya da bağlantı bir an kopmuş olabilir. SDK kendiliğinden yeniden bağlanır; uzun sürerse uygulamayı yeniden açın.',
+        'Uygulamanın SDK’sı bu oturumda bağlıydı, şu an bağlı değil: uygulama arka plana geçmiş ya da bağlantı bir an kopmuş olabilir. SDK kendiliğinden yeniden bağlanır; uzun sürerse uygulamayı yeniden açın.',
+      ],
     },
     /** Capability-specific wording (falls back to `reasons.*`). */
     reasonFor: {
@@ -226,6 +237,7 @@ registerMessages('sources', {
         sdkLacksCapability: 'Bağlı Dürbün SDK’sı ağ isteklerini göndermiyor (eski bir sürüm ya da kapatılmış bir özellik).',
         notSeenYet: ['{app} açılınca, içinde Dürbün SDK’sı varsa istekleri burada görünür.', 'Uygulama açılınca, içinde Dürbün SDK’sı varsa istekleri burada görünür.'],
         notOwnApp: ['{app} sizin projelerinizden biri değilse ağ isteklerine ulaşmanın bir yolu yok.', 'Uygulama sizin projelerinizden biri değilse ağ isteklerine ulaşmanın bir yolu yok.'],
+        sdkDisconnected: 'Uygulama arka plana geçmiş ya da bağlantı bir an kopmuş olabilir; SDK yeniden bağlandığında yeni istekler burada görünür.',
       },
       mocks: {
         noSdk: ['Mock’ları uygulamanın içindeki Dürbün SDK’sı uygular; {app} SDK’yla bağlanmadı.', 'Mock’ları uygulamanın içindeki Dürbün SDK’sı uygular.'],
@@ -240,6 +252,7 @@ registerMessages('sources', {
         storeBuild: 'Mock’lar uygulamanın içinde, Dürbün SDK’sıyla çalışır; bu derlemede SDK açık değil.',
         storeBuildIos: 'Mock’lar uygulamanın içinde, Dürbün SDK’sıyla çalışır; bu derlemede SDK açık değil.',
         releaseWithoutSdk: 'Mock’lar uygulamanın içinde, Dürbün SDK’sıyla çalışır; bu sürümde SDK açık değil.',
+        sdkDisconnected: 'Mock kuralları SDK yeniden bağlanınca uygulamaya yine iletilir.',
       },
       tools: {
         noSdk: ['Uygulama içi araçlar Dürbün SDK’sı ya da Flutter debug oturumu ister; {app} ikisiyle de bağlı değil.', 'Uygulama içi araçlar Dürbün SDK’sı ya da Flutter debug oturumu ister.'],
@@ -253,16 +266,20 @@ registerMessages('sources', {
         storeBuild: 'Uygulama içi araçlar da SDK ister; bu derlemede SDK açık değil.',
         storeBuildIos: 'Uygulama içi araçlar da SDK ister; bu derlemede SDK açık değil.',
         releaseWithoutSdk: 'Uygulama içi araçlar SDK ya da Flutter debug oturumu ister; bu sürümde SDK açık değil.',
+        sdkDisconnected: 'Uygulama içi araçlar SDK yeniden bağlanınca kullanılabilir.',
       },
       metrics: {
         noSdk: ['{app} için uygulamanın içinden metrik gelmiyor: Dürbün SDK’sı ya da Flutter debug oturumu bağlı değil.', 'Uygulamanın içinden metrik gelmiyor: Dürbün SDK’sı ya da Flutter debug oturumu bağlı değil.'],
         sdkLacksCapability: 'Bağlı Dürbün SDK’sı metrik göndermiyor.',
+        sdkDisconnected: 'Uygulamanın kendi metrikleri SDK yeniden bağlanınca gelir.',
       },
       logs: {
         readOnlyDevice: 'Bağlantı kesilmeden önce gelen loglar ekranda; cihaz yeniden bağlanınca akış kaldığı yerden devam eder.',
+        sdkDisconnected: 'Cihaz logu geliyor; uygulamanın SDK’dan gelen logları SDK yeniden bağlanınca gelir.',
       },
       crashes: {
         readOnlyDevice: 'Bağlantı kesilmeden önce okunan çökme kayıtları ekranda; yenileri cihaz yeniden bağlanınca okunur.',
+        sdkDisconnected: 'Uygulamanın kendi çökme raporları SDK yeniden bağlanınca gelir.',
       },
     },
     action: {
@@ -340,6 +357,8 @@ registerMessages('sources', {
     /** An app session's SDK protocol and the device clock (app info, log details). */
     session: {
       protocol: 'protokol {n}',
+      /** The SDK connected in this session and is away right now. */
+      away: 'şu an bağlı değil',
       seconds: '{n} sn',
       clock: {
         ahead: 'Cihaz saati Mac’ten {amount} ileri',
@@ -378,8 +397,19 @@ registerMessages('sources', {
       open: 'Ayarları aç',
     },
     empty: {
+      sdkGuide: 'SDK kurulumu',
       network: {
         title: ['{app} için ağ istekleri görünmüyor', 'Ağ istekleri görünmüyor'],
+        awayTitle: ['{app} uygulamasının SDK’sı şu an bağlı değil', 'Uygulamanın SDK’sı şu an bağlı değil'],
+        cleared: {
+          title: ['{app} için ağ listesi temizlendi', 'Ağ listesi temizlendi'],
+          body: ['{app} bağlı; yeni istekler geldikçe burada görünür.', 'Uygulama bağlı; yeni istekler geldikçe burada görünür.'],
+        },
+        waiting: {
+          title: ['{app} henüz ağ isteği göndermedi', 'Uygulama henüz ağ isteği göndermedi'],
+          body: ['{app} bağlı; bir istek yaptığında burada hemen görünür.', 'Uygulama bağlı; bir istek yaptığında burada hemen görünür.'],
+          hint: 'Uygulamada istek yapan bir ekranı açın. Liste yine boş kalırsa SDK kurulumundaki ağ adımına bakın.',
+        },
         deviceTitle: 'Bu cihazda ağ isteklerini gönderebilen bir uygulama yok',
         device: 'Bu cihazdaki uygulamaların hiçbiri Dürbün SDK’sıyla ya da Flutter debug oturumuyla bağlı değil.',
       },
@@ -523,6 +553,7 @@ registerMessages('sources', {
       'device-only': 'Nothing comes from inside the app: Dürbün only reads what the device records itself (logs, crashes). Network requests do not show up and mocks do not work.',
       demo: 'Demo data.',
       import: 'An imported recording; only what was recorded is there.',
+      sdkAway: 'This build has the Dürbün SDK, but it is not connected right now; the app’s data comes again once it reconnects.',
     },
     build: {
       debug: 'Debug',
@@ -579,6 +610,10 @@ registerMessages('sources', {
       otherApp: ['For {app} you see only what the device shows from outside: its device log and crash records.', 'You see only what the device shows from outside: the device log and crash records.'],
       demo: 'Demo data: no real device or app.',
       import: 'An imported recording: only what was recorded is there.',
+      sdkAway: [
+        '{app} sends its data with the Dürbün SDK inside it; the SDK is not connected right now, so meanwhile you see only what the device records.',
+        'The app sends its data with the Dürbün SDK inside it; the SDK is not connected right now, so meanwhile you see only what the device records.',
+      ],
     },
     reasons: {
       noSdk: ['{appv} has not connected through the Dürbün SDK on this device.', 'This app has not connected through the Dürbün SDK.'],
@@ -634,6 +669,10 @@ registerMessages('sources', {
         ios: 'Only the Dart layer feeds this session: Swift / Objective-C logs, native crashes and URLSession requests do not come through it.',
       },
       demoData: 'This is a demo: the device and the app are sample data made up by Dürbün. On a real device the same sources work the same way.',
+      sdkDisconnected: [
+        'The SDK in {app} was connected earlier in this session and is not connected right now: the app may have gone to the background, or the connection dropped for a moment. The SDK reconnects by itself; if it takes long, open the app again.',
+        'The app’s SDK was connected earlier in this session and is not connected right now: the app may have gone to the background, or the connection dropped for a moment. The SDK reconnects by itself; if it takes long, open the app again.',
+      ],
     },
     reasonFor: {
       network: {
@@ -641,6 +680,7 @@ registerMessages('sources', {
         sdkLacksCapability: 'The connected Dürbün SDK does not send network requests (an older version or a disabled feature).',
         notSeenYet: ['Once {app} opens, its requests show up here if it has the Dürbün SDK.', 'Once the app opens, its requests show up here if it has the Dürbün SDK.'],
         notOwnApp: ['If {app} isn’t one of your projects, there is no way to reach its network requests.', 'If the app isn’t one of your projects, there is no way to reach its network requests.'],
+        sdkDisconnected: 'The app may have gone to the background, or the connection dropped for a moment; once the SDK reconnects, new requests show up here.',
       },
       mocks: {
         noSdk: ['Mocks are applied inside the app by the Dürbün SDK; {app} is not connected through the SDK.', 'Mocks are applied inside the app by the Dürbün SDK.'],
@@ -654,6 +694,7 @@ registerMessages('sources', {
         storeBuild: 'Mocks run inside the app with the Dürbün SDK; it is not turned on in this build.',
         storeBuildIos: 'Mocks run inside the app with the Dürbün SDK; it is not turned on in this build.',
         releaseWithoutSdk: 'Mocks run inside the app with the Dürbün SDK; it is not turned on in this build.',
+        sdkDisconnected: 'Mock rules reach the app again once the SDK reconnects.',
       },
       tools: {
         noSdk: ['In-app tools need the Dürbün SDK or a Flutter debug session; {app} is connected through neither.', 'In-app tools need the Dürbün SDK or a Flutter debug session.'],
@@ -667,16 +708,20 @@ registerMessages('sources', {
         storeBuild: 'In-app tools need the SDK as well; it is not turned on in this build.',
         storeBuildIos: 'In-app tools need the SDK as well; it is not turned on in this build.',
         releaseWithoutSdk: 'In-app tools need the SDK or a Flutter debug session; the SDK is not turned on in this build.',
+        sdkDisconnected: 'In-app tools work again once the SDK reconnects.',
       },
       metrics: {
         noSdk: ['No metrics come from inside {app}: no Dürbün SDK or Flutter debug session is connected.', 'No metrics come from inside the app: no Dürbün SDK or Flutter debug session is connected.'],
         sdkLacksCapability: 'The connected Dürbün SDK does not send metrics.',
+        sdkDisconnected: 'The app’s own metrics come again once the SDK reconnects.',
       },
       logs: {
         readOnlyDevice: 'Logs that arrived before the disconnect stay on screen; the stream picks up again once the device reconnects.',
+        sdkDisconnected: 'The device log keeps coming; the app’s lines from the SDK come again once it reconnects.',
       },
       crashes: {
         readOnlyDevice: 'Crash records read before the disconnect stay on screen; new ones are read once the device reconnects.',
+        sdkDisconnected: 'The app’s own crash reports come again once the SDK reconnects.',
       },
     },
     action: {
@@ -751,6 +796,7 @@ registerMessages('sources', {
     /** An app session's SDK protocol and the device clock (app info, log details). */
     session: {
       protocol: 'protocol {n}',
+      away: 'not connected right now',
       seconds: '{n} s',
       clock: {
         ahead: 'The device clock is {amount} ahead of the Mac',
@@ -787,8 +833,19 @@ registerMessages('sources', {
       open: 'Open settings',
     },
     empty: {
+      sdkGuide: 'SDK setup',
       network: {
         title: ['No network requests for {app}', 'No network requests'],
+        awayTitle: ['The SDK in {app} is not connected right now', 'The app’s SDK is not connected right now'],
+        cleared: {
+          title: ['Network list cleared for {app}', 'Network list cleared'],
+          body: ['{app} is connected; new requests show up here as they come.', 'The app is connected; new requests show up here as they come.'],
+        },
+        waiting: {
+          title: ['{app} has not sent a network request yet', 'The app has not sent a network request yet'],
+          body: ['{app} is connected; its requests show up here as soon as it makes one.', 'The app is connected; its requests show up here as soon as it makes one.'],
+          hint: 'Open a screen in the app that makes a request. If the list stays empty, check the network step of the SDK setup.',
+        },
         deviceTitle: 'No app on this device can send network requests',
         device: 'None of the apps on this device is connected with the Dürbün SDK or a Flutter debug session.',
       },
@@ -1045,6 +1102,8 @@ export function summaryText(badge: ExplainBadge, ctx: ExplainContext | undefined
     // Never ran while watched: whether it has the SDK is unknown (any build may have it, store builds included).
     if (ctx.unseen) return t('sources.summary.notSeenYet', reasonParams(ctx));
   }
+  // The SDK of this build was connected earlier in this session: say it is away, not that the build lacks it.
+  if (badge === 'sdk' && ctx?.sdkAway) return t('sources.summary.sdkAway', reasonParams(ctx));
   return t(`sources.summary.${badge}`, reasonParams(ctx));
 }
 

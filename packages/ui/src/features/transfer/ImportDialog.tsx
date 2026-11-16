@@ -5,9 +5,10 @@ import { CircleCheck, FileUp, KeyRound, PackageOpen, TriangleAlert, Workflow } f
 import type { PackageConflict, PackageImportRequest, PackageImportResult, PackageItemPreview, PackageManifest } from '@durbun/protocol';
 import { Button, Callout, Checkbox, Dialog, EmptyState, Input, SegmentedControl, Spinner, formatDateTime, pickFiles, toast } from '../../components';
 import { ApiError, api, ui } from '../../data';
-import { errorText, t as tNow, tCode, useT, type TFunction } from '../../i18n';
+import { errorText, t as tNow, useT, type TFunction } from '../../i18n';
 import { loadEnvironments } from '../flows/model/envStore';
 import { applyUiPrefs } from './prefsSync';
+import { packageNoticeText } from './notices';
 
 type Parts = Required<Omit<PackageImportRequest['include'], 'flows'>>;
 
@@ -390,7 +391,7 @@ export function ImportDialog({ open, text: initialText, fileName: initialName, o
                 {manifest.warnings.map((w, i) => (
                   <li key={i}>
                     <TriangleAlert size={12} aria-hidden />
-                    {tCode(w.code, w.params, w.message)}
+                    {packageNoticeText(w)}
                   </li>
                 ))}
               </ul>
@@ -442,7 +443,7 @@ function ImportResult({ result: r }: { result: PackageImportResult }) {
           ) : null}
           {r.automationOff ? <li>{t('transfer.import.automationOff', { count: r.automationOff })}</li> : null}
           {notices.map((n, i) => (
-            <li key={i}>{n.code ? tCode(n.code, n.params, n.message) : n.message}</li>
+            <li key={i}>{packageNoticeText(n)}</li>
           ))}
         </ul>
       </Callout>
