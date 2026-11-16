@@ -469,8 +469,16 @@ export class PackageService {
     for (const [i, r] of (Array.isArray(c.mocks) ? c.mocks : []).entries()) {
       const rule = validMock(r);
       if (!rule) {
-        const problem = validateMockRules([r]).problems[0] ?? `rule #${i + 1}`;
-        warnings.push({ code: 'package.mock.invalid', message: `A mock rule could not be read: ${problem}`, params: { problem } });
+        const checked = validateMockRules([r]);
+        const problem = checked.problems[0] ?? `rule #${i + 1}`;
+        const issue = checked.issues[0];
+        // `field` + `expected` (+ options / min / max) let the UI word it; `problem` is the English text.
+        const params: Record<string, string | number> = { problem, rule: i + 1 };
+        if (issue) {
+          Object.assign(params, issue.extra ?? {}, { field: issue.field, expected: issue.expected });
+          if (issue.name) params.name = issue.name;
+        }
+        warnings.push({ code: 'package.mock.invalid', message: `A mock rule could not be read: ${problem}`, params });
         continue;
       }
       const cur = localMocks.find((m) => m.id === rule.id);

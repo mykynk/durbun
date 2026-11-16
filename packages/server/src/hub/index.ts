@@ -42,6 +42,7 @@ import {
 } from './lifecycle';
 import { ConsoleEchoFilter } from './consoleEcho';
 import { EvictionCounter } from './evictions';
+import { MockHitCounter } from './mockHits';
 import { capLogEntry, logEntryBytes } from './logSize';
 import { MetricsStore, sanitizeSample, type MetricSeriesInfo } from './metrics';
 import { cleanUndefined, DISCONNECTED_ERROR, NetworkStore, type NetworkLimits } from './network';
@@ -162,9 +163,13 @@ export function createHub(opts: CreateHubOptions): Hub {
   const oldestLogId = () => logs.first()?.id ?? 0;
   const evictionSnapshot = (): StoreEvictions => evictions.snapshot(oldestLogId());
 
-  const batcher = new ChangeBatcher(HUB_BATCH_INTERVAL_MS, HUB_MAX_QUEUED_LOGS, logger, () =>
-    evictions.takeIfChanged() ? { netSeq: network.seq, evictions: evictionSnapshot() } : { netSeq: network.seq },
-  );
+  const mockHits = new MockHitCounter();
+  const batcher = new ChangeBatcher(HUB_BATCH_INTERVAL_MS, HUB_MAX_QUEUED_LOGS, logger, () => {
+    const extras: Partial<HubChange> = { netSeq: network.seq };
+    if (evictions.takeIfChanged()) extras.evictions = evictionSnapshot();
+    if (mockHits.takeIfChanged()) extras.mockHits = mockHits.snapshot();
+    return extras;
+  });
   const network = new NetworkStore(
     limitsFrom(settings),
     (entry) => batcher.networkChanged(entry),
@@ -172,6 +177,7 @@ export function createHub(opts: CreateHubOptions): Hub {
       if (eviction.kind === 'entry') evictions.request(eviction.entry);
       else evictions.body();
     },
+    (entry) => mockHits.hit(entry.mockRuleId!, entry.appId, entry.endTs ?? entry.startTs),
   );
   const metrics = new MetricsStore({ keep: () => keepMetricSeries() });
   const deviceApps = new DeviceAppStore({
@@ -947,6 +953,12 @@ export function createHub(opts: CreateHubOptions): Hub {
     getNetworkSeq: () => network.seq,
     getNetworkSince: (seq: number) => network.changedSince(seq).map((e) => ({ ...e })),
     getNetworkIds: () => network.ids(),
+    getMockHits: () => mockHits.snapshot(),
+    retainMockHits(ruleIds: string[]): void {
+      if (!Array.isArray(ruleIds)) return;
+      // The next batch carries the map even when nothing else changed.
+      if (mockHits.retain(ruleIds.filter((id) => typeof id === 'string'))) batcher.touch();
+    },
     getNetwork: () => network.list().map((e) => ({ ...e })),
     getNetworkDetail: (id) => network.detail(id),
     searchNetwork: (text, opts) => network.search(typeof text === 'string' ? text : '', opts ?? {}),

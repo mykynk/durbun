@@ -283,6 +283,8 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
       if (netSeq !== undefined) msg.netSeq = netSeq;
       const evictions = hub.getEvictions?.();
       if (evictions) msg.evictions = evictions;
+      const mockHits = hub.getMockHits?.();
+      if (mockHits) msg.mockHits = mockHits;
       if (resumed) msg.resumed = { afterLogId: resume!.afterLogId, networkIds: hub.getNetworkIds!() };
       return msg;
     },
@@ -343,6 +345,8 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
         }
         const revision = config.mocksRevision;
         broadcast(revision !== undefined ? { type: 'mocks', rules, revision } : { type: 'mocks', rules });
+        // Deleted rules lose their hit counts (the next batch carries the smaller map).
+        hub.retainMockHits?.(rules.map((r) => r.id));
       }),
     ),
     config.onWriteError(

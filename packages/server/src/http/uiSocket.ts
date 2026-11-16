@@ -103,6 +103,10 @@ export function batchFromChange(change: Partial<HubChange>): BatchMessage | null
     msg.evictions = change.evictions;
     any = true;
   }
+  if (change.mockHits) {
+    msg.mockHits = change.mockHits;
+    any = true;
+  }
   if (any && typeof change.netSeq === 'number') msg.netSeq = change.netSeq;
   return any ? msg : null;
 }

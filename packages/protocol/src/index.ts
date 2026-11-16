@@ -815,6 +815,8 @@ export interface DriverStatus {
   active: boolean;
   detail?: string;
   code?: string;
+  /** Params of `code` (device counts, tool versions…; the English `detail` is the fallback). */
+  params?: I18nParams;
 }
 
 export interface ToolCheck {
@@ -916,6 +918,21 @@ export interface StoreEvictions {
  * When resumed: `network` holds only the requests changed after `netSeq`, `metrics` all series again, and the
  * `history` that follows only lines newer than `afterLogId` (`logCount` is their number).
  */
+/** Requests one mock rule answered since the server started (see MockRuleHits). */
+export interface MockRuleHitCount {
+  count: number;
+  /** Device time of the latest answer (epoch ms). */
+  lastTs: number;
+  /** Per app session id (a bounded number of sessions; the total stays exact). */
+  byApp?: Record<string, number>;
+}
+
+/**
+ * The server's count of the requests each mock rule answered, by rule id: the same in every window and kept when
+ * the request list is cleared. A deleted rule loses its count; a server restart starts every count at 0.
+ */
+export type MockRuleHits = Record<string, MockRuleHitCount>;
+
 export interface UiResumed {
   afterLogId: number;
   /** Every request id the server holds: the UI drops the others (deleted while it was away). */
@@ -939,6 +956,8 @@ export type ServerToUi =
       /** Present when the snapshot continues the UI's copy instead of replacing it. */
       resumed?: UiResumed;
       evictions?: StoreEvictions;
+      /** Mock rule hit counts (every rule that answered something). Optional for older servers. */
+      mockHits?: MockRuleHits;
       devices: DeviceInfo[];
       apps: AppSession[];
       network: NetworkEntry[];
@@ -974,6 +993,8 @@ export type ServerToUi =
       netSeq?: number;
       /** Sent when the limits deleted something since the previous batch. */
       evictions?: StoreEvictions;
+      /** Every mock rule's hit count, sent when one changed since the previous batch (replaces the previous map). */
+      mockHits?: MockRuleHits;
     }
   | {
       type: 'cleared';

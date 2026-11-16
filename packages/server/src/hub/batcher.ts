@@ -35,7 +35,7 @@ export class ChangeBatcher {
      * Read once per flush, before anything is emitted: members added to the first change of the flush (the
      * network change counter as of this batch, eviction counts when they changed).
      */
-    private readonly extras?: () => Pick<HubChange, 'netSeq' | 'evictions'>,
+    private readonly extras?: () => Pick<HubChange, 'netSeq' | 'evictions' | 'mockHits'>,
   ) {}
 
   /** Flush soon even when nothing else is queued (only `extras` changed). */
@@ -118,7 +118,7 @@ export class ChangeBatcher {
     this.flushing = true;
     this.touched = false;
     try {
-      let extra: Pick<HubChange, 'netSeq' | 'evictions'> = {};
+      let extra: Pick<HubChange, 'netSeq' | 'evictions' | 'mockHits'> = {};
       try {
         extra = this.extras?.() ?? {};
       } catch (err) {
@@ -138,6 +138,7 @@ export class ChangeBatcher {
       };
       if (extra.netSeq !== undefined) change.netSeq = extra.netSeq;
       if (extra.evictions) change.evictions = extra.evictions;
+      if (extra.mockHits) change.mockHits = extra.mockHits;
       this.logs = [];
       this.network = new Map();
       this.devices = new Map();

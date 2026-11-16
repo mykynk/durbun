@@ -120,6 +120,13 @@ export const SERVER_CODES = {
     'driver.adbVersionConflict',
     'demo.active',
     'demo.inactive',
+    'driver.android.online',
+    'driver.iosSim.booted',
+    'driver.iosDevice.devices',
+    'driver.vm.notStarted',
+    'driver.vm.attached',
+    'driver.vm.waiting',
+    'driver.vm.idle',
   ],
   /** `notice` messages. */
   notices: [
@@ -265,7 +272,43 @@ export const SERVER_CODES = {
     'reader.frameStats.unsupported',
   ],
   /** `ToolCheck.code`: Doctor rows worded specially (params in `ToolCheck.params`). */
-  doctor: ['doctor.node.embedded', 'driver.adbVersionConflict', 'doctor.adbMatchedServer'],
+  doctor: [
+    'doctor.node.embedded',
+    'driver.adbVersionConflict',
+    'doctor.adbMatchedServer',
+    'doctor.nodeTooOld',
+    'doctor.port.listening',
+    'doctor.port.cannotListen',
+    'doctor.port.free',
+    'doctor.port.inUse',
+    'doctor.port.untested',
+    'doctor.uiBuild.missing',
+    'doctor.dataDir.notWritable',
+    'doctor.checksFailed',
+    'doctor.driverInitFailed',
+    'doctor.tool.from',
+    'doctor.tool.badConfiguredPath',
+    'doctor.tool.notFound',
+    'doctor.tool.optionalNotFound',
+    'doctor.xcode.macOnly',
+    'doctor.xcode.xcrunMissing',
+    'doctor.xcode.noDeveloperDir',
+    'doctor.xcode.cltOnly',
+    'doctor.xcode.simctlNotFound',
+    'doctor.xcode.missing',
+    'doctor.simctl.failed',
+    'doctor.simctl.booted',
+    'doctor.adb.notFound',
+    'doctor.adb.versionFailed',
+    'doctor.usbmuxd.attached',
+    'doctor.usbmuxd.failed',
+    'doctor.idevicesyslog.missing',
+    'doctor.idevicesyslog.failed',
+    'doctor.devicectl.caps',
+    'doctor.devicectl.missing',
+    'doctor.idevicescreenshot.notNeeded',
+    'doctor.vm.status',
+  ],
   /** REST `{ error, code }` bodies (`ApiError.code`). */
   rest: [
     'access.denied',
@@ -307,6 +350,8 @@ export const SERVER_CODES = {
   flowRegex: ['flow.regex.unsafe'],
   /** A save refused because another window changed the same thing since it was loaded (reload or overwrite). */
   editConflicts: ['mocks.conflict', 'flow.conflict', 'env.conflict'],
+  /** Pinning a flow run (PATCH /api/flow-runs/:id) refused: too many pinned runs (params { max }). */
+  flowRunPins: ['flowRun.pinLimit'],
   /**
    * Flow steps that change a device setting (put back when the run ends): { permission, app } / { app, locale } /
    * { orientation } / —.
@@ -462,7 +507,7 @@ registerMessages('code', {
     /* ── drivers ── */
     'driver.adbError': 'adb hata verdi',
     'driver.simctlError': 'simctl hata verdi',
-    'driver.initFailed': 'Sürücü başlatılamadı',
+    'driver.initFailed': ['Sürücü başlatılamadı: {error}', 'Sürücü başlatılamadı'],
     'driver.statusFailed': 'Sürücü durumu okunamadı',
     'driver.adbVersionConflict': [
       'Başka bir program adb sunucusunun {server} sürümünü çalıştırıyor, Dürbün’ün adb’si ise {client} sürümünde ({path}). Dürbün o sunucuyu yeniden başlatıp diğer programın cihaz bağlantılarını koparmamak için Android cihazlarını bekletiyor. Ayarlar’da adb yolunu {match} yapın (aynı sürüm).',
@@ -470,6 +515,13 @@ registerMessages('code', {
       'Başka bir program farklı sürümde bir adb sunucusu çalıştırıyor. Dürbün onu yeniden başlatmamak için Android cihazlarını bekletiyor; ayrıntı ve çözüm Sistem kontrolünde.',
     ],
     'demo.active': 'Demo cihazlarında örnek veri üretiliyor',
+    'driver.android.online': ['{adb} · {count, number} cihaz bağlı', '{count, number} cihaz bağlı', 'Hazır'],
+    'driver.iosSim.booted': ['{count, number} açık simülatör', 'Hazır'],
+    'driver.iosDevice.devices': ['{count, number} bağlı cihaz', 'Hazır'],
+    'driver.vm.notStarted': 'Başlatılmadı',
+    'driver.vm.attached': ['{count, number} uygulama Dart VM Service ile bağlı', 'Uygulamalar Dart VM Service ile bağlı'],
+    'driver.vm.waiting': 'Flutter debug uygulamaları bekleniyor (otomatik bağlanma açık)',
+    'driver.vm.idle': 'Bağlı uygulama yok (otomatik bağlanma kapalı)',
     'demo.inactive': 'Demo modu kapalı',
 
     /* ── notices ── */
@@ -596,7 +648,33 @@ registerMessages('code', {
     'action.settingRestored': 'Ayar, Dürbün değiştirmeden önceki değerine döndü',
     'action.nothingToRestore': 'Dürbün bu ayarı değiştirmedi; geri alınacak bir şey yok',
     'action.backgroundKilled': 'Uygulama arka planda sonlandırıldı. Son uygulamalardan açıp durumunu geri getirip getirmediğine bakın.',
-    'action.invalidParams': ['Geçersiz parametre: {detail}', 'Geçersiz parametre'],
+    'action.invalidParams': ['Geçersiz parametre: {detail}', 'Geçersiz parametre: “{param}”', 'Geçersiz parametre'],
+    /** action.invalidParams by `expected` (PREPARE); `{param}` is the parameter's name as the action takes it. */
+    invalidParam: {
+      appId: ['“{param}” için bir uygulama kimliği (paket adı ya da bundle id) gerekli', 'Uygulama kimliği (paket adı ya da bundle id) gerekli'],
+      url: ['“{param}” için geçerli bir adres (URL) gerekli', 'Geçerli bir adres (URL) gerekli'],
+      absolutePath: [
+        '“{param}” için dosyanın bu Mac’teki tam yolu gerekli ({kinds})',
+        '“{param}” için dosyanın bu Mac’teki tam yolu gerekli',
+        'Dosyanın bu Mac’teki tam yolu gerekli',
+      ],
+      range: ['“{param}” {min} ile {max} arasında olmalı', 'Değer izin verilen aralığın dışında'],
+      boolean: ['“{param}” açık ya da kapalı (true / false) olmalı', 'Değer açık ya da kapalı (true / false) olmalı'],
+      oneOf: ['“{param}” için “{value}” geçersiz; şunlardan biri olmalı: {options}', '“{param}” şunlardan biri olmalı: {options}', 'Değer izin verilenlerden biri değil'],
+      permission: ['“{param}” bir izin adı olmalı (örn. android.permission.CAMERA)', 'Bir izin adı gerekli (örn. android.permission.CAMERA)'],
+      user: ['“{param}” bu telefondaki bir kullanıcı değil', 'Bu kullanıcı telefonda yok'],
+      locale: [
+        '“{value}” geçerli bir dil kodu değil; tr-TR gibi bir kod ya da “system” yazın',
+        '“{param}” için tr-TR gibi bir dil kodu ya da “system” yazın',
+        'tr-TR gibi bir dil kodu ya da “system” yazın',
+      ],
+      text: ['“{param}” boş olamaz', 'Yazılacak metin boş olamaz'],
+      key: ['“{value}” tanınan bir tuş değil', 'Tanınmayan tuş'],
+      coordinates: 'Enlem (−90…90) ve boylam (−180…180) gerekli',
+      jsonObject: ['“{param}” bir JSON nesnesi olmalı', 'Bir JSON nesnesi gerekli'],
+      apsObject: ['“{param}” içinde bir “aps” nesnesi olmalı', 'Bildirim içeriğinde bir “aps” nesnesi olmalı'],
+      maxBytes: ['“{param}” en fazla {max, number} bayt olabilir', 'İçerik çok büyük'],
+    },
     'action.recording.busy': 'Bu cihazda zaten bir ekran kaydı sürüyor',
     'action.recording.notRunning': 'Bu cihazda süren bir ekran kaydı yok',
     'action.developerModeOff':
@@ -715,8 +793,8 @@ registerMessages('code', {
     'file.unknown': 'Dosya bulunamadı',
     'har.invalid': 'Geçersiz HAR isteği',
     'import.failed': ['İçe aktarılamadı: {detail}', 'İçe aktarılamadı'],
-    'import.invalid': 'Bu dosya bir Dürbün oturumu değil',
-    'import.version': 'Bu oturum dosyası daha yeni bir Dürbün sürümüyle kaydedilmiş',
+    'import.invalid': ['Oturum dosyasındaki “{field}” listesi eksik ya da bozuk', 'Bu dosya bir Dürbün oturumu değil'],
+    'import.version': ['Bu oturum dosyasının sürümü ({version}) tanınmıyor', 'Bu oturum dosyasının sürümü tanınmıyor'],
     'import.done': [{ one: '{count} cihaz içe aktarıldı', other: '{count} cihaz içe aktarıldı' }, 'Oturum içe aktarıldı'],
     'method.notAllowed': 'Bu işleme izin verilmiyor',
     'search.invalid': 'Geçersiz arama isteği',
@@ -731,6 +809,10 @@ registerMessages('code', {
     'upload.failed': ['Yüklenen dosya kaydedilemedi: {detail}', 'Yüklenen dosya kaydedilemedi'],
     'upload.tooLarge': ['Dosya çok büyük (en fazla {limit})', 'Dosya çok büyük'],
     'url.invalid': 'Geçersiz adres',
+    'flowRun.pinLimit': [
+      'En fazla {max, number} çalıştırma sabitlenebilir. Yenisini sabitlemek için önce birinin sabitlemesini kaldırın',
+      'Sabitlenebilecek çalıştırma sınırına ulaşıldı. Yenisini sabitlemek için önce birinin sabitlemesini kaldırın',
+    ],
     network: 'Dürbün sunucusuna ulaşılamadı',
 
     /* ── SDK-less readers (DeviceInfo.readers, `{ detail }` = the server's English detail) ── */
@@ -756,6 +838,57 @@ registerMessages('code', {
       'Başka bir programın başlattığı adb sunucusu {server} sürümünde. Dürbün onu yeniden başlatmamak için aynı sürümdeki adb’yi kullanıyor: {path}.',
       'Dürbün, başka bir programın başlattığı adb sunucusuyla aynı sürümdeki adb’yi kullanıyor.',
     ],
+
+    'doctor.nodeTooOld': ['Dürbün için Node.js {major} ya da daha yenisi gerekir', 'Dürbün için daha yeni bir Node.js gerekir'],
+    'doctor.port.listening': ['{addr} adresinde dinliyor', 'Dinliyor'],
+    'doctor.port.cannotListen': ['{addr} dinlenemedi: {error}', '{addr} dinlenemedi', 'Port dinlenemedi'],
+    'doctor.port.free': 'Kullanılabilir',
+    'doctor.port.inUse': ['{port} portunu başka bir program kullanıyor', 'Portu başka bir program kullanıyor'],
+    'doctor.port.untested': ['{port} portu denenemedi', 'Port denenemedi'],
+    'doctor.uiBuild.missing': 'Derlenmiş arayüz bulunamadı (dist/ui). Sunucu çalışır ama tarayıcı yalnızca bilgi sayfası gösterir.',
+    'doctor.dataDir.notWritable': ['Yazılamıyor: {error}', 'Bu klasöre yazılamıyor'],
+    'doctor.checksFailed': ['Kontroller çalıştırılamadı: {error}', 'Kontroller çalıştırılamadı'],
+    'doctor.driverInitFailed': ['Başlatılamadı: {error}', 'Başlatılamadı'],
+    'doctor.tool.from': 'Bulundu',
+    'doctor.tool.badConfiguredPath': [
+      'Ayarlardaki yol ({path}) çalıştırılabilir bir dosya değil; otomatik bulunan kullanılıyor',
+      'Ayarlardaki yol çalıştırılabilir bir dosya değil; otomatik bulunan kullanılıyor',
+    ],
+    'doctor.tool.notFound': 'bulunamadı',
+    'doctor.tool.optionalNotFound': 'bulunamadı (isteğe bağlı: devicectl’in okuyamadığı iPhone’lar için kullanılır, örn. iOS 16 ya da Geliştirici Modu kapalı)',
+    'doctor.xcode.macOnly': 'Xcode araçları yalnızca macOS’ta çalışır',
+    'doctor.xcode.xcrunMissing': 'xcrun bulunamadı',
+    'doctor.xcode.noDeveloperDir': 'Seçili bir Xcode geliştirici klasörü yok (xcode-select -p başarısız)',
+    'doctor.xcode.cltOnly': 'Yalnızca Command Line Tools seçili; simctl ve devicectl için Xcode gerekir',
+    'doctor.xcode.simctlNotFound': ['xcrun, simctl’i bulamıyor ({dir})', 'xcrun, simctl’i bulamıyor'],
+    'doctor.xcode.missing': 'Xcode kurulu değil ya da seçili değil',
+    'doctor.simctl.failed': ['simctl çalıştırılamadı: {error}', 'simctl çalıştırılamadı'],
+    'doctor.simctl.booted': ['{count, number} açık simülatör', 'Hazır'],
+    'doctor.adb.notFound': 'adb bulunamadı (ayarlardaki yol, $ANDROID_HOME, ~/Library/Android/sdk/platform-tools ve PATH denendi)',
+    'doctor.adb.versionFailed': ['{path} var ama “adb version” çalışmadı', 'adb var ama “adb version” çalışmadı'],
+    'doctor.usbmuxd.attached': ['{count, number} cihaz bağlı', 'Hazır'],
+    'doctor.usbmuxd.failed': ['usbmuxd’ye ulaşılamadı: {error}', 'usbmuxd’ye ulaşılamadı'],
+    'doctor.idevicesyslog.missing': 'idevicesyslog bulunamadı — libimobiledevice’ı (brew install libimobiledevice) ya da Flutter’ı kurun',
+    'doctor.idevicesyslog.failed': ['idevicesyslog çalıştırılamadı: {error}', 'idevicesyslog çalıştırılamadı'],
+    'doctor.devicectl.caps': ['ekran görüntüsü: {shot} · ekran kaydı: {rec}', 'Hazır'],
+    'doctor.devicectl.missing': [
+      'iOS cihazlarda uygulama başlatmak, durdurmak ve kurmak için Xcode {minXcode} ya da daha yenisini kurun',
+      'iOS cihazlarda uygulama başlatmak, durdurmak ve kurmak için Xcode’un daha yeni bir sürümünü kurun',
+    ],
+    'doctor.idevicescreenshot.notNeeded': 'gerekmiyor (ekran görüntüsünü devicectl alıyor)',
+    'doctor.vm.status': [
+      '{count, number} uygulama bağlı ({names}) · otomatik bağlanma {auto}',
+      '{count, number} uygulama bağlı · otomatik bağlanma {auto}',
+      'Flutter VM Service köprüsü hazır',
+    ],
+    /** doctor.tool.from by `source` (PREPARE). */
+    toolFrom: {
+      settings: 'Ayarlardaki yoldan',
+      env: '$ANDROID_HOME / $ANDROID_SDK_ROOT içinden',
+      sdk: 'Android SDK içinden',
+      path: 'PATH üzerinden',
+      'flutter-cache': ['Flutter {version} önbelleğinden', 'Flutter önbelleğinden'],
+    },
 
     /* ── UI-side messages kept under code.* (used by the shell) ── */
     'demo.enabled': 'Demo verisi açıldı',
@@ -834,6 +967,7 @@ registerMessages('code', {
         vmWaiting: 'Flutter debug uygulamaları bekleniyor (otomatik bağlanma açık)',
         vmIdle: 'Bağlı uygulama yok (otomatik bağlanma kapalı)',
       },
+      doctor: { yes: 'var', no: 'yok', autoOn: 'açık', autoOff: 'kapalı (elle bağlanmak için: SDK kurulumu → Flutter)' },
     },
   },
   en: {
@@ -958,7 +1092,7 @@ registerMessages('code', {
     /* ── drivers ── */
     'driver.adbError': 'adb reported an error',
     'driver.simctlError': 'simctl reported an error',
-    'driver.initFailed': 'The driver failed to start',
+    'driver.initFailed': ['The driver failed to start: {error}', 'The driver failed to start'],
     'driver.statusFailed': 'Could not read the driver status',
     'driver.adbVersionConflict': [
       'Another program runs adb server version {server}; the adb Dürbün uses is version {client} ({path}). Dürbün keeps Android devices waiting instead of restarting that server and cutting the other program’s device connections. Set the adb path in Settings to {match} (the same version).',
@@ -966,6 +1100,20 @@ registerMessages('code', {
       'Another program runs an adb server of a different version. Dürbün keeps Android devices waiting instead of restarting it; details and the fix are in System check.',
     ],
     'demo.active': 'Generating sample data on the demo devices',
+    'driver.android.online': [
+      { one: '{adb} · {count, number} device online', other: '{adb} · {count, number} devices online' },
+      { one: '{count, number} device online', other: '{count, number} devices online' },
+      'Ready',
+    ],
+    'driver.iosSim.booted': [{ one: '{count, number} booted simulator', other: '{count, number} booted simulators' }, 'Ready'],
+    'driver.iosDevice.devices': [{ one: '{count, number} device attached', other: '{count, number} devices attached' }, 'Ready'],
+    'driver.vm.notStarted': 'Not started',
+    'driver.vm.attached': [
+      { one: '{count, number} app attached through the Dart VM Service', other: '{count, number} apps attached through the Dart VM Service' },
+      'Apps attached through the Dart VM Service',
+    ],
+    'driver.vm.waiting': 'Waiting for Flutter debug apps (auto-attach on)',
+    'driver.vm.idle': 'No app attached (auto-attach off)',
     'demo.inactive': 'Demo mode is off',
 
     /* ── notices ── */
@@ -1092,7 +1240,24 @@ registerMessages('code', {
     'action.settingRestored': 'The setting is back to its value from before Dürbün changed it',
     'action.nothingToRestore': 'Dürbün has not changed this setting; there is nothing to restore',
     'action.backgroundKilled': 'The app was ended in the background. Open it from Recents and check that it restores its state.',
-    'action.invalidParams': ['Invalid parameter: {detail}', 'Invalid parameter'],
+    'action.invalidParams': ['Invalid parameter: {detail}', 'Invalid parameter: “{param}”', 'Invalid parameter'],
+    invalidParam: {
+      appId: ['“{param}” needs an app id (package name or bundle id)', 'An app id (package name or bundle id) is required'],
+      url: ['“{param}” needs a valid address (URL)', 'A valid address (URL) is required'],
+      absolutePath: ['“{param}” needs the file’s full path on this Mac ({kinds})', '“{param}” needs the file’s full path on this Mac', 'The file’s full path on this Mac is required'],
+      range: ['“{param}” must be between {min} and {max}', 'The value is outside the allowed range'],
+      boolean: ['“{param}” must be on or off (true / false)', 'The value must be on or off (true / false)'],
+      oneOf: ['“{value}” is not valid for “{param}”; use one of: {options}', '“{param}” must be one of: {options}', 'The value is not one of the allowed ones'],
+      permission: ['“{param}” must be a permission name (e.g. android.permission.CAMERA)', 'A permission name is required (e.g. android.permission.CAMERA)'],
+      user: ['“{param}” is not a user of this phone', 'This user is not on the phone'],
+      locale: ['“{value}” is not a valid language tag; use a tag like tr-TR or “system”', 'Use a language tag like tr-TR or “system” for “{param}”', 'Use a language tag like tr-TR or “system”'],
+      text: ['“{param}” cannot be empty', 'The text to type cannot be empty'],
+      key: ['“{value}” is not a known key', 'Unknown key'],
+      coordinates: 'Latitude (−90…90) and longitude (−180…180) are required',
+      jsonObject: ['“{param}” must be a JSON object', 'A JSON object is required'],
+      apsObject: ['“{param}” must contain an “aps” object', 'The notification payload must contain an “aps” object'],
+      maxBytes: ['“{param}” can be at most {max, number} bytes', 'The content is too large'],
+    },
     'action.recording.busy': 'A screen recording is already running on this device',
     'action.recording.notRunning': 'No screen recording is running on this device',
     'action.developerModeOff':
@@ -1206,8 +1371,8 @@ registerMessages('code', {
     'file.unknown': 'File not found',
     'har.invalid': 'Invalid HAR request',
     'import.failed': ['Import failed: {detail}', 'Import failed'],
-    'import.invalid': 'This file is not a Dürbün session',
-    'import.version': 'This session file was saved by a newer Dürbün version',
+    'import.invalid': ['The session file’s “{field}” list is missing or damaged', 'This file is not a Dürbün session'],
+    'import.version': ['This session file’s version ({version}) is not recognized', 'This session file’s version is not recognized'],
     'import.done': [{ one: 'Imported {count} device', other: 'Imported {count} devices' }, 'Session imported'],
     'method.notAllowed': 'Method not allowed',
     'search.invalid': 'Invalid search request',
@@ -1222,6 +1387,7 @@ registerMessages('code', {
     'upload.failed': ['Could not save the upload: {detail}', 'Could not save the upload'],
     'upload.tooLarge': ['The file is too large (limit {limit})', 'The file is too large'],
     'url.invalid': 'Malformed URL',
+    'flowRun.pinLimit': ['At most {max, number} runs can be pinned. Unpin one to pin another', 'The pinned run limit is reached. Unpin one to pin another'],
     network: 'Could not reach the Dürbün server',
 
     'reader.crashReports.dropboxRefused':
@@ -1245,6 +1411,52 @@ registerMessages('code', {
       'Another program started adb server version {server}. Dürbün uses the adb of that version so it never restarts it: {path}.',
       'Dürbün uses the adb of the same version as the adb server another program started.',
     ],
+
+    'doctor.nodeTooOld': ['Dürbün needs Node.js {major} or newer', 'Dürbün needs a newer Node.js'],
+    'doctor.port.listening': ['Listening on {addr}', 'Listening'],
+    'doctor.port.cannotListen': ['Could not listen on {addr}: {error}', 'Could not listen on {addr}', 'Could not listen on the port'],
+    'doctor.port.free': 'Available',
+    'doctor.port.inUse': ['Port {port} is used by another program', 'Another program uses the port'],
+    'doctor.port.untested': ['Could not test port {port}', 'Could not test the port'],
+    'doctor.uiBuild.missing': 'No built UI found (dist/ui). The server works, but the browser shows a placeholder page.',
+    'doctor.dataDir.notWritable': ['Not writable: {error}', 'This folder is not writable'],
+    'doctor.checksFailed': ['Checks failed: {error}', 'The checks could not run'],
+    'doctor.driverInitFailed': ['Failed to start: {error}', 'Failed to start'],
+    'doctor.tool.from': 'Found',
+    'doctor.tool.badConfiguredPath': [
+      'The path in Settings ({path}) is not an executable file; using the detected one',
+      'The path in Settings is not an executable file; using the detected one',
+    ],
+    'doctor.tool.notFound': 'not found',
+    'doctor.tool.optionalNotFound': 'not found (optional: used for iPhones devicectl cannot read, such as iOS 16 or Developer Mode off)',
+    'doctor.xcode.macOnly': 'Xcode tools are only available on macOS',
+    'doctor.xcode.xcrunMissing': 'xcrun not found',
+    'doctor.xcode.noDeveloperDir': 'No Xcode developer directory selected (xcode-select -p failed)',
+    'doctor.xcode.cltOnly': 'Only the Command Line Tools are selected; simctl and devicectl need Xcode',
+    'doctor.xcode.simctlNotFound': ['xcrun cannot find simctl ({dir})', 'xcrun cannot find simctl'],
+    'doctor.xcode.missing': 'Xcode is not installed or not selected',
+    'doctor.simctl.failed': ['simctl failed: {error}', 'simctl failed'],
+    'doctor.simctl.booted': [{ one: '{count, number} booted simulator', other: '{count, number} booted simulators' }, 'Ready'],
+    'doctor.adb.notFound': 'adb not found (tried the path in Settings, $ANDROID_HOME, ~/Library/Android/sdk/platform-tools and PATH)',
+    'doctor.adb.versionFailed': ['{path} exists but “adb version” failed', 'adb exists but “adb version” failed'],
+    'doctor.usbmuxd.attached': [{ one: '{count, number} device attached', other: '{count, number} devices attached' }, 'Ready'],
+    'doctor.usbmuxd.failed': ['Could not reach usbmuxd: {error}', 'Could not reach usbmuxd'],
+    'doctor.idevicesyslog.missing': 'idevicesyslog not found — install libimobiledevice (brew install libimobiledevice) or Flutter',
+    'doctor.idevicesyslog.failed': ['idevicesyslog failed to run: {error}', 'idevicesyslog failed to run'],
+    'doctor.devicectl.caps': ['screenshot: {shot} · screen recording: {rec}', 'Ready'],
+    'doctor.devicectl.missing': [
+      'Install Xcode {minXcode} or newer to launch, stop and install apps on iOS devices',
+      'Install a newer Xcode to launch, stop and install apps on iOS devices',
+    ],
+    'doctor.idevicescreenshot.notNeeded': 'not needed (devicectl captures screenshots)',
+    'doctor.vm.status': ['{count, number} attached ({names}) · auto-attach {auto}', '{count, number} attached · auto-attach {auto}', 'The Flutter VM Service bridge is ready'],
+    toolFrom: {
+      settings: 'From the path in Settings',
+      env: 'From $ANDROID_HOME / $ANDROID_SDK_ROOT',
+      sdk: 'From the Android SDK',
+      path: 'From PATH',
+      'flutter-cache': ['From the Flutter {version} cache', 'From the Flutter cache'],
+    },
 
     /* ── UI-side messages kept under code.* (used by the shell) ── */
     'demo.enabled': 'Demo data enabled',
@@ -1319,6 +1531,7 @@ registerMessages('code', {
         vmWaiting: 'Waiting for Flutter debug apps (auto-attach on)',
         vmIdle: 'No app attached (auto-attach off)',
       },
+      doctor: { yes: 'yes', no: 'no', autoOn: 'on', autoOff: 'off (attach manually: SDK setup → Flutter)' },
     },
   },
 });
@@ -1440,6 +1653,28 @@ function connectionGap(p: Params, lang: Lang, which: 'lost' | 'restored', cut: R
   return { params: { ...p, link, gap: cut.test(str(p.detail)) ? part(lang, `gap.${which}`) : '' } };
 }
 
+/** `expected` values of action.invalidParams the UI words specifically (`code.invalidParam.<expected>`). */
+const INVALID_PARAM_KINDS = new Set([
+  'appId',
+  'url',
+  'absolutePath',
+  'range',
+  'boolean',
+  'oneOf',
+  'permission',
+  'user',
+  'locale',
+  'text',
+  'key',
+  'coordinates',
+  'jsonObject',
+  'apsObject',
+  'maxBytes',
+]);
+
+/** `source` values of doctor.tool.from (the server's ToolSource). */
+const TOOL_SOURCES = new Set(['settings', 'env', 'sdk', 'path', 'flutter-cache']);
+
 type Prepared = { key: string; params: Params };
 type Preparer = (p: Params, lang: Lang) => Partial<Prepared> | void;
 
@@ -1493,6 +1728,22 @@ const PREPARE: Record<string, Preparer> = {
     const w = num(p.width);
     const h = num(p.height);
     return { params: { ...p, size: w && h ? `${w}×${h}` : '' } };
+  },
+  'action.invalidParams': (p) => {
+    const expected = str(p.expected);
+    return INVALID_PARAM_KINDS.has(expected) ? { key: `invalidParam.${expected}` } : undefined;
+  },
+  'doctor.tool.from': (p) => {
+    const source = str(p.source);
+    return TOOL_SOURCES.has(source) ? { key: `toolFrom.${source}` } : undefined;
+  },
+  'doctor.devicectl.caps': (p, lang) =>
+    p.screenshot === undefined && p.screenRecord === undefined
+      ? undefined
+      : { params: { ...p, shot: part(lang, `doctor.${str(p.screenshot) === 'yes' ? 'yes' : 'no'}`), rec: part(lang, `doctor.${str(p.screenRecord) === 'yes' ? 'yes' : 'no'}`) } },
+  'doctor.vm.status': (p, lang) => {
+    const auto = str(p.auto);
+    return { params: { ...p, auto: auto === 'on' ? part(lang, 'doctor.autoOn') : auto === 'off' ? part(lang, 'doctor.autoOff') : '' } };
   },
   ...FLOW_PREPARE,
 };
@@ -1558,9 +1809,9 @@ export function deviceDisplayName(d: Pick<DeviceInfo, 'id' | 'name'> | undefined
 }
 
 /** Localized `DriverStatus` text (code when present, else the server's English detail, localized when recognized). */
-export function driverStatusText(d: Pick<DriverStatus, 'id' | 'code' | 'detail'>): string {
+export function driverStatusText(d: Pick<DriverStatus, 'id' | 'code' | 'detail' | 'params'>): string {
   const detail = d.detail ?? '';
-  if (d.code && hasCode(d.code)) return tCode(d.code, undefined, detail);
+  if (d.code && hasCode(d.code)) return tCode(d.code, d.params, detail);
   const lang = getLanguage();
   let m: RegExpExecArray | null;
   if ((m = /^(adb\b.*?) · (\d+) devices? online$/.exec(detail))) return part(lang, 'driver.androidOnline', { adb: m[1]!, count: Number(m[2]) });

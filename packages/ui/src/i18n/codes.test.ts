@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { FLOW_NODE_SPECS } from '@durbun/protocol';
-import { messageKeys, setLanguage, type Lang } from './core';
+import { getLanguage, messageKeys, setLanguage, type Lang } from './core';
 import {
   LOCAL_CODES,
   SERVER_CODES,
@@ -319,6 +319,70 @@ const FLOW_SAMPLES: [code: string, params: Record<string, string | number>][] = 
   ['action.processUnknown', { app: 'com.example.shop', tool: 'devicectl' }],
   ['action.clearData.unexpectedPath', { path: '/Users/me/Library/Developer/CoreSimulator/x' }],
   ['action.launch.noLauncher', { app: 'com.example.shop', user: 10 }],
+  // Pinning a flow run refused
+  ['flowRun.pinLimit', { max: 50 }],
+  // Invalid device action parameters, worded from what was expected
+  ['action.invalidParams', { param: 'appId', expected: 'appId' }],
+  ['action.invalidParams', { param: 'url', expected: 'url' }],
+  ['action.invalidParams', { param: 'path', expected: 'absolutePath', kinds: '.apk, .apks, .xapk' }],
+  ['action.invalidParams', { param: 'durationSec', expected: 'range', min: 1, max: 180 }],
+  ['action.invalidParams', { param: 'bufferSize', expected: 'range', min: '64K', max: '256M' }],
+  ['action.invalidParams', { param: 'enabled', expected: 'boolean' }],
+  ['action.invalidParams', { param: 'mode', expected: 'oneOf', options: 'dark, light' }],
+  ['action.invalidParams', { param: 'rotation', expected: 'oneOf', options: '0, 90, 180, 270', value: '45' }],
+  ['action.invalidParams', { param: 'permission', expected: 'permission' }],
+  ['action.invalidParams', { param: 'userId', expected: 'user' }],
+  ['action.invalidParams', { param: 'locale', expected: 'locale', value: 'turkish' }],
+  ['action.invalidParams', { param: 'locale', expected: 'locale' }],
+  ['action.invalidParams', { param: 'text', expected: 'text' }],
+  ['action.invalidParams', { param: 'key', expected: 'key', value: 'hyper' }],
+  ['action.invalidParams', { param: 'lat', expected: 'coordinates' }],
+  ['action.invalidParams', { param: 'payload', expected: 'jsonObject' }],
+  ['action.invalidParams', { param: 'payload', expected: 'apsObject' }],
+  ['action.invalidParams', { param: 'payload', expected: 'maxBytes', max: 4096 }],
+  ['action.invalidParams', { param: 'speed', expected: 'somethingNew' }],
+  // Session import problems
+  ['import.invalid', { field: 'logs' }],
+  ['import.version', { version: 'x' }],
+  ['import.failed', { detail: 'Too many devices' }],
+  // Driver states
+  ['driver.android.online', { adb: 'adb 1.0.41', count: 2 }],
+  ['driver.android.online', { adb: 'adb', count: 1 }],
+  ['driver.iosSim.booted', { count: 3 }],
+  ['driver.iosDevice.devices', { count: 1 }],
+  ['driver.vm.attached', { count: 2 }],
+  ['driver.initFailed', { error: 'spawn adb EACCES' }],
+  // System check rows
+  ['doctor.nodeTooOld', { major: 20 }],
+  ['doctor.port.listening', { addr: '127.0.0.1:9750' }],
+  ['doctor.port.cannotListen', { addr: '0.0.0.0:9751', error: 'EADDRINUSE' }],
+  ['doctor.port.cannotListen', { addr: '0.0.0.0:9751' }],
+  ['doctor.port.free', { port: 9751 }],
+  ['doctor.port.inUse', { port: 9751 }],
+  ['doctor.port.untested', { port: 9751 }],
+  ['doctor.dataDir.notWritable', { error: 'EACCES: permission denied' }],
+  ['doctor.checksFailed', { error: 'timed out after 8000 ms' }],
+  ['doctor.driverInitFailed', { error: 'spawn xcrun ENOENT' }],
+  ['doctor.tool.from', { source: 'settings' }],
+  ['doctor.tool.from', { source: 'env' }],
+  ['doctor.tool.from', { source: 'sdk' }],
+  ['doctor.tool.from', { source: 'path' }],
+  ['doctor.tool.from', { source: 'flutter-cache', version: '3.38.1' }],
+  ['doctor.tool.from', { source: 'flutter-cache' }],
+  ['doctor.tool.from', { source: 'somewhereNew' }],
+  ['doctor.tool.badConfiguredPath', { path: '/opt/adb', source: 'sdk' }],
+  ['doctor.xcode.simctlNotFound', { dir: '/Applications/Xcode.app/Contents/Developer' }],
+  ['doctor.simctl.failed', { error: 'xcrun: error: unable to find utility "simctl"' }],
+  ['doctor.simctl.booted', { count: 0 }],
+  ['doctor.simctl.booted', { count: 2 }],
+  ['doctor.adb.versionFailed', { path: '/Users/me/Library/Android/sdk/platform-tools/adb' }],
+  ['doctor.usbmuxd.attached', { count: 1 }],
+  ['doctor.usbmuxd.failed', { error: 'connect ENOENT /var/run/usbmuxd' }],
+  ['doctor.idevicesyslog.failed', { error: 'dyld: Library not loaded' }],
+  ['doctor.devicectl.caps', { screenshot: 'yes', screenRecord: 'no' }],
+  ['doctor.devicectl.missing', { minXcode: '15' }],
+  ['doctor.vm.status', { count: 1, names: 'Kumbara', auto: 'on' }],
+  ['doctor.vm.status', { count: 0, names: '', auto: 'off' }],
 ];
 
 /** English words that must not leak into Turkish system lines. */
@@ -397,6 +461,25 @@ describe('server codes → i18n', () => {
     expect(found.size).toBeGreaterThan(250);
     const known = new Set(allServerCodes());
     expect([...found].filter((c) => !known.has(c)).sort()).toEqual([]);
+  });
+
+  it('words invalid parameters, driver states and System check rows from their params', () => {
+    const tr = (code: string, params?: Record<string, string | number>) => tCodeIn('tr', code, params, FALLBACK);
+    const en = (code: string, params?: Record<string, string | number>) => tCodeIn('en', code, params, FALLBACK);
+    expect(tr('action.invalidParams', { param: 'mode', expected: 'oneOf', options: 'dark, light' })).toBe('“mode” şunlardan biri olmalı: dark, light');
+    expect(en('action.invalidParams', { param: 'durationSec', expected: 'range', min: 1, max: 180 })).toBe('“durationSec” must be between 1 and 180');
+    // An unknown `expected` keeps the generic text, naming the parameter.
+    expect(tr('action.invalidParams', { param: 'speed', expected: 'somethingNew' })).toBe('Geçersiz parametre: “speed”');
+    // Older servers: the English detail.
+    expect(tr('action.invalidParams', { detail: 'scale must be a number' })).toBe('Geçersiz parametre: scale must be a number');
+    expect(tr('doctor.tool.from', { source: 'flutter-cache', version: '3.38.1' })).toBe('Flutter 3.38.1 önbelleğinden');
+    expect(tr('doctor.tool.from', { source: 'path' })).toBe('PATH üzerinden');
+    expect(tr('doctor.devicectl.caps', { screenshot: 'yes', screenRecord: 'no' })).toBe('ekran görüntüsü: var · ekran kaydı: yok');
+    expect(en('doctor.vm.status', { count: 1, names: 'Kumbara', auto: 'on' })).toBe('1 attached (Kumbara) · auto-attach on');
+    expect(tr('flowRun.pinLimit', { max: 50 })).toMatch(/^En fazla 50 çalıştırma sabitlenebilir/);
+    expect(driverStatusText({ id: 'android', code: 'driver.android.online', params: { adb: 'adb 1.0.41', count: 2 }, detail: 'adb 1.0.41 · 2 devices online' })).toBe(
+      tCodeIn(getLanguage(), 'driver.android.online', { adb: 'adb 1.0.41', count: 2 }, FALLBACK),
+    );
   });
 
   it('every system line code has a realistic sample', () => {

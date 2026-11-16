@@ -175,11 +175,13 @@ export function validateSessionExport(raw: unknown): SessionExport {
   if (!isPlainObject(raw)) throw new HttpError(400, 'Not a Dürbün session file (expected a JSON object)', 'import.invalid');
   if (raw.format !== 'durbun-session') throw new HttpError(400, 'Not a Dürbün session file (format is not "durbun-session")', 'import.invalid');
   const versionProblem = sessionVersionProblem(raw.version);
-  if (versionProblem) throw new HttpError(400, versionProblem, 'import.version');
+  if (versionProblem) throw new HttpError(400, versionProblem, 'import.version', raw.version === undefined || raw.version === null ? undefined : { version: String(raw.version).slice(0, 40) });
   for (const key of ['devices', 'apps', 'logs', 'network'] as const) {
-    if (!Array.isArray(raw[key])) throw new HttpError(400, `Session file is missing the "${key}" list`, 'import.invalid');
+    if (!Array.isArray(raw[key])) throw new HttpError(400, `Session file is missing the "${key}" list`, 'import.invalid', { field: key });
   }
-  if (raw.metrics !== undefined && !Array.isArray(raw.metrics)) throw new HttpError(400, 'Session file has an invalid "metrics" list', 'import.invalid');
+  if (raw.metrics !== undefined && !Array.isArray(raw.metrics)) {
+    throw new HttpError(400, 'Session file has an invalid "metrics" list', 'import.invalid', { field: 'metrics' });
+  }
   const objects = (v: unknown) => (Array.isArray(v) ? v.filter(isPlainObject) : undefined);
   const data: SessionExport = {
     format: 'durbun-session',
@@ -194,7 +196,9 @@ export function validateSessionExport(raw: unknown): SessionExport {
   };
   const metrics = objects(raw.metrics);
   if (metrics) data.metrics = metrics as unknown as SessionExport['metrics'];
-  if (raw.deviceApps !== undefined && !Array.isArray(raw.deviceApps)) throw new HttpError(400, 'Session file has an invalid "deviceApps" list', 'import.invalid');
+  if (raw.deviceApps !== undefined && !Array.isArray(raw.deviceApps)) {
+    throw new HttpError(400, 'Session file has an invalid "deviceApps" list', 'import.invalid', { field: 'deviceApps' });
+  }
   const deviceApps = objects(raw.deviceApps);
   if (deviceApps) data.deviceApps = deviceApps as unknown as SessionExport['deviceApps'];
   if (raw.masked === true) data.masked = true;
@@ -454,7 +458,7 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
     try {
       result = deps.hub.importSession(data, label);
     } catch (err) {
-      throw new HttpError(400, `Import failed: ${errorMessage(err)}`, 'import.failed');
+      throw new HttpError(400, `Import failed: ${errorMessage(err)}`, 'import.failed', { detail: errorMessage(err) });
     }
     sendJson(res, 200, { deviceIds: result.deviceIds, ...importCounts(deps.hub, before, data) });
   }
@@ -656,7 +660,7 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
         const headers: Record<string, string> = {};
         if (err.status === 405 && 'allow' in err) headers.Allow = String((err as { allow: string }).allow);
         if (err.status === 413) headers.Connection = 'close';
-        sendError(res, err.status, err.message, err.code, headers);
+        sendError(res, err.status, err.message, err.code, headers, err.params);
         return;
       }
       deps.logger.error(`${req.method} ${pathname} failed: ${errorMessage(err)}`);

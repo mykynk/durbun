@@ -22,7 +22,7 @@ import { silentLogger } from '../../util/logger';
 import { failureText } from '../exec';
 import { fail } from '../shared/files';
 import { Poller } from '../shared/timing';
-import { defaultResolveEnv, listAdbCandidates, resolveAdb, type ResolvedTool, type ResolveEnv } from '../tools';
+import { defaultResolveEnv, listAdbCandidates, resolveAdb, toolSourceCode, type ResolvedTool, type ResolveEnv } from '../tools';
 import { Adb } from './adb';
 import { adbBinaryInfo, adbServerPort, queryAdbServerVersion, type AdbBinaryInfo } from './adbServer';
 import { AdbDeviceTracker } from './deviceTracker';
@@ -194,7 +194,13 @@ export class AndroidDriver implements DeviceDriver {
     }
     const n = [...this.sessions.values()].filter((s) => s.isOnline).length;
     const adb = this.adbVersion ? `adb ${this.adbVersion}` : 'adb';
-    return { ...base, available: true, detail: `${adb} · ${n} device${n === 1 ? '' : 's'} online` };
+    return {
+      ...base,
+      available: true,
+      detail: `${adb} · ${n} device${n === 1 ? '' : 's'} online`,
+      code: 'driver.android.online',
+      params: { adb, count: n },
+    };
   }
 
   async checks(): Promise<ToolCheck[]> {
@@ -208,6 +214,7 @@ export class AndroidDriver implements DeviceDriver {
           label,
           status: 'missing',
           detail: 'adb not found (settings.adbPath, $ANDROID_HOME, ~/Library/Android/sdk/platform-tools, PATH)',
+          code: 'doctor.adb.notFound',
           fix: ADB_FIX,
           docsUrl: ADB_DOCS,
         },
@@ -224,6 +231,7 @@ export class AndroidDriver implements DeviceDriver {
         ...(version ? { version } : {}),
         path: tool.path,
         detail: version ? (tool.detail ?? sourceText(tool)) : `${tool.path} exists but "adb version" failed`,
+        ...(version ? toolSourceCode(tool) : { code: 'doctor.adb.versionFailed', params: { path: tool.path } }),
         ...(version ? {} : { fix: ADB_FIX, docsUrl: ADB_DOCS }),
       },
     ];

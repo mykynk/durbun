@@ -44,7 +44,7 @@ import { mergeReaders, ReaderReporter, readerDetail } from '../shared/readers';
 import { ScreenRecorder } from '../shared/screenRecord';
 import { StallWatchdog, type StallInfo } from '../shared/stallWatchdog';
 import { Backoff, every, Poller, serialize } from '../shared/timing';
-import { probeXcodeTools, resolveIdeviceTool, type ResolvedTool } from '../tools';
+import { probeXcodeTools, resolveIdeviceTool, toolSourceCode, type ResolvedTool } from '../tools';
 import { IosAppTracker } from './appTracker';
 import { IosCrashIndex } from './crashDedupe';
 import { crashReportEntry, jetsamEntries, type IpsReport, type JetsamReport } from './crashReport';
@@ -1200,9 +1200,9 @@ export class IosDeviceDriver implements DeviceDriver {
     const n = this.sessions.size;
     const devices = `${n} device${n === 1 ? '' : 's'}`;
     if (!this.syslogTool) {
-      return { ...base, available: true, detail: `${devices} · ${SYSLOG_MISSING.detail}`, code: SYSLOG_MISSING.code };
+      return { ...base, available: true, detail: `${devices} · ${SYSLOG_MISSING.detail}`, code: SYSLOG_MISSING.code, params: { count: n } };
     }
-    return { ...base, available: true, detail: devices };
+    return { ...base, available: true, detail: devices, code: 'driver.iosDevice.devices', params: { count: n } };
   }
 
   async checks(): Promise<ToolCheck[]> {
@@ -1211,12 +1211,15 @@ export class IosDeviceDriver implements DeviceDriver {
     const checks: ToolCheck[] = [];
     let usbmuxOk = false;
     let usbmuxDetail = '';
+    let usbmuxCode: Pick<ToolCheck, 'code' | 'params'>;
     try {
       const devices = await this.client.listDevices(3000);
       usbmuxOk = true;
       usbmuxDetail = `${devices.length} device(s) attached`;
+      usbmuxCode = { code: 'doctor.usbmuxd.attached', params: { count: devices.length } };
     } catch (e) {
       usbmuxDetail = (e as Error).message;
+      usbmuxCode = { code: 'doctor.usbmuxd.failed', params: { error: usbmuxDetail } };
     }
     checks.push({
       id: 'usbmuxd',
@@ -1224,6 +1227,7 @@ export class IosDeviceDriver implements DeviceDriver {
       status: usbmuxOk ? 'ok' : fs.existsSync(socketPath) ? 'error' : 'missing',
       path: socketPath,
       detail: usbmuxDetail,
+      ...usbmuxCode,
       ...(usbmuxOk ? {} : { fix: process.platform === 'darwin' ? 'sudo killall -HUP usbmuxd' : 'Install and start usbmuxd' }),
     });
     const syslog = resolveIdeviceTool('idevicesyslog', settings);
@@ -1233,6 +1237,7 @@ export class IosDeviceDriver implements DeviceDriver {
         label: 'idevicesyslog (iOS device logs)',
         status: 'missing',
         detail: SYSLOG_MISSING.detail,
+        code: 'doctor.idevicesyslog.missing',
         fix: 'brew install libimobiledevice',
         docsUrl: 'https://libimobiledevice.org',
       });
@@ -1246,6 +1251,7 @@ export class IosDeviceDriver implements DeviceDriver {
         ...(version ? { version } : {}),
         path: syslog.path,
         detail: v.ok ? (syslog.detail ?? `from ${syslog.source}`) : `idevicesyslog failed to run: ${v.error ?? v.stderr.trim().slice(0, 200)}`,
+        ...(v.ok ? toolSourceCode(syslog) : { code: 'doctor.idevicesyslog.failed', params: { error: v.error ?? v.stderr.trim().slice(0, 200) } }),
         ...(v.ok ? {} : { fix: 'brew install libimobiledevice' }),
       });
     }
@@ -1261,6 +1267,9 @@ export class IosDeviceDriver implements DeviceDriver {
       detail: caps.available
         ? `screenshot: ${caps.screenshot ? 'yes' : 'no'} · screen recording: ${caps.screenRecord ? 'yes' : 'no'}`
         : 'Install Xcode 15 or newer to see installed apps and crash reports and to launch/stop/install apps on iOS devices',
+      ...(caps.available
+        ? { code: 'doctor.devicectl.caps', params: { screenshot: caps.screenshot ? 'yes' : 'no', screenRecord: caps.screenRecord ? 'yes' : 'no' } }
+        : { code: 'doctor.devicectl.missing', params: { minXcode: '15' } }),
       ...(caps.available ? {} : { fix: devicectlFix(xcode?.developerDir) }),
     });
     checks.push({
@@ -1269,6 +1278,7 @@ export class IosDeviceDriver implements DeviceDriver {
       status: shot ? 'ok' : caps.screenshot ? 'ok' : 'warn',
       ...(shot ? { path: shot.path } : {}),
       detail: shot ? (shot.detail ?? `from ${shot.source}`) : caps.screenshot ? 'not needed (devicectl captures screenshots)' : 'not found',
+      ...(shot ? toolSourceCode(shot) : { code: caps.screenshot ? 'doctor.idevicescreenshot.notNeeded' : 'doctor.tool.notFound' }),
       ...(shot || caps.screenshot ? {} : { fix: 'brew install libimobiledevice' }),
     });
     // Fallbacks for iPhones devicectl cannot read (no Xcode 15+, iOS before 17, Developer Mode off).
@@ -1289,6 +1299,7 @@ export class IosDeviceDriver implements DeviceDriver {
           : caps.available
             ? 'not found (optional: used for iPhones devicectl cannot read, such as iOS 16 or Developer Mode off)'
             : 'not found',
+        ...(tool ? toolSourceCode(tool) : { code: caps.available ? 'doctor.tool.optionalNotFound' : 'doctor.tool.notFound' }),
         ...(tool ? {} : { fix }),
       });
     }

@@ -28,12 +28,20 @@ export class ApiError extends Error {
   readonly code?: string;
   /** The parsed JSON error body (e.g. `{ error, code, preflight }` of a flow that cannot start). */
   readonly body?: Record<string, unknown>;
+  /** Values for the `code`'s text (`tCode(code, params)`), when the server sent any. */
+  readonly params?: Record<string, string | number>;
   constructor(status: number, message: string, code?: string, body?: Record<string, unknown>) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.body = body;
+    const p = body?.params;
+    if (p && typeof p === 'object' && !Array.isArray(p)) {
+      const params: Record<string, string | number> = {};
+      for (const [k, v] of Object.entries(p as Record<string, unknown>)) if (typeof v === 'string' || typeof v === 'number') params[k] = v;
+      this.params = params;
+    }
   }
 }
 
@@ -426,6 +434,27 @@ export async function deleteFlowRun(id: string): Promise<void> {
 export async function clearFlowRuns(flowId?: string): Promise<number> {
   const res = await json<{ removed?: number }>(`/api/flow-runs${flowId ? `?flowId=${enc(flowId)}` : ''}`, { method: 'DELETE' });
   return typeof res.removed === 'number' ? res.removed : 0;
+}
+
+/**
+ * Clear a flow's finished runs (all flows without `flowId`). Pinned runs stay: `keptPinned` says how many of them
+ * remain (0 from a server that does not pin).
+ */
+export async function clearFlowRunHistory(flowId?: string): Promise<{ removed: number; keptPinned: number }> {
+  const res = await json<{ removed?: number; keptPinned?: number }>(`/api/flow-runs${flowId ? `?flowId=${enc(flowId)}` : ''}`, { method: 'DELETE' });
+  return { removed: typeof res.removed === 'number' ? res.removed : 0, keptPinned: typeof res.keptPinned === 'number' ? res.keptPinned : 0 };
+}
+
+/**
+ * Pin a run (automatic clean-up and "clear history" keep it) or unpin it. Answers the run's new header. 409
+ * `flowRun.pinLimit` {max}: too many pinned runs; 404 `flowRun.notFound`.
+ */
+export async function pinFlowRun(id: string, pinned: boolean): Promise<FlowRunHeader> {
+  return json<FlowRunHeader>(`/api/flow-runs/${enc(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pinned }),
+  });
 }
 
 export async function cancelFlowRun(id: string): Promise<void> {

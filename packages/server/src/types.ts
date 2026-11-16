@@ -41,6 +41,7 @@ import type {
   ServerToSdk,
   SessionExport,
   StoreEvictions,
+  MockRuleHits,
   StoreLimits,
   ToolCheck,
   Transport,
@@ -135,6 +136,8 @@ export interface HubChange {
   netSeq?: number;
   /** Present when the limits deleted something since the previous change. */
   evictions?: StoreEvictions;
+  /** Present when a mock rule hit count changed since the previous change (the whole map). */
+  mockHits?: MockRuleHits;
 }
 
 export interface ClearEvent {
@@ -204,6 +207,10 @@ export interface Hub extends HubSink {
   getNetworkSeq?(): number;
   getNetworkSince?(seq: number): NetworkEntry[];
   getNetworkIds?(): string[];
+  /** Mock rule hit counts (hub/mockHits.ts). */
+  getMockHits?(): MockRuleHits;
+  /** The mock list changed: forget the counts of rules no longer in it. */
+  retainMockHits?(ruleIds: string[]): void;
 
   /* mutations from the UI */
   /**

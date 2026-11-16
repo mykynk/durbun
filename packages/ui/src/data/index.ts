@@ -68,7 +68,7 @@ export type { SlackState } from './stores/slack';
 export { usePrefs, getPrefs, flushPrefs, defaultPrefs, DEFAULT_NOISE_RULES, HIGHLIGHT_COLORS, TAB_IDS } from './stores/prefs';
 export type { UiPrefs, ThemePref, Density, TimeFormat, TabId, NoiseRule, HighlightRule, HighlightColor } from './stores/prefs';
 export { useUi, ui } from './stores/ui';
-export type { UiState, SettingsSection, SdkGuideTab, SdkGuideSection, UiFocus, MockRuleDraft } from './stores/ui';
+export type { UiState, SettingsSection, SdkGuideTab, SdkGuideSection, UiFocus, MockRuleDraft, LogTimeReason, FlowFromRequestsSource, FlowFromRequestsOptions } from './stores/ui';
 
 /* scope helpers */
 export {
@@ -85,8 +85,12 @@ export {
   scopeDeviceId,
   scopeEvictions,
   useScopeEvictions,
+  scopeMockHits,
+  useScopeMockHits,
 } from './scope';
-export type { CompiledScope, ScopeTarget, ScopeEvictions } from './scope';
+export type { CompiledScope, ScopeTarget, ScopeEvictions, ScopeMockHit } from './scope';
+export { useMockHits } from './stores/mockHits';
+export type { MockHitsState } from './stores/mockHits';
 export { compileNoiseRules } from './noise';
 
 /* wire */

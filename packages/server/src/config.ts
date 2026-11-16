@@ -260,9 +260,26 @@ function clampDelay(v: unknown): number | undefined {
   return Math.min(MAX_DELAY_MS, Math.max(0, Math.round(n)));
 }
 
-function validateHeaders(v: unknown, where: string): { ok: true; headers?: Header[] } | { ok: false; problem: string } {
+/**
+ * A mock rule problem: the English `problem` plus which field and what it expects, so the UI can word it
+ * (`package.mock.invalid` params { field, expected, options?, min?, max? }).
+ */
+export interface MockRuleProblem {
+  ok: false;
+  problem: string;
+  field: string;
+  /** 'required' | 'text' | 'number' | 'range' {min,max} | 'oneOf' {options} | 'maxLength' {max} | 'base64' | 'httpMethod' | 'headerList' | 'appIdList' | 'object' | 'tooMany' {max} | 'list'. */
+  expected: string;
+  extra?: Record<string, string | number>;
+}
+
+function bad(problem: string, field: string, expected: string, extra?: Record<string, string | number>): MockRuleProblem {
+  return extra ? { ok: false, problem, field, expected, extra } : { ok: false, problem, field, expected };
+}
+
+function validateHeaders(v: unknown, where: string): { ok: true; headers?: Header[] } | MockRuleProblem {
   if (v === undefined || v === null) return { ok: true };
-  if (!Array.isArray(v)) return { ok: false, problem: `${where}: headers must be a list of [name, value] pairs` };
+  if (!Array.isArray(v)) return bad(`${where}: headers must be a list of [name, value] pairs`, 'headers', 'headerList');
   const headers: Header[] = [];
   for (const h of v) {
     if (Array.isArray(h) && h.length >= 2 && typeof h[0] === 'string' && (typeof h[1] === 'string' || typeof h[1] === 'number')) {
@@ -272,32 +289,32 @@ function validateHeaders(v: unknown, where: string): { ok: true; headers?: Heade
       const name = h.name.trim();
       if (name) headers.push([name, String(h.value)]);
     } else {
-      return { ok: false, problem: `${where}: invalid header ${JSON.stringify(h)}` };
+      return bad(`${where}: invalid header ${JSON.stringify(h)}`, 'headers', 'headerList');
     }
   }
   return { ok: true, headers };
 }
 
-function validateAction(raw: unknown, where: string): { ok: true; action: MockAction } | { ok: false; problem: string } {
-  if (!isPlainObject(raw)) return { ok: false, problem: `${where}: action is missing` };
+function validateAction(raw: unknown, where: string): { ok: true; action: MockAction } | MockRuleProblem {
+  if (!isPlainObject(raw)) return bad(`${where}: action is missing`, 'action', 'required');
   switch (raw.type) {
     case 'respond': {
       const status = toNumber(raw.status ?? 200);
       if (status === undefined || !Number.isInteger(status) || status < 100 || status > 599) {
-        return { ok: false, problem: `${where}: status must be an integer between 100 and 599` };
+        return bad(`${where}: status must be an integer between 100 and 599`, 'status', 'range', { min: 100, max: 599 });
       }
       const h = validateHeaders(raw.headers, where);
       if (!h.ok) return h;
       if (raw.body !== undefined && raw.body !== null && typeof raw.body !== 'string') {
-        return { ok: false, problem: `${where}: body must be a string` };
+        return bad(`${where}: body must be a string`, 'body', 'text');
       }
       const bodyEncoding = raw.bodyEncoding === 'base64' ? 'base64' : 'utf8';
       if (raw.bodyEncoding !== undefined && raw.bodyEncoding !== 'utf8' && raw.bodyEncoding !== 'base64') {
-        return { ok: false, problem: `${where}: bodyEncoding must be utf8 or base64` };
+        return bad(`${where}: bodyEncoding must be utf8 or base64`, 'bodyEncoding', 'oneOf', { options: 'utf8, base64' });
       }
       const body = typeof raw.body === 'string' ? raw.body : undefined;
       if (body !== undefined && bodyEncoding === 'base64' && !BASE64_RE.test(body)) {
-        return { ok: false, problem: `${where}: body is not valid base64` };
+        return bad(`${where}: body is not valid base64`, 'body', 'base64');
       }
       const action: MockAction = { type: 'respond', status };
       if (h.headers) action.headers = h.headers;
@@ -311,13 +328,13 @@ function validateAction(raw: unknown, where: string): { ok: true; action: MockAc
     }
     case 'delay': {
       const delayMs = clampDelay(raw.delayMs);
-      if (delayMs === undefined) return { ok: false, problem: `${where}: delayMs must be a number` };
+      if (delayMs === undefined) return bad(`${where}: delayMs must be a number`, 'delayMs', 'number');
       return { ok: true, action: { type: 'delay', delayMs } };
     }
     case 'fail': {
       const error = raw.error ?? 'connection';
       if (typeof error !== 'string' || !(FAIL_ERRORS as readonly string[]).includes(error)) {
-        return { ok: false, problem: `${where}: error must be one of ${FAIL_ERRORS.join(', ')}` };
+        return bad(`${where}: error must be one of ${FAIL_ERRORS.join(', ')}`, 'error', 'oneOf', { options: FAIL_ERRORS.join(', ') });
       }
       const action: MockAction = { type: 'fail', error: error as (typeof FAIL_ERRORS)[number] };
       const message = optionalString(raw.message, 2_000);
@@ -327,28 +344,28 @@ function validateAction(raw: unknown, where: string): { ok: true; action: MockAc
       return { ok: true, action };
     }
     default:
-      return { ok: false, problem: `${where}: action type must be respond, delay or fail` };
+      return bad(`${where}: action type must be respond, delay or fail`, 'action', 'oneOf', { options: 'respond, delay, fail' });
   }
 }
 
-export function validateMockRule(raw: unknown, index = 0, now = Date.now()): { ok: true; rule: MockRule } | { ok: false; problem: string } {
+export function validateMockRule(raw: unknown, index = 0, now = Date.now()): { ok: true; rule: MockRule } | MockRuleProblem {
   const where = `rule #${index + 1}`;
-  if (!isPlainObject(raw)) return { ok: false, problem: `${where}: must be an object` };
+  if (!isPlainObject(raw)) return bad(`${where}: must be an object`, 'rule', 'object');
   const label = typeof raw.name === 'string' && raw.name.trim() ? `${where} (${raw.name.trim().slice(0, 60)})` : where;
-  if (typeof raw.url !== 'string') return { ok: false, problem: `${label}: url must be a string` };
-  if (raw.url.length > 8_192) return { ok: false, problem: `${label}: url is too long` };
+  if (typeof raw.url !== 'string') return bad(`${label}: url must be a string`, 'url', 'text');
+  if (raw.url.length > 8_192) return bad(`${label}: url is too long`, 'url', 'maxLength', { max: 8_192 });
   const methodRaw = typeof raw.method === 'string' ? raw.method.trim() : raw.method === undefined ? '*' : null;
   if (methodRaw === null || (methodRaw !== '*' && methodRaw !== '' && !METHOD_RE.test(methodRaw))) {
-    return { ok: false, problem: `${label}: method must be '*' or an HTTP method` };
+    return bad(`${label}: method must be '*' or an HTTP method`, 'method', 'httpMethod');
   }
   const match = raw.match ?? 'contains';
   if (typeof match !== 'string' || !(MATCH_TYPES as string[]).includes(match)) {
-    return { ok: false, problem: `${label}: match must be one of ${MATCH_TYPES.join(', ')}` };
+    return bad(`${label}: match must be one of ${MATCH_TYPES.join(', ')}`, 'match', 'oneOf', { options: MATCH_TYPES.join(', ') });
   }
   let apps: string[] | undefined;
   if (raw.apps !== undefined && raw.apps !== null) {
     if (!Array.isArray(raw.apps) || raw.apps.some((a) => typeof a !== 'string')) {
-      return { ok: false, problem: `${label}: apps must be a list of app ids` };
+      return bad(`${label}: apps must be a list of app ids`, 'apps', 'appIdList');
     }
     apps = [...new Set((raw.apps as string[]).map((a) => a.trim()).filter(Boolean))];
   }
@@ -371,24 +388,42 @@ export function validateMockRule(raw: unknown, index = 0, now = Date.now()): { o
   return { ok: true, rule };
 }
 
-/** Validate a rule list. Valid rules are kept (duplicate ids get a fresh id); `problems` lists the rest. */
-export function validateMockRules(raw: unknown, now = Date.now()): { rules: MockRule[]; problems: string[] } {
-  if (!Array.isArray(raw)) return { rules: [], problems: ['mock rules must be a list'] };
+/** One rejected rule of a list: its 1-based position, name and what was wrong (for the UI's own words). */
+export interface MockRuleIssue {
+  rule: number;
+  name?: string;
+  field: string;
+  expected: string;
+  extra?: Record<string, string | number>;
+}
+
+/**
+ * Validate a rule list. Valid rules are kept (duplicate ids get a fresh id); `problems` lists the rest in English,
+ * `issues` the same with field + expectation.
+ */
+export function validateMockRules(raw: unknown, now = Date.now()): { rules: MockRule[]; problems: string[]; issues: MockRuleIssue[] } {
+  if (!Array.isArray(raw)) return { rules: [], problems: ['mock rules must be a list'], issues: [{ rule: 0, field: 'mocks', expected: 'list' }] };
   const problems: string[] = [];
-  if (raw.length > MAX_MOCK_RULES) problems.push(`too many mock rules (${raw.length}); at most ${MAX_MOCK_RULES}`);
+  const issues: MockRuleIssue[] = [];
+  if (raw.length > MAX_MOCK_RULES) {
+    problems.push(`too many mock rules (${raw.length}); at most ${MAX_MOCK_RULES}`);
+    issues.push({ rule: 0, field: 'mocks', expected: 'tooMany', extra: { max: MAX_MOCK_RULES, count: raw.length } });
+  }
   const rules: MockRule[] = [];
   const seen = new Set<string>();
   raw.slice(0, MAX_MOCK_RULES).forEach((item, index) => {
     const r = validateMockRule(item, index, now);
     if (!r.ok) {
       problems.push(r.problem);
+      const name = isPlainObject(item) && typeof item.name === 'string' && item.name.trim() ? item.name.trim().slice(0, 60) : undefined;
+      issues.push({ rule: index + 1, ...(name ? { name } : {}), field: r.field, expected: r.expected, ...(r.extra ? { extra: r.extra } : {}) });
       return;
     }
     const rule = seen.has(r.rule.id) ? { ...r.rule, id: newMockRuleId() } : r.rule;
     seen.add(rule.id);
     rules.push(rule);
   });
-  return { rules, problems };
+  return { rules, problems, issues };
 }
 
 /* ────────────────────────────── file helpers ────────────────────────────── */

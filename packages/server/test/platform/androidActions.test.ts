@@ -181,6 +181,17 @@ describe('runAndroidAction', () => {
     expect(missing.code).toBe('action.fileNotFound');
   });
 
+  it('a bad parameter names the field and what it expects (the UI words it)', async () => {
+    const { adb } = fakeAdb({});
+    expect(await runAndroidAction(target(adb), 'key-event', { key: 'warp' })).toMatchObject({
+      ok: false,
+      code: 'action.invalidParams',
+      params: { param: 'key', expected: 'key', value: 'warp' },
+    });
+    expect(await runAndroidAction(target(adb), 'font-scale', { scale: 9 })).toMatchObject({ params: { param: 'scale', expected: 'range', min: 0.5, max: 2 } });
+    expect(await runAndroidAction(target(adb), 'open-url', {})).toMatchObject({ params: { param: 'url', expected: 'url' } });
+  });
+
   it('builds settings/uimode/input commands', async () => {
     const { adb, calls } = fakeAdb({});
     await runAndroidAction(target(adb), 'appearance', { mode: 'dark' });

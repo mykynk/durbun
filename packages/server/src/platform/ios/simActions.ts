@@ -93,7 +93,7 @@ export async function runSimAction(
   const { udid } = t;
   const needApp = (): string | DeviceActionResult => {
     const appId = str(params, 'appId');
-    if (!validAppId(appId)) return fail('A valid bundle identifier (appId) is required', 'action.invalidParams');
+    if (!validAppId(appId)) return fail('A valid bundle identifier (appId) is required', 'action.invalidParams', undefined, { param: 'appId', expected: 'appId' });
     return appId;
   };
 
@@ -113,7 +113,7 @@ export async function runSimAction(
 
     case 'open-url': {
       const url = str(params, 'url');
-      if (!url || url.length > 4096) return fail('A URL is required', 'action.invalidParams');
+      if (!url || url.length > 4096) return fail('A URL is required', 'action.invalidParams', undefined, { param: 'url', expected: 'url' });
       const r = await simOf(t)(['openurl', udid, url]);
       if (!r.ok) return fail(`Could not open the URL: ${simError(r)}`, 'action.openUrlFailed');
       return done(`Opened ${url}`);
@@ -178,7 +178,7 @@ export async function runSimAction(
       if (typeof appId !== 'string') return appId;
       const service = str(params, 'permission');
       if (!service || !SIM_PRIVACY_SERVICES.includes(service)) {
-        return fail(`permission must be one of: ${SIM_PRIVACY_SERVICES.join(', ')}`, 'action.invalidParams');
+        return fail(`permission must be one of: ${SIM_PRIVACY_SERVICES.join(', ')}`, 'action.invalidParams', undefined, { param: 'permission', expected: 'oneOf', options: SIM_PRIVACY_SERVICES.join(', ') });
       }
       if (params.restore === true) {
         // simctl cannot read what was set: "restore" asks the user again, as after a fresh install.
@@ -187,7 +187,7 @@ export async function runSimAction(
         return done(`${appId} will ask for ${service} again`, 'action.permissionReset');
       }
       const grant = bool(params, 'grant');
-      if (grant === undefined) return fail('grant (boolean) is required', 'action.invalidParams');
+      if (grant === undefined) return fail('grant (boolean) is required', 'action.invalidParams', undefined, { param: 'grant', expected: 'boolean' });
       const r = await simOf(t)(['privacy', udid, grant ? 'grant' : 'revoke', service, appId]);
       if (!r.ok) return fail(`Could not change ${service} for ${appId}: ${simError(r)}`);
       return done(grant ? `${service} granted to ${appId}` : `${service} revoked from ${appId} (iOS ends a running app when a permission is revoked)`);
@@ -201,7 +201,7 @@ export async function runSimAction(
 
     case 'appearance': {
       const mode = str(params, 'mode');
-      if (mode !== 'dark' && mode !== 'light') return fail('mode must be "dark" or "light"', 'action.invalidParams');
+      if (mode !== 'dark' && mode !== 'light') return fail('mode must be "dark" or "light"', 'action.invalidParams', undefined, { param: 'mode', expected: 'oneOf', options: 'dark, light' });
       const r = await simOf(t)(['ui', udid, 'appearance', mode]);
       if (!r.ok) return fail(`Could not switch appearance: ${simError(r)}`);
       return done(mode === 'dark' ? 'Dark mode on' : 'Light mode on');
@@ -213,7 +213,7 @@ export async function runSimAction(
       let size: string;
       if (explicit && CONTENT_SIZES.some(([n]) => n === explicit)) size = explicit;
       else if (scale !== undefined && scale > 0 && scale <= 4) size = contentSizeForScale(scale);
-      else return fail('scale must be a positive number (1 = default size)', 'action.invalidParams');
+      else return fail('scale must be a positive number (1 = default size)', 'action.invalidParams', undefined, { param: 'scale', expected: 'range', min: 0.1, max: 4 });
       const r = await simOf(t)(['ui', udid, 'content_size', size]);
       if (!r.ok) return fail(`Could not set the content size: ${simError(r)}`);
       return done(`Text size set to ${size}`, 'action.done', { contentSize: size });
@@ -224,11 +224,11 @@ export async function runSimAction(
       if (typeof appId !== 'string') return appId;
       const payload = params.payload;
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-        return fail('payload must be a JSON object', 'action.invalidParams');
+        return fail('payload must be a JSON object', 'action.invalidParams', undefined, { param: 'payload', expected: 'jsonObject' });
       }
-      if (!('aps' in payload)) return fail('payload must contain an "aps" object', 'action.invalidParams');
+      if (!('aps' in payload)) return fail('payload must contain an "aps" object', 'action.invalidParams', undefined, { param: 'payload', expected: 'apsObject' });
       const json = JSON.stringify(payload);
-      if (Buffer.byteLength(json) > 4096) return fail('payload must be 4096 bytes or less', 'action.invalidParams');
+      if (Buffer.byteLength(json) > 4096) return fail('payload must be 4096 bytes or less', 'action.invalidParams', undefined, { param: 'payload', expected: 'maxBytes', max: 4096 });
       await ensureDir(t.ctx.tempDir);
       const file = path.join(t.ctx.tempDir, tempFileName('push', t.label, 'json'));
       await fs.promises.writeFile(file, json);
@@ -245,7 +245,7 @@ export async function runSimAction(
       const lat = num(params, 'lat');
       const lon = num(params, 'lon');
       if (lat === undefined || lon === undefined || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
-        return fail('lat (−90…90) and lon (−180…180) are required', 'action.invalidParams');
+        return fail('lat (−90…90) and lon (−180…180) are required', 'action.invalidParams', undefined, { param: 'lat', expected: 'coordinates' });
       }
       const r = await simOf(t)(['location', udid, 'set', `${lat},${lon}`]);
       if (!r.ok) return fail(`Could not set the location: ${simError(r)}`);
@@ -254,7 +254,7 @@ export async function runSimAction(
 
     case 'status-bar': {
       const mode = str(params, 'mode');
-      if (mode !== 'clean' && mode !== 'reset') return fail('mode must be "clean" or "reset"', 'action.invalidParams');
+      if (mode !== 'clean' && mode !== 'reset') return fail('mode must be "clean" or "reset"', 'action.invalidParams', undefined, { param: 'mode', expected: 'oneOf', options: 'clean, reset' });
       const args =
         mode === 'clean'
           ? [
@@ -341,7 +341,7 @@ async function findAppBundle(root: string, depth = 3): Promise<string | undefine
 }
 
 async function installApp(t: SimActionTarget, file: string | undefined, replace = false): Promise<DeviceActionResult> {
-  if (!file || !path.isAbsolute(file)) return fail('An absolute .app / .zip path is required', 'action.invalidParams');
+  if (!file || !path.isAbsolute(file)) return fail('An absolute .app / .zip path is required', 'action.invalidParams', undefined, { param: 'file', expected: 'absolutePath', kinds: '.app, .zip, .ipa' });
   const st = await fs.promises.stat(file).catch(() => undefined);
   if (!st) return fail(`File not found: ${file}`, 'action.fileNotFound');
   let appPath = file;

@@ -37,17 +37,41 @@ export type MockRuleDraft = Omit<MockRule, 'id' | 'createdAt'>;
 export type UiFocus =
   /** Logs tab: select + scroll to this log id (clear filters that hide it, like "show in context"). */
   | { kind: 'log'; logId: number; seq: number }
+  /**
+   * Logs tab: open the moments around `ts` (±30 s, filters suspended for the view, like "show in context") when
+   * there is no line to point at; prefer lines of this device / app session. `reason` says why (worded by Logs).
+   */
+  | { kind: 'logTime'; ts: number; deviceId?: string; appId?: string; reason: LogTimeReason; seq: number }
   /** Network tab: select this request and open its detail. */
   | { kind: 'network'; netId: string; seq: number }
+  /** Network tab: show only the requests this mock rule answered ("12 hits" on a rule). */
+  | { kind: 'networkMockHits'; ruleId: string; seq: number }
   /** Mocks tab: select / open this saved rule. */
   | { kind: 'mock'; ruleId: string; seq: number }
   /** Mocks tab: open the editor pre-filled with a new, unsaved rule. */
   | { kind: 'mockDraft'; draft: MockRuleDraft; seq: number }
   /** Flows tab: open this flow (and show this run). */
   | { kind: 'flow'; flowId: string; runId?: string; seq: number }
-  | { kind: 'flowFromRequests'; ids: string[]; seq: number }
+  /**
+   * Flows tab: open "flow from requests" with `ids` picked. `visibleIds` (in list order) are the requests the
+   * caller's list showed, so the dialog can offer the same set, `filterLabel` words the filter that made that list
+   * ("POST · /login"), `from` is where the user started (wording / analytics-free hints only).
+   */
+  | { kind: 'flowFromRequests'; ids: string[]; visibleIds?: string[]; filterLabel?: string; from?: FlowFromRequestsSource; seq: number }
   /** Flows tab: open the import dialog with this text (a dropped flow file, an AI answer). */
   | { kind: 'flowImport'; text: string; seq: number };
+
+/** Why Logs is opened by time instead of a line: the request's own line was dropped by the memory limit. */
+export type LogTimeReason = 'requestLineGone';
+
+/** Where "flow from requests" was started. */
+export type FlowFromRequestsSource = 'network' | 'logs' | 'flows';
+
+export interface FlowFromRequestsOptions {
+  visibleIds?: readonly string[];
+  filterLabel?: string;
+  from?: FlowFromRequestsSource;
+}
 
 let focusSeq = 0;
 
@@ -107,6 +131,24 @@ export const ui = {
     ui.setTab('logs');
     useUi.setState({ focus: { kind: 'log', logId, seq: ++focusSeq } });
   },
+  /**
+   * Switch to Logs and open the moments around `ts` (epoch ms): for a request whose own log line is gone. Prefer
+   * lines of `deviceId` / `appId` when given.
+   */
+  focusLogTime(ts: number, opts: { deviceId?: string; appId?: string; reason?: LogTimeReason } = {}): void {
+    if (!Number.isFinite(ts)) return;
+    ui.setTab('logs');
+    const focus: UiFocus = { kind: 'logTime', ts, reason: opts.reason ?? 'requestLineGone', seq: ++focusSeq };
+    if (opts.deviceId) focus.deviceId = opts.deviceId;
+    if (opts.appId) focus.appId = opts.appId;
+    useUi.setState({ focus });
+  },
+  /** Switch to Network and show only the requests this mock rule answered. */
+  focusNetworkMockHits(ruleId: string): void {
+    if (!ruleId) return;
+    ui.setTab('network');
+    useUi.setState({ focus: { kind: 'networkMockHits', ruleId, seq: ++focusSeq } });
+  },
   /** Switch to Network and open this request. */
   focusNetwork(netId: string): void {
     ui.setTab('network');
@@ -127,10 +169,17 @@ export const ui = {
     ui.setTab('flows');
     useUi.setState({ focus: { kind: 'flow', flowId, ...(runId ? { runId } : {}), seq: ++focusSeq } });
   },
-  /** Switch to Flows and offer to build a flow from these captured requests. */
-  newFlowFromRequests(ids: string[]): void {
+  /**
+   * Switch to Flows and offer to build a flow from these captured requests (`opts`: the list they were picked
+   * from, its filter in words, where the user started).
+   */
+  newFlowFromRequests(ids: readonly string[], opts: FlowFromRequestsOptions = {}): void {
     ui.setTab('flows');
-    useUi.setState({ focus: { kind: 'flowFromRequests', ids, seq: ++focusSeq } });
+    const focus: UiFocus = { kind: 'flowFromRequests', ids: [...ids], seq: ++focusSeq };
+    if (opts.visibleIds) focus.visibleIds = [...opts.visibleIds];
+    if (opts.filterLabel) focus.filterLabel = opts.filterLabel;
+    if (opts.from) focus.from = opts.from;
+    useUi.setState({ focus });
   },
   /** Switch to Flows and offer to import the flows in this text. */
   importFlows(text: string): void {

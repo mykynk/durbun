@@ -142,12 +142,12 @@ export async function runAndroidAction(
   const shell = (cmd: string, timeoutMs?: number) => adb.shell(serial, cmd, timeoutMs ? { timeoutMs } : undefined);
   const needApp = (): string | DeviceActionResult => {
     const appId = str(params, 'appId');
-    if (!validAppId(appId)) return fail('A valid package name (appId) is required', 'action.invalidParams');
+    if (!validAppId(appId)) return fail('A valid package name (appId) is required', 'action.invalidParams', undefined, { param: 'appId', expected: 'appId' });
     return appId;
   };
   // Phones with a work profile / second user: the app of that user (`--user`); default: the phone's default.
   const user = userParam(params, t.users);
-  if (user === 'invalid') return fail('userId is not a user of this phone', 'action.invalidParams');
+  if (user === 'invalid') return fail('userId is not a user of this phone', 'action.invalidParams', undefined, { param: 'userId', expected: 'user' });
   const u = userFlag(user);
 
   switch (action) {
@@ -164,7 +164,7 @@ export async function runAndroidAction(
 
     case 'open-url': {
       const url = str(params, 'url');
-      if (!url || url.length > 4096) return fail('A URL is required', 'action.invalidParams');
+      if (!url || url.length > 4096) return fail('A URL is required', 'action.invalidParams', undefined, { param: 'url', expected: 'url' });
       const r = await shell(`am start -a android.intent.action.VIEW -d ${shellQuote(url)}`);
       const out = textOf(r);
       if (!r.ok || /^Error:/m.test(out)) {
@@ -242,7 +242,7 @@ export async function runAndroidAction(
 
     case 'app-install': {
       const file = str(params, 'file');
-      if (!file || !path.isAbsolute(file)) return fail('An absolute APK file path is required', 'action.invalidParams');
+      if (!file || !path.isAbsolute(file)) return fail('An absolute APK file path is required', 'action.invalidParams', undefined, { param: 'file', expected: 'absolutePath', kinds: '.apk, .apks, .xapk' });
       const st = await fs.promises.stat(file).catch(() => undefined);
       if (!st?.isFile()) return fail(`File not found: ${file}`, 'action.fileNotFound');
       const kind = androidPackageKind(file);
@@ -287,7 +287,7 @@ export async function runAndroidAction(
       const size = (str(params, 'bufferSize') ?? DEFAULT_LOG_BUFFER).toUpperCase();
       const bytes = logBufferBytes(size);
       if (bytes === undefined || bytes < 64 * 1024 || bytes > 256 * 1024 * 1024) {
-        return fail('bufferSize must be between 64K and 256M (e.g. "16M")', 'action.invalidParams');
+        return fail('bufferSize must be between 64K and 256M (e.g. "16M")', 'action.invalidParams', undefined, { param: 'bufferSize', expected: 'range', min: '64K', max: '256M' });
       }
       const before = parseLogBufferSizes((await adb.run(['-s', serial, 'logcat', '-g'], { timeoutMs: 15_000 })).stdout);
       const r = await adb.run(['-s', serial, 'logcat', '-G', size], { timeoutMs: 15_000 });
@@ -317,7 +317,7 @@ export async function runAndroidAction(
 
     case 'input-text': {
       const text = typeof params.text === 'string' ? params.text : '';
-      if (!text) return fail('text is required', 'action.invalidParams');
+      if (!text) return fail('text is required', 'action.invalidParams', undefined, { param: 'text', expected: 'text' });
       if (!/^[\x20-\x7E\n]*$/.test(text)) {
         // adb's `input text` types through the ASCII key map only; no shell command types other characters.
         const others = [...new Set([...text].filter((c) => !/[\x20-\x7E\n]/.test(c)))].slice(0, 8).join(' ');
@@ -337,7 +337,7 @@ export async function runAndroidAction(
     case 'key-event': {
       const key = str(params, 'key');
       const code = key ? ANDROID_KEY_CODES[key] : undefined;
-      if (code === undefined) return fail(`Unknown key "${key ?? ''}"`, 'action.invalidParams');
+      if (code === undefined) return fail(`Unknown key "${key ?? ''}"`, 'action.invalidParams', undefined, { param: 'key', expected: 'key', value: key ?? '' });
       const r = await shell(`input keyevent ${code}`);
       if (!r.ok) return fail(`Could not send the key: ${failureText(r)}`);
       return done(`Sent ${key}`);
@@ -348,7 +348,7 @@ export async function runAndroidAction(
       const lat = num(params, 'lat');
       const lon = num(params, 'lon');
       if (lat === undefined || lon === undefined || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
-        return fail('lat (−90…90) and lon (−180…180) are required', 'action.invalidParams');
+        return fail('lat (−90…90) and lon (−180…180) are required', 'action.invalidParams', undefined, { param: 'lat', expected: 'coordinates' });
       }
       // Note the argument order of the emulator console: longitude first.
       const r = await adb.run(['-s', serial, 'emu', 'geo', 'fix', String(lon), String(lat)], { timeoutMs: 10_000 });

@@ -537,7 +537,7 @@ export class IosSimDriver implements DeviceDriver {
     }
     if (this.pollProblem) return { ...base, available: true, detail: this.pollProblem, code: 'driver.simctlError' };
     const n = this.sessions.size;
-    return { ...base, available: true, detail: `${n} booted simulator${n === 1 ? '' : 's'}` };
+    return { ...base, available: true, detail: `${n} booted simulator${n === 1 ? '' : 's'}`, code: 'driver.iosSim.booted', params: { count: n } };
   }
 
   async checks(): Promise<ToolCheck[]> {
@@ -549,6 +549,8 @@ export class IosSimDriver implements DeviceDriver {
           label: 'Xcode simctl (iOS simulators)',
           status: 'missing',
           detail: x.detail ?? 'Xcode is not installed or not selected',
+          code: x.code ?? 'doctor.xcode.missing',
+          ...(x.params ? { params: x.params } : {}),
           fix: 'Install Xcode from the App Store, then: sudo xcode-select -s /Applications/Xcode.app',
           docsUrl: 'https://developer.apple.com/xcode/',
         },
@@ -567,6 +569,8 @@ export class IosSimDriver implements DeviceDriver {
         ...(version ? { version } : {}),
         ...(x.developerDir ? { path: x.developerDir } : {}),
         detail: problem ?? `${this.sessions.size} booted simulator(s)`,
+        // A failing simctl / xcodebuild: its own output is the data.
+        ...(problem ? { code: 'doctor.simctl.failed', params: { error: problem } } : { code: 'doctor.simctl.booted', params: { count: this.sessions.size } }),
         ...(fix ? { fix } : {}),
       },
     ];

@@ -185,6 +185,8 @@ describe('REST API', () => {
     const bad = await fetch(`${t.base}/api/import`, { method: 'POST', body: JSON.stringify({ format: 'har' }) });
     expect(bad.status).toBe(400);
     expect(await bad.json()).toMatchObject({ code: 'import.invalid' });
+    const noLogs = await fetch(`${t.base}/api/import`, { method: 'POST', body: JSON.stringify({ format: 'durbun-session', version: 1, devices: [], apps: [], network: [] }) });
+    expect(await noLogs.json()).toMatchObject({ code: 'import.invalid', params: { field: 'logs' } });
     const broken = await fetch(`${t.base}/api/import`, { method: 'POST', body: '{"format":' });
     expect(broken.status).toBe(400);
     expect(await broken.json()).toMatchObject({ code: 'body.invalidJson' });

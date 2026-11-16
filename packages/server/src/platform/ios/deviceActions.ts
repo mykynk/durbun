@@ -130,7 +130,7 @@ export async function runIosDeviceAction(
   const dev = ['--device', t.udid];
   const needApp = (): string | DeviceActionResult => {
     const appId = str(params, 'appId');
-    if (!validAppId(appId)) return fail('A valid bundle identifier (appId) is required', 'action.invalidParams');
+    if (!validAppId(appId)) return fail('A valid bundle identifier (appId) is required', 'action.invalidParams', undefined, { param: 'appId', expected: 'appId' });
     return appId;
   };
   const needDevicectl = (): DeviceActionResult | undefined =>
@@ -190,7 +190,7 @@ export async function runIosDeviceAction(
       const missing = needDevicectl();
       if (missing) return missing;
       const url = str(params, 'url');
-      if (!url || url.length > 4096) return fail('A URL is required', 'action.invalidParams');
+      if (!url || url.length > 4096) return fail('A URL is required', 'action.invalidParams', undefined, { param: 'url', expected: 'url' });
       const appId = str(params, 'appId');
       let r;
       if (appId && validAppId(appId)) {
@@ -266,7 +266,7 @@ async function stopApp(t: IosDeviceActionTarget, appId: string): Promise<DeviceA
 
 async function installApp(t: IosDeviceActionTarget, file: string | undefined, replace = false): Promise<DeviceActionResult> {
   const devicectl = t.devicectl ?? xcrunDevicectl;
-  if (!file || !path.isAbsolute(file)) return fail('An absolute .app / .ipa path is required', 'action.invalidParams');
+  if (!file || !path.isAbsolute(file)) return fail('An absolute .app / .ipa path is required', 'action.invalidParams', undefined, { param: 'file', expected: 'absolutePath', kinds: '.app, .ipa' });
   const st = await fs.promises.stat(file).catch(() => undefined);
   if (!st) return fail(`File not found: ${file}`, 'action.fileNotFound');
   let appPath = file;

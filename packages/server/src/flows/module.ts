@@ -17,9 +17,10 @@
  *   POST   /api/flows/:id/preflight           FlowRunRequest → FlowPreflight
  *   POST   /api/flows/:id/run                 FlowRunRequest → FlowRun (409 + preflight when it cannot start)
  *   GET    /api/flow-runs?flowId=&limit=      { running, runs } (headers)
- *   DELETE /api/flow-runs?flowId=             remove finished runs
+ *   DELETE /api/flow-runs?flowId=             remove finished, unpinned runs → { removed, keptPinned }
  *   GET    /api/flow-runs/:id                 FlowRun
- *   DELETE /api/flow-runs/:id
+ *   PATCH  /api/flow-runs/:id                 { pinned } → FlowRunHeader (409 flowRun.pinLimit {max})
+ *   DELETE /api/flow-runs/:id                 (a pinned run too: deleting it is explicit)
  *   POST   /api/flow-runs/:id/cancel
  *   GET    /api/flow-runs/:id/files/:name     evidence file
  *   GET|PUT /api/flow-environments            FlowEnvironments (PUT with an old `revision`: 409 env.conflict)
@@ -59,7 +60,7 @@ import type { Hub, Logger } from '../types';
 import { buildAiPack, extractFlowDocs, previewImport, type AiPackRequest } from './aiPack';
 import { FlowEngine, FlowRunError } from './engine';
 import { EnvironmentStore } from './environments';
-import { RunStore } from './runs';
+import { RunPinError, RunStore } from './runs';
 import { FlowStore, FlowStoreError } from './store';
 import { FlowTriggers } from './triggers';
 
@@ -389,7 +390,11 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
     const method = req.method ?? 'GET';
     if (!id) {
       const flowId = queryString(query, 'flowId');
-      if (method === 'DELETE') return sendJson(res, 200, { removed: await runs.clear(flowId) });
+      if (method === 'DELETE') {
+        const removed = await runs.clear(flowId);
+        if (removed > 0) broadcastFlows();
+        return sendJson(res, 200, { removed, keptPinned: runs.pinnedCount(flowId) });
+      }
       requireMethod(req, 'GET', 'DELETE');
       const limit = Math.max(1, Math.min(500, Number(query.get('limit')) || 100));
       const running = engine.running().filter((r) => !flowId || r.flowId === flowId);
@@ -402,7 +407,14 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
         broadcastFlows();
         return sendJson(res, 200, { ok: true });
       }
-      requireMethod(req, 'GET', 'DELETE');
+      if (method === 'PATCH') {
+        const body = await readJson(req, JSON_LIMIT);
+        if (!isPlainObject(body) || typeof body.pinned !== 'boolean') throw new HttpError(400, 'Send { "pinned": true | false }', 'params.invalid');
+        const header = await runs.setPinned(id, body.pinned);
+        broadcastFlows();
+        return sendJson(res, 200, header);
+      }
+      requireMethod(req, 'GET', 'DELETE', 'PATCH');
       const run = engine.activeRun(id) ?? (await runs.get(id));
       if (!run) throw new HttpError(404, 'No such run', 'flowRun.notFound');
       return sendJson(res, 200, run);
@@ -506,6 +518,10 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
         throw new HttpError(err.status, err.message, err.code);
       }
       if (err instanceof PackageError) throw new HttpError(err.status, err.message, err.code);
+      if (err instanceof RunPinError) {
+        if (err.params) return sendJson(res, err.status, { error: err.message, code: err.code, params: err.params });
+        throw new HttpError(err.status, err.message, err.code);
+      }
       throw err;
     }
   }

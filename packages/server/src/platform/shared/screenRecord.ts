@@ -49,7 +49,7 @@ export class ScreenRecorder {
     if (this.active) return Promise.resolve(fail('A screen recording is already running on this device', 'action.recording.busy'));
     const raw = num(params, 'durationSec');
     const limitSec = raw === undefined ? maxSec : Math.round(raw);
-    if (limitSec < 1 || limitSec > maxSec) return Promise.resolve(fail(`durationSec must be between 1 and ${maxSec}`, 'action.invalidParams'));
+    if (limitSec < 1 || limitSec > maxSec) return Promise.resolve(fail(`durationSec must be between 1 and ${maxSec}`, 'action.invalidParams', undefined, { param: 'durationSec', expected: 'range', min: 1, max: maxSec }));
 
     const a = { info: { startedAt: Date.now(), limitSec }, stopRequested: false } as Active;
     this.active = a;

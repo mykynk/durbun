@@ -333,6 +333,11 @@ export interface FlowRun {
   errorParams?: I18nParams;
   outputs?: Record<string, unknown>;
   preflight?: FlowPreflightIssue[];
+  /**
+   * Kept out of the automatic clean-up: never pruned for the history limits, kept when a flow's history is
+   * cleared (PATCH /api/flow-runs/:id { pinned }). Absent = not pinned.
+   */
+  pinned?: boolean;
 }
 
 /** A run without its steps (history lists). */

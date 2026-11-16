@@ -274,7 +274,7 @@ describe('an adb server of another version', () => {
     expect(ctx.hub.devices.size).toBe(0);
     version = 41;
     await waitFor(() => ctx.hub.devices.get(ID)?.state === 'online', 10_000);
-    expect(driver.status().code).toBeUndefined();
+    expect(driver.status().code).toBe('driver.android.online');
   });
 
   it('uses an adb of the server version found on this Mac when no adbPath is set', async () => {
@@ -288,7 +288,7 @@ describe('an adb server of another version', () => {
     driver = new AndroidDriver({ resolveEnv: isolatedEnv(dir, { ANDROID_HOME: sdk, PATH: path.dirname(brew) }) });
     await driver.start(ctx);
     await waitFor(() => ctx.hub.devices.get(ID)?.state === 'online', 10_000);
-    expect(driver.status().code).toBeUndefined();
+    expect(driver.status().code).toBe('driver.android.online');
     const used = calls(dir).filter((c) => c[1] !== 'version');
     expect(used.some((c) => c[0] === 'brew' && c[1] === 'devices')).toBe(true);
     expect(used.filter((c) => c[0] === 'sdk')).toEqual([]);

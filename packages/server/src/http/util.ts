@@ -7,6 +7,8 @@ export class HttpError extends Error {
     readonly status: number,
     message: string,
     readonly code?: string,
+    /** Params of `code` for the UI's own wording (sent as `params` next to `error` and `code`). */
+    readonly params?: Record<string, string | number>,
   ) {
     super(message);
     this.name = 'HttpError';
@@ -34,8 +36,17 @@ export function sendJson(res: ServerResponse, status: number, data: unknown, hea
   res.end(body);
 }
 
-export function sendError(res: ServerResponse, status: number, message: string, code?: string, headers: Record<string, string> = {}): void {
-  sendJson(res, status, code ? { error: message, code } : { error: message }, headers);
+export function sendError(
+  res: ServerResponse,
+  status: number,
+  message: string,
+  code?: string,
+  headers: Record<string, string> = {},
+  params?: Record<string, string | number>,
+): void {
+  const body: Record<string, unknown> = code ? { error: message, code } : { error: message };
+  if (code && params && Object.keys(params).length) body.params = params;
+  sendJson(res, status, body, headers);
 }
 
 export function formatBytes(n: number): string {

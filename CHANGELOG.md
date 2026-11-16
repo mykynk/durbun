@@ -103,6 +103,8 @@ All notable changes to Dürbün are listed here. The format follows
   its connection.
 - Device tab: reasons and action errors are worded in the interface language, with the tool, the versions
   and the install command as data, instead of English text inside the sentence.
+- System check rows, device driver states and the errors for invalid action parameters, unreadable mock
+  rules in a package and session import problems are worded in the interface language too.
 - Light theme: level, method, status and SDK colours are darker where they were hard to read; a test checks
   every text and background pair (WCAG AA).
 - Status bar badges open what they describe; "Connect Slack" in a share dialog connects in place.

@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import type { AppSession, DeviceApp, DeviceInfo, LogEntry, NetworkEntry, StoreEvictions } from '@durbun/protocol';
+import type { AppSession, DeviceApp, DeviceInfo, LogEntry, MockRuleHits, NetworkEntry, StoreEvictions } from '@durbun/protocol';
 import { appGroupKey, deviceAppKey, useHub, type HubState } from './stores/hub';
 import { useScope, type Scope } from './stores/scope';
 import { useStoreLimits } from './stores/limits';
+import { useMockHits } from './stores/mockHits';
 import { emptyLogCounts, isCrashEntry, isProtectedEntry, logStore, type LogCounts, type LogStore } from './logStore';
 import { emptyNetworkCounts, networkStore, type NetworkCounts, type NetworkStore } from './networkStore';
 import { bundlePrefix } from './ownApps';
@@ -570,4 +571,50 @@ export function useScopeEvictions(): ScopeEvictions {
   const evictions = useStoreLimits((s) => s.evictions);
   const local = evictions ? undefined : { logs: logStore.dropped, requests: networkStore.dropped };
   return useMemo(() => scopeEvictions(compiled, evictions, local), [compiled, evictions, local?.logs, local?.requests]);
+}
+
+/** One rule's server count in a scope. `lastTs` is the rule's newest hit anywhere (the server keeps no per-app time). */
+export interface ScopeMockHit {
+  count: number;
+  lastTs?: number;
+}
+
+/**
+ * The server's mock rule hit counts narrowed to a scope: everything for 'all'; the rule's hits from the app sessions
+ * of the device (device scope) or of the app (app / device-app scope) otherwise. Rules with no hit in the scope are
+ * left out (read a missing rule as 0). Null when the server does not count: the caller keeps its own count.
+ */
+export function scopeMockHits(
+  compiled: CompiledScope,
+  hits: MockRuleHits | null,
+  apps: Record<string, AppSession>,
+): Record<string, ScopeMockHit> | null {
+  if (!hits) return null;
+  const out: Record<string, ScopeMockHit> = {};
+  const s = compiled.scope;
+  let sessions: ReadonlySet<string> | undefined;
+  if (s.kind === 'device') {
+    const ids = new Set<string>();
+    for (const a of Object.values(apps)) if (a.deviceId === s.deviceId) ids.add(a.id);
+    sessions = ids;
+  } else if (s.kind !== 'all') {
+    sessions = compiled.appIds ?? new Set<string>();
+  }
+  for (const [ruleId, c] of Object.entries(hits)) {
+    let count = c.count;
+    if (sessions) {
+      count = 0;
+      for (const [app, n] of Object.entries(c.byApp ?? {})) if (sessions.has(app)) count += n;
+    }
+    if (count > 0) out[ruleId] = c.lastTs ? { count, lastTs: c.lastTs } : { count };
+  }
+  return out;
+}
+
+/** `scopeMockHits` for the current scope (null: the server does not count, keep the view's own count). */
+export function useScopeMockHits(): Record<string, ScopeMockHit> | null {
+  const compiled = useCompiledScope();
+  const hits = useMockHits((st) => st.hits);
+  const apps = useHub((st) => st.apps);
+  return useMemo(() => scopeMockHits(compiled, hits, apps), [compiled, hits, apps]);
 }

@@ -151,7 +151,7 @@ const isResult = (v: unknown): v is DeviceActionResult => typeof v === 'object' 
 
 function onOff(params: Record<string, unknown>, label: string): { value: string; message: string } | DeviceActionResult {
   const enabled = bool(params, 'enabled');
-  if (enabled === undefined) return fail('enabled (boolean) is required', 'action.invalidParams');
+  if (enabled === undefined) return fail('enabled (boolean) is required', 'action.invalidParams', undefined, { param: 'enabled', expected: 'boolean' });
   return { value: enabled ? 'on' : 'off', message: `${label} ${enabled ? 'on' : 'off'}` };
 }
 
@@ -172,7 +172,7 @@ function settingIo(t: SettingTarget, action: DeviceActionId, params: Record<stri
         },
         wanted: () => {
           const mode = str(params, 'mode');
-          if (mode !== 'dark' && mode !== 'light') return fail('mode must be "dark" or "light"', 'action.invalidParams');
+          if (mode !== 'dark' && mode !== 'light') return fail('mode must be "dark" or "light"', 'action.invalidParams', undefined, { param: 'mode', expected: 'oneOf', options: 'dark, light' });
           return { value: mode === 'dark' ? 'yes' : 'no', message: mode === 'dark' ? 'Dark mode on' : 'Light mode on' };
         },
       };
@@ -189,7 +189,7 @@ function settingIo(t: SettingTarget, action: DeviceActionId, params: Record<stri
         },
         wanted: () => {
           const scale = num(params, 'scale');
-          if (scale === undefined || scale < 0.5 || scale > 2.0) return fail('scale must be a number between 0.5 and 2.0', 'action.invalidParams');
+          if (scale === undefined || scale < 0.5 || scale > 2.0) return fail('scale must be a number between 0.5 and 2.0', 'action.invalidParams', undefined, { param: 'scale', expected: 'range', min: 0.5, max: 2 });
           const value = String(Math.round(scale * 100) / 100);
           return { value, message: `Font scale set to ${value}` };
         },
@@ -210,7 +210,7 @@ function settingIo(t: SettingTarget, action: DeviceActionId, params: Record<stri
         },
         wanted: () => {
           const enabled = bool(params, 'enabled');
-          if (enabled === undefined) return fail('enabled (boolean) is required', 'action.invalidParams');
+          if (enabled === undefined) return fail('enabled (boolean) is required', 'action.invalidParams', undefined, { param: 'enabled', expected: 'boolean' });
           return { value: enabled ? '1' : '0', message: enabled ? 'Animations enabled' : 'Animations disabled' };
         },
       };
@@ -272,14 +272,14 @@ function settingIo(t: SettingTarget, action: DeviceActionId, params: Record<stri
             value === 'auto'
               ? 'settings put system accelerometer_rotation 1'
               : `settings put system accelerometer_rotation 0; settings put system user_rotation ${index}`;
-          if (value !== 'auto' && index < 0) return fail(`Unknown rotation "${value}"`, 'action.invalidParams');
+          if (value !== 'auto' && index < 0) return fail(`Unknown rotation "${value}"`, 'action.invalidParams', undefined, { param: 'orientation', expected: 'oneOf', options: ROTATIONS.join(', '), value });
           const r = await shell(cmd);
           return r.ok ? undefined : fail(`Could not change the rotation: ${failureText(r)}`);
         },
         wanted: () => {
           const o = str(params, 'orientation');
           if (o !== 'auto' && !(ROTATIONS as readonly string[]).includes(o ?? '')) {
-            return fail('orientation must be auto, portrait, landscape, reverse-portrait or reverse-landscape', 'action.invalidParams');
+            return fail('orientation must be auto, portrait, landscape, reverse-portrait or reverse-landscape', 'action.invalidParams', undefined, { param: 'orientation', expected: 'oneOf', options: ['auto', ...ROTATIONS].join(', ') });
           }
           return { value: o!, message: o === 'auto' ? 'Auto-rotate on' : `Screen turned to ${o} (apps that fix their orientation keep it)` };
         },
@@ -292,13 +292,13 @@ function settingIo(t: SettingTarget, action: DeviceActionId, params: Record<stri
           return r.ok ? settingValue(r.stdout.split('\n')[0]) : undefined;
         },
         write: async (value) => {
-          if (value !== '0' && value !== '1' && value !== DEFAULT_VALUE) return fail(`Unexpected value "${value}"`, 'action.invalidParams');
+          if (value !== '0' && value !== '1' && value !== DEFAULT_VALUE) return fail(`Unexpected value "${value}"`, 'action.invalidParams', undefined, { param: 'enabled', expected: 'oneOf', options: '0, 1', value });
           const r = await shell(putSetting('global', 'always_finish_activities', value));
           return r.ok ? undefined : fail(`Could not change "Don't keep activities": ${failureText(r)}`);
         },
         wanted: () => {
           const enabled = bool(params, 'enabled');
-          if (enabled === undefined) return fail('enabled (boolean) is required', 'action.invalidParams');
+          if (enabled === undefined) return fail('enabled (boolean) is required', 'action.invalidParams', undefined, { param: 'enabled', expected: 'boolean' });
           return {
             value: enabled ? '1' : '0',
             message: enabled ? "Don't keep activities on: every screen of an app ends when you leave it" : "Don't keep activities off",
@@ -307,13 +307,13 @@ function settingIo(t: SettingTarget, action: DeviceActionId, params: Record<stri
       };
     case 'app-permission': {
       const appId = str(params, 'appId');
-      if (!validAppId(appId)) return fail('A valid package name (appId) is required', 'action.invalidParams');
+      if (!validAppId(appId)) return fail('A valid package name (appId) is required', 'action.invalidParams', undefined, { param: 'appId', expected: 'appId' });
       const permission = str(params, 'permission');
       if (!permission || permission.length > 200 || !PERMISSION_RE.test(permission)) {
-        return fail('permission must be a permission name such as android.permission.CAMERA', 'action.invalidParams');
+        return fail('permission must be a permission name such as android.permission.CAMERA', 'action.invalidParams', undefined, { param: 'permission', expected: 'permission' });
       }
       const user = userParam(params, t.users);
-      if (user === 'invalid') return fail('userId is not a user of this phone', 'action.invalidParams');
+      if (user === 'invalid') return fail('userId is not a user of this phone', 'action.invalidParams', undefined, { param: 'userId', expected: 'user' });
       const short = permission.replace(/^android\.permission\./, '');
       return {
         label: `${short} for ${appId}`,
@@ -328,7 +328,7 @@ function settingIo(t: SettingTarget, action: DeviceActionId, params: Record<stri
         },
         wanted: () => {
           const grant = bool(params, 'grant');
-          if (grant === undefined) return fail('grant (boolean) is required', 'action.invalidParams');
+          if (grant === undefined) return fail('grant (boolean) is required', 'action.invalidParams', undefined, { param: 'grant', expected: 'boolean' });
           return {
             value: grant ? 'granted' : 'denied',
             message: grant ? `${short} granted to ${appId}` : `${short} revoked from ${appId} (Android ends the app when a permission is revoked)`,
@@ -338,9 +338,9 @@ function settingIo(t: SettingTarget, action: DeviceActionId, params: Record<stri
     }
     case 'app-locale': {
       const appId = str(params, 'appId');
-      if (!validAppId(appId)) return fail('A valid package name (appId) is required', 'action.invalidParams');
+      if (!validAppId(appId)) return fail('A valid package name (appId) is required', 'action.invalidParams', undefined, { param: 'appId', expected: 'appId' });
       const user = userParam(params, t.users);
-      if (user === 'invalid') return fail('userId is not a user of this phone', 'action.invalidParams');
+      if (user === 'invalid') return fail('userId is not a user of this phone', 'action.invalidParams', undefined, { param: 'userId', expected: 'user' });
       return {
         label: `Language of ${appId}`,
         scope: { appId },
@@ -349,7 +349,7 @@ function settingIo(t: SettingTarget, action: DeviceActionId, params: Record<stri
           return r.ok ? parseAppLocales(textOf(r)) : undefined;
         },
         write: async (value) => {
-          if (value !== 'system' && !value.split(',').every((tag) => LOCALE_RE.test(tag))) return fail(`Unexpected locale "${value}"`, 'action.invalidParams');
+          if (value !== 'system' && !value.split(',').every((tag) => LOCALE_RE.test(tag))) return fail(`Unexpected locale "${value}"`, 'action.invalidParams', undefined, { param: 'locale', expected: 'locale', value });
           // Without --locales the app's list is emptied: it follows the phone's language again.
           const r = await shell(`cmd locale set-app-locales ${shellQuote(appId)}${userFlag(user)}${value === 'system' ? '' : ` --locales ${value}`}`);
           const out = textOf(r);
@@ -359,7 +359,7 @@ function settingIo(t: SettingTarget, action: DeviceActionId, params: Record<stri
         wanted: () => {
           const locale = str(params, 'locale');
           if (!locale || (locale !== 'system' && !LOCALE_RE.test(locale))) {
-            return fail('locale must be a language tag such as tr-TR, or "system"', 'action.invalidParams');
+            return fail('locale must be a language tag such as tr-TR, or "system"', 'action.invalidParams', undefined, { param: 'locale', expected: 'locale' });
           }
           return {
             value: locale,

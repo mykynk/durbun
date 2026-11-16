@@ -119,6 +119,8 @@ export class NetworkStore {
     private readonly notify: (entry: NetworkEntry) => void,
     /** Called for every entry or body the limits delete (not for clears and removals). */
     private readonly onEvict?: (eviction: NetworkEviction) => void,
+    /** Called once per request a mock rule answered (its response or failure arrived with `mockRuleId`). */
+    private readonly onMockHit?: (entry: NetworkEntry) => void,
   ) {}
 
   get size(): number {
@@ -240,6 +242,7 @@ export class NetworkStore {
 
   response(id: string, appId: string | undefined, deviceId: string, msg: SdkNetResponse): NetworkEntry {
     const entry = this.entries.get(id) ?? this.placeholder(id, appId, deviceId, msg.ts);
+    const hit = isNewMockHit(entry, msg);
     entry.state = 'complete';
     entry.status = msg.status;
     entry.statusText = msg.statusText;
@@ -258,11 +261,13 @@ export class NetworkStore {
     cleanUndefined(entry);
     if (msg.body) this.storeBody(id, 'response', msg.body);
     this.onChange(entry);
+    if (hit) this.onMockHit?.(entry);
     return entry;
   }
 
   error(id: string, appId: string | undefined, deviceId: string, msg: SdkNetError): NetworkEntry {
     const entry = this.entries.get(id) ?? this.placeholder(id, appId, deviceId, msg.ts);
+    const hit = isNewMockHit(entry, msg);
     entry.state = msg.cancelled ? 'cancelled' : 'failed';
     entry.error = msg.error;
     entry.endTs = msg.ts;
@@ -270,6 +275,7 @@ export class NetworkStore {
     if (msg.mocked) entry.mocked = true;
     if (msg.mockRuleId) entry.mockRuleId = msg.mockRuleId;
     this.onChange(entry);
+    if (hit) this.onMockHit?.(entry);
     return entry;
   }
 
@@ -482,4 +488,9 @@ export class NetworkStore {
 export function cleanUndefined<T extends object>(obj: T): T {
   for (const key of Object.keys(obj) as (keyof T)[]) if (obj[key] === undefined) delete obj[key];
   return obj;
+}
+
+/** A response / failure marked as answered by a rule the entry was not already counted for. */
+function isNewMockHit(entry: NetworkEntry, msg: { mocked?: boolean; mockRuleId?: string }): boolean {
+  return msg.mocked === true && typeof msg.mockRuleId === 'string' && msg.mockRuleId !== '' && !(entry.mocked && entry.mockRuleId === msg.mockRuleId);
 }

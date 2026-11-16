@@ -30,6 +30,19 @@ export interface ResolvedTool {
   source: ToolSource;
   /** English note, e.g. "from Flutter 3.38.5 cache" or a problem with the configured path. */
   detail?: string;
+  /** The configured path (settings) that is not an executable file, so this one was taken instead. */
+  badConfigured?: string;
+  /** Flutter version of a tool from Flutter's cache. */
+  flutterVersion?: string;
+}
+
+/**
+ * Code + params of where a tool was found (System check): 'doctor.tool.from' {source, version?}, or
+ * 'doctor.tool.badConfiguredPath' {path, source} when the configured path was unusable.
+ */
+export function toolSourceCode(tool: ResolvedTool): { code: string; params: Record<string, string> } {
+  if (tool.badConfigured) return { code: 'doctor.tool.badConfiguredPath', params: { path: tool.badConfigured, source: tool.source } };
+  return { code: 'doctor.tool.from', params: { source: tool.source, ...(tool.flutterVersion ? { version: tool.flutterVersion } : {}) } };
 }
 
 export interface ResolveEnv {
@@ -88,30 +101,32 @@ export function findOnPath(name: string, renv: ResolveEnv): string | null {
 
 export function resolveAdb(settings: Pick<ServerSettings, 'adbPath'>, renv = defaultResolveEnv()): ResolvedTool | null {
   let note: string | undefined;
+  const bad: { badConfigured?: string } = {};
   if (settings.adbPath && settings.adbPath.trim()) {
     const p = expandHome(settings.adbPath.trim(), renv.home);
     if (isExecutableFile(p)) return { path: p, source: 'settings' };
     note = `Configured adbPath "${settings.adbPath}" is not an executable file`;
+    bad.badConfigured = settings.adbPath.trim();
   }
   for (const key of ['ANDROID_HOME', 'ANDROID_SDK_ROOT'] as const) {
     const root = renv.env[key];
     if (root) {
       const p = path.join(expandHome(root, renv.home), 'platform-tools', 'adb');
-      if (isExecutableFile(p)) return { path: p, source: 'env', detail: note };
+      if (isExecutableFile(p)) return { path: p, source: 'env', detail: note, ...bad };
     }
   }
   const flutterSdk = flutterConfiguredAndroidSdk(renv);
   if (flutterSdk) {
     const p = path.join(flutterSdk, 'platform-tools', 'adb');
-    if (isExecutableFile(p)) return { path: p, source: 'sdk', detail: joinNotes('Android SDK from `flutter config --android-sdk`', note) };
+    if (isExecutableFile(p)) return { path: p, source: 'sdk', detail: joinNotes('Android SDK from `flutter config --android-sdk`', note), ...bad };
   }
   const sdk = path.join(renv.home, 'Library', 'Android', 'sdk', 'platform-tools', 'adb');
-  if (isExecutableFile(sdk)) return { path: sdk, source: 'sdk', detail: note };
+  if (isExecutableFile(sdk)) return { path: sdk, source: 'sdk', detail: note, ...bad };
   const onPath = findOnPath('adb', renv);
-  if (onPath) return { path: onPath, source: 'path', detail: note };
+  if (onPath) return { path: onPath, source: 'path', detail: note, ...bad };
   for (const { root, label } of wellKnownAndroidSdks(renv)) {
     const p = path.join(root, 'platform-tools', 'adb');
-    if (isExecutableFile(p)) return { path: p, source: 'sdk', detail: joinNotes(`from ${label} (${root})`, note) };
+    if (isExecutableFile(p)) return { path: p, source: 'sdk', detail: joinNotes(`from ${label} (${root})`, note), ...bad };
   }
   return null;
 }
@@ -299,6 +314,7 @@ export function resolveIdeviceTool(
   renv = defaultResolveEnv(),
 ): ResolvedTool | null {
   let note: string | undefined;
+  const bad: { badConfigured?: string } = {};
   const configured = settings.idevicesyslogPath?.trim();
   if (configured) {
     const syslogPath = expandHome(configured, renv.home);
@@ -306,10 +322,13 @@ export function resolveIdeviceTool(
     if (isExecutableFile(candidate)) {
       return { path: candidate, source: 'settings', env: envForArtifactsBinary(candidate) };
     }
-    if (name === 'idevicesyslog') note = `Configured idevicesyslogPath "${configured}" is not an executable file`;
+    if (name === 'idevicesyslog') {
+      note = `Configured idevicesyslogPath "${configured}" is not an executable file`;
+      bad.badConfigured = configured;
+    }
   }
   const onPath = findOnPath(name, renv);
-  if (onPath) return { path: onPath, source: 'path', env: envForArtifactsBinary(onPath), detail: note };
+  if (onPath) return { path: onPath, source: 'path', env: envForArtifactsBinary(onPath), detail: note, ...bad };
   for (const root of findFlutterRoots(renv)) {
     const artifacts = path.join(root, 'bin', 'cache', 'artifacts');
     const p = path.join(artifacts, artifactSubdir(name), name);
@@ -320,6 +339,8 @@ export function resolveIdeviceTool(
         source: 'flutter-cache',
         env: flutterArtifactsEnv(artifacts),
         detail: `from Flutter${version ? ` ${version}` : ''} cache (${root})${note ? ` · ${note}` : ''}`,
+        ...bad,
+        ...(version ? { flutterVersion: version } : {}),
       };
     }
   }
@@ -354,6 +375,9 @@ export interface XcodeTools {
   simctl: boolean;
   devicectl: boolean;
   detail?: string;
+  /** Code + params of `detail` (System check): 'doctor.xcode.*'. */
+  code?: string;
+  params?: Record<string, string>;
 }
 
 let xcodeCache: { at: number; value: XcodeTools } | undefined;
@@ -371,14 +395,14 @@ export async function probeXcodeTools(force = false): Promise<XcodeTools> {
 
 async function probeXcodeToolsUncached(): Promise<XcodeTools> {
   const xcrun = '/usr/bin/xcrun';
-  const none = (detail: string): XcodeTools => ({ available: false, xcrun, simctl: false, devicectl: false, detail });
-  if (process.platform !== 'darwin') return none('Xcode tools are only available on macOS');
-  if (!isExecutableFile(xcrun)) return none('xcrun not found');
+  const none = (detail: string, code: string): XcodeTools => ({ available: false, xcrun, simctl: false, devicectl: false, detail, code });
+  if (process.platform !== 'darwin') return none('Xcode tools are only available on macOS', 'doctor.xcode.macOnly');
+  if (!isExecutableFile(xcrun)) return none('xcrun not found', 'doctor.xcode.xcrunMissing');
   const sel = await run('/usr/bin/xcode-select', ['-p'], { timeoutMs: 5000 });
   const developerDir = sel.ok ? sel.stdout.trim() : undefined;
-  if (!developerDir) return none('No Xcode developer directory selected (xcode-select -p failed)');
+  if (!developerDir) return none('No Xcode developer directory selected (xcode-select -p failed)', 'doctor.xcode.noDeveloperDir');
   if (developerDir.includes('CommandLineTools')) {
-    return { ...none('Only the Command Line Tools are selected; simctl/devicectl need Xcode'), developerDir };
+    return { ...none('Only the Command Line Tools are selected; simctl/devicectl need Xcode', 'doctor.xcode.cltOnly'), developerDir };
   }
   const [simctl, devicectl] = await Promise.all([
     run(xcrun, ['--find', 'simctl'], { timeoutMs: 10_000 }),
@@ -391,5 +415,6 @@ async function probeXcodeToolsUncached(): Promise<XcodeTools> {
     simctl: simctl.ok,
     devicectl: devicectl.ok,
     detail: simctl.ok ? undefined : `xcrun cannot find simctl (${developerDir})`,
+    ...(simctl.ok ? {} : { code: 'doctor.xcode.simctlNotFound', params: { dir: developerDir } }),
   };
 }

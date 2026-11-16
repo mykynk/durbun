@@ -260,6 +260,8 @@ describe('inspect', () => {
     expect(m.data.note).toBeUndefined();
     expect(m.data.mocks).toEqual([]);
     expect(m.data.warnings.map((w) => w.code)).toEqual(['package.mock.invalid']);
+    // Which field and what it expects, so the UI words it (the English `problem` stays).
+    expect(m.data.warnings[0]!.params).toMatchObject({ rule: 1, field: 'url', expected: 'text', problem: expect.stringContaining('url must be a string') });
   });
 
   it('a passphrase check reuses the token; the server keeps at most two packages and lets one go', async () => {

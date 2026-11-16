@@ -110,9 +110,9 @@ export function unavailableDriver(id: DeviceDriver['id'], reason: string): Devic
     id,
     start: async () => {},
     stop: async () => {},
-    status: (): DriverStatus => ({ id, available: false, active: false, detail: `Failed to initialize: ${reason}`, code: 'driver.initFailed' }),
+    status: (): DriverStatus => ({ id, available: false, active: false, detail: `Failed to initialize: ${reason}`, code: 'driver.initFailed', params: { error: reason } }),
     checks: async (): Promise<ToolCheck[]> => [
-      { id: `driver-${id}`, label: id, status: 'error', detail: `The ${id} driver failed to initialize: ${reason}` },
+      { id: `driver-${id}`, label: id, status: 'error', detail: `The ${id} driver failed to initialize: ${reason}`, code: 'doctor.driverInitFailed', params: { error: reason } },
     ],
     owns: () => false,
     runAction: async (): Promise<DeviceActionResult> => ({ ok: false, error: `The ${id} driver is unavailable: ${reason}`, code: 'driver.initFailed' }),
@@ -123,8 +123,10 @@ export function unavailableVm(reason: string): FlutterVmModule {
   return {
     start: async () => {},
     stop: async () => {},
-    status: () => ({ id: 'flutter-vm', available: false, active: false, detail: `Failed to initialize: ${reason}`, code: 'driver.initFailed' }),
-    checks: async () => [{ id: 'flutter-vm', label: 'Flutter VM Service', status: 'error', detail: `Failed to initialize: ${reason}` }],
+    status: () => ({ id: 'flutter-vm', available: false, active: false, detail: `Failed to initialize: ${reason}`, code: 'driver.initFailed', params: { error: reason } }),
+    checks: async () => [
+      { id: 'flutter-vm', label: 'Flutter VM Service', status: 'error', detail: `Failed to initialize: ${reason}`, code: 'doctor.driverInitFailed', params: { error: reason } },
+    ],
     attach: async () => {
       throw new Error(`The Flutter VM Service module is unavailable: ${reason}`);
     },

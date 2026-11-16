@@ -12,6 +12,7 @@ import { flushPendingCommands, handleReply } from './commands';
 import { emitNotice, emitResync, emitServerMessage } from './events';
 import { forgetResume, noteEpoch, noteNetSeq, resumeEpoch } from './resume';
 import { setStoreEvictions, setStoreLimits } from './stores/limits';
+import { setMockHitsFromBatch, setMockHitsFromSnapshot } from './stores/mockHits';
 
 /** The server's limits (its `limits` when it sends them, else the settings): the window holds no more than it. */
 function applyLimits(settings: ServerSettings, limits?: StoreLimits): void {
@@ -160,6 +161,7 @@ export function handleServerMessage(msg: ServerToUi): void {
       metricsStore.push(msg.metrics ?? []);
       setMocksFromServer(msg.mocks ?? [], msg.mocksRevision);
       setFlowsFromServer(msg.flows, msg.flowRuns);
+      setMockHitsFromSnapshot(msg.mockHits);
       applyEvictions(msg.evictions);
       if (typeof msg.epoch !== 'string' || typeof msg.netSeq !== 'number') forgetResume();
       noteEpoch(msg.epoch);
@@ -193,6 +195,7 @@ export function handleServerMessage(msg: ServerToUi): void {
       }
       if (msg.metrics?.length) metricsStore.push(msg.metrics);
       if (msg.removedDevices?.length) removeDevices(msg.removedDevices);
+      setMockHitsFromBatch(msg.mockHits);
       applyEvictions(msg.evictions);
       noteNetSeq(msg.netSeq);
       break;

@@ -54,6 +54,44 @@ describe('doctor', () => {
     expect(await checkPort({ id: 'port-http', label: 'HTTP', port: 9750, host: '127.0.0.1', state: 'listening' })).toMatchObject({ status: 'ok' });
   });
 
+  it('gives every check row it writes a code + params (the English detail stays as the fallback)', async () => {
+    expect(await checkPort({ id: 'port-http', label: 'HTTP', port: 9750, host: '127.0.0.1', state: 'listening' })).toMatchObject({
+      code: 'doctor.port.listening',
+      params: { addr: '127.0.0.1:9750' },
+      detail: 'Listening on 127.0.0.1:9750',
+    });
+    expect(await checkPort({ id: 'port-sdk', label: 'SDK', port: 1, host: '127.0.0.1', state: 'failed', error: 'EACCES' })).toMatchObject({
+      code: 'doctor.port.cannotListen',
+      params: { addr: '127.0.0.1:1', error: 'EACCES' },
+    });
+    expect(checkNodeVersion('18.0.0', undefined)).toMatchObject({ code: 'doctor.nodeTooOld', params: { major: expect.any(Number) } });
+    const checks = await runDoctor({
+      nodeVersion: '22.1.0',
+      dataDir: '/nonexistent/durbun-test-dir',
+      uiDir: null,
+      timeoutMs: 100,
+      ports: [],
+      drivers: [
+        {
+          id: 'android',
+          checks: async (): Promise<ToolCheck[]> => [
+            { id: 'adb', label: 'adb', status: 'ok', detail: 'from PATH', code: 'doctor.tool.from', params: { source: 'path', bad: { x: 1 } as unknown as string } },
+            { id: 'odd', label: 'odd', status: 'ok', code: 'Not A Code' },
+          ],
+        },
+        { id: 'ios-device', checks: async () => Promise.reject(new Error('socket gone')) },
+      ],
+    });
+    const byId = Object.fromEntries(checks.map((c) => [c.id, c]));
+    // A driver's code + params survive the clean-up (only strings and numbers).
+    expect(byId.adb).toMatchObject({ code: 'doctor.tool.from', params: { source: 'path' } });
+    expect(byId.adb!.params).not.toHaveProperty('bad');
+    expect(byId.odd!.code).toBeUndefined();
+    expect(byId['data-dir']).toMatchObject({ code: 'doctor.dataDir.notWritable', params: { error: expect.any(String) } });
+    expect(byId['ui-build']).toMatchObject({ code: 'doctor.uiBuild.missing' });
+    expect(byId['driver-ios-device-checks']).toMatchObject({ code: 'doctor.checksFailed', params: { error: 'socket gone' } });
+  });
+
   it('aggregates driver checks, isolating failures and hangs, and merges duplicates by worst status', async () => {
     const dataDir = await makeTempDir('durbun-doctor-');
     const checks = await runDoctor({

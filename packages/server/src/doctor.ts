@@ -59,6 +59,8 @@ export function checkNodeVersion(version: string = process.versions.node, electr
   }
   if (!ok) {
     check.detail = `Dürbün needs Node.js ${MIN_NODE_MAJOR} or newer`;
+    check.code = 'doctor.nodeTooOld';
+    check.params = { major: MIN_NODE_MAJOR };
     check.fix = 'brew install node';
     check.docsUrl = 'https://nodejs.org/';
   }
@@ -79,15 +81,20 @@ export function probePort(port: number, host = '127.0.0.1'): Promise<'free' | 'i
 
 export async function checkPort(p: PortState): Promise<ToolCheck> {
   const base = { id: p.id, label: p.label, path: `${p.host}:${p.port}` };
-  if (p.state === 'listening') return { ...base, status: 'ok', detail: `Listening on ${p.host}:${p.port}` };
+  const addr = `${p.host}:${p.port}`;
+  if (p.state === 'listening') return { ...base, status: 'ok', detail: `Listening on ${addr}`, code: 'doctor.port.listening', params: { addr } };
   const who = `lsof -nP -iTCP:${p.port} -sTCP:LISTEN`;
   if (p.state === 'failed') {
-    return { ...base, status: 'error', detail: p.error ?? `Could not listen on ${p.host}:${p.port}`, fix: who };
+    // `error` is the system's own text (EADDRINUSE…), shown as data.
+    const params: Record<string, string> = p.error ? { addr, error: p.error } : { addr };
+    return { ...base, status: 'error', detail: p.error ?? `Could not listen on ${addr}`, fix: who, code: 'doctor.port.cannotListen', params };
   }
   const probe = await probePort(p.port, p.host);
-  if (probe === 'free') return { ...base, status: 'ok', detail: 'Available' };
-  if (probe === 'in-use') return { ...base, status: 'warn', detail: `Port ${p.port} is used by another program`, fix: who };
-  return { ...base, status: 'warn', detail: `Could not test port ${p.port}` };
+  if (probe === 'free') return { ...base, status: 'ok', detail: 'Available', code: 'doctor.port.free', params: { port: p.port } };
+  if (probe === 'in-use') {
+    return { ...base, status: 'warn', detail: `Port ${p.port} is used by another program`, fix: who, code: 'doctor.port.inUse', params: { port: p.port } };
+  }
+  return { ...base, status: 'warn', detail: `Could not test port ${p.port}`, code: 'doctor.port.untested', params: { port: p.port } };
 }
 
 export function checkUiBuild(uiDir: string | null): ToolCheck {
@@ -98,6 +105,7 @@ export function checkUiBuild(uiDir: string | null): ToolCheck {
         label: 'UI build',
         status: 'warn',
         detail: 'No built UI found (dist/ui). The server works, but the browser shows a placeholder page.',
+        code: 'doctor.uiBuild.missing',
         fix: 'npm run build',
       };
 }
@@ -113,6 +121,8 @@ export async function checkDataDir(dataDir: string): Promise<ToolCheck> {
       status: 'error',
       path: dataDir,
       detail: `Not writable: ${(err as Error).message}`,
+      code: 'doctor.dataDir.notWritable',
+      params: { error: (err as Error).message },
       fix: 'durbun --data-dir <writable folder>',
     };
   }
@@ -135,6 +145,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
   });
 }
 
+const CODE_RE = /^[a-z][\w-]*\.[\w.-]+$/;
+
+function cleanParams(raw: unknown): ToolCheck['params'] | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: NonNullable<ToolCheck['params']> = {};
+  let any = false;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))) {
+      out[k] = typeof v === 'string' && v.length > 500 ? `${v.slice(0, 499)}…` : v;
+      any = true;
+    }
+  }
+  return any ? out : undefined;
+}
+
 /** Coerce a driver-provided check into a well-formed ToolCheck (drivers are written by other teams). */
 function sanitizeCheck(raw: unknown, sourceId: string): ToolCheck | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
@@ -146,6 +171,12 @@ function sanitizeCheck(raw: unknown, sourceId: string): ToolCheck | undefined {
     const value = c[key];
     if (typeof value === 'string' && value) out[key] = value;
   }
+  // The UI words a check by its code + params (the English detail is the fallback).
+  if (typeof c.code === 'string' && CODE_RE.test(c.code)) {
+    out.code = c.code;
+    const params = cleanParams(c.params);
+    if (params) out.params = params;
+  }
   if (status !== c.status) out.detail = `${out.detail ? out.detail + ' — ' : ''}(${sourceId} reported an unknown status)`;
   return out;
 }
@@ -156,7 +187,8 @@ async function collect(sourceId: string, label: string, run: () => Promise<ToolC
     if (!Array.isArray(result)) return [];
     return result.map((c) => sanitizeCheck(c, sourceId)).filter((c): c is ToolCheck => c !== undefined);
   } catch (err) {
-    return [{ id: `${sourceId}-checks`, label, status: 'error', detail: `Checks failed: ${(err as Error).message ?? String(err)}` }];
+    const error = (err as Error).message ?? String(err);
+    return [{ id: `${sourceId}-checks`, label, status: 'error', detail: `Checks failed: ${error}`, code: 'doctor.checksFailed', params: { error } }];
   }
 }
 

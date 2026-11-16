@@ -82,10 +82,12 @@ class FlutterVmModuleImpl implements FlutterVmModule {
     const n = this.attachedSessions().length;
     const auto = this.ctx?.settings().autoAttachVmService ?? true;
     let detail: string;
-    if (!this.started) detail = 'Not started';
-    else if (n > 0) detail = `${n} app${n === 1 ? '' : 's'} attached through the Dart VM service`;
-    else detail = auto ? 'Waiting for Flutter debug apps (auto-attach on)' : 'No app attached (auto-attach off)';
-    return { id: 'flutter-vm', available: true, active: this.started, detail };
+    let code: string;
+    if (!this.started) [detail, code] = ['Not started', 'driver.vm.notStarted'];
+    else if (n > 0) [detail, code] = [`${n} app${n === 1 ? '' : 's'} attached through the Dart VM service`, 'driver.vm.attached'];
+    else if (auto) [detail, code] = ['Waiting for Flutter debug apps (auto-attach on)', 'driver.vm.waiting'];
+    else [detail, code] = ['No app attached (auto-attach off)', 'driver.vm.idle'];
+    return { id: 'flutter-vm', available: true, active: this.started, detail, code, params: { count: n } };
   }
 
   async checks(): Promise<ToolCheck[]> {
@@ -100,6 +102,8 @@ class FlutterVmModuleImpl implements FlutterVmModule {
         detail:
           `${n} attached${names.length ? ` (${names.join(', ')})` : ''} · auto-attach ${auto ? 'on' : 'off'}` +
           (auto ? '' : ' — paste the "A Dart VM Service … is available at" URL to attach manually'),
+        code: 'doctor.vm.status',
+        params: { count: n, names: names.join(', '), auto: auto ? 'on' : 'off' },
       },
     ];
   }
