@@ -17,6 +17,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:durbun/durbun.dart';
+import 'package:durbun/src/core/protocol.dart' show buildErrorInfo, buildLog;
 import 'package:durbun/src/flutter/durbun.dart' show durbunBackend;
 import 'package:durbun/src/inspector/filter_ui.dart' show FilterButton;
 import 'package:durbun/src/inspector/inspector.dart' show ShakeHint;
@@ -532,6 +533,73 @@ void main() {
       await back(tester);
     });
   });
+
+  gallery('stack without symbols, masked log share', (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch.toDouble();
+    const dwarf = '*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n'
+        'pid: 4711, tid: 4730, name 1.ui\n'
+        'os: android arch: arm64 comp: yes sim: no\n'
+        "build_id: '6c3e1a0f9b2d4e7a8c1b5d3f0e9a7c42'\n"
+        'isolate_dso_base: 7a5e1c8000, vm_dso_base: 7a5e1c8000\n'
+        'isolate_instructions: 7a5e2d4000, vm_instructions: 7a5e2c0000\n'
+        '    #00 abs 0000007a5e3d33f3 virt 00000000002793f3 _kDartIsolateSnapshotInstructions+0x1c13f3\n'
+        '    #01 abs 0000007a5e3d2a10 virt 0000000000278a10 _kDartIsolateSnapshotInstructions+0x1c0a10\n'
+        '    #02 abs 0000007a5e3b9c4c virt 000000000025fc4c _kDartIsolateSnapshotInstructions+0x1a7c4c';
+    final s = patiStore()
+      ..ingest(buildLog(
+          level: 'info',
+          message: 'Oturum yenilendi',
+          tag: 'auth',
+          ts: now - 2000,
+          data: <String, Object?>{'userId': 8812, 'accessToken': 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI4ODEyIn0.c2ln', 'otp': 482913}))
+      ..ingest(buildLog(
+          level: 'fatal',
+          message: 'Unhandled exception: Null check operator used on a null value',
+          kind: 'crash',
+          ts: now - 1000,
+          error: buildErrorInfo(type: '_TypeError', message: 'Null check operator used on a null value', stack: dwarf),
+          data: <String, Object?>{'source': 'zone', 'symbolize': 'flutter symbolize -i stack.txt -d <split-debug-info folder>/app.android-arm64.symbols'}));
+    await openPanel(tester, store: s);
+    await tester.tap(find.byTooltip(tr.logs).first);
+    await settle(tester);
+    await step(tester, 'no symbols message', () async {
+      await openRow(tester, 'Null check operator');
+      await shot(tester, '35-log-detail-no-symbols');
+      await tapLabel(tester, tr.stack);
+      await shot(tester, '36-log-stack-no-symbols');
+      await back(tester);
+    });
+    await step(tester, 'masked log share', () async {
+      await openRow(tester, 'Oturum yenilendi');
+      await tester.tap(find.byTooltip(tr.shareLogTitle).first);
+      await settle(tester);
+      await shot(tester, '37-log-share-masked');
+    });
+  });
+
+  gallery('large text: stack without symbols', (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch.toDouble();
+    final s = DurbunInspectorStore(notifyDelay: Duration.zero)
+      ..ingest(patiHello())
+      ..ingest(buildLog(
+          level: 'fatal',
+          message: 'Unhandled exception: Null check operator used on a null value',
+          kind: 'crash',
+          ts: now - 1000,
+          error: buildErrorInfo(
+              type: '_TypeError',
+              message: 'Null check operator used on a null value',
+              stack: '*** *** ***\nos: ios arch: arm64 comp: yes sim: no\nisolate_dso_base: 104d1c000, vm_dso_base: 104d1c000\n'
+                  '    #00 abs 0000000104f2a3f3 virt 000000000020e3f3 _kDartIsolateSnapshotInstructions+0x1c13f3')));
+    await openPanel(tester, store: s);
+    await tester.tap(find.byTooltip(tr.logs).first);
+    await settle(tester);
+    await step(tester, 'large no symbols', () async {
+      await openRow(tester, 'Null check operator');
+      await tapLabel(tester, tr.stack);
+      await shot(tester, '38-text200-stack-no-symbols');
+    });
+  }, textScale: 2);
 
   /* Tools */
 

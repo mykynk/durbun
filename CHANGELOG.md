@@ -82,6 +82,8 @@ All notable changes to Dürbün are listed here. The format follows
   different session configurations is reached, a warning line says so on the Mac.
 - Android SDK: a `respond` mock skipped because `DurbunInterceptor` was added as a network interceptor is
   explained on the desktop, not only in logcat.
+- Flutter SDK: the README's wrapper for `CronetClient` / `OkHttpClient` keeps responses streaming instead of
+  reading them into memory.
 
 ### Changed
 
@@ -134,6 +136,11 @@ All notable changes to Dürbün are listed here. The format follows
 - iOS SDK: in a build compiled without `DEBUG`, Dürbün also runs in the Simulator, under a debugger and in
   builds signed for development, so custom configurations such as Debug-Staging work. Ad hoc, enterprise,
   TestFlight and App Store builds still need an explicit opt-in.
+- Flutter SDK: sharing a log line from the panel masks secret values in its data, with a switch to turn
+  that off; number and boolean values under secret keys are masked too.
+- Flutter SDK: release builds with Dürbün off no longer contain the in-app panel's pages (about 0.85 MB
+  less Dart code in a typical Android app). The README gives measured sizes and a compile-time gate that
+  leaves Dürbün out completely.
 
 ### Added
 
@@ -287,6 +294,12 @@ All notable changes to Dürbün are listed here. The format follows
 - iOS SDK: `captureBodies`, `maxBodyBytes`, `appName` and `captureOSLog` options.
 - iOS SDK: usable from Objective-C as `DURDurbun`.
 - iOS SDK: the `DurbunEnabled` Info.plist key turns Dürbün on or off per build configuration.
+- Flutter SDK: `Durbun.log` and `Durbun.event` work in background isolates (`compute`, `Isolate.run`,
+  background engines) with no setup; `Durbun.attachIsolate()` also captures that isolate's HTTP requests.
+- Flutter SDK: `DurbunOptions.secretNames` adds your own field names to the masking used by Share, Send to
+  Slack, Export and the previous-run file.
+- Flutter SDK: stacks from `--split-debug-info` / `--obfuscate` builds are marked in the panel and in shared
+  reports, with the `flutter symbolize` command; the crash carries the command to the desktop as `symbolize`.
 
 ## [0.2.0] - 2026-11-12
 

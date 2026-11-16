@@ -4,13 +4,26 @@ import 'dart:async';
 
 /// Log levels, identical to the desktop's `LogLevel`.
 enum DurbunLogLevel {
+  /// Very detailed tracing, usually filtered out (`Durbun.v`).
   verbose('verbose'),
+
+  /// Diagnostic detail for developers (`Durbun.d`).
   debug('debug'),
+
+  /// Normal events worth seeing (`Durbun.i`, the default of `Durbun.log`).
   info('info'),
+
+  /// Something unexpected that the app recovered from (`Durbun.w`).
   warn('warn'),
+
+  /// A failure the user may notice (`Durbun.e`).
   error('error'),
+
+  /// A crash or an error the app cannot continue after (`Durbun.f`);
+  /// uncaught errors are reported at this level.
   fatal('fatal');
 
+  /// A level with its [wireName].
   const DurbunLogLevel(this.wireName);
 
   /// Name used on the wire protocol.
@@ -32,6 +45,8 @@ enum DurbunPrintCapture {
 
 /// State of the connection to the Dürbün desktop.
 class DurbunConnection {
+  /// A connection state; the SDK creates these, apps read them from
+  /// `Durbun.connectionState` and `Durbun.connection`.
   const DurbunConnection({
     required this.connected,
     this.via,
@@ -62,14 +77,28 @@ class DurbunConnection {
       : 'DurbunConnection(disconnected)';
 }
 
-/// Kind of an app action shown on the desktop.
-enum DurbunActionKind { toggle, select, button }
+/// Kind of an app action shown on the desktop and in the panel's App tools.
+enum DurbunActionKind {
+  /// An on/off switch ([DurbunAction.toggle]).
+  toggle,
+
+  /// A choice among [DurbunAction.options] ([DurbunAction.select]).
+  select,
+
+  /// A button that runs code once per tap ([DurbunAction.button]).
+  button,
+}
 
 /// One choice of a [DurbunAction.select] action.
 class DurbunActionOption {
+  /// A choice whose [value] is passed to the action and whose [label] is
+  /// shown, e.g. `DurbunActionOption('staging', 'Staging')`.
   const DurbunActionOption(this.value, this.label);
 
+  /// What the action receives when this choice is picked.
   final String value;
+
+  /// What the desktop and the panel show for this choice.
   final String label;
 }
 
@@ -134,6 +163,9 @@ class DurbunAction {
 
   /// Stable id, e.g. `flutter.debugPaint` or `app.clearCache`.
   final String id;
+
+  /// Whether this is a toggle, a select or a button (set by the
+  /// constructor used).
   final DurbunActionKind kind;
 
   /// English label (fallback when the desktop has no translation).
@@ -144,6 +176,9 @@ class DurbunAction {
 
   /// Optional i18n key for the desktop UI.
   final String? labelKey;
+
+  /// The choices of a select action, in display order; empty for toggles
+  /// and buttons.
   final List<DurbunActionOption> options;
 
   final FutureOr<Object?> Function(Map<String, Object?> params)? _onPressed;
@@ -220,6 +255,8 @@ class DurbunAction {
 /// A mock rule decision for HTTP stacks that do not use dart:io (e.g. Dio
 /// with a native adapter). See `DurbunNetwork.findMock`.
 class DurbunMockDecision {
+  /// A decision; `DurbunNetwork.findMock` builds these from the desktop's
+  /// rules.
   const DurbunMockDecision({
     required this.ruleId,
     required this.ruleLabel,
@@ -232,7 +269,11 @@ class DurbunMockDecision {
     this.message,
   });
 
+  /// Id of the desktop rule that matched; pass it to `DurbunNetwork.begin`
+  /// as `mockRuleId` so the request is shown as mocked.
   final String ruleId;
+
+  /// The rule's name (or its URL pattern) for logs and error messages.
   final String ruleLabel;
 
   /// `respond` | `delay` | `fail`.
@@ -240,7 +281,11 @@ class DurbunMockDecision {
 
   /// respond: status, `[name, value]` headers and decoded body bytes.
   final int status;
+
+  /// respond: response headers as `[name, value]` pairs.
   final List<List<String>> headers;
+
+  /// respond: the response body, already decoded (not compressed).
   final List<int> body;
 
   /// Wait before responding / sending / failing.
@@ -248,6 +293,9 @@ class DurbunMockDecision {
 
   /// fail: `timeout` | `connection` | `dns` | `tls` | `custom`.
   final String failure;
+
+  /// fail: the error text to throw (`custom`), or null for the platform's
+  /// usual message of that [failure].
   final String? message;
 }
 

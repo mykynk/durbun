@@ -85,10 +85,12 @@ Future<bool> shareFileNatively(String path, {required String mime, String? subje
   }
 }
 
-/// The report for [log] (the app and device from the store's hello).
-String logShareReportFor(BuildContext context, InspectorLog log, DurbunInspectorStore store) {
+/// The report for [log] (the app and device from the store's hello); secret
+/// values in its data are masked unless the last share turned masking off.
+String logShareReportFor(BuildContext context, InspectorLog log, DurbunInspectorStore store, {bool? mask}) {
   final t = InspectorStrings.of(context);
-  return buildLogReport(logShareInputFor(log, t, app: hostAppLabel(store), device: hostDeviceLabel(store)), t);
+  return buildLogReport(logShareInputFor(log, t, app: hostAppLabel(store), device: hostDeviceLabel(store)), t,
+      mask: mask ?? shareOptionsOf(store).mask);
 }
 
 Future<void> _showSheet(BuildContext context, Widget sheet) {
@@ -165,22 +167,44 @@ class _ShareSheetState extends State<_ShareSheet> {
   }
 }
 
-class _LogShareSheet extends StatelessWidget {
+class _LogShareSheet extends StatefulWidget {
   const _LogShareSheet({required this.log, required this.store});
 
   final InspectorLog log;
   final DurbunInspectorStore store;
 
   @override
+  State<_LogShareSheet> createState() => _LogShareSheetState();
+}
+
+class _LogShareSheetState extends State<_LogShareSheet> {
+  late ShareOptions _options = shareOptionsOf(widget.store);
+
+  @override
   Widget build(BuildContext context) {
     final t = InspectorStrings.of(context);
+    final log = widget.log;
     final first = log.message.split('\n').first;
     return _ReportSheet(
       title: t.shareLogTitle,
       description: t.shareLogDescription,
-      report: logShareReportFor(context, log, store),
+      report: logShareReportFor(context, log, widget.store, mask: _options.mask),
       subject: '${log.level.toUpperCase()} ${first.length > 80 ? '${first.substring(0, 80)}…' : first}',
-      store: store,
+      store: widget.store,
+      // Only structured data has field names to mask.
+      options: <Widget>[
+        if (log.data != null)
+          SheetSwitch(
+              label: t.shareMask,
+              hint: t.shareLogMaskHint,
+              icon: Icons.visibility_off_outlined,
+              value: _options.mask,
+              onChanged: (v) {
+                final o = _options.copyWith(mask: v);
+                _lastOptions[widget.store] = o;
+                setState(() => _options = o);
+              }),
+      ],
     );
   }
 }

@@ -198,6 +198,28 @@ abstract final class Durbun {
     _backend.removeAction(id);
   }
 
+  /// Captures the dart:io HTTP traffic (package:http, Dio's default
+  /// adapter) of the background isolate it is called in: `compute`,
+  /// `Isolate.run`, `Isolate.spawn`, a workmanager task. Call it once at the
+  /// start of the isolate's work; its requests then appear next to the main
+  /// isolate's. Completes with `true` when they are captured, `false` when no
+  /// SDK runs in this app's main isolate (or network capture is off). Never
+  /// throws.
+  ///
+  /// ```dart
+  /// final items = await Isolate.run(() async {
+  ///   await Durbun.attachIsolate();
+  ///   final res = await http.get(Uri.parse('https://api.example.com/feed'));
+  ///   return parseFeed(res.body);
+  /// });
+  /// ```
+  ///
+  /// [log] and [event] need no setup: in any isolate they reach the SDK of
+  /// the main isolate. Mock rules apply only to the main isolate's requests;
+  /// `print` in other isolates is not captured. In the main isolate this
+  /// does nothing.
+  static Future<bool> attachIsolate() => _backend.attachIsolate();
+
   /// Waits until everything sent so far reached the desktop (or [timeout]).
   static Future<bool> flush({Duration timeout = const Duration(seconds: 5)}) =>
       _backend.flush(timeout);

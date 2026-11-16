@@ -5,8 +5,10 @@ abstract interface class NetworkRecorder {
   /// False → the wrapper is a pure pass-through (SDK disabled or disposed).
   bool get networkEnabled;
 
+  /// Whether body contents are captured (sizes always are).
   bool get captureBodies;
 
+  /// Bodies are cut after this many bytes.
   int get maxBodyBytes;
 
   /// Whether the value of [lowerCaseName] must be redacted.

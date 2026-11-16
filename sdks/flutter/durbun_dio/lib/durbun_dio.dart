@@ -52,6 +52,8 @@ import 'src/dart_io_adapter_stub.dart'
 /// A [DurbunDioInterceptor] on the same Dio stays out of the way, so it is
 /// safe to keep one while switching.
 class DurbunDioAdapter implements HttpClientAdapter {
+  /// Reports every request [inner] makes; [source] names the client on the
+  /// desktop and in the panel.
   DurbunDioAdapter(this.inner, {this.source = 'dio'});
 
   /// The adapter that does the network work (`NativeAdapter`, …).
@@ -328,6 +330,8 @@ bool _leftToOtherLayers(HttpClientAdapter adapter) {
 /// shown is Dio's decoded data encoded again. [DurbunDioAdapter] has none of
 /// these limits and is the recommended setup.
 class DurbunDioInterceptor extends Interceptor {
+  /// An interceptor for [dio]; add it as the last one
+  /// (`dio.interceptors.add(DurbunDioInterceptor(dio: dio))`).
   DurbunDioInterceptor({required this.dio, this.source = 'dio'});
 
   /// The Dio instance this interceptor is added to. While it uses the

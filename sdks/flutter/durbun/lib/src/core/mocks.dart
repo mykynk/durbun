@@ -4,6 +4,7 @@ library;
 
 /// `MockAction` (flattened union; [type] is `respond`, `delay` or `fail`).
 class MockAction {
+  /// An action of [type]; the other fields apply as their docs say.
   const MockAction({
     required this.type,
     this.status = 200,
@@ -39,8 +40,13 @@ class MockAction {
   /// fail: optional message (used by `custom`).
   final String? message;
 
+  /// Answers with [status], [headers] and [body] without touching the network.
   bool get isRespond => type == 'respond';
+
+  /// Waits [delayMs], then makes the real request.
   bool get isDelay => type == 'delay';
+
+  /// Fails the request with the platform's natural [error].
   bool get isFail => type == 'fail';
 
   /// Returns null for unknown/invalid actions (such rules never match).
@@ -77,6 +83,7 @@ class MockAction {
     return null;
   }
 
+  /// The action as wire JSON (the desktop's `MockAction`).
   Map<String, Object?> toJson() {
     switch (type) {
       case 'respond':
@@ -114,6 +121,7 @@ class MockAction {
 
 /// `MockRule`.
 class MockRule {
+  /// A rule as the desktop sends it; see [MockRule.fromJson].
   const MockRule({
     required this.id,
     required this.enabled,
@@ -126,12 +134,19 @@ class MockRule {
     this.createdAt = 0,
   });
 
+  /// The desktop's id of the rule (reported back as `mockRuleId`).
   final String id;
+
+  /// Disabled rules never match.
   final bool enabled;
+
+  /// Optional name given on the desktop.
   final String? name;
 
   /// `*` or an HTTP method.
   final String method;
+
+  /// The URL pattern, read as [match] says.
   final String url;
 
   /// `contains` | `exact` | `glob` | `regex`.
@@ -139,7 +154,11 @@ class MockRule {
 
   /// Bundle ids / package names; null or empty = every app.
   final List<String>? apps;
+
+  /// What happens to a matching request.
   final MockAction action;
+
+  /// Epoch milliseconds when the rule was made on the desktop.
   final num createdAt;
 
   /// Returns null when the JSON is not a usable rule.
@@ -163,6 +182,8 @@ class MockRule {
     );
   }
 
+  /// The usable rules of a JSON list, in order; anything else gives an
+  /// empty list.
   static List<MockRule> listFromJson(Object? json) {
     if (json is! List) return const <MockRule>[];
     return [
@@ -171,6 +192,7 @@ class MockRule {
     ];
   }
 
+  /// The rule as wire JSON (the desktop's `MockRule`).
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
     'enabled': enabled,

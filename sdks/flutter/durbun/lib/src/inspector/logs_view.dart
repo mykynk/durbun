@@ -7,6 +7,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/stack_format.dart';
 import 'filter_ui.dart';
 import 'format.dart';
 import 'json_tree.dart';
@@ -754,9 +755,18 @@ class StackTraceView extends StatelessWidget {
     var lines = stack.split('\n').where((l) => l.trim().isNotEmpty).toList();
     final more = maxFrames != null && lines.length > maxFrames! ? lines.length - maxFrames! : 0;
     if (more > 0) lines = lines.take(maxFrames!).toList();
+    final noSymbols = AddressOnlyStack.parse(stack);
+    final t = InspectorStrings.of(context);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        // A --split-debug-info build: say what these addresses are and how to read them.
+        if (noSymbols != null) ...<Widget>[
+          Callout(title: t.stackNoSymbols, body: t.stackNoSymbolsBody),
+          const SizedBox(height: DurbunSpace.sm),
+          CodeBlock(text: noSymbols.symbolizeCommand()),
+          const SizedBox(height: DurbunSpace.md),
+        ],
         for (final line in lines)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 1.5),
@@ -768,7 +778,7 @@ class StackTraceView extends StatelessWidget {
         if (more > 0)
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text(InspectorStrings.of(context).moreFrames(more), style: TextStyle(fontSize: 12, color: c.textSubtle)),
+            child: Text(t.moreFrames(more), style: TextStyle(fontSize: 12, color: c.textSubtle)),
           ),
       ],
     );

@@ -85,7 +85,7 @@ class InspectorUnavailablePage extends StatelessWidget {
                 if (state == DurbunStartState.notStarted || state == DurbunStartState.running) ...<Widget>[
                   const SizedBox(height: 20),
                   // The copy button sits in the snippet's corner.
-                  CodeBlock(text: kDurbunStartSnippet),
+                  const PlainCodeBlock(text: kDurbunStartSnippet),
                 ],
                 const SizedBox(height: 24),
                 Align(child: DButton(label: t.close, kind: DButtonKind.ghost, onTap: onClose)),

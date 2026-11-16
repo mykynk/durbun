@@ -160,9 +160,10 @@ Statistics, Device & SDK, Export session, Previous run and Clear:
   desktop's query language (`tag:auth -tag:frame level:warn is:crash`),
   consecutive identical lines merged into `×N`, and request rows inside the
   stream. The detail view shows the message, a collapsible data tree, a stack
-  trace that highlights app frames, "Only this tag" / hide-this-tag actions,
+  trace that highlights app frames (a stack from a `--split-debug-info` build
+  is marked as such, with the `flutter symbolize` command that reads it), "Only this tag" / hide-this-tag actions,
   and **Share**: the line as a report (level, app, device, message, data,
-  stack) to copy, send through the system share sheet or
+  stack; secret values in the data are masked like a request's) to copy, send through the system share sheet or
   [send to Slack](#send-to-slack).
 - **Network:** dart:io, `package:http`, Dio, OkHttp and URLSession in one table
   with status, method, path (query dimmed), start time (`HH:mm:ss`), host,
@@ -175,8 +176,9 @@ Statistics, Device & SDK, Export session, Previous run and Clear:
   headers, cookies and query parameters, DNS / connect / TLS / TTFB bars, and
   **Replay** and **Copy as** (cURL, fetch, Dart dio, Swift, Kotlin).
   **Share** turns a request into a report your team can read without Dürbün
-  (URL, status, trace IDs, headers, bodies, cURL; secret values are masked as
-  `••••` by default) and opens the system share sheet, copies the report or
+  (URL, status, trace IDs, headers, bodies, cURL; secret values in headers,
+  query parameters, JSON and form bodies are masked as `••••` by default, and
+  [your own secret names](#secret-names-in-shares-and-exports) can be added) and opens the system share sheet, copies the report or
   [sends it to Slack](#send-to-slack). The desktop produces the same report. The **Sort** button (next to the search
   box) offers: newest on top (default), arrival order (newest at the bottom, the
   list follows new requests), slowest first, largest response first, and errors
@@ -195,7 +197,7 @@ Statistics, Device & SDK, Export session, Previous run and Clear:
 - **Device & SDK** (under Tools): the app, the device, the captured layers
   (Dart / Kotlin / Swift), the desktop connection, the body setting in use,
   "What is captured?" (whether each data source is on and, if not, why) and
-  "What is not captured?" (background isolates, `dart:developer` `log()`,
+  "What is not captured?" (`print` and HTTP of background isolates that are not attached, `dart:developer` `log()`,
   clients with their own network stack, other native libraries on Android,
   WebView, WebSocket messages, clients created before the SDK).
 - **Statistics** (under Tools), in scrollable tabs: *Summary* (request count;
@@ -303,6 +305,29 @@ Limits and settings:
   define), the panel does not open and shaking is not listened to; the widget
   only draws the app.
 
+### Secret names in shares and exports
+
+Share, Send to Slack, Export session and the previous run's file replace
+secret values with `••••` (each can be turned off where it is offered):
+`Authorization`, `Cookie` / `Set-Cookie`, and any header, query parameter,
+JSON or form field, or log `data` key whose name contains `token`, `secret`,
+`password`, `apikey`, `credential`, `signature` or `sessionid`, or is exactly
+`auth`, `session`, `pass`, `pwd`, `otp` or `sid`. String, number and boolean
+values are masked. Add the names your app uses for its own secrets:
+
+```dart
+await Durbun.run(body, options: const DurbunOptions(
+  secretNames: ['pin', 'cardNumber', 'cvv', '*iban*', 'x-client-key'],
+));
+```
+
+A name matches ignoring case and `-`, `_`, `.` (`cardNumber` also masks
+`card_number` and `Card-Number`); a `*` at either end matches any text there
+(`*iban*` masks `payerIban`). Without a `*` the whole name must match, so
+`pin` leaves `shipping` alone. This list changes only what leaves the phone
+through a share or an export: what is captured, kept in the panel and sent
+to the desktop stays as it is (`redactHeaders` hides a header everywhere).
+
 ### Send to Slack
 
 Give the panel a Slack incoming webhook and every Share sheet gets a
@@ -342,7 +367,7 @@ to testers (Firebase App Distribution, TestFlight, ad hoc) are in
 | Build | Dürbün |
 |---|---|
 | `flutter run` (debug), profile | **On**, automatically |
-| Release | **Off.** No socket is opened, no hooks are installed, and the native layer is never started. The Dart code is almost entirely removed by the compiler's tree shaking |
+| Release | **Off.** No socket is opened, no hooks are installed, and the native layer is never started. Most of the Dart code, the panel's pages included, is left out by tree shaking ([size](#size-with-dürbün-off)) |
 | Release + `--dart-define=DURBUN=true` | **On**, wherever the build is installed from (Firebase, ad-hoc, TestFlight, Google Play, App Store, and so on) |
 | `--dart-define=DURBUN=false` | Off in every mode (for example profile measurements) |
 | `DurbunOptions(enabled: true/false)` | Overrides everything |
@@ -374,10 +399,67 @@ flutter build ipa --release
 - Android: with Dürbün on in release, the main manifest needs the `INTERNET`
   permission (every networked app already has it; the plugin does not add any
   permission itself).
-- Size (Flutter 3.38 counter app that already includes another plugin, release
-  build with DURBUN off): Android arm64 APK **+34 KB**; iOS `.app` **+868 KB**
-  uncompressed / **+278 KB** zipped (`durbun.framework`; smaller once symbols
-  are stripped for store distribution).
+- Builds made with `--split-debug-info` (and `--obfuscate`) have Dart stack
+  traces with addresses instead of files and lines. The panel says so above
+  such a stack, the shared report ends with a note, and on the desktop the
+  crash's data carries a `symbolize` entry, all with the command that reads
+  it. Keep the symbols folder of every build you hand out, save the stack (or
+  the whole shared report) as `stack.txt`, and run, with that build's folder
+  and the file for the device's architecture:
+
+  ```bash
+  flutter symbolize -i stack.txt -d build/symbols/app.android-arm64.symbols
+  # iOS: app.ios-arm64.symbols
+  ```
+
+
+### Size with Dürbün off
+
+What `Durbun.run` plus `DurbunInspector.builder` add to the Dart code of a
+release build (Flutter 3.38, Android arm64 `app.so`, compiled with
+`flutter assemble`, the AOT step of `flutter build apk`; compressed is
+`gzip -9`, close to what the APK stores):
+
+| App | Dürbün off | Dürbün on (`DURBUN=true`) |
+|---|---|---|
+| Small app with an app bar, a text field and a list | +0.39 MB (+0.17 MB compressed) | +2.5 MB (+1.0 MB compressed) |
+| Bare counter app | +1.2 MB (+0.5 MB compressed) | +3.9 MB (+1.6 MB compressed) |
+
+With Dürbün off, about 50 KB of that is Dürbün's own code (the shake
+listener, the bubble and the page that says Dürbün is off); the rest is
+Flutter framework code those pieces use, which most apps already contain.
+The panel's pages are not in such a build: they are reached only once the
+SDK has started. The plugin's native layer (Kotlin classes in the APK,
+`durbun.framework` on iOS) is not part of these numbers and stays in the
+app either way.
+
+To keep every byte of Dürbün's Dart code out of builds that never run it,
+gate the two lines with a compile-time constant:
+
+```dart
+import 'package:flutter/foundation.dart';
+
+/// Debug and profile builds, or release with --dart-define=DURBUN=true.
+const bool kWithDurbun = !kReleaseMode || bool.fromEnvironment('DURBUN');
+
+Future<void> main() async {
+  if (kWithDurbun) {
+    await Durbun.run(() async {
+      WidgetsFlutterBinding.ensureInitialized();
+      runApp(const MyApp());
+    });
+  } else {
+    runApp(const MyApp());
+  }
+}
+
+// MaterialApp(builder: kWithDurbun ? DurbunInspector.builder : null, ...)
+```
+
+Measured the same way, this build is as large as the app without Dürbün
+(+9 KB compressed), with `Durbun.log` calls left in the code. A build gated
+like this cannot be turned on with `DurbunOptions(enabled: true)`: only the
+define brings the code back.
 
 ## Where the data comes from
 
@@ -435,6 +517,29 @@ Durbun.addAction(DurbunAction.button(
 
 The same actions are in the in-app panel under Tools → App tools, so a tester
 can use them on the phone without the Mac.
+
+### Background isolates
+
+`Durbun.log`, `Durbun.e`, `Durbun.event` and friends work in any isolate of
+the app: in `compute`, `Isolate.run`, `Isolate.spawn` or a background engine
+they are sent to the SDK running in the main isolate, and appear in the same
+stream, on the desktop and in the panel. To capture the dart:io HTTP traffic
+of a background isolate too (package:http, Dio's default adapter), call
+`Durbun.attachIsolate()` once at the start of its work:
+
+```dart
+final feed = await Isolate.run(() async {
+  await Durbun.attachIsolate(); // true when its requests are captured
+  final res = await http.get(Uri.parse('https://api.example.com/feed'));
+  Durbun.d('feed parsed', tag: 'sync');
+  return parseFeed(res.body);
+});
+```
+
+The isolate takes the main isolate's body limit and `redactHeaders`; mock
+rules apply only to the main isolate's requests. When no SDK runs in the main
+isolate (Dürbün off in this build, or nothing started it), these calls do
+nothing and `attachIsolate()` completes with `false`.
 
 ### Screens and app lifecycle
 
@@ -606,6 +711,7 @@ rules are on their way).
 | `slackWebhook` | `null` | Slack incoming webhook for the panel's [Send to Slack](#send-to-slack); `null` reads `--dart-define=DURBUN_SLACK_WEBHOOK` |
 | `maxBodyBytes` | `null` (1 MB) | Body limit per request/response until a desktop connects (at most 10 MB); then the desktop's setting applies. Raise it when testers read large responses in the panel without a Mac |
 | `captureBodies` | `null` | `false`: bodies are never captured (sizes stay), even if the desktop asks for them; `null`/`true`: captured until the desktop says otherwise |
+| `secretNames` | `[]` | Your own secret field names, masked as `••••` when the panel shares or exports (see [Secret names](#secret-names-in-shares-and-exports)); capture is not changed |
 | `captureLifecycle` | `true` | A log line (tag `lifecycle`) each time the app goes to the background or comes back (`AppLifecycleState.paused`, `.resumed`, …) |
 
 ## Limitations
@@ -625,8 +731,13 @@ rules are on their way).
 - For redirects that dart:io follows by itself, only the status code and the
   `location` header of the intermediate hops are known; mock rules do not apply
   to intermediate hops.
-- Dart HTTP requests and logs in background isolates (`compute`,
-  `Isolate.run`) are not captured (each isolate has its own `HttpOverrides`).
+- In background isolates (`compute`, `Isolate.run`, `Isolate.spawn`,
+  workmanager tasks), `Durbun.log` and `Durbun.event` reach the SDK of the
+  main isolate by themselves; HTTP is captured after `Durbun.attachIsolate()`
+  runs in that isolate (see [Background isolates](#background-isolates)).
+  `print` there is not captured, mock rules apply only to the main isolate's
+  requests, and work that runs while the app's main isolate is not running
+  (for example a push handler in a fresh background engine) is not seen.
 - `HttpClient`s created **before** `Durbun.run/init` are not wrapped.
 - WebSocket: only the handshake (101) is visible, not the messages.
 - `dart:developer` `log()` calls come not from the SDK but from the desktop's Dart
@@ -649,17 +760,31 @@ rules are on their way).
 
 ### Reporting uncaptured clients manually
 
-For package:http clients (for example `CronetClient`, `OkHttpClient`), a small
-wrapper is enough. While Dürbün is off, `begin` returns null and nothing
-happens. The wrapper reads the response body into memory once, so do not use it
-for large downloads:
+For package:http clients (for example `CronetClient`, `OkHttpClient`), copy
+this wrapper into your app and wrap the client once:
+`DurbunReportingClient(CronetClient.fromCronetEngine(engine))`. While Dürbün
+is off, `begin` returns null and requests go straight to the inner client.
+The response still streams to your code chunk by chunk (downloads and
+server-sent events keep working); only the first `DurbunNetwork.maxBodyBytes`
+bytes are copied for the report, which is sent when the body ends, fails or
+your code stops reading it. The plugin does not ship this class, so it does
+not add `package:http` to your dependencies; the package's tests run this
+exact code.
 
 ```dart
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:durbun/durbun.dart';
 import 'package:http/http.dart' as http;
 
+/// Reports the requests of any package:http client (CronetClient,
+/// OkHttpClient, …) to Dürbün. The response still streams to your code
+/// chunk by chunk; only its first DurbunNetwork.maxBodyBytes bytes are copied
+/// for the report, which is sent when the body ends, fails or is cancelled.
 class DurbunReportingClient extends http.BaseClient {
   DurbunReportingClient(this._inner, {this.source = 'cronet'});
+
   final http.Client _inner;
   final String source;
 
@@ -673,31 +798,72 @@ class DurbunReportingClient extends http.BaseClient {
       contentType: request.headers['content-type'],
       source: source,
     );
-    if (call == null) return _inner.send(request);
+    if (call == null) return _inner.send(request); // Dürbün is off
+    final http.StreamedResponse response;
     try {
-      final response = await _inner.send(request);
-      final bytes = await response.stream.toBytes();
-      call.response(
-        status: response.statusCode,
-        statusText: response.reasonPhrase,
-        headers: [for (final h in response.headers.entries) [h.key, h.value]],
-        body: bytes,
-        contentType: response.headers['content-type'],
-      );
-      return http.StreamedResponse(
-        http.ByteStream.fromBytes(bytes),
-        response.statusCode,
-        contentLength: bytes.length,
-        request: response.request,
-        headers: response.headers,
-        isRedirect: response.isRedirect,
-        persistentConnection: response.persistentConnection,
-        reasonPhrase: response.reasonPhrase,
-      );
+      response = await _inner.send(request);
     } catch (e) {
       call.error(e);
       rethrow;
     }
+    final limit = DurbunNetwork.captureBodies ? DurbunNetwork.maxBodyBytes : 0;
+    final copy = BytesBuilder(copy: false);
+    var size = 0;
+    var ended = false;
+    void end([Object? error, bool cancelled = false]) {
+      if (ended) return;
+      ended = true;
+      if (error != null) {
+        call.error(error, cancelled: cancelled);
+        return;
+      }
+      call.response(
+        status: response.statusCode,
+        statusText: response.reasonPhrase,
+        headers: [for (final h in response.headers.entries) [h.key, h.value]],
+        body: copy.takeBytes(),
+        bodySize: size,
+        contentType: response.headers['content-type'],
+      );
+    }
+
+    final body = StreamController<List<int>>(sync: true);
+    body.onListen = () {
+      final sub = response.stream.listen(
+        (chunk) {
+          if (size < limit) {
+            copy.add(chunk.length <= limit - size ? chunk : chunk.sublist(0, limit - size));
+          }
+          size += chunk.length;
+          body.add(chunk);
+        },
+        onError: (Object e, StackTrace st) {
+          end(e);
+          body.addError(e, st);
+        },
+        onDone: () {
+          end();
+          body.close();
+        },
+      );
+      body
+        ..onPause = sub.pause
+        ..onResume = sub.resume
+        ..onCancel = () {
+          end('cancelled', true);
+          return sub.cancel();
+        };
+    };
+    return http.StreamedResponse(
+      body.stream,
+      response.statusCode,
+      contentLength: response.contentLength,
+      request: response.request,
+      headers: response.headers,
+      isRedirect: response.isRedirect,
+      persistentConnection: response.persistentConnection,
+      reasonPhrase: response.reasonPhrase,
+    );
   }
 
   @override

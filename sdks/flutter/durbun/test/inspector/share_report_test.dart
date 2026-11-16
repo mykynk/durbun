@@ -100,6 +100,7 @@ ShareInput _with(
   String? error,
   bool? mocked,
   String? mockRule,
+  List<List<String>>? requestHeaders,
   List<List<String>>? responseHeaders,
   String? requestContentType,
   String? responseContentType,
@@ -122,7 +123,7 @@ ShareInput _with(
       device: b.device,
       mocked: mocked ?? b.mocked,
       mockRule: mockRule ?? b.mockRule,
-      requestHeaders: b.requestHeaders,
+      requestHeaders: requestHeaders ?? b.requestHeaders,
       responseHeaders: responseHeaders ?? b.responseHeaders,
       requestContentType: requestContentType ?? b.requestContentType,
       responseContentType: responseContentType ?? b.responseContentType,
@@ -227,5 +228,99 @@ void main() {
   test('time line: local with offset, then UTC', () {
     expect(shareTime(DateTime.utc(2026, 1, 1, 0, 0, 0, 5).millisecondsSinceEpoch.toDouble(), -330),
         '2025-12-31 18:30:00.005 (UTC-05:30) · 2026-01-01T00:00:00.005Z');
+  });
+
+  group("the app's own secret names", () {
+    tearDown(() => setExtraSecretNames(const <String>[]));
+
+    test('match ignoring case and separators; * matches the rest; no partial words', () {
+      setExtraSecretNames(<String>['pin', 'cardNumber', '*iban*', 'x-client-key', '*', '  ']);
+      for (final n in ['pin', 'PIN', 'card_number', 'Card-Number', 'cardnumber', 'ibanNo', 'payer_iban', 'IBAN', 'X-Client-Key']) {
+        expect(isSecretName(n), isTrue, reason: n);
+      }
+      for (final n in ['shipping', 'pinned', 'cardNumberType', 'x-client', 'user']) {
+        expect(isSecretName(n), isFalse, reason: n);
+      }
+    });
+
+    test('mask query values, headers, JSON and form fields in shares and exports', () {
+      setExtraSecretNames(<String>['pin', 'tckn', 'x-client-key']);
+      final r = buildShareReport(
+        _with(_login,
+            url: 'https://api.example.com/v1/verify?tckn=98765432109&lang=tr',
+            requestHeaders: const <List<String>>[
+              ['X-Client-Key', 'k-123'],
+              ['Content-Type', 'application/json'],
+            ],
+            requestBody: _utf8('{"pin":"4321","tckn":98765432109,"name":"ayşe"}')),
+        const ShareOptions(),
+        en,
+      );
+      expect(r, contains('POST https://api.example.com/v1/verify?tckn=••••&lang=tr'));
+      expect(r, contains('X-Client-Key: ••••'));
+      expect(r, contains('"pin": "••••"'));
+      expect(r, contains('"tckn": "••••"'));
+      expect(r, contains('"name": "ayşe"'));
+      expect(r, isNot(contains('4321')));
+      expect(r, isNot(contains('98765432109')));
+
+      final form = buildShareReport(
+          _with(_login, requestContentType: 'application/x-www-form-urlencoded', requestBody: _utf8('pin=4321&lang=tr')),
+          const ShareOptions(),
+          en);
+      expect(form, contains('pin=••••&lang=tr'));
+    });
+  });
+
+  test('numbers and booleans under a secret key are masked too, not other values', () {
+    final m = ShareMasker(true);
+    expect(m.body('{"otp":123456,"password":true,"count":3,"token":null}', 'application/json', true),
+        '{"otp":"••••","password":"••••","count":3,"token":null}');
+    expect(m.count, 2);
+  });
+
+  test('a log line: secret values in its data are masked, the message is kept', () {
+    final input = LogShareInput(
+      level: 'info',
+      ts: DateTime.utc(2026, 11, 4).millisecondsSinceEpoch.toDouble(),
+      utcOffsetMinutes: 0,
+      message: 'signed in with token abc',
+      data: const <String, Object?>{
+        'user': 'ayşe',
+        'auth': <String, Object?>{'accessToken': 'eyJ.x.y', 'expires': 3600},
+        'otp': 123456,
+        'list': <Object?>[
+          <String, Object?>{'password': 'p'},
+        ],
+      },
+    );
+    final masked = buildLogReport(input, en);
+    expect(masked, contains('signed in with token abc'));
+    expect(masked, contains('"user": "ayşe"'));
+    expect(masked, contains('"accessToken": "••••"'));
+    expect(masked, contains('"expires": 3600'));
+    expect(masked, contains('"otp": "••••"'));
+    expect(masked, contains('"password": "••••"'));
+    expect(masked, endsWith(en.reportMasked));
+    final open = buildLogReport(input, en, mask: false);
+    expect(open, contains('eyJ.x.y'));
+    expect(open, isNot(contains(en.reportMasked)));
+  });
+
+  test('an address-only Dart stack gets the symbolize command', () {
+    const stack = '''*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+pid: 4711, tid: 4730, name 1.ui
+os: android arch: arm64 comp: yes sim: no
+build_id: '6c3e1a0f9b'
+isolate_dso_base: 7a5e1c8000, vm_dso_base: 7a5e1c8000
+isolate_instructions: 7a5e2d4000, vm_instructions: 7a5e2c0000
+    #00 abs 0000007a5e3d33f3 virt 00000000002793f3 _kDartIsolateSnapshotInstructions+0x1c13f3
+    #01 abs 0000007a5e3d2a10 virt 0000000000278a10 _kDartIsolateSnapshotInstructions+0x1c0a10''';
+    final r = buildLogReport(
+        LogShareInput(level: 'fatal', ts: 0, utcOffsetMinutes: 0, message: 'Unhandled exception: Bad state', stack: stack), en);
+    expect(r, contains('flutter symbolize -i stack.txt -d <split-debug-info folder>/app.android-arm64.symbols'));
+    expect(obfuscatedStackNote('#0      main (package:shop/main.dart:12:3)', en), isNull);
+    expect(obfuscatedStackNote('*** *** ***\nbacktrace:\n  #00 pc 000000000004e7a4  /apex/com.android.runtime/lib64/bionic/libc.so', en), isNull,
+        reason: 'a native tombstone is not a Dart stack');
   });
 }

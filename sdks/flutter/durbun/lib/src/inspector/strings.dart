@@ -136,6 +136,17 @@ class InspectorStrings {
   String get data => _('Veri', 'Data');
   String get stack => _('Yığın izi', 'Stack trace');
   String moreFrames(int n) => _('… $n satır daha', '… $n more frames');
+  String get stackNoSymbols => _('Sembolsüz Dart yığını', 'Dart stack without symbols');
+  String get stackNoSymbolsBody => _(
+        'Bu derleme --split-debug-info ile alınmış; satırlarda dosya ve satır yerine yalnızca adresler var. '
+            'Yığını (ya da paylaşılan raporun tamamını) stack.txt olarak kaydedin ve bu derlemenin sembol klasörüyle şu komutu çalıştırın:',
+        'This build was made with --split-debug-info, so the frames show addresses instead of files and lines. '
+            'Save the stack (or the whole shared report) as stack.txt and run this command with the symbols folder of this exact build:',
+      );
+  String reportNoSymbols(String command) => _(
+        'Sembolsüz Dart yığını (--split-debug-info). Okumak için stack.txt olarak kaydedip bu derlemenin sembol klasörüyle çalıştırın: $command',
+        'Dart stack without symbols (--split-debug-info). To read it, save it as stack.txt and run, with the symbols folder of this exact build: $command',
+      );
   String repeated(int n) => _('$n kez tekrarlandı', 'repeated $n times');
   String get tagActions => _('Etiket', 'Tag');
   String onlyThisTag(String tag) => _('Yalnızca “$tag”', 'Only “$tag”');
@@ -415,7 +426,10 @@ class InspectorStrings {
     'A report your team can read without Dürbün: URL, status, headers, bodies and cURL',
   );
   String get shareMask => _('Gizli değerleri maskele', 'Mask secret values');
-  String get shareMaskHint => _('Authorization, çerezler, token ve parola alanları •••• olur', 'Authorization, cookies, token and password fields become ••••');
+  String get shareMaskHint => _('Başlık, sorgu ve gövdelerdeki Authorization, çerez, token, parola ve API anahtarı değerleri •••• olur',
+      'Authorization, cookies, tokens, passwords and API keys in headers, query and bodies become ••••');
+  String get shareLogMaskHint => _('Verideki token, parola ve API anahtarı alanlarının değerleri •••• olur; mesaj olduğu gibi kalır',
+      'Token, password and API key fields in the data become ••••; the message stays as it is');
   String get shareBodies => _('Gövdeleri ekle', 'Include bodies');
   String get shareCurl => _('cURL ekle', 'Include cURL');
   String get shareSend => _('Paylaş…', 'Share…');
@@ -611,8 +625,8 @@ class InspectorStrings {
   );
   String get ncIsolates => _('Arka plan isolate’leri', 'Background isolates');
   String get ncIsolatesWhy => _(
-    'compute, Isolate.run ve arka plan bildirimleri gibi işlerdeki Durbun.log satırları ve HTTP istekleri gelmez. Yalnızca uygulamanın ana isolate’i görünür.',
-    'Durbun.log lines and HTTP requests from work such as compute, Isolate.run or background notification handlers do not arrive. Only the app’s main isolate is seen.',
+    'compute, Isolate.run ya da arka plan işlerindeki Durbun.log satırları kendiliğinden gelir. Bu işlerin HTTP istekleri, o isolate’te Durbun.attachIsolate() çağrılınca görünür. Oradaki print satırları ve uygulama kapalıyken çalışan işler gelmez.',
+    'Durbun.log lines from compute, Isolate.run or background work arrive by themselves. Their HTTP requests show once Durbun.attachIsolate() runs in that isolate. print there, and work that runs while the app itself is closed, do not arrive.',
   );
   String get ncDeveloperLog => _('dart:developer log()', 'dart:developer log()');
   String get ncDeveloperLogWhy => _(

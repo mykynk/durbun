@@ -125,6 +125,12 @@ void main() {
       expect(data, endsWith('"refresh_token": "••••'));
     });
 
+    test('secret values in a log line\'s data are masked in the file', () {
+      final s = _newStore()
+        ..ingest(buildLog(level: 'info', message: 'signed in', ts: 6000, data: <String, Object?>{'otp': 482913, 'user': 'ayşe'}));
+      expect(runLogRecord(s.logs.first, ShareMasker(true))['data'], <String, Object?>{'otp': '••••', 'user': 'ayşe'});
+    });
+
     test('a crash line keeps its error; long text is capped', () {
       final s = _newStore()
         ..ingest(_crash())

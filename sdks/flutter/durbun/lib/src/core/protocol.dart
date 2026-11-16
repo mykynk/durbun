@@ -14,6 +14,8 @@ const int kProtocolVersion = 1;
 
 /// SDK identity sent in `hello.sdk`.
 const String kSdkName = 'durbun-flutter';
+
+/// This package's version, sent in `hello.sdk` next to [kSdkName].
 const String kSdkVersion = '0.2.0';
 
 /// `DEFAULT_PORTS`.
@@ -84,6 +86,7 @@ abstract final class SdkLogKind {
 
 /// `SdkConfig` pushed by the desktop in `welcome` and `config` messages.
 class SdkConfig {
+  /// A config with every field given; the SDK reads them with [fromJson].
   const SdkConfig({
     required this.captureBodies,
     required this.maxBodyBytes,
@@ -99,9 +102,18 @@ class SdkConfig {
     deviceLogsAvailable: false,
   );
 
+  /// Whether request and response bodies are captured (sizes always are).
   final bool captureBodies;
+
+  /// Bodies are cut after this many bytes (at most 10 MiB).
   final int maxBodyBytes;
+
+  /// How often metric samples are sent, in milliseconds (at least 100).
   final int metricsIntervalMs;
+
+  /// Whether the desktop reads the device's own logs (adb logcat, iOS
+  /// syslog); `print` capture in `auto` mode stays off then, so lines are
+  /// not shown twice.
   final bool deviceLogsAvailable;
 
   /// Tolerant parser: missing/invalid fields fall back to [fallback].
@@ -125,6 +137,7 @@ class SdkConfig {
     );
   }
 
+  /// The config as wire JSON.
   Map<String, Object?> toJson() => {
     'captureBodies': captureBodies,
     'maxBodyBytes': maxBodyBytes,
@@ -136,8 +149,9 @@ class SdkConfig {
   String toString() => 'SdkConfig(${toJson()})';
 }
 
-/// `ServerWelcome`.
+/// `ServerWelcome`: the desktop's answer to the SDK's hello.
 class ServerWelcome {
+  /// A welcome with every field given; the SDK reads them with [fromJson].
   const ServerWelcome({
     required this.protocol,
     required this.server,
@@ -146,12 +160,22 @@ class ServerWelcome {
     required this.mocks,
   });
 
+  /// The desktop's protocol version.
   final int protocol;
+
+  /// The desktop's name and version, e.g. `durbun/0.2.0`.
   final String server;
+
+  /// The app session id the desktop gave this connection (e.g. `app:3`).
   final String appId;
+
+  /// Settings that apply from now on.
   final SdkConfig config;
+
+  /// The mock rules in force, first match wins.
   final List<MockRule> mocks;
 
+  /// Reads a `welcome` message; missing fields get safe defaults.
   static ServerWelcome fromJson(Map<Object?, Object?> json) {
     final protocol = json['protocol'];
     return ServerWelcome(
@@ -170,6 +194,7 @@ class ServerWelcome {
 /// decoding, truncation) is produced by the transport encoder, off the UI
 /// isolate when the background transport is used.
 class PendingBody {
+  /// A captured body; [bytes] is at most [limit] long.
   PendingBody({
     required this.bytes,
     required this.size,
@@ -194,6 +219,8 @@ class PendingBody {
 
   /// `config.captureBodies` at capture time; false → only the size is sent.
   final bool capture;
+
+  /// The body's `content-type` header, if any.
   final String? contentType;
 
   /// Set when [bytes] are still compressed (e.g. `gzip` with

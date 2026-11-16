@@ -23,9 +23,21 @@ import 'types.dart';
 const int kMaxMessageChars = 1024 * 1024;
 const int _maxStackChars = 256 * 1024;
 
+/// Runs a desktop command (a [DurbunAction] or a built-in tool) with its
+/// parameters; the result goes back to the desktop.
 typedef DurbunCommandHandler =
     FutureOr<Object?> Function(Map<String, Object?> params);
 
+/// The SDK's connection to the Dürbün desktop for pure Dart programs (no
+/// Flutter): logs, events, dart:io HTTP capture, mock rules and commands.
+/// Flutter apps use `Durbun.run` / `Durbun.init`, which create one of these.
+///
+/// ```dart
+/// final client = DurbunClient.start(const DurbunOptions(enabled: true));
+/// client.log(DurbunLogLevel.info, 'Job started', tag: 'cron');
+/// await client.flush(const Duration(seconds: 2));
+/// await client.dispose();
+/// ```
 class DurbunClient implements HttpCaptureHost {
   DurbunClient._({
     required this.options,
@@ -99,10 +111,19 @@ class DurbunClient implements HttpCaptureHost {
   /// of a connection).
   static const Duration kHelloGateTimeout = Duration(seconds: 3);
 
+  /// The options this client was started with.
   final DurbunOptions options;
+
+  /// `hello.sdk.platform` (`flutter` unless [start] was given another).
   final String sdkPlatform;
+
+  /// The app as detected at start (id, name, version), options applied.
   final DetectedApp app;
+
+  /// The device as detected at start.
   final DetectedDevice device;
+
+  /// Capabilities announced on top of the client's own (e.g. `metrics`).
   final List<String> extraCapabilities;
 
   /// Random id for this app launch (`hello.session`).
@@ -242,6 +263,7 @@ class DurbunClient implements HttpCaptureHost {
     );
   }
 
+  /// Whether [dispose] ran; a disposed client ignores every call.
   bool get isDisposed => _disposed;
 
   /// Waits until everything logged so far was handed to the desktop's socket
@@ -276,10 +298,13 @@ class DurbunClient implements HttpCaptureHost {
 
   /* ───────────────────────────── state ───────────────────────────── */
 
+  /// The current connection to the desktop.
   DurbunConnection get connection => _connection;
 
+  /// Every change of [connection] (connected, disconnected).
   Stream<DurbunConnection> get connectionChanges => _connectionController.stream;
 
+  /// Whether the desktop is connected right now.
   bool get isConnected => _connection.connected;
 
   /// Config from the desktop (defaults until the first welcome).
@@ -297,9 +322,11 @@ class DurbunClient implements HttpCaptureHost {
   /// Whether the transport engine runs on a background isolate.
   bool get usesBackgroundIsolate => _transport.isBackground;
 
+  /// Calls [listener] each time the desktop sends new settings.
   void addConfigListener(void Function(SdkConfig config) listener) =>
       _configListeners.add(listener);
 
+  /// Stops calling a listener added with [addConfigListener].
   void removeConfigListener(void Function(SdkConfig config) listener) =>
       _configListeners.remove(listener);
 
@@ -396,6 +423,7 @@ class DurbunClient implements HttpCaptureHost {
   /// Called when [connectionReport] changes.
   void addReportListener(void Function() listener) => _reportListeners.add(listener);
 
+  /// Stops calling a listener added with [addReportListener].
   void removeReportListener(void Function() listener) => _reportListeners.remove(listener);
 
   void _notifyReport() {
@@ -581,6 +609,7 @@ class DurbunClient implements HttpCaptureHost {
     publishActions();
   }
 
+  /// Removes the action with [id] and tells the desktop.
   void removeAction(String id) {
     if (_actions.remove(id) != null) publishActions();
   }
@@ -631,6 +660,7 @@ class DurbunClient implements HttpCaptureHost {
   void registerCommand(String name, DurbunCommandHandler handler) =>
       _commands[name] = handler;
 
+  /// The registered actions as the desktop receives them (`hello.actions`).
   List<Map<String, Object?>> describeActions() => <Map<String, Object?>>[
     for (final a in _actions.values) a.describe(),
     ...?_native?.actions,
@@ -846,6 +876,7 @@ class DurbunClient implements HttpCaptureHost {
   void addStateListener(void Function() listener) =>
       _stateListeners.add(listener);
 
+  /// Stops calling a listener added with [addStateListener].
   void removeStateListener(void Function() listener) =>
       _stateListeners.remove(listener);
 

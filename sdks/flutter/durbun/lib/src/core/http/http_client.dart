@@ -17,6 +17,7 @@ abstract interface class HttpCaptureHost implements NetworkRecorder {
 /// [HttpOverrides] produced): every member is forwarded, requests are
 /// reported, mock rules are applied.
 class DurbunHttpClient implements HttpClient {
+  /// Wraps [_inner]; its traffic is reported to and mocked by [_host].
   DurbunHttpClient(this._inner, this._host);
 
   final HttpClient _inner;
@@ -25,8 +26,10 @@ class DurbunHttpClient implements HttpClient {
   /// The wrapped client.
   HttpClient get inner => _inner;
 
+  /// Where this client's requests are reported.
   NetworkRecorder get recorder => _host;
 
+  /// A timer that runs outside the app's zones (the SDK's own timeouts).
   Timer startInternalTimer(Duration duration, void Function() callback) =>
       _host.startTimer(duration, callback);
 
@@ -369,8 +372,11 @@ class DurbunHttpClient implements HttpClient {
 /// Installs [DurbunHttpClient] for every dart:io `HttpClient()` created on
 /// this isolate, chaining whatever overrides were there before.
 class DurbunHttpOverrides extends HttpOverrides {
+  /// Wraps every `HttpClient` the app creates (and that [previous] would
+  /// create) and reports it to [host]. Install it as `HttpOverrides.global`.
   DurbunHttpOverrides(this.host, {this.previous});
 
+  /// Where the wrapped clients report their requests.
   final HttpCaptureHost host;
 
   /// The overrides that were current when this one was installed.

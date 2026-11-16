@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../core/client.dart';
 import '../core/json_safe.dart';
 import '../core/protocol.dart';
+import '../core/stack_format.dart';
 import '../core/types.dart';
 
 /// Chains `FlutterError.onError` and `PlatformDispatcher.onError` (and
@@ -123,6 +124,7 @@ class FlutterErrorHooks {
           if (details.library != null) 'library': details.library,
           if (details.context != null) 'context': details.context.toString(),
           if (details.silent) 'silent': true,
+          ...symbolizeHint(details.stack?.toString()),
         },
       );
     } catch (_) {}
@@ -158,7 +160,7 @@ class FlutterErrorHooks {
         tag: 'flutter',
         kind: SdkLogKind.crash,
         error: DurbunClient.errorInfo(error, stack),
-        data: <String, Object?>{'source': source},
+        data: <String, Object?>{'source': source, ...symbolizeHint(stack?.toString())},
       );
     } catch (_) {}
   }
@@ -195,4 +197,16 @@ String renderFlutterErrorDetails(FlutterErrorDetails details) {
   if (details.context != null) sb.write('\n${details.context}');
   if (details.library != null) sb.write('\n(${details.library})');
   return sb.toString();
+}
+
+/// `{'symbolize': 'flutter symbolize -i stack.txt -d …/app.android-arm64.symbols'}`
+/// when [stack] carries only addresses (a `--split-debug-info` build), so
+/// the desktop and the panel say how to read it; empty otherwise.
+Map<String, Object?> symbolizeHint(String? stack) {
+  try {
+    final format = AddressOnlyStack.parse(stack);
+    return format == null ? const <String, Object?>{} : <String, Object?>{'symbolize': format.symbolizeCommand()};
+  } catch (_) {
+    return const <String, Object?>{};
+  }
 }

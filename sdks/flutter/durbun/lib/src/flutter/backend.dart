@@ -80,6 +80,10 @@ abstract class DurbunBackend {
 
   Future<bool> flush(Duration timeout);
 
+  /// Captures dart:io HTTP of the calling (background) isolate through the
+  /// SDK running in the main isolate; true when captured.
+  Future<bool> attachIsolate();
+
   Future<void> dispose();
 
   /// Whether dart:io `HttpClient` traffic is captured right now.

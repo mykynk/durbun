@@ -16,11 +16,15 @@ import '../core/options.dart';
 import '../core/print_capture.dart';
 import '../core/protocol.dart';
 import '../core/types.dart';
+import '../inspector/inspector.dart' show inspectorPanelBuilder;
+import '../inspector/panel.dart' show InspectorPanelHost;
 import '../inspector/panel_prefs_io.dart';
+import '../inspector/share_report.dart' show setExtraSecretNames;
 import '../inspector/store.dart';
 import 'backend.dart';
 import 'commands.dart';
 import 'error_hooks.dart';
+import 'isolate_link.dart';
 import 'lifecycle.dart';
 import 'metrics.dart';
 import 'native_bridge.dart';
@@ -73,6 +77,9 @@ class IoDurbunBackend implements DurbunBackend {
   static final _Changes _changes = _Changes();
 
   DurbunStartState _startState = DurbunStartState.notStarted;
+
+  /// Receives logs, events and HTTP from the app's other isolates.
+  IsolateHub? _isolates;
   DurbunOffReason? _offReason;
   DurbunClient? _client;
   DurbunOptions? _options;
@@ -133,6 +140,7 @@ class IoDurbunBackend implements DurbunBackend {
       );
       _client = client;
       _options = options;
+      _isolates = IsolateHub(client);
       _startState = options.inspector ? DurbunStartState.running : DurbunStartState.inspectorOff;
       _offReason = null;
       client
@@ -148,6 +156,8 @@ class IoDurbunBackend implements DurbunBackend {
           ..helloProvider = (() => client.isDisposed ? null : client.describeState()['hello'] as Map<String, Object?>?)
           ..slackWebhook = resolveSlackWebhook(options.slackWebhook)
           ..attached = true;
+        setExtraSecretNames(options.secretNames);
+        inspectorPanelBuilder ??= (store, onClose) => InspectorPanelHost(store: store, onClose: onClose);
         client.outgoingTap = store.ingest;
       }
       client.runInternal(() {
@@ -364,19 +374,39 @@ class IoDurbunBackend implements DurbunBackend {
     Object? error,
     StackTrace? stackTrace,
   }) {
-    _client?.log(
-      level,
-      message,
-      tag: tag,
-      data: data,
-      error: error,
-      stackTrace: stackTrace,
-    );
+    final client = _client;
+    if (client != null) {
+      client.log(
+        level,
+        message,
+        tag: tag,
+        data: data,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    } else if (_startState == DurbunStartState.notStarted) {
+      // Another isolate (compute, Isolate.run, a background engine): the
+      // SDK of the main isolate, if one runs, takes it.
+      forwardLog(level, message, tag, data, error, stackTrace);
+    }
   }
 
   @override
-  void event(String name, Map<String, Object?>? props) =>
-      _client?.event(name, props);
+  void event(String name, Map<String, Object?>? props) {
+    final client = _client;
+    if (client != null) {
+      client.event(name, props);
+    } else if (_startState == DurbunStartState.notStarted) {
+      forwardEvent(name, props);
+    }
+  }
+
+  @override
+  Future<bool> attachIsolate() async {
+    if (_client != null) return isActive && _client!.networkEnabled;
+    if (_startState != DurbunStartState.notStarted) return false;
+    return attachThisIsolate();
+  }
 
   @override
   DurbunConnection get connection =>
@@ -467,6 +497,8 @@ class IoDurbunBackend implements DurbunBackend {
       ..removeStateListener(_changes.ping);
     _guardian?.cancel();
     _guardian = null;
+    _isolates?.dispose();
+    _isolates = null;
     final native = _native;
     _native = null;
     if (native != null) await native.stop();

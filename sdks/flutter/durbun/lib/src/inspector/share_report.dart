@@ -11,6 +11,7 @@ library;
 
 import 'dart:convert';
 
+import '../core/stack_format.dart';
 import 'network_model.dart';
 import 'store.dart';
 import 'strings.dart';
@@ -140,10 +141,39 @@ const List<String> _secretParts = <String>[
   'token', 'secret', 'password', 'passwd', 'apikey', 'api_key', 'api-key', 'credential', 'signature', 'sessionid', 'session_id', 'session-id', //
 ];
 
+/// The app's own secret names (`DurbunOptions.secretNames`), normalized by
+/// [_normalizeName]; a `*` at either end matches any text there.
+List<String> _extraNames = const <String>[];
+
+/// `cardNumber`, `card_number`, `Card-Number` → `cardnumber`.
+String _normalizeName(String name) => name.toLowerCase().replaceAll(RegExp(r'[\s._-]'), '');
+
+/// Sets the app's own secret names, masked on top of the built-in ones
+/// wherever the panel shares or exports. Called when the SDK starts.
+void setExtraSecretNames(Iterable<String> names) {
+  _extraNames = <String>[
+    for (final n in names)
+      if (_normalizeName(n).replaceAll('*', '').isNotEmpty) _normalizeName(n),
+  ];
+}
+
+bool _extraMatch(String pattern, String name) {
+  final start = pattern.startsWith('*');
+  final end = pattern.length > 1 && pattern.endsWith('*');
+  final core = pattern.substring(start ? 1 : 0, end ? pattern.length - 1 : pattern.length);
+  if (start && end) return name.contains(core);
+  if (start) return name.endsWith(core);
+  if (end) return name.startsWith(core);
+  return name == core;
+}
+
 /// Header, query, form or JSON key whose value is a secret.
 bool isSecretName(String name) {
   final n = name.toLowerCase();
-  return _secretNames.contains(n) || _secretParts.any(n.contains);
+  if (_secretNames.contains(n) || _secretParts.any(n.contains)) return true;
+  if (_extraNames.isEmpty) return false;
+  final normalized = _normalizeName(name);
+  return _extraNames.any((p) => _extraMatch(p, normalized));
 }
 
 String _maskHeaderValue(String name, String value) {
@@ -177,7 +207,10 @@ String _decodeKey(String key) {
   }
 }
 
-final RegExp _jsonPair = RegExp(r'"((?:[^"\\]|\\.)*)"(\s*:\s*)"((?:[^"\\]|\\.)*)"');
+/// A JSON key with a string, number or boolean value (`"pin": 1234` is as
+/// secret as `"pin": "1234"`).
+final RegExp _jsonPair =
+    RegExp(r'"((?:[^"\\]|\\.)*)"(\s*:\s*)("(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false)');
 
 /// Masks secret values in headers, URLs, query strings and text bodies
 /// (JSON string values, form fields) when [on]; [count] says how many it
@@ -237,11 +270,51 @@ class ShareMasker {
     if (json) {
       return text.replaceAllMapped(_jsonPair, (m) {
         final key = m.group(1)!;
-        return isSecretName(key) && m.group(3) != kShareMask ? _hit('"$key"${m.group(2)}"$kShareMask"') : m.group(0)!;
+        return isSecretName(key) && m.group(3) != '"$kShareMask"' ? _hit('"$key"${m.group(2)}"$kShareMask"') : m.group(0)!;
       });
     }
     if (contentType.toLowerCase().contains('x-www-form-urlencoded')) return query(text);
     return text;
+  }
+
+  /// Structured log data: string, number and boolean values under a secret
+  /// key become `••••`, at any depth. Returns [data] itself when nothing
+  /// was masked.
+  Object? data(Object? data) {
+    if (!on) return data;
+    Object? walk(Object? v, int depth) {
+      if (depth > 32) return v;
+      if (v is Map) {
+        var changed = false;
+        final out = <String, Object?>{};
+        for (final e in v.entries) {
+          final key = '${e.key}';
+          final value = e.value;
+          Object? next;
+          if ((value is String || value is num || value is bool) && isSecretName(key) && value != kShareMask) {
+            next = _hit(kShareMask);
+          } else {
+            next = walk(value, depth + 1);
+          }
+          if (!identical(next, value)) changed = true;
+          out[key] = next;
+        }
+        return changed ? out : v;
+      }
+      if (v is List) {
+        var changed = false;
+        final out = <Object?>[];
+        for (final item in v) {
+          final next = walk(item, depth + 1);
+          if (!identical(next, item)) changed = true;
+          out.add(next);
+        }
+        return changed ? out : v;
+      }
+      return v;
+    }
+
+    return walk(data, 0);
   }
 }
 
@@ -549,8 +622,11 @@ void _capped(List<String> out, String text, InspectorStrings t, [String language
 /// an e-mail. The desktop builds the same text
 /// (`packages/ui/src/features/logs/model/shareReport.ts`). Log text is shown
 /// as it is: a free-form message has no field names to mask, so the preview
-/// is what goes out.
-String buildLogReport(LogShareInput input, InspectorStrings t) {
+/// is what goes out. Structured [LogShareInput.data] has field names: with
+/// [mask], secret values in it become `••••` and a closing line says so.
+String buildLogReport(LogShareInput input, InspectorStrings t, {bool mask = true}) {
+  final m = ShareMasker(mask);
+  final data = m.data(input.data);
   final head = <String?>[input.level.toUpperCase(), input.kind, input.tag].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
   final out = <String>[head, ''];
   out.add('- ${t.reportTime}: ${shareTime(input.ts, input.utcOffsetMinutes)}');
@@ -564,10 +640,10 @@ String buildLogReport(LogShareInput input, InspectorStrings t) {
     out.add('${t.message}:');
     _capped(out, message, t);
   }
-  if (input.data != null) {
+  if (data != null) {
     String? json;
     try {
-      json = const JsonEncoder.withIndent('  ').convert(input.data);
+      json = const JsonEncoder.withIndent('  ').convert(data);
     } catch (_) {
       json = null;
     }
@@ -582,8 +658,19 @@ String buildLogReport(LogShareInput input, InspectorStrings t) {
   if (stack.isNotEmpty && !message.contains(stack.split('\n').first)) {
     out.add('${t.stack}:');
     _capped(out, stack, t);
+    final note = obfuscatedStackNote(stack, t);
+    if (note != null) out.addAll(<String>[note, '']);
   }
+  if (m.count > 0) out.add(t.reportMasked);
   return out.join('\n').trimRight();
+}
+
+/// One line under an address-only Dart stack (a `--split-debug-info`
+/// build): what it is and the `flutter symbolize` command; null for any
+/// other stack.
+String? obfuscatedStackNote(String stack, InspectorStrings t) {
+  final format = AddressOnlyStack.parse(stack);
+  return format == null ? null : t.reportNoSymbols(format.symbolizeCommand());
 }
 
 /// The report input for a panel log line.

@@ -10,6 +10,7 @@ import 'types.dart';
 /// }, options: const DurbunOptions(host: '192.168.1.20'));
 /// ```
 class DurbunOptions {
+  /// Options with the defaults the README lists; every field is optional.
   const DurbunOptions({
     this.enabled,
     this.host,
@@ -31,6 +32,7 @@ class DurbunOptions {
     this.maxBodyBytes,
     this.captureBodies,
     this.captureLifecycle = true,
+    this.secretNames = const <String>[],
   });
 
   /// Whether the SDK runs. `null` (default):
@@ -131,6 +133,28 @@ class DurbunOptions {
   /// background or comes back (`AppLifecycleState.paused`, `.resumed`, …).
   final bool captureLifecycle;
 
+  /// Your app's own secret field names, masked as `••••` when the in-app
+  /// panel shares or exports something (Share, Send to Slack, Export
+  /// session, the previous run's file), on top of the built-in names
+  /// (`authorization`, `cookie`, and any name containing `token`, `secret`,
+  /// `password`, `apikey`, `signature`, …).
+  ///
+  /// A name matches header names, query parameters, form fields, JSON keys
+  /// and the keys of a log line's `data`, ignoring case and `-`, `_`, `.`:
+  /// `'cardNumber'` also masks `card_number` and `Card-Number`. A `*` at
+  /// either end matches any text there (`'*iban*'` masks `ibanNo` and
+  /// `payerIban`); without one the whole name must match, so `'pin'` does
+  /// not mask `shipping`.
+  ///
+  /// ```dart
+  /// DurbunOptions(secretNames: ['pin', 'cardNumber', 'cvv', '*iban*', 'x-client-key'])
+  /// ```
+  ///
+  /// This changes only what leaves the phone through a share or an export;
+  /// what is captured, kept in the panel and sent to the desktop stays as
+  /// it is (see [redactHeaders] to hide a header everywhere).
+  final List<String> secretNames;
+
   /// Copy with some fields replaced.
   DurbunOptions copyWith({
     bool? enabled,
@@ -153,6 +177,7 @@ class DurbunOptions {
     int? maxBodyBytes,
     bool? captureBodies,
     bool? captureLifecycle,
+    List<String>? secretNames,
   }) {
     return DurbunOptions(
       enabled: enabled ?? this.enabled,
@@ -175,6 +200,7 @@ class DurbunOptions {
       maxBodyBytes: maxBodyBytes ?? this.maxBodyBytes,
       captureBodies: captureBodies ?? this.captureBodies,
       captureLifecycle: captureLifecycle ?? this.captureLifecycle,
+      secretNames: secretNames ?? this.secretNames,
     );
   }
 }

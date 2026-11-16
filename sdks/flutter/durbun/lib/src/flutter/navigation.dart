@@ -22,6 +22,8 @@ import 'durbun.dart';
 /// often carry ids, tokens or personal data. One observer serves one
 /// navigator; give each nested navigator its own. A no-op when the SDK is off.
 class DurbunNavigatorObserver extends NavigatorObserver {
+  /// An observer for one navigator; keep the instance (do not create one
+  /// per build). [routeName] picks the name sent for a route.
   DurbunNavigatorObserver({this.routeName});
 
   /// The name shown for [Route]s; return null to skip one. Default: the

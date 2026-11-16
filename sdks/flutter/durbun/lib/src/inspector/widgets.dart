@@ -929,6 +929,41 @@ class CodeBlock extends StatelessWidget {
   }
 }
 
+/// [CodeBlock] without text selection: for the page that opens while the
+/// SDK is off, so a build without Dürbün does not carry the text-selection
+/// machinery only for it. The copy button still copies the whole text.
+class PlainCodeBlock extends StatelessWidget {
+  const PlainCodeBlock({super.key, required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: c.isDark ? c.bgSunken : c.bgPanel,
+        borderRadius: BorderRadius.circular(DurbunRadius.lg),
+        border: Border.all(color: c.border),
+      ),
+      child: Stack(
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, kMinTapTarget + 4, 12),
+            child: Text(text, style: DurbunType.monoStyle(size: DurbunType.monoBody, color: c.text, height: 1.5)),
+          ),
+          Positioned(
+            top: 2,
+            right: 2,
+            child: DIconButton(icon: Icons.copy_rounded, tooltip: t.copy, onTap: () => copyText(context, text)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// A row of a grouped list: an icon (no tile), a title with an optional
 /// subtitle, a value on the right and a chevron when it opens a page.
 class ListRow extends StatelessWidget {

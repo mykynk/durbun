@@ -90,7 +90,8 @@ Object? _capData(Object? data) {
   }
 }
 
-Map<String, Object?> runLogRecord(InspectorLog l) {
+/// [l]'s record; with [m], secret values in its data are masked.
+Map<String, Object?> runLogRecord(InspectorLog l, [ShareMasker? m]) {
   final e = l.error;
   return <String, Object?>{
     't': 'log',
@@ -102,7 +103,7 @@ Map<String, Object?> runLogRecord(InspectorLog l) {
     if (l.kind != null) 'kind': l.kind,
     if (l.isEvent) 'event': true,
     if (l.native) 'native': true,
-    if (l.data != null) 'data': _capData(l.data),
+    if (l.data != null) 'data': _capData(m == null ? l.data : m.data(l.data)),
     if (e != null)
       'error': <String, Object?>{
         for (final k in const <String>['type', 'message', 'stack'])
@@ -282,7 +283,7 @@ class RunRecorder {
     }
     for (final l in store.logs) {
       if (l.seq <= _logSeq) continue;
-      out.add(_encode(runLogRecord(l)));
+      out.add(_encode(runLogRecord(l, _masker)));
       _logSeq = l.seq;
     }
     final budget = Stopwatch()..start();

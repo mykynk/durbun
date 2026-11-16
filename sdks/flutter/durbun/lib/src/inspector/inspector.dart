@@ -20,6 +20,13 @@ import 'strings.dart';
 import 'theme.dart';
 import 'unavailable_view.dart';
 
+/// Builds the panel's page. Set by the SDK when it starts with the
+/// inspector on; the panel's pages are reached only through it, so the
+/// compiler leaves them out of a build in which the SDK can never start (a
+/// release build without `--dart-define=DURBUN=true` and without
+/// `DurbunOptions(enabled: true)`).
+Widget Function(DurbunInspectorStore store, VoidCallback onClose)? inspectorPanelBuilder;
+
 /// Puts Dürbün's in-app inspector into the app: shake the phone to open a
 /// panel with logs, network requests, mocks, performance and device info. It
 /// works without the desktop, and shows what the desktop would (Dart, Dio,
@@ -49,6 +56,8 @@ import 'unavailable_view.dart';
 /// page that says why and what to do, and a debug build says the same once
 /// in the console.
 class DurbunInspector extends StatefulWidget {
+  /// Puts the inspector around [child] (usually from `MaterialApp.builder`,
+  /// see [builder]); the other parameters tune how it opens and what it keeps.
   const DurbunInspector({
     super.key,
     required this.child,
@@ -68,6 +77,7 @@ class DurbunInspector extends StatefulWidget {
   static Widget builder(BuildContext context, Widget? child) =>
       DurbunInspector(child: child ?? const SizedBox.shrink());
 
+  /// The app, drawn as it is; the panel opens over it on its navigator.
   final Widget child;
 
   /// Show a small draggable Dürbün button over the app (off by default).
@@ -353,7 +363,11 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   Future<void> _openPanel() async {
     if (_open || !mounted) return;
     _removeHint();
-    if (!_enabled) return _openUnavailable();
+    // A test store opens the panel directly; an app's panel comes from the
+    // running SDK, so a build in which the SDK can never start compiles
+    // without the panel's pages (see [inspectorPanelBuilder]).
+    final panel = widget.store != null ? _testPanel : inspectorPanelBuilder;
+    if (!_enabled || panel == null) return _openUnavailable();
     final navigator = _navigator();
     if (navigator == null) return;
     setState(() => _open = true);
@@ -366,7 +380,7 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
       settings: const RouteSettings(name: kInspectorRouteName),
       // Rises over the app like a sheet; no edge swipe fighting the tabs.
       fullscreenDialog: true,
-      builder: (_) => InspectorPanelHost(store: store, onClose: () => _close(route)),
+      builder: (_) => panel(store, () => _close(route)),
     );
     try {
       await navigator.push<void>(route);
@@ -379,6 +393,9 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
       store.panelOpen.value = false;
     }
   }
+
+  static Widget _testPanel(DurbunInspectorStore store, VoidCallback onClose) =>
+      InspectorPanelHost(store: store, onClose: onClose);
 
   /// [DurbunInspector.show] without a running SDK: a page that says why.
   Future<void> _openUnavailable() async {

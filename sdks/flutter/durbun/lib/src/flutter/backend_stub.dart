@@ -58,6 +58,9 @@ class _StubBackend implements DurbunBackend {
   Future<bool> flush(Duration timeout) async => false;
 
   @override
+  Future<bool> attachIsolate() async => false;
+
+  @override
   Future<void> dispose() async {}
 
   @override
