@@ -168,7 +168,7 @@ describe('code localization helpers', () => {
   it('words refusals from the server params: no English sentence inside the Turkish text', () => {
     setLanguage('tr');
     expect(describeError({ code: 'action.toolMissing', message: 'adb is not available', params: { tool: 'adb' } })).toEqual({
-      text: 'adb bu Mac’te bulunamadı; Sistem kontrolü nasıl kurulacağını gösterir.',
+      text: 'adb bu Mac’te bulunamadı; Sistem kontrolü nasıl kurulacağını gösterir',
       detail: undefined,
       code: 'action.toolMissing',
     });

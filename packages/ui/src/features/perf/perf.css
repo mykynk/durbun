@@ -199,9 +199,17 @@
   overflow: hidden;
   overflow-wrap: break-word;
 }
+.pf-tile__sub--line {
+  display: block;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* As tall as the trend line it replaces (22px), so a tile with a button keeps its row even. */
 .pf-tile__action {
+  display: flex;
+  align-items: center;
+  height: 22px;
   margin-top: auto;
-  padding-top: 4px;
 }
 .pf-tile__action .btn {
   margin-left: -9px;

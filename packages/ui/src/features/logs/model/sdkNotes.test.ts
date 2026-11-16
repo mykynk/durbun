@@ -15,10 +15,20 @@ describe('sdk notes', () => {
     expect(sdkNoteOf({ ...base, data: 'noInterceptor' })).toBeUndefined();
   });
 
-  it('a WebSocket without the SDK factory: recognised, worded by the SDK message itself', () => {
-    const line = { ...base, message: 'A WebSocket was opened without DurbunWebSocketFactory: …', data: { reason: 'noWebSocketFactory' } };
+  it('a WebSocket without the SDK factory: recognised and worded in the interface language, the call kept as code', () => {
+    const line = { ...base, message: 'This app opened a WebSocket with OkHttpClient.newWebSocket, so Dürbün shows its handshake but not its messages. …', data: { reason: 'noWebSocketFactory' } };
     expect(sdkNoteOf(line)).toEqual({ kind: 'noWebSocketFactory' });
-    expect(sdkNoteText(line)).toBeUndefined();
+    expect(sdkNoteOf({ ...line, source: 'device' } as never)).toBeUndefined();
+    setLanguage('tr');
+    const tr = sdkNoteText(line)!;
+    expect(tr).toMatch(/^Uygulama bir WebSocket’i OkHttpClient\.newWebSocket ile açtı; /);
+    expect(tr).toContain('DurbunWebSocketFactory(client).newWebSocket(request, listener)');
+    expect(tr).not.toContain('This app');
+    expect(tr.endsWith('.')).toBe(true);
+    setLanguage('en');
+    const en = sdkNoteText(line)!;
+    expect(en).toMatch(/^The app opened a WebSocket with OkHttpClient\.newWebSocket, /);
+    expect(en).toContain('DurbunWebSocketFactory(client).newWebSocket(request, listener)');
   });
 
   it('words them in the interface language', () => {

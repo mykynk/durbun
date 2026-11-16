@@ -37,8 +37,8 @@ export function sdkNoteOf(e: Pick<LogEntry, 'source' | 'data' | 'appId'>): SdkNo
 /** The line in the interface language, or undefined when it is not such a line (callers fall back to `message`). */
 export function sdkNoteText(e: Pick<LogEntry, 'source' | 'data' | 'appId' | 'message'>): string | undefined {
   const note = sdkNoteOf(e);
-  // No wording of its own yet: the SDK's message stays (the Network tab says it for the connection it concerns).
-  if (!note || note.kind === 'noWebSocketFactory') return undefined;
+  if (!note) return undefined;
+  if (note.kind === 'noWebSocketFactory') return t('logs.sdkNote.noWebSocketFactory');
   if (note.kind === 'noInterceptor') {
     const ms = note.afterMs ?? 30_000;
     // A whole wait the SDK chose ("30 sn", not "30,0 sn").

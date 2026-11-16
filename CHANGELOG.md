@@ -95,6 +95,8 @@ All notable changes to Dürbün are listed here. The format follows
   on one line at narrow widths.
 - Turkish: stack chips read "yığın satırı"; the pin-limit and Slack messages end with a full stop. Selected mock
   presets and the "new lines" pill keep their contrast in the light theme.
+- The top bar keeps the device name readable next to the selected app in narrow windows instead of cutting it
+  to one letter; both names have a tooltip. Server messages of more than one sentence end with a full stop.
 
 ### Changed
 

@@ -405,25 +405,25 @@ registerMessages('code', {
       'Uygulamadan gelen bir mesaj okunamadığı için atlandı',
     ],
     'app.messageUnknown': [
-      'Bu Dürbün, {app} uygulamasının gönderdiği “{type}” mesajlarını tanımıyor ve atlıyor: uygulamadaki SDK daha yeni. Dürbün’ü güncelleyin (son nottan beri {dropped, number} mesaj)',
-      'Bu Dürbün, {app} uygulamasının gönderdiği “{type}” mesajlarını tanımıyor ve atlıyor: uygulamadaki SDK daha yeni. Dürbün’ü güncelleyin',
-      'Bu Dürbün, uygulamanın gönderdiği bazı mesajları tanımıyor: Dürbün’ü güncelleyin',
+      'Bu Dürbün, {app} uygulamasının gönderdiği “{type}” mesajlarını tanımıyor ve atlıyor: uygulamadaki SDK daha yeni. Dürbün’ü güncelleyin (son nottan beri {dropped, number} mesaj).',
+      'Bu Dürbün, {app} uygulamasının gönderdiği “{type}” mesajlarını tanımıyor ve atlıyor: uygulamadaki SDK daha yeni. Dürbün’ü güncelleyin.',
+      'Bu Dürbün, uygulamanın gönderdiği bazı mesajları tanımıyor: Dürbün’ü güncelleyin.',
     ],
     'app.sdkNewer': [
-      '{app}, {sdk} {sdkVersion} kullanıyor (protokol {protocol}); bu Dürbün en çok protokol {serverProtocol} anlıyor, bazı veriler eksik kalabilir. Dürbün’ü güncelleyin',
-      'Uygulamadaki SDK bu Dürbün’den yeni; bazı veriler eksik kalabilir. Dürbün’ü güncelleyin',
+      '{app}, {sdk} {sdkVersion} kullanıyor (protokol {protocol}); bu Dürbün en çok protokol {serverProtocol} anlıyor, bazı veriler eksik kalabilir. Dürbün’ü güncelleyin.',
+      'Uygulamadaki SDK bu Dürbün’den yeni; bazı veriler eksik kalabilir. Dürbün’ü güncelleyin.',
     ],
     'app.sdkOlder': [
-      '{app}, {sdk} {sdkVersion} kullanıyor (protokol {protocol}); bu Dürbün protokol {minProtocol} ve sonrasını destekliyor, bazı veriler eksik kalabilir. Uygulamadaki Dürbün SDK’sını güncelleyin',
-      'Uygulamadaki Dürbün SDK’sı bu Dürbün için eski; bazı veriler eksik kalabilir. SDK’yı güncelleyin',
+      '{app}, {sdk} {sdkVersion} kullanıyor (protokol {protocol}); bu Dürbün protokol {minProtocol} ve sonrasını destekliyor, bazı veriler eksik kalabilir. Uygulamadaki Dürbün SDK’sını güncelleyin.',
+      'Uygulamadaki Dürbün SDK’sı bu Dürbün için eski; bazı veriler eksik kalabilir. SDK’yı güncelleyin.',
     ],
     'app.clockBehind': [
-      '{device} saati Mac’ten yaklaşık {seconds, number} sn geride ({app} bağlıyken ölçüldü). Log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor',
-      'Cihazın saati Mac’ten geride; log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor',
+      '{device} saati Mac’ten yaklaşık {seconds, number} sn geride ({app} bağlıyken ölçüldü). Log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor.',
+      'Cihazın saati Mac’ten geride; log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor.',
     ],
     'app.clockAhead': [
-      '{device} saati Mac’ten yaklaşık {seconds, number} sn ileride ({app} bağlıyken ölçüldü). Log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor',
-      'Cihazın saati Mac’ten ileride; log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor',
+      '{device} saati Mac’ten yaklaşık {seconds, number} sn ileride ({app} bağlıyken ölçüldü). Log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor.',
+      'Cihazın saati Mac’ten ileride; log satırlarının saatleri cihazın bildirdiği gibi gösteriliyor.',
     ],
     'app.deviceFound': [
       '{app} ağ üzerinden bağlanmıştı; {device} cihazında çalıştığı görüldüğü için oturumu artık bu cihazda gösteriliyor',
@@ -447,10 +447,10 @@ registerMessages('code', {
       'Kurulu uygulamalar okundu; iPhone’daki sistem süreçlerinin satırları artık gizleniyor',
     ],
     'logs.connectionLost': [
-      'Cihazın {link} bağlantısı koptu; {gap}. {graceSeconds, number} sn içinde dönmezse cihaz bağlı değil olarak görünür',
-      'Cihazın {link} bağlantısı koptu; {graceSeconds, number} sn içinde dönmezse cihaz bağlı değil olarak görünür',
-      'Cihazın {link} bağlantısı koptu',
-      'Cihazın bağlantısı koptu',
+      'Cihazın {link} bağlantısı koptu; {gap}. {graceSeconds, number} sn içinde dönmezse cihaz bağlı değil olarak görünür.',
+      'Cihazın {link} bağlantısı koptu; {graceSeconds, number} sn içinde dönmezse cihaz bağlı değil olarak görünür.',
+      'Cihazın {link} bağlantısı koptu.',
+      'Cihazın bağlantısı koptu.',
     ],
     'logs.connectionRestored': [
       'Cihazın {link} bağlantısı {seconds, number} sn sonra geri geldi; {gap}',
@@ -539,7 +539,7 @@ registerMessages('code', {
     'settings.sdkRebindFailed': ['SDK portu ({port}) yeniden açılamadı: {error}', 'SDK portu yeniden açılamadı'],
     'config.writeFailed': ['{file} kaydedilemedi: {error}', 'Ayar dosyası kaydedilemedi'],
     'config.unreadable': [
-      '{file} okunamadı ({error}); Dürbün bu dosya olmadan başladı. Bozuk dosyanın kopyası: {backup}',
+      '{file} okunamadı ({error}); Dürbün bu dosya olmadan başladı. Bozuk dosyanın bir kopyası saklandı ({backup}).',
       '{file} okunamadı ({error}); Dürbün bu dosya olmadan başladı.',
       'Bir ayar dosyası okunamadı; Dürbün onsuz başladı.',
     ],
@@ -559,7 +559,7 @@ registerMessages('code', {
     'replay.bodyMissing': 'İstek gövdesi yakalanmamış ya da bellekten atılmış; istek gövdesiz gönderildi',
     'replay.bodyDropped': 'GET ve HEAD istekleri gövde taşıyamaz; gövde çıkarıldı',
     'replay.tlsUnverified': 'İstek, sunucu sertifikası doğrulanmadan gönderildi',
-    'replay.tlsRejected': 'Sunucunun sertifikası kabul edilmedi. Doğrulamadan yeniden göndermeyi yalnızca güvendiğiniz bir test sunucusu için kullanın',
+    'replay.tlsRejected': 'Sunucunun sertifikası kabul edilmedi. Doğrulamadan yeniden göndermeyi yalnızca güvendiğiniz bir test sunucusu için kullanın.',
 
     /* ── command errors ── */
     'command.invalid': ['Geçersiz komut: {detail}', 'Geçersiz komut'],
@@ -598,8 +598,8 @@ registerMessages('code', {
     ],
     'preflight.http.thisMac': ['Bir adım bu Mac’teki bir servise ({host}) istek gönderiyor', 'Bir adım bu Mac’teki bir servise istek gönderiyor'],
     'flow.http.tls': [
-      '{host} sunucusunun sertifikası kabul edilmedi ({reason}). Bu bir test sunucusuysa ortamın sertifika ayarını değiştirin',
-      'Sunucunun sertifikası kabul edilmedi. Bu bir test sunucusuysa ortamın sertifika ayarını değiştirin',
+      '{host} sunucusunun sertifikası kabul edilmedi ({reason}). Bu bir test sunucusuysa ortamın sertifika ayarını değiştirin.',
+      'Sunucunun sertifikası kabul edilmedi. Bu bir test sunucusuysa ortamın sertifika ayarını değiştirin.',
     ],
     'preflight.env.insecureTls': [
       '{env} ortamı sunucu sertifikalarını doğrulamıyor: HTTP adımları kendini sizin sunucunuz gibi gösteren bir sunucuyu da kabul eder',
@@ -607,9 +607,9 @@ registerMessages('code', {
     ],
     'preflight.env.customCa': ['{env} ortamı HTTPS adımlarında kendi sertifikalarına da güveniyor', 'Seçilen ortam HTTPS adımlarında kendi sertifikalarına da güveniyor'],
     'env.tls.invalidCa': 'Güvenilen sertifika metninde PEM sertifikası yok (-----BEGIN CERTIFICATE----- ile başlamalı)',
-    'mocks.conflict': 'Mock kuralları başka bir pencerede değiştirildi; değişikliğiniz kaydedilmedi. Yeniden yükleyin ya da kendi listenizi yine de kaydedin',
-    'flow.conflict': 'Bu akış başka bir pencerede değiştirildi; değişikliğiniz kaydedilmedi. Yeniden yükleyin ya da kendi sürümünüzü yine de kaydedin',
-    'env.conflict': 'Ortamlar başka bir pencerede değiştirildi; değişikliğiniz kaydedilmedi. Yeniden yükleyin ya da kendi sürümünüzü yine de kaydedin',
+    'mocks.conflict': 'Mock kuralları başka bir pencerede değiştirildi; değişikliğiniz kaydedilmedi. Yeniden yükleyin ya da kendi listenizi yine de kaydedin.',
+    'flow.conflict': 'Bu akış başka bir pencerede değiştirildi; değişikliğiniz kaydedilmedi. Yeniden yükleyin ya da kendi sürümünüzü yine de kaydedin.',
+    'env.conflict': 'Ortamlar başka bir pencerede değiştirildi; değişikliğiniz kaydedilmedi. Yeniden yükleyin ya da kendi sürümünüzü yine de kaydedin.',
     'flow.step.permissionGranted': ['{permission} izni {app} uygulamasına verildi', 'İzin verildi'],
     'flow.step.permissionRevoked': ['{permission} izni {app} uygulamasından geri alındı', 'İzin geri alındı'],
     'flow.step.appLanguage': ['{app} dili: {locale}', 'Uygulamanın dili değiştirildi'],
@@ -683,7 +683,7 @@ registerMessages('code', {
       'iOS bu uygulamanın bu Mac’ten durdurulmasına izin vermiyor; yalnızca Xcode’dan kurulan uygulamalar durdurulabilir. Uygulamayı telefondaki uygulama değiştiriciden kapatın.',
     'action.osTooOld': [
       'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS {minVersion} ve sonrasıyla çalışır, bu cihaz iOS {osVersion} kullanıyor.',
-      'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor ({detail})',
+      'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor ({detail}).',
       'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor.',
     ],
     'action.install.signatureMismatch':
@@ -693,14 +693,14 @@ registerMessages('code', {
       'Telefon USB üzerinden kurulumu reddetti. Telefondaki onay penceresini kabul edin; Xiaomi’de Geliştirici seçenekleri → “USB üzerinden yükle”yi açın.',
     'action.install.noSpace': 'Telefonda yeterli boş alan yok. Yer açıp tekrar deneyin.',
     'action.install.noMatchingAbis': [
-      'Bu paket telefonun işlemcisine uygun yerel kod içermiyor ({detail})',
+      'Bu paket telefonun işlemcisine uygun yerel kod içermiyor ({detail}).',
       'Bu paket telefonun işlemcisine uygun yerel kod içermiyor (örneğin yalnızca x86 emülatör için derlenmiş).',
     ],
     'action.install.olderSdk': 'Bu uygulama telefondakinden daha yeni bir Android sürümü istiyor.',
     'action.install.missingSplit': 'Uygulamanın parçalı APK’larından biri eksik. Tek .apk yerine .apks dosyasını (bundletool) kurun.',
     'action.install.notSigned': 'APK imzalı değil ya da imzası bozuk. İmzalı bir build kurun.',
     'action.install.verificationFailed': 'Telefondaki uygulama doğrulaması (örneğin Play Protect) kurulumu engelledi.',
-    'action.install.obbFailed': ['Uygulama kuruldu ama veri dosyası (OBB) kopyalanamadı: {detail}', 'Uygulama kuruldu ama veri dosyası (OBB) kopyalanamadı.'],
+    'action.install.obbFailed': ['Uygulama kuruldu ama veri dosyası (OBB) kopyalanamadı: {detail}', 'Uygulama kuruldu ama veri dosyası (OBB) kopyalanamadı'],
     'action.appNotRunning': 'Uygulama şu an çalışmıyor; önce açın.',
     'action.backgroundKillRefused':
       'Sistem uygulamayı arka planda sonlandırmadı; bir ön plan hizmeti ya da açık bir pencere onu canlı tutuyor.',
@@ -712,8 +712,8 @@ registerMessages('code', {
     'action.toolTooOld': [
       'Bu Mac’teki {tool} bu işlem için eski; {from} uygulamasını güncelleyin.',
       'Bu Mac’teki {tool} bu işlem için eski; daha yeni bir sürümünü kurun.',
-      'Bu işlem için {detail} gerekir',
-      'Bu işlem için aracın daha yeni bir sürümü gerekir',
+      'Bu işlem için {detail} gerekir.',
+      'Bu işlem için aracın daha yeni bir sürümü gerekir.',
     ],
     'action.wouldDisconnect': 'Cihaz bu Mac’e Wi-Fi üzerinden bağlı; bu işlem bağlantıyı keser. Önce cihazı USB ile bağlayın.',
     'action.permissionUnknown': 'Android bu izin adını tanımıyor. Tam adını yazın (örneğin android.permission.CAMERA).',
@@ -741,9 +741,9 @@ registerMessages('code', {
     'action.deviceNotFound': 'Cihaz bulunamadı',
     'action.toolMissing': [
       'Bu işlem için Xcode {minXcode} ya da daha yenisi veya {tool} gerekir; {tool} şu komutla kurulur: {install}',
-      'Bu işlem için Xcode {minXcode} ya da daha yenisi gerekir ({tool} onunla gelir).',
+      'Bu işlem için Xcode {minXcode} ya da daha yenisi gerekir ({tool} onunla gelir)',
       '{tool} bu Mac’te bulunamadı; şu komutla kurun: {install}',
-      '{tool} bu Mac’te bulunamadı; Sistem kontrolü nasıl kurulacağını gösterir.',
+      '{tool} bu Mac’te bulunamadı; Sistem kontrolü nasıl kurulacağını gösterir',
       'Gerekli araç eksik: {detail}',
       'Gerekli araç eksik',
     ],
@@ -822,7 +822,7 @@ registerMessages('code', {
       'iPhone’un çökme raporlarını (.ips) okumak için Xcode 15 ya da daha yenisi (devicectl) veya libimobiledevice’in idevicecrashreport aracı gerekir; ikisi de bu Mac’te bulunamadı. Birini kurun (brew install libimobiledevice); raporlar kendiliğinden gelir.',
     'reader.crashReports.developerModeOff':
       'iPhone’da Geliştirici Modu kapalı olduğu için çökme raporları (.ips) okunamıyor. Ayarlar → Gizlilik ve Güvenlik → Geliştirici Modu açılıp telefon yeniden başlatılınca raporlar gelir.',
-    'reader.crashReports.failed': ['Cihazın çökme kayıtları okunamadı: {detail}', 'Cihazın çökme kayıtları şu an okunamıyor.'],
+    'reader.crashReports.failed': ['Cihazın çökme kayıtları okunamadı: {detail}', 'Cihazın çökme kayıtları şu an okunamıyor'],
     'reader.crashReports.osTooOld':
       'Çökme raporları ve kurulu uygulamalar Xcode’un devicectl aracıyla okunur; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor. Canlı loglar idevicesyslog ile yine gelir.',
     'reader.crashReports.viaLibimobiledevice':
@@ -990,25 +990,25 @@ registerMessages('code', {
       'Dürbün dropped an unreadable message from the app',
     ],
     'app.messageUnknown': [
-      'This Dürbün does not know the “{type}” messages {app} sends and skips them: the app’s SDK is newer. Update Dürbün ({dropped, number} messages since the last note)',
-      'This Dürbün does not know the “{type}” messages {app} sends and skips them: the app’s SDK is newer. Update Dürbün',
-      'This Dürbün does not know some messages the app sends: update Dürbün',
+      'This Dürbün does not know the “{type}” messages {app} sends and skips them: the app’s SDK is newer. Update Dürbün ({dropped, number} messages since the last note).',
+      'This Dürbün does not know the “{type}” messages {app} sends and skips them: the app’s SDK is newer. Update Dürbün.',
+      'This Dürbün does not know some messages the app sends: update Dürbün.',
     ],
     'app.sdkNewer': [
-      '{app} uses {sdk} {sdkVersion} (protocol {protocol}); this Dürbün understands up to protocol {serverProtocol}, so some data may be missing. Update Dürbün',
-      'The app’s SDK is newer than this Dürbün; some data may be missing. Update Dürbün',
+      '{app} uses {sdk} {sdkVersion} (protocol {protocol}); this Dürbün understands up to protocol {serverProtocol}, so some data may be missing. Update Dürbün.',
+      'The app’s SDK is newer than this Dürbün; some data may be missing. Update Dürbün.',
     ],
     'app.sdkOlder': [
-      '{app} uses {sdk} {sdkVersion} (protocol {protocol}); this Dürbün supports protocol {minProtocol} and later, so some data may be missing. Update the Dürbün SDK in the app',
-      'The app’s Dürbün SDK is too old for this Dürbün; some data may be missing. Update the SDK',
+      '{app} uses {sdk} {sdkVersion} (protocol {protocol}); this Dürbün supports protocol {minProtocol} and later, so some data may be missing. Update the Dürbün SDK in the app.',
+      'The app’s Dürbün SDK is too old for this Dürbün; some data may be missing. Update the SDK.',
     ],
     'app.clockBehind': [
-      'The clock of {device} is about {seconds, number} s behind the Mac (measured while {app} was connected). Log times are shown as the device reports them',
-      'The device clock is behind the Mac; log times are shown as the device reports them',
+      'The clock of {device} is about {seconds, number} s behind the Mac (measured while {app} was connected). Log times are shown as the device reports them.',
+      'The device clock is behind the Mac; log times are shown as the device reports them.',
     ],
     'app.clockAhead': [
-      'The clock of {device} is about {seconds, number} s ahead of the Mac (measured while {app} was connected). Log times are shown as the device reports them',
-      'The device clock is ahead of the Mac; log times are shown as the device reports them',
+      'The clock of {device} is about {seconds, number} s ahead of the Mac (measured while {app} was connected). Log times are shown as the device reports them.',
+      'The device clock is ahead of the Mac; log times are shown as the device reports them.',
     ],
     'app.deviceFound': [
       '{app} connected over the network and runs on {device}: its session now shows under this device',
@@ -1032,10 +1032,10 @@ registerMessages('code', {
       'The installed apps could be read; the iPhone’s system process lines are left out from now on',
     ],
     'logs.connectionLost': [
-      'The device’s {link} connection dropped; {gap}. If it is not back within {graceSeconds, number} s, the device shows as disconnected',
-      'The device’s {link} connection dropped; if it is not back within {graceSeconds, number} s, the device shows as disconnected',
-      'The device’s {link} connection dropped',
-      'The device’s connection dropped',
+      'The device’s {link} connection dropped; {gap}. If it is not back within {graceSeconds, number} s, the device shows as disconnected.',
+      'The device’s {link} connection dropped; if it is not back within {graceSeconds, number} s, the device shows as disconnected.',
+      'The device’s {link} connection dropped.',
+      'The device’s connection dropped.',
     ],
     'logs.connectionRestored': [
       'The device’s {link} connection is back after {seconds, number} s; {gap}',
@@ -1131,7 +1131,7 @@ registerMessages('code', {
     'settings.sdkRebindFailed': ['Could not reopen the SDK port ({port}): {error}', 'Could not reopen the SDK port'],
     'config.writeFailed': ['Could not save {file}: {error}', 'Could not save the settings file'],
     'config.unreadable': [
-      '{file} could not be read ({error}); Dürbün started without it. A copy of the broken file: {backup}',
+      '{file} could not be read ({error}); Dürbün started without it. A copy of the broken file was kept ({backup}).',
       '{file} could not be read ({error}); Dürbün started without it.',
       'A settings file could not be read; Dürbün started without it.',
     ],
@@ -1151,7 +1151,7 @@ registerMessages('code', {
     'replay.bodyMissing': 'The request body was not captured or was evicted; the request was sent without a body',
     'replay.bodyDropped': 'GET and HEAD requests cannot carry a body; it was dropped',
     'replay.tlsUnverified': 'Sent without verifying the server certificate',
-    'replay.tlsRejected': 'The server certificate was not accepted. Resend without verifying only to a test server you trust',
+    'replay.tlsRejected': 'The server certificate was not accepted. Resend without verifying only to a test server you trust.',
 
     /* ── command errors ── */
     'command.invalid': ['Invalid command: {detail}', 'Invalid command'],
@@ -1190,8 +1190,8 @@ registerMessages('code', {
     ],
     'preflight.http.thisMac': ['A step sends a request to a service on this Mac ({host})', 'A step sends a request to a service on this Mac'],
     'flow.http.tls': [
-      'The certificate of {host} was not accepted ({reason}). If this is a test server, change the environment’s certificate setting',
-      'The server certificate was not accepted. If this is a test server, change the environment’s certificate setting',
+      'The certificate of {host} was not accepted ({reason}). If this is a test server, change the environment’s certificate setting.',
+      'The server certificate was not accepted. If this is a test server, change the environment’s certificate setting.',
     ],
     'preflight.env.insecureTls': [
       '{env} does not verify server certificates: HTTP steps also accept a server pretending to be yours',
@@ -1199,9 +1199,9 @@ registerMessages('code', {
     ],
     'preflight.env.customCa': ['{env} also trusts its own certificates for HTTPS steps', 'The chosen environment also trusts its own certificates for HTTPS steps'],
     'env.tls.invalidCa': 'The trusted certificate text holds no PEM certificate (it starts with -----BEGIN CERTIFICATE-----)',
-    'mocks.conflict': 'The mock rules were changed in another window; your change was not saved. Reload them or save your list anyway',
-    'flow.conflict': 'This flow was changed in another window; your change was not saved. Reload it or save your version anyway',
-    'env.conflict': 'The environments were changed in another window; your change was not saved. Reload them or save your version anyway',
+    'mocks.conflict': 'The mock rules were changed in another window; your change was not saved. Reload them or save your list anyway.',
+    'flow.conflict': 'This flow was changed in another window; your change was not saved. Reload it or save your version anyway.',
+    'env.conflict': 'The environments were changed in another window; your change was not saved. Reload them or save your version anyway.',
     'flow.step.permissionGranted': ['{permission} granted to {app}', 'Permission granted'],
     'flow.step.permissionRevoked': ['{permission} revoked from {app}', 'Permission revoked'],
     'flow.step.appLanguage': ['Language of {app}: {locale}', 'App language changed'],
@@ -1266,7 +1266,7 @@ registerMessages('code', {
       'iOS does not let this Mac stop this app; only apps installed from Xcode can be stopped. Close it from the app switcher on the phone.',
     'action.osTooOld': [
       'This action uses Xcode’s devicectl, which works with iOS {minVersion} and later; this device runs iOS {osVersion}.',
-      'This action uses Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS ({detail})',
+      'This action uses Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS ({detail}).',
       'This action uses Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS.',
     ],
     'action.install.signatureMismatch':
@@ -1276,14 +1276,14 @@ registerMessages('code', {
       'The phone refused the install over USB. Accept the prompt on the phone; on Xiaomi phones turn on Developer options → “Install via USB”.',
     'action.install.noSpace': 'There is not enough free space on the phone. Free some space and try again.',
     'action.install.noMatchingAbis': [
-      'This package has no native code for the phone’s processor ({detail})',
+      'This package has no native code for the phone’s processor ({detail}).',
       'This package has no native code for the phone’s processor (built for an x86 emulator only, for example).',
     ],
     'action.install.olderSdk': 'This app needs a newer Android version than the phone runs.',
     'action.install.missingSplit': 'One of the app’s split APKs is missing. Install the .apks file (bundletool) instead of a single .apk.',
     'action.install.notSigned': 'The APK is not signed or its signature is broken. Install a signed build.',
     'action.install.verificationFailed': 'App verification on the phone (Play Protect, for example) blocked the install.',
-    'action.install.obbFailed': ['The app was installed, but its data file (OBB) could not be copied: {detail}', 'The app was installed, but its data file (OBB) could not be copied.'],
+    'action.install.obbFailed': ['The app was installed, but its data file (OBB) could not be copied: {detail}', 'The app was installed, but its data file (OBB) could not be copied'],
     'action.appNotRunning': 'The app is not running; open it first.',
     'action.backgroundKillRefused': 'The system did not end the app in the background; a foreground service or an open window keeps it alive.',
     'action.apiTooLow': [
@@ -1294,8 +1294,8 @@ registerMessages('code', {
     'action.toolTooOld': [
       '{tool} on this Mac is too old for this action; update {from}.',
       '{tool} on this Mac is too old for this action; install a newer version.',
-      'This action needs {detail}',
-      'This action needs a newer version of the tool',
+      'This action needs {detail}.',
+      'This action needs a newer version of the tool.',
     ],
     'action.wouldDisconnect': 'The device is connected to this Mac over Wi-Fi; this action would cut the connection. Connect it with USB first.',
     'action.permissionUnknown': 'Android does not know this permission name. Write the full name (android.permission.CAMERA, for example).',
@@ -1323,9 +1323,9 @@ registerMessages('code', {
     'action.deviceNotFound': 'Device not found',
     'action.toolMissing': [
       'This action needs Xcode {minXcode} or newer, or {tool}; install {tool} with: {install}',
-      'This action needs Xcode {minXcode} or newer ({tool} comes with it).',
+      'This action needs Xcode {minXcode} or newer ({tool} comes with it)',
       '{tool} was not found on this Mac; install it with: {install}',
-      '{tool} was not found on this Mac; the System check shows how to install it.',
+      '{tool} was not found on this Mac; the System check shows how to install it',
       'A required tool is missing: {detail}',
       'A required tool is missing',
     ],
@@ -1396,7 +1396,7 @@ registerMessages('code', {
       'Reading the iPhone’s crash reports (.ips) takes Xcode 15 or newer (devicectl) or libimobiledevice’s idevicecrashreport; neither was found on this Mac. Install one (brew install libimobiledevice) and the reports come in by themselves.',
     'reader.crashReports.developerModeOff':
       'Crash reports (.ips) cannot be read while Developer Mode is off on the iPhone. Once it is turned on in Settings → Privacy & Security → Developer Mode and the phone has restarted, the reports come in.',
-    'reader.crashReports.failed': ['The device’s crash records could not be read: {detail}', 'The device’s crash records cannot be read right now.'],
+    'reader.crashReports.failed': ['The device’s crash records could not be read: {detail}', 'The device’s crash records cannot be read right now'],
     'reader.crashReports.osTooOld':
       'Crash reports and installed apps are read with Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS. Live logs still come through idevicesyslog.',
     'reader.crashReports.viaLibimobiledevice':

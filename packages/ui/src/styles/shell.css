@@ -564,12 +564,15 @@
   font-weight: 600;
   color: var(--text);
   flex-shrink: 0;
+  /* Never spills onto the sources button or the tabs, whatever the names. */
+  overflow: hidden;
 }
 .crumb:hover,
 .crumb[aria-expanded="true"] {
   background: var(--bg-hover);
 }
 .crumb__icon {
+  display: inline-flex;
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -579,14 +582,14 @@
   white-space: nowrap;
   min-width: 0;
 }
+/* Both names keep a readable floor (`useNameFloor`: their own width or 4.5em / 3.5em); the app name gives way first. */
 .crumb__text--muted {
   color: var(--text-muted);
   font-weight: 500;
-  flex-shrink: 4;
+  flex-shrink: 1;
 }
-/* With the source and build badges next to it, the device name gives way before the app name does. */
 .crumb__text--app {
-  min-width: 3.5em;
+  flex-shrink: 8;
 }
 .crumb__sep {
   color: var(--text-subtle);
@@ -666,7 +669,7 @@
     display: none;
   }
   .crumb {
-    max-width: 220px;
+    max-width: 240px;
   }
   /* The build badge stays in the sidebar and the ⓘ panel next to the crumb. */
   .crumb .build-badge {
@@ -678,7 +681,13 @@
     display: none;
   }
   .crumb {
-    max-width: 180px;
+    max-width: 192px;
+    gap: 5px;
+  }
+  /* Device and app names before the SDK / source badge (the sidebar and the ⓘ panel show it). */
+  .crumb .sdk-badge,
+  .crumb .src-badge {
+    display: none;
   }
 }
 @container main (max-width: 780px) {
@@ -700,12 +709,6 @@
   }
   .crumb__text--muted,
   .crumb__sep {
-    display: none;
-  }
-}
-@container main (max-width: 620px) {
-  .crumb .sdk-badge,
-  .crumb .src-badge {
     display: none;
   }
 }

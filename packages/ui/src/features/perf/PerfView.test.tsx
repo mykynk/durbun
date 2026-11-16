@@ -161,7 +161,10 @@ describe('PerfView', () => {
     expect(screen.getAllByText('RenderThread').length).toBeGreaterThan(0);
     expect(screen.queryByText('Hazırlama')).toBeNull();
     expect(tile('Açılış').textContent).toMatch(/1,24\s*sn/);
-    expect(tile('Açılış').textContent).toContain('MainActivity');
+    // One line (cut with an ellipsis when the tile is narrow), the whole text in its tooltip: the tile row stays even.
+    const sub = tile('Açılış').querySelector('.pf-tile__sub--line');
+    expect(sub?.textContent).toBe('soğuk · MainActivity');
+    expect(sub?.getAttribute('title')).toBe('soğuk · MainActivity');
     expect(screen.getByRole('button', { name: 'Loglarda göster' })).toBeTruthy();
     // CPU, memory, frames, frame times, requests and logs charts.
     expect(created.length).toBe(6);

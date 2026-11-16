@@ -279,6 +279,38 @@ export function TopBar() {
   );
 }
 
+/**
+ * Floor for a breadcrumb name: its own width or `em`, whichever is less, so a short name ("Pixel 8", "Kasa") is never cut
+ * to a letter nor padded with blank space. Measured from the text itself (`scrollWidth`), again whenever the name or its
+ * box changes (a font load, a breakpoint that showed the name again).
+ */
+function useNameFloor(text: string | undefined, em: number) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      // The text's own width: without the old floor, which would otherwise widen the box it is read from.
+      const prev = el.style.minWidth;
+      el.style.minWidth = '0px';
+      const natural = el.scrollWidth;
+      // Hidden at the narrowest widths (icon only): keep the last floor until it shows again.
+      if (natural <= 0) {
+        el.style.minWidth = prev;
+        return;
+      }
+      const cap = (parseFloat(getComputedStyle(el).fontSize) || 13) * em;
+      el.style.minWidth = `${Math.ceil(Math.min(natural, cap))}px`;
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, em]);
+  return ref;
+}
+
 function ScopeBreadcrumb() {
   const t = useT();
   const scope = useScope();
@@ -323,6 +355,10 @@ function ScopeBreadcrumb() {
 
   const appName = target.app ? appTitle(target.app) : target.deviceApp?.name || target.bundleId;
   const isAppScope = scope.kind === 'app' || scope.kind === 'deviceApp';
+  const deviceName = scope.kind === 'all' ? undefined : target.device ? deviceDisplayName(target.device) : isAppScope && appName ? t('shell.scope.unknownDevice') : pendingName;
+  // The app name gives way first (CSS `flex-shrink`), down to its own floor; the device name keeps a longer one.
+  const deviceRef = useNameFloor(deviceName, 4.5);
+  const appRef = useNameFloor(isAppScope ? appName : undefined, 3.5);
   let content: ReactNode;
   if (scope.kind === 'all') {
     content = (
@@ -337,13 +373,20 @@ function ScopeBreadcrumb() {
     const build = isAppScope ? buildBadgeOf(input) : undefined;
     content = (
       <>
-        {device ? <PlatformIcon device={device} size={15} className="crumb__icon" /> : <Waypoints size={15} className="crumb__icon" aria-hidden />}
-        <span className={clsx('crumb__text', isAppScope && appName && 'crumb__text--muted')}>{device ? deviceDisplayName(device) : isAppScope && appName ? t('shell.scope.unknownDevice') : pendingName}</span>
+        {/* The narrowest widths show the icon alone: the device name stays in its tooltip. */}
+        <span className="crumb__icon" title={deviceName}>
+          {device ? <PlatformIcon device={device} size={15} /> : <Waypoints size={15} aria-hidden />}
+        </span>
+        <span ref={deviceRef} className={clsx('crumb__text', isAppScope && appName && 'crumb__text--muted')} title={deviceName}>
+          {deviceName}
+        </span>
         {isAppScope && appName ? (
           <>
             <ChevronRight size={13} className="crumb__sep" aria-hidden />
             {target.app ? <SdkBadge platform={target.app.sdk.platform} /> : <SourceBadge badge={explainSources(input).badge} short />}
-            <span className="crumb__text crumb__text--app">{appName}</span>
+            <span ref={appRef} className="crumb__text crumb__text--app" title={appName}>
+              {appName}
+            </span>
             {build ? <BuildBadgeChip badge={build} installer={target.deviceApp?.install.installer} short /> : null}
             {scope.kind === 'app' && scope.exact && target.app ? <span className="crumb__session tnum">{formatClock(target.app.connectedAt, { ms: false })}</span> : null}
           </>

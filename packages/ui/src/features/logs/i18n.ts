@@ -181,6 +181,8 @@ const tr: MessageTree = {
   sdkNote: {
     noInterceptor:
       'Uygulama başlayalı {time} geçti ama hiçbir OkHttp istemcisinde DurbunInterceptor yok; bu yüzden HTTP istekleri Dürbün’de görünmüyor. Retrofit, Coil, Glide ya da Ktor’un kullandıkları dahil her OkHttpClient.Builder’a .addInterceptor(DurbunInterceptor()) ekleyin. HttpURLConnection, Cronet ve WebView trafiği yakalanmaz.',
+    noWebSocketFactory:
+      'Uygulama bir WebSocket’i OkHttpClient.newWebSocket ile açtı; bu yüzden Dürbün bağlantının el sıkışmasını gösteriyor ama mesajlarını göremiyor. Soketi DurbunWebSocketFactory(client).newWebSocket(request, listener) ile açın; bir kütüphane WebSocket.Factory istiyorsa ona DurbunWebSocketFactory(client) verin.',
     networkInterceptor:
       '“{rule}” sahte yanıtı {request} isteğine uygulanmadı: bu istemcide DurbunInterceptor bir ağ interceptor’ı olarak eklenmiş ve ağa çıkmadan yanıt veremez. Sahte yanıtlar için addInterceptor(…) kullanın; gecikme ve hata kuralları iki yerde de çalışır.',
     networkInterceptorAny:
@@ -716,6 +718,8 @@ const en: MessageTree = {
   sdkNote: {
     noInterceptor:
       '{time} after the app started, still no OkHttp client has DurbunInterceptor, so its HTTP calls do not show up in Dürbün. Add .addInterceptor(DurbunInterceptor()) to every OkHttpClient.Builder, including the ones Retrofit, Coil, Glide or Ktor use. HttpURLConnection, Cronet and WebView traffic is not captured.',
+    noWebSocketFactory:
+      'The app opened a WebSocket with OkHttpClient.newWebSocket, so Dürbün shows the connection’s handshake but not its messages. Open the socket with DurbunWebSocketFactory(client).newWebSocket(request, listener); where a library asks for a WebSocket.Factory, pass it DurbunWebSocketFactory(client).',
     networkInterceptor:
       'Mock “{rule}” was not applied to {request}: this client has DurbunInterceptor as a network interceptor, which cannot answer without the network. Use addInterceptor(…) for respond mocks; delay and fail rules work in both places.',
     networkInterceptorAny:

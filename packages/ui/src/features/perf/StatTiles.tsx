@@ -38,6 +38,8 @@ export interface StatTileProps {
   /** Replaces the value (e.g. "boşta" / "veri yok"). */
   placeholder?: string;
   sub?: ReactNode;
+  /** Keep `sub` on one line (cut with an ellipsis, the whole text in its tooltip) so the tile row stays even. */
+  subOneLine?: boolean;
   hint?: string;
   trend?: readonly number[];
   tone?: 'default' | 'danger';
@@ -48,7 +50,7 @@ export interface StatTileProps {
   action?: ReactNode;
 }
 
-export const StatTile = memo(function StatTile({ label, color, value, unit, unitFirst, placeholder, sub, hint, trend, tone = 'default', stale, tag, action }: StatTileProps) {
+export const StatTile = memo(function StatTile({ label, color, value, unit, unitFirst, placeholder, sub, subOneLine, hint, trend, tone = 'default', stale, tag, action }: StatTileProps) {
   return (
     <div className={clsx('pf-tile', tone === 'danger' && 'pf-tile--danger', stale && 'pf-tile--stale')} role="group" aria-label={label}>
       <div className="pf-tile__head">
@@ -80,7 +82,9 @@ export const StatTile = memo(function StatTile({ label, color, value, unit, unit
           <span className="pf-tile__placeholder">{placeholder ?? '—'}</span>
         )}
       </div>
-      <div className="pf-tile__sub" title={typeof sub === 'string' ? sub : undefined}>{sub ?? ' '}</div>
+      <div className={clsx('pf-tile__sub', subOneLine && 'pf-tile__sub--line')} title={typeof sub === 'string' ? sub : undefined}>
+        {sub ?? ' '}
+      </div>
       {action ? <div className="pf-tile__action">{action}</div> : <TrendLine values={trend ?? []} color={color} />}
     </div>
   );

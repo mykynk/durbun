@@ -543,8 +543,8 @@ describe('server codes → i18n', () => {
     expect(tcodeEn('logs.scopeNotApplied', { reason: 'devicectlMissing', device: 'Pixel' })).toBe('Pixel: system process lines are shown too; telling app lines apart needs Xcode 15 or newer (devicectl) or ideviceinstaller (libimobiledevice)');
     expect(tr('logs.scopeApplied', { via: 'idevicesyslog', device: 'Yusuf’un iPhone’u' })).toBe('Yusuf’un iPhone’u: kurulu uygulamalar okundu; sistem süreçlerinin satırları artık gizleniyor');
     const lost = SYSTEM_SAMPLES.filter(([c]) => c === 'logs.connectionLost').map(([, p]) => p);
-    expect(tr('logs.connectionLost', lost[0]!)).toBe('Cihazın USB bağlantısı koptu; dönene kadar log satırı gelmez. 3 sn içinde dönmezse cihaz bağlı değil olarak görünür');
-    expect(tr('logs.connectionLost', lost[1]!)).toBe('Cihazın Wi-Fi bağlantısı koptu; 10 sn içinde dönmezse cihaz bağlı değil olarak görünür');
+    expect(tr('logs.connectionLost', lost[0]!)).toBe('Cihazın USB bağlantısı koptu; dönene kadar log satırı gelmez. 3 sn içinde dönmezse cihaz bağlı değil olarak görünür.');
+    expect(tr('logs.connectionLost', lost[1]!)).toBe('Cihazın Wi-Fi bağlantısı koptu; 10 sn içinde dönmezse cihaz bağlı değil olarak görünür.');
     const back = SYSTEM_SAMPLES.filter(([c]) => c === 'logs.connectionRestored').map(([, p]) => p);
     expect(tr('logs.connectionRestored', back[0]!)).toBe('Cihazın USB bağlantısı 1,4 sn sonra geri geldi; aradaki log satırları eksik');
     expect(tr('logs.connectionRestored', back[1]!)).toBe('Cihazın USB bağlantısı 0,8 sn sonra geri geldi');

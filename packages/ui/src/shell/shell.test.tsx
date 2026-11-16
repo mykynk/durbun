@@ -13,6 +13,8 @@ import * as S from './sdkSnippets';
 import { sdkHostLines } from './sdkHosts';
 import { noticeToastParts } from './notices';
 import { Sidebar } from './Sidebar';
+import { TopBar } from './TopBar';
+import { setScope } from '../data/stores/scope';
 import { InfoCard } from '../features/device/InfoCard';
 import '../features/device/i18n';
 import { scopeExportParams } from './actions';
@@ -364,6 +366,39 @@ describe('Sidebar', () => {
     expect(text).toContain('SDK data only');
     expect(text).toContain('Imported');
     expect(text).toContain('Unlock the device and tap Trust on “Trust This Computer?”');
+  });
+});
+
+describe('Top bar breadcrumb', () => {
+  it('device and app names carry their whole text as a tooltip (the icon too, for the widths that show it alone)', () => {
+    hubActions.replaceAll({
+      devices: [device('android:R5CT20XK9QM', { name: 'Pixel 8' })],
+      apps: [
+        {
+          id: 'app:3',
+          sessionKey: 's-kasa',
+          deviceId: 'android:R5CT20XK9QM',
+          sdk: { name: 'durbun-android', version: '0.4.0', platform: 'android' },
+          app: { name: 'Kasa', id: 'com.mykynk.kasa', pid: 13002 },
+          transport: 'adb-reverse',
+          connected: true,
+          connectedAt: 1,
+          capabilities: ['logs'],
+          actions: [],
+          stats: { logs: 0, requests: 0, errors: 0 },
+        },
+      ],
+      drivers: [],
+      processes: [],
+    });
+    act(() => setScope({ kind: 'app', appId: 'app:3' }));
+    setLanguage('tr');
+    const { container } = render(<TopBar />);
+    const crumb = container.querySelector('.crumb')!;
+    expect(crumb.querySelector('.crumb__text--muted')?.getAttribute('title')).toBe('Pixel 8');
+    expect(crumb.querySelector('.crumb__text--app')?.getAttribute('title')).toBe('Kasa');
+    expect(crumb.querySelector('.crumb__icon')?.getAttribute('title')).toBe('Pixel 8');
+    act(() => setScope({ kind: 'all' }));
   });
 });
 

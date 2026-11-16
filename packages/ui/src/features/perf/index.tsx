@@ -715,11 +715,15 @@ export default function PerfView() {
                   launch
                     ? launch.info.kind === 'prewarmed'
                       ? t('perf.tiles.launchNotTimed')
-                      : [t('perf.tiles.launchCold'), launch.info.screen].filter(Boolean).join(' · ')
+                      : launch.info.screen
+                        ? t('perf.tiles.launchColdScreen', { screen: launch.info.screen })
+                        : t('perf.tiles.launchCold')
                     : appConnected
                       ? t('perf.tiles.launchNone')
                       : undefined
                 }
+                // A long screen name is cut, the whole line is in the tooltip.
+                subOneLine
                 hint={launch ? `${launchText(launch.info, lang).tip}` : t('perf.tiles.launchHint')}
                 action={
                   launch ? (

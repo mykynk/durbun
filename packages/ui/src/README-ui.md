@@ -67,7 +67,7 @@ import { registerMessages, useT } from '../../i18n';
   one-off requests (full reason in the tooltip); for a plain handshake, why it has no messages
   (`streamCaptureState`): the SDK does not capture them, capture is off (Settings), or the SDK captures them but had
   no hook on this socket (`net.response.noStream`, e.g. an Android socket opened without `DurbunWebSocketFactory`;
-  the SDK's `noWebSocketFactory` line, `sdkNoteOf`, opens with "Show in Logs"). ping/pong are hidden by default
+  the SDK's `noWebSocketFactory` line, `sdkNoteOf`, opens with "Show in Logs"; Logs words that line in the UI language, `sdkNoteText`). ping/pong are hidden by default
   (counted), the direction filter and the hide-ping/pong choice persist (`network.streamFilter`), the search does
   not (the list's body search seeds it).
 - Availability: `networkActionAvailability(entry, action)` and `streamCaptureState(...)` in `data/explain.ts` are
