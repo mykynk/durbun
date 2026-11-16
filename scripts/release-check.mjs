@@ -214,6 +214,8 @@ export function nextSteps(version) {
     '  5. Publish the draft, then the packages: pub.dev, npm, Maven Central, CocoaPods.',
     '  6. Update the website: node scripts/site-data.mjs --dir apps/desktop/release --date <publish day, UTC> \\',
     '       --out <site>/assets/durbun/release.json (before the next app:dist overwrites that folder)',
+    '  7. Homebrew: node scripts/homebrew-cask.mjs --dir apps/desktop/release --out <tap>/Casks/durbun.rb, then commit',
+    '     and push it in mykynk/homebrew-tap; then add the brew install line to README.md, README.tr.md and the site',
   ];
 }
 

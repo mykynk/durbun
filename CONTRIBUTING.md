@@ -148,3 +148,8 @@ All parts share one version and are released together, by hand from a maintainer
    --dir apps/desktop/release --date <the day it was published, UTC> --out <site>/assets/durbun/release.json`
    writes the version, the date, the minimum macOS and each DMG's address, size and SHA-256 (it checks them
    against `SHA256SUMS.txt`) into the one file the site reads.
+8. Update the Homebrew cask: `node scripts/homebrew-cask.mjs --dir apps/desktop/release --out
+   <tap>/Casks/durbun.rb` (or `--sums SHA256SUMS.txt` with the published release's checksums) writes the version,
+   both DMGs' SHA-256, the minimum macOS and the bundle name from `apps/desktop`. Commit and push it in the tap
+   repository `mykynk/homebrew-tap`, so `brew install --cask mykynk/tap/durbun` installs the new version. The
+   first time, once the tap exists, add that install line to `README.md`, `README.tr.md` and the website.

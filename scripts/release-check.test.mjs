@@ -126,4 +126,7 @@ test('the closing instructions tag only after the artifacts and attach the updat
   const text = nextSteps('0.3.0').join('\n');
   assert.ok(text.indexOf('npm run app:release') < text.indexOf('git tag -a v0.3.0'));
   assert.match(text, /durbun-update-mac-\*\.json/);
+  // The cask is written from the published release's files, after the website data.
+  assert.ok(text.indexOf('scripts/site-data.mjs') < text.indexOf('scripts/homebrew-cask.mjs'));
+  assert.match(text, /mykynk\/homebrew-tap/);
 });
