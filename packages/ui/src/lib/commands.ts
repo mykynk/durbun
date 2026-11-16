@@ -24,6 +24,8 @@ export interface PaletteCommand {
   disabled?: boolean;
   /** Ordering with an empty query (higher first). Default 0. */
   priority?: number;
+  /** Listed only for a search (one entry per flow or rule would bury everything else in the empty palette). */
+  searchOnly?: boolean;
 }
 
 export type CommandProvider = () => readonly PaletteCommand[];

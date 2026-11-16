@@ -4,7 +4,7 @@ import type { FlowDoc, FlowPreflight } from '@durbun/protocol';
 import '../../../i18n';
 import '../i18n';
 import { setLanguage } from '../../../i18n/core';
-import { PreflightDetails } from './RunControls';
+import { PreflightDetails, withEditorIssues } from './RunControls';
 
 afterEach(() => {
   cleanup();
@@ -36,5 +36,19 @@ describe('PreflightDetails', () => {
     const where = items[0]!.querySelector('.fl-preflight__where')!;
     expect(where.textContent).toBe('device › record, device › shot, device › launch and 2 more steps');
     expect(where.getAttribute('title')).toContain('device › clear');
+  });
+});
+
+describe('withEditorIssues', () => {
+  const ready: FlowPreflight = { ok: true, issues: [], irreversible: [], skipped: [] };
+  it('blocks the run when the editor sees an error the saved preflight did not report', () => {
+    const pf = withEditorIssues(ready, [{ level: 'error', code: 'flow.condition.noRules', message: 'Rules are required', nodeId: 'check' }]);
+    expect(pf.ok).toBe(false);
+    expect(pf.issues[0]).toMatchObject({ level: 'error', code: 'preflight.flow.invalid', nodeId: 'check', params: { issue: 'flow.condition.noRules' } });
+  });
+  it('leaves the preflight alone without editor errors, or when the server already reported them', () => {
+    expect(withEditorIssues(ready, [{ level: 'warning', code: 'x', message: 'x' }])).toBe(ready);
+    const server: FlowPreflight = { ok: false, issues: [{ level: 'error', code: 'preflight.flow.invalid', message: 'x' }], irreversible: [], skipped: [] };
+    expect(withEditorIssues(server, [{ level: 'error', code: 'x', message: 'x' }])).toBe(server);
   });
 });

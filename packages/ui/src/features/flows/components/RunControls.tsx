@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { Ban, Check, ChevronDown, CircleAlert, CircleCheck, Globe, Play, Smartphone, Square, TriangleAlert, Wand } from 'lucide-react';
-import type { FlowDoc, FlowPreflight, FlowPreflightIssue, FlowRunRequest } from '@durbun/protocol';
+import type { FlowDoc, FlowIssue, FlowPreflight, FlowPreflightIssue, FlowRunRequest } from '@durbun/protocol';
 import { Button, Dialog, DropdownMenu, Popover, Spinner, Tooltip, toast, type MenuItem } from '../../../components';
 import { api, isDeviceUsable, isReadOnlyDevice, sortDevices, useHub, useScope } from '../../../data';
 import { deviceDisplayName, useT } from '../../../i18n';
-import { activeEnvironment, saveEnvironments, useEnvironments } from '../model/envStore';
+import { activeEnvironment, setActiveEnvironment, useEnvironments } from '../model/envStore';
 import { flowErrorText } from '../model/errors';
 import { issueText, nodeName } from '../model/text';
 
@@ -86,6 +86,24 @@ export function usePreflight(flowId: string | null, req: FlowRunRequest, revisio
   return { preflight, loading, refresh: () => run() };
 }
 
+/**
+ * The preflight checks what the server has saved; the editor checks what is on screen (edits not saved yet, or a
+ * server that answered without validating). Errors the editor sees block the run too, worded like the server's own
+ * `preflight.flow.invalid`, so the header ("1 error") and the run button never disagree.
+ */
+export function withEditorIssues(preflight: FlowPreflight, issues: readonly FlowIssue[]): FlowPreflight {
+  const errors = issues.filter((i) => i.level === 'error');
+  if (!errors.length || preflight.issues.some((i) => i.code === 'preflight.flow.invalid')) return preflight;
+  const added: FlowPreflightIssue[] = errors.slice(0, 20).map((i) => ({
+    level: 'error',
+    code: 'preflight.flow.invalid',
+    message: i.message,
+    ...(i.nodeId ? { nodeId: i.nodeId } : {}),
+    params: { ...(i.params ?? {}), problem: i.message, issue: i.code },
+  }));
+  return { ...preflight, ok: false, issues: [...added, ...preflight.issues] };
+}
+
 /* ───────────── target menu ───────────── */
 
 export function TargetPicker({ flow, target, onChange, preflight }: { flow: FlowDoc; target: RunTarget | null; onChange(t: RunTarget | null): void; preflight: FlowPreflight | null }) {
@@ -154,9 +172,8 @@ export function EnvPicker({ onManage }: { onManage(): void }) {
   const active = activeEnvironment(envs);
   const choose = async (activeId: string | undefined) => {
     if (!envs || envs.activeId === activeId) return;
-    const { activeId: _a, ...rest } = envs;
     try {
-      await saveEnvironments(activeId ? { ...rest, activeId } : rest);
+      await setActiveEnvironment(activeId);
     } catch (err) {
       toast.error(t('flows.env.pickFailed'), { description: flowErrorText(err) });
     }

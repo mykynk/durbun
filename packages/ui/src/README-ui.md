@@ -95,16 +95,27 @@ STUB_FEATURES=network npx vite build --config dev/vite.stub.config.ts --outDir <
 ### 4.1 Connection
 
 `startConnection()` runs once in `main.tsx`. One WebSocket to `/ui`; reconnects forever with backoff
-(0.3 s → 5 s). **Every (re)connect resyncs from scratch**: `hello` → `snapshot` (stores are cleared and
-replaced) → `history` chunks → live `batch`es. Old data stays visible while disconnected.
+(0.3 s → 5 s). Every (re)connect syncs: `hello` → `snapshot` → `history` chunks → live `batch`es. Old data stays
+visible while disconnected.
+
+**Resume** (`data/resume.ts`): a reconnect continues this window's copy instead of loading everything again. The
+snapshot's `epoch` (changes with every clear) and `netSeq` (also from batches) plus the newest log id held go on the
+WS URL (`/ui?epoch=…&afterLogId=…&netSeq=…`). When the server answers with `resumed` for the same epoch, the stores
+are kept: only newer lines arrive as history, requests that changed are upserted, requests the server deleted
+meanwhile are dropped (`networkStore.retainIds`), and requests that ended while away give their log rows the outcome's
+level. Any other snapshot (no epoch: the dev mock and older servers, another epoch after a clear) clears and replaces
+everything as before; `forgetResume()` makes the next connection load everything. `useConnection(s => s.resumed)` says
+which of the two the latest sync was (the status bar's connection tooltip mentions a resume); `onResync` fires either
+way, so derived caches must not assume the stores were emptied (check `logStore.generation` instead).
 
 ```ts
 useConnection(s => s.status)   // 'connecting' | 'syncing' | 'live' | 'reconnecting'
+useConnection(s => s.resumed)  // the latest sync continued this window's data (see Resume)
 useConnection(s => s.server)   // ServerInfo | null (version, ports, demo, lan, hostAddresses…) — `demo`/`lan` are
                                // values at connect time: use useDemoActive() / useServerSettings(s => s.settings.allowLan)
 isConnected(status)            // syncing || live
 reconnectNow()
-onResync(() => resetMyDerivedCaches())   // fired on every snapshot
+onResync(() => resetMyDerivedCaches())   // fired on every snapshot, resumed or not
 onServerMessage((msg: ServerToUi) => …)  // every message, after stores were updated (keep it cheap)
 onNotice((n: UiNotice) => …)             // the shell already shows notices as toasts
 ```
@@ -125,11 +136,11 @@ useStoreVersion(store, opts?)                 // generic
 
 | Member | Meaning |
 |---|---|
-| `entries: LogEntry[]` | ordered by `id` (arrival order, SPEC §4); ring trimmed at `maxEntries` (server `maxLogEntries`) |
+| `entries: LogEntry[]` | ordered by `id` (arrival order, SPEC §4); ring trimmed at `maxEntries` (the server's `limits.maxLogEntries`, else its `maxLogEntries` setting; `setMaxEntries`) |
 | `version` | frame-coalesced change counter |
 | `generation` | bumped on reset / arbitrary removal (`cleared`) — drop index-based caches when it changes |
 | `headDropped` | entries trimmed from the head since the last reset (absolute index = `headDropped + i`) |
-| `dropped` | entries the memory limit deleted since the last reset (head trims minus crash records moved to `kept`). Logs and Network show it at the oldest edge ("the oldest N lines were dropped") |
+| `dropped` | entries the limits deleted since the last reset. With a server that reports its evictions it is the server's count (`followServer(evictions)` also drops the lines below the server's `oldestLogId`); otherwise this window's own head trims minus crash records moved to `kept`. Views show it per scope through `useScopeEvictions()` (4.3) at the oldest edge ("the oldest N lines were dropped") |
 | `levelRevision` / `setNetworkLevel(netId, level)` | a network log row takes its request's outcome level when the outcome arrives (`networkLogLevel` from `@durbun/protocol`, applied in `data/dispatch.ts` after `networkStore.upsert`; the hub does the same for its copy). The entry object is replaced and counts follow; `RowModel` re-runs its filters on a `levelRevision` change without a new `build` (scroll and selection stay) |
 | `lastId`, `size` | newest id, `entries.length` |
 | `totalReceived` / `liveReceived` | accepted since page load (with / without history) |
@@ -161,13 +172,19 @@ const rows = useMemo(() => {
 **`networkStore`** (`NetworkStore`): `byId: Map<string, NetworkEntry>` (latest state; updates replace the
 object), `order: string[]` (first seen), `list()` (cached array in order), `get(id)`, `size`,
 `counts`/`countsByDevice`/`countsByApp` (`{ total, pending, failed, clientError, serverError, mocked }`),
-`generation`, `dropped` (requests the memory limit deleted since the last reset), `isNetworkError(e)`. Log rows with `kind: 'network'` carry `netId` — render them from
+`generation`, `dropped` (requests the limits deleted since the last reset; the server's count when it reports one), `maxEntries` / `setMaxEntries` (the server's `maxNetworkEntries`), `retainIds(ids)` (a resumed sync), `isNetworkError(e)`. Log rows with `kind: 'network'` carry `netId` — render them from
 `networkStore.get(netId)` so status/duration update live.
 
 **`metricsStore`** (`MetricsStore`): `series: Map<key, MetricSeries>` where
 `MetricSeries = { key, deviceId, appId?, pid?, samples: MetricSample[] (≤ 3600, ts-ordered), updatedAt }`;
 `metricSeriesKey({deviceId, appId?, pid?})` → `"<deviceId>|<appId>"` or `"<deviceId>|pid:<pid>"`;
 `get(key)`, `seriesFor(target)`, `latest(key)`, `keys()`.
+
+**The UI trims to the server's limits.** `hello` and `settings` carry `limits` (`StoreLimits`: `maxLogEntries`,
+`maxNetworkEntries`, the log memory budget); `dispatch.applyLimits` sets both stores' `maxEntries` from them (from the
+settings when a server sends none), so a window never holds more than the server does. Snapshots, batches and
+`cleared` carry `evictions` (`StoreEvictions`: totals, `logsByBytes`, per app / per process counts, `oldestLogId`,
+last evicted timestamps); `applyEvictions` makes both stores follow them and puts them in `useStoreLimits`.
 
 Counters & rates (throttled hooks): `useScopedLogCounts(throttleMs = 250)`,
 `useScopedNetworkCounts(throttleMs = 250)`, `useIngestRate()` → `{ logsPerSec, requestsPerSec, history: number[60] }`,
@@ -185,7 +202,9 @@ Counters & rates (throttled hooks): `useScopedLogCounts(throttleMs = 250)`,
 | `useHub(s => s.deviceApps)` / `useDeviceApp(key)` | apps the **device** reports (SPEC §10, `DeviceApp`, key `'<deviceId>\|<bundle id>'` = `deviceAppKey()`), with or without an SDK. Activity-only bumps (`lastActivity` < 10 s) are coalesced and do not re-render |
 | `isImportedDevice(id)`, `isNetworkDevice(id)`, `isReadOnlyDevice(id)`, `DESKTOP_DEVICE_ID` | virtual-device helpers (see 4.6) |
 | `useScope()` / `setScope(scope, hint?)` / `getScope()` | current scope (see 4.4); persisted; validated after every resync |
-| `useMocks(s => s.rules)` / `saveMocks(rules): Promise<MockRule[]>` | mock rules; `saveMocks` = `mocks.set` (optimistic, reverts on error) |
+| `useMocks(s => s.rules \| s.revision \| s.conflict)` / `saveMocks(rules, { overwrite? })` / `resolveMocksConflict('reload' \| 'overwrite')` | mock rules; `saveMocks` = `mocks.set` (optimistic, reverts on error) with the `revision` this window loaded as `baseRevision`. Another window's save in between is refused (`mocks.conflict`): `rules` shows the server's list and `conflict` keeps the attempted one until the view asks "reload" or "save mine anyway" (see Edit conflicts in 4.5) |
+| `useStoreLimits(s => s.limits \| s.evictions)` | the server's `StoreLimits` and `StoreEvictions` (4.2); both null with a server that sends none (the dev mock), then the stores count their own trims |
+| `useScopeEvictions()` / `scopeEvictions(compiled, evictions, local?)` | what the limits deleted from the current scope: `{ logs, requests, logsByMemory, lastLogTs?, lastRequestTs?, approximate }` (an app scope counts its sessions and its processes' device lines; `approximate` = this window's own trims, every scope). Show a quiet note at the oldest edge of a list when above 0 |
 | `useFlows(s => s.summaries \| s.runs)` | flow list (WS `flows`) and live runs by id (WS `flowRun` deltas merged by step id, `applyFlowRunDelta`); `rememberFlowRun(run)` stores a REST copy unless a newer live copy exists; `latestRunOf(runs, flowId)` |
 | `useTransfer` / `transfer` (`features/transfer/store.ts`) | package dialogs: `transfer.openExport('share' \| 'backup', flowIds?)`, `transfer.openImport(text?, fileName?)`, `transfer.close()`; session / HAR export dialog: `transfer.openDataExport('session' \| 'har', { ids?, label?, fileName? }?)` (scope + counts, "mask secret values" on by default; `ids` fixes the requests, e.g. the Network tab's visible rows). Never start an export download without it |
 | `useBugReport` / `bugReport` (`features/report/store.ts`) | "Report a bug" (SPEC §12): `bugReport.open({ kind: 'log', logId } \| { kind: 'request', netId } \| { kind: 'now' })` from every entry point (crash banner and notification, log and request detail panels and context menus, both Share dialogs, ⌘K, the top bar button); `bugReport.close()` keeps the note (`draft`), `bugReport.done()` clears it once the report left (saved, copied, sent). The dialog decides the scope from the anchor (`bugScope`), the window (`bugWindow`, ≤ 10 min), the lines and requests (`collectLogs` / `collectRequests`) and the Markdown (`buildBugReport`) in `features/report/model.ts`; never build a bug report elsewhere |
@@ -314,10 +333,21 @@ with `tCode(code, data, fallback)`. Default timeouts: 15 s; `device.action` 30 s
 | `api.doctor()` | `GET /api/doctor` → `ToolCheck[]` |
 | `api.upload(file, { name?, onProgress?, signal? })` | `POST /api/upload` → `{ file }` (pass to `app-install`); errors keep the server `code` (`upload.tooLarge`…) |
 | `api.fileUrl(name)`, `api.health()` | `/api/files/:name`, `/api/health` |
-| `api.listFlows()`, `getFlow`, `createFlow`, `saveFlow`, `deleteFlow`, `duplicateFlow`, `preflightFlow`, `runFlow`, `listFlowRuns`, `getFlowRun`, `cancelFlowRun`, `getFlowEnvironments`, `saveFlowEnvironments`, `aiPack`, `previewFlowImport`, `importFlows`, `flowFromRequests` | `/api/flows*`, `/api/flow-runs*`, `/api/flow-environments` (SPEC §11) |
+| `api.listFlows()`, `getFlow`, `createFlow`, `saveFlow(id, flow, { baseUpdatedAt? })`, `deleteFlow`, `duplicateFlow`, `preflightFlow`, `runFlow`, `listFlowRuns`, `getFlowRun`, `cancelFlowRun`, `getFlowEnvironments`, `saveFlowEnvironments(envs, { overwrite? })`, `aiPack`, `previewFlowImport`, `importFlows`, `flowFromRequests` | `/api/flows*`, `/api/flow-runs*`, `/api/flow-environments` (SPEC §11). `baseUpdatedAt` / the environments' `revision` make a save refuse another window's newer copy (see Edit conflicts) |
 | `api.exportPackage(req)` → `{ blob, fileName }`, `api.inspectPackage(text, passphrase?)`, `api.importPackage(req)` | `/api/packages/*` (`.durbun` share / backup) |
 | `api.getBackup()`, `updateBackup(patch)`, `runBackup()`, `backupSuggestions()`, `backupFiles()`, `readBackupFile(name)`, `getUiPrefs()`, `putUiPrefs(prefs)` | Settings → Backup and the server copy of the portable UI prefs (`features/transfer/prefsSync.ts` keeps it current) |
 | `api.slackStatus()`, `api.updateSlack(patch)`, `api.sendToSlack(text)` | `/api/slack` (Send to Slack; never returns the webhook URL). Prefer `useSlackStatus()` / `updateSlack()` from `data` and the `SlackButton` component, which converts a share report with `toSlackText` (`lib/slack.ts`) |
+
+**Edit conflicts.** Mock rules, flows and flow environments are saved against the copy this window loaded:
+`mocks.set` with `baseRevision`, `saveFlow` with `baseUpdatedAt` (the loaded flow's `updatedAt`), and
+`saveFlowEnvironments` with the `revision` the GET returned (left in the document). When another window saved in
+between, the server refuses with `mocks.conflict` / `flow.conflict` / `env.conflict` (409 for REST);
+`isEditConflict(err)` recognizes all three. Never overwrite by yourself: show a choice that says what each option
+discards — load the current version (this window's edits are dropped, or kept as a draft where the view has one) or
+save mine (`overwrite: true` / no `baseUpdatedAt`, the other window's change is lost) — and keep the user's edits
+until they pick. The flow editor (`useFlowDocument`: `save === 'conflict'`, `keepMine()`, `loadTheirs()`, which keeps
+this window's version as a draft), the environments dialog and the Mocks tab follow this; `setActiveEnvironment`
+re-applies only the choice on the current copy.
 
 Also: `downloadUrl(url, name?)`, `downloadBlob(blob, name)`, `downloadText(text, name)`,
 `pickFiles({ accept, multiple })`, `copyText(text)` in `components`.

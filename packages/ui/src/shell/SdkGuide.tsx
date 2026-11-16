@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Archive, BookOpen, Cable, FolderOpen, Plug, ShieldCheck, Wifi } from 'lucide-react';
+import { Archive, BookOpen, Cable, CircleCheck, FolderOpen, Plug, ShieldCheck, Stethoscope, Wifi } from 'lucide-react';
 import { DEFAULT_PORTS } from '@durbun/protocol';
 import { useLanguage, useT } from '../i18n';
-import { isConnected, ui, updateServerSettings, useConnection, useDevices, useServerSettings, useUi, type SdkGuideSection, type SdkGuideTab } from '../data';
+import type { AppSession, SdkPlatform } from '@durbun/protocol';
+import { isConnected, setScope, ui, updateServerSettings, useConnection, useDevices, useHub, useServerSettings, useUi, type SdkGuideSection, type SdkGuideTab } from '../data';
 import { Dialog, confirm } from '../components/Dialog';
 import { Tabs } from '../components/Tabs';
 import { Button } from '../components/Button';
@@ -11,6 +12,7 @@ import { Callout } from '../components/Layout';
 import { CopyButton } from '../components/CopyButton';
 import { SegmentedControl, Toggle } from '../components/Controls';
 import { toast } from '../components/Toast';
+import { Spinner } from '../components/Spinner';
 import { usePersistentState } from '../hooks';
 import { deviceDisplayName } from '../i18n/codes';
 import { attachVm, errorMessage } from './actions';
@@ -346,6 +348,89 @@ function RnGuide({ repo }: { repo?: string }) {
   );
 }
 
+/** SDK platforms a guide tab sets up (the JS SDK is the React Native one's core). */
+const TAB_PLATFORMS: Record<SdkGuideTab, readonly SdkPlatform[]> = {
+  flutter: ['flutter'],
+  android: ['android'],
+  ios: ['ios'],
+  'react-native': ['react-native', 'js'],
+};
+/** How long the guide waits before it lists what usually goes wrong. */
+export const SDK_WAIT_HINT_MS = 60_000;
+
+/** The newest connected SDK session of the tab's platform, and whether it arrived after `since`. */
+export function guideSession(apps: Record<string, AppSession>, tab: SdkGuideTab, since: number): { session: AppSession; fresh: boolean } | null {
+  let best: AppSession | undefined;
+  for (const a of Object.values(apps)) {
+    if (!a.connected || a.transport === 'vm-service' || a.transport === 'demo' || a.transport === 'import' || !TAB_PLATFORMS[tab].includes(a.sdk.platform)) continue;
+    if (!best || a.connectedAt > best.connectedAt) best = a;
+  }
+  return best ? { session: best, fresh: best.connectedAt >= since } : null;
+}
+
+/**
+ * "Run your app": waits for the app to connect while the guide is open, then says so with the app, its version
+ * and the device, and opens its logs. When nothing comes for a minute, the usual reasons per platform.
+ */
+function ConnectWatch({ tab }: { tab: SdkGuideTab }) {
+  const t = useT();
+  const apps = useHub((s) => s.apps);
+  const devices = useHub((s) => s.devices);
+  const [since] = useState(() => Date.now());
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    setLate(false);
+    const timer = setTimeout(() => setLate(true), SDK_WAIT_HINT_MS);
+    return () => clearTimeout(timer);
+  }, [tab]);
+  const found = guideSession(apps, tab, since);
+  if (found) {
+    const { session: a, fresh } = found;
+    const device = devices[a.deviceId];
+    const what = [a.app.name, a.app.version, device ? deviceDisplayName(device) : undefined].filter(Boolean).join(' · ');
+    return (
+      <section className="sdk-note sdk-watch is-ok" role="status" aria-live="polite">
+        <h3 className="sdk-note__title">
+          <CircleCheck size={14} aria-hidden /> {fresh ? t('shell.sdk.watch.connected') : t('shell.sdk.watch.already')}
+        </h3>
+        <p className="sdk-p">{what}</p>
+        <Button
+          size="sm"
+          variant={fresh ? 'primary' : 'secondary'}
+          onClick={() => {
+            setScope({ kind: 'app', appId: a.id });
+            ui.setTab('logs');
+            ui.closeSdkGuide();
+          }}
+        >
+          {t('shell.sdk.watch.openLogs')}
+        </Button>
+      </section>
+    );
+  }
+  return (
+    <section className="sdk-note sdk-watch" role="status" aria-live="polite">
+      <h3 className="sdk-note__title">
+        <Spinner size={12} /> {t('shell.sdk.watch.waiting')}
+      </h3>
+      <p className="sdk-p">{t('shell.sdk.watch.waitingHint')}</p>
+      {late ? (
+        <>
+          <p className="sdk-p">{t('shell.sdk.watch.lateTitle')}</p>
+          <ul className="sdk-watch__reasons">
+            <li>{t(`shell.sdk.watch.reasons.build.${tab}`)}</li>
+            <li>{t('shell.sdk.watch.reasons.usb')}</li>
+            <li>{t('shell.sdk.watch.reasons.wifi')}</li>
+          </ul>
+          <Button size="sm" variant="secondary" icon={Stethoscope} onClick={ui.openDoctor}>
+            {t('shell.doctor.title')}
+          </Button>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function ConnectionNotes({ tab }: { tab: SdkGuideTab }) {
   const t = useT();
   const lang = useLanguage();
@@ -371,6 +456,7 @@ function ConnectionNotes({ tab }: { tab: SdkGuideTab }) {
 
   return (
     <div className="sdk-notes">
+      <ConnectWatch tab={tab} />
       <section className="sdk-note">
         <h3 className="sdk-note__title">
           <Cable size={14} aria-hidden /> {t('shell.sdk.usbTitle')}

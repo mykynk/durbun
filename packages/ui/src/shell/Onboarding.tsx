@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { Apple, BookOpen, CircleCheck, CircleMinus, FlaskConical, MonitorSmartphone, Plug, ShieldCheck, Stethoscope, TriangleAlert } from 'lucide-react';
+import { Apple, ArchiveRestore, BookOpen, CircleCheck, CircleMinus, FileUp, FlaskConical, FolderOpen, MonitorSmartphone, Plug, ShieldCheck, Stethoscope, TriangleAlert } from 'lucide-react';
 import '../sources/text';
 import type { DriverStatus, ToolCheck } from '@durbun/protocol';
 import { useT } from '../i18n';
@@ -10,7 +10,8 @@ import { AndroidIcon, DurbunMark, type IconType } from '../components/Icons';
 import { Button } from '../components/Button';
 import { CopyButton } from '../components/CopyButton';
 import { findCheck, useDoctor } from './useDoctor';
-import { setDemo } from './actions';
+import { pickAndImport, setDemo } from './actions';
+import { transfer } from '../features/transfer/store';
 import { checkDetail, checkFix } from './doctorText';
 
 type ToolState = 'ok' | 'missing' | 'unknown';
@@ -175,6 +176,27 @@ export function Onboarding() {
             <p className="onb-p">{t('shell.onboarding.demo.body')}</p>
           </OnbCard>
         </div>
+
+        {/* No device needed: a recording, HAR, package or flow from a colleague, or a backup on a new Mac. */}
+        <section className="onb-files" aria-labelledby="onb-files-title">
+          <span className="onb-card__icon" aria-hidden>
+            <FolderOpen size={18} />
+          </span>
+          <div className="onb-files__text">
+            <h3 className="onb-card__title" id="onb-files-title">
+              {t('shell.onboarding.files.title')}
+            </h3>
+            <p className="onb-p">{t('shell.onboarding.files.body')}</p>
+          </div>
+          <div className="onb-files__actions">
+            <Button variant="secondary" icon={FileUp} onClick={() => void pickAndImport()}>
+              {t('shell.onboarding.files.open')}
+            </Button>
+            <Button variant="secondary" icon={ArchiveRestore} onClick={() => transfer.openImport()}>
+              {t('shell.onboarding.files.restore')}
+            </Button>
+          </div>
+        </section>
 
         <div className="onboarding__links">
           <Button variant="ghost" icon={BookOpen} onClick={() => ui.openSdkGuide()}>

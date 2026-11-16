@@ -28,9 +28,10 @@ import {
   Workflow,
 } from 'lucide-react';
 import { FLOW_FORMAT, FLOW_VERSION, flowNodeSpec, type FlowDoc, type FlowPort, type FlowPreflight } from '@durbun/protocol';
-import { ApiError, api, isConnected, latestRunOf, rememberFlowRun, setFlowSummaries, ui, useConnection, useFlows, useUi } from '../../data';
+import { ApiError, api, isConnected, isEditConflict, latestRunOf, rememberFlowRun, setFlowSummaries, ui, useConnection, useFlows, useHub, useUi } from '../../data';
 import {
   Button,
+  Callout,
   DropdownMenu,
   EmptyState,
   IconButton,
@@ -41,6 +42,7 @@ import {
   confirm,
   copyText,
   downloadUrl,
+  formatDateTime,
   pickFiles,
   toast,
   useCommands,
@@ -49,7 +51,8 @@ import {
   useShortcut,
   type MenuItem,
 } from '../../components';
-import { useLanguage, useT } from '../../i18n';
+import { deviceDisplayName, useLanguage, useT } from '../../i18n';
+import type { PickerTarget } from './model/picker';
 import { FLOW_FILE_ACCEPT, readPicked, transfer } from '../transfer/store';
 import { Canvas, EMPTY_SELECTION, type CanvasApi, type QuickAddRequest, type Selection } from './components/Canvas';
 import { NodePicker } from './components/NodePicker';
@@ -57,14 +60,16 @@ import { NodeInspector } from './components/NodeInspector';
 import { FlowSettings } from './components/FlowSettings';
 import { TemplateScope, type TemplateScopeValue } from './components/fields';
 import { EnvironmentsDialog } from './components/EnvironmentsDialog';
-import { EnvPicker, PreflightChip, RunButton, RunDialog, TargetPicker, runRequest, usePreflight, useRunTarget, type RunDialogState } from './components/RunControls';
+import { EnvPicker, PreflightChip, RunButton, RunDialog, TargetPicker, runRequest, usePreflight, useRunTarget, withEditorIssues, type RunDialogState } from './components/RunControls';
 import { RunPanel } from './components/RunPanel';
 import { FlowList, newFlowMenu, type NewFlowKind } from './components/FlowList';
 import { STARTERS, starterFlow, type StarterId } from './model/starters';
 import { ImportFlowsDialog } from './components/ImportDialog';
 import { AiPackDialog } from './components/AiDialog';
 import { FromRequestsDialog } from './components/FromRequestsDialog';
-import { useFlowDocument, type FlowDocument } from './model/useFlowDocument';
+import { hasPendingSave, useFlowDocument, type DraftOffer, type FlowDocument } from './model/useFlowDocument';
+import { draftIds, dropDraft } from './model/drafts';
+import { takeFlowIntent, useFlowIntent } from './intent';
 import { flowErrorText } from './model/errors';
 import {
   GRID,
@@ -95,7 +100,7 @@ import { loadEnvironments, useEnvironments } from './model/envStore';
 import './i18n';
 import './flows.css';
 
-type DialogState = { kind: 'env' } | { kind: 'import'; text: string | null } | { kind: 'ai'; flowId: string | null; fix?: boolean } | { kind: 'requests'; ids?: string[] } | null;
+type DialogState = { kind: 'env' } | { kind: 'import'; text: string | null } | { kind: 'ai'; flowId: string | null; fix?: boolean } | { kind: 'requests'; ids?: string[]; from?: 'network' } | null;
 
 /** Inputs typed for each flow in this window (never stored: they may hold passwords). */
 const lastInputs = new Map<string, Record<string, string>>();
@@ -230,6 +235,26 @@ export default function FlowsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
 
+  /* ── drafts kept from earlier windows ── */
+  const summaryIds = useMemo(() => summaries.map((f) => f.id).join('\u0001'), [summaries]);
+  const drafts = useMemo(() => {
+    const ids = draftIds();
+    if (!loaded) return new Set(ids);
+    // A draft of a flow that no longer exists (deleted here or in another window) has nothing to go back to.
+    const known = new Set(summaryIds ? summaryIds.split('\u0001') : []);
+    for (const id of ids) if (!known.has(id) && !hasPendingSave(id)) dropDraft(id);
+    return new Set(ids.filter((id) => known.has(id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, summaryIds, doc.draft, doc.save, selectedId]);
+  const restoreDraft = useCallback(() => {
+    doc.restoreDraft();
+    toast.success(t('flows.draft.restored'), { description: t('flows.draft.restoredHint'), action: { label: t('flows.draft.undo'), onClick: doc.undo } });
+  }, [doc, t]);
+  const discardDraft = useCallback(() => {
+    const d = doc.discardDraft();
+    if (d) toast.info(t('flows.draft.discarded'), { action: { label: t('flows.draft.undo'), onClick: () => doc.offerDraft(d) }, duration: 10_000 });
+  }, [doc, t]);
+
   /* ── runs ── */
   const runs = useFlows((s) => s.runs);
   const summary = summaries.find((f) => f.id === flowId);
@@ -252,7 +277,8 @@ export default function FlowsView() {
   useEffect(() => {
     if (focus?.kind === 'flowFromRequests') {
       ui.consumeFocus(focus.seq);
-      setDialog({ kind: 'requests', ids: focus.ids });
+      // Only the Network tab asks for this: Cancel takes the user back there.
+      setDialog({ kind: 'requests', ids: focus.ids, from: 'network' });
       return;
     }
     if (focus?.kind === 'flowImport') {
@@ -329,7 +355,19 @@ export default function FlowsView() {
   /* ── run target + preflight ── */
   const [target, setTarget] = useRunTarget(flow);
   const req = useMemo(() => runRequest(target, undefined), [target]);
-  const { preflight, loading: pfLoading } = usePreflight(flowId, req, `${summary?.updatedAt ?? 0}|${envs?.activeId ?? ''}`, active && !!flow);
+  const { preflight: savedPreflight, loading: pfLoading } = usePreflight(flowId, req, `${summary?.updatedAt ?? 0}|${envs?.activeId ?? ''}`, active && !!flow);
+  const preflight = useMemo(() => savedPreflight && withEditorIssues(savedPreflight, doc.issues), [savedPreflight, doc.issues]);
+  // The device the flow will run on, for the step picker: the picked one, the one Dürbün resolved, else the platform.
+  const devices = useHub((s) => s.devices);
+  const flowPlatform = flow?.target?.platform;
+  const pickerTarget = useMemo((): PickerTarget | null => {
+    const d = target?.deviceId ? devices[target.deviceId] : undefined;
+    if (d) return { platform: d.platform, kind: d.kind, name: deviceDisplayName(d) };
+    const auto = savedPreflight?.target;
+    if (auto?.platform) return { platform: auto.platform, ...(auto.kind ? { kind: auto.kind } : {}), name: auto.deviceName ?? (auto.platform === 'ios' ? 'iOS' : 'Android') };
+    if (flowPlatform === 'android' || flowPlatform === 'ios') return { platform: flowPlatform, name: flowPlatform === 'ios' ? 'iOS' : 'Android' };
+    return null;
+  }, [target, devices, savedPreflight, flowPlatform]);
 
   /* ── edits ── */
   const apply = doc.apply;
@@ -445,7 +483,7 @@ export default function FlowsView() {
   /** Leaving a flow whose last save failed asks first (its edits are kept and saved again in the background). */
   const leaveOk = useCallback(async (): Promise<boolean> => {
     if (doc.save !== 'error' || !flow) return true;
-    return confirm({ title: t('flows.save.leaveTitle'), message: t('flows.save.leaveMessage', { name: flow.name }), confirmLabel: t('flows.save.leaveConfirm') });
+    return confirm({ title: t('flows.save.leaveTitle'), message: t('flows.save.leaveMessage', { name: flow.name }), confirmLabel: t('flows.save.leaveConfirm'), cancelLabel: t('flows.save.leaveStay') });
   }, [doc.save, flow, t]);
   const switchTo = useCallback(
     async (id: string) => {
@@ -591,7 +629,7 @@ export default function FlowsView() {
           toast.error(t('flows.save.failed'), { description: flowErrorText(doc.saveError) });
           return;
         }
-        const pf = await api.preflightFlow(id, runRequest(target, undefined, startNodeId ? { startNodeId } : {}));
+        const pf = withEditorIssues(await api.preflightFlow(id, runRequest(target, undefined, startNodeId ? { startNodeId } : {})), doc.issues);
         const blocking = !pf.ok || pf.issues.some((i) => i.level === 'error');
         if (blocking || pf.irreversible.length || flow.inputs?.length) {
           setRunDialog({ preflight: pf, ...(startNodeId ? { startNodeId } : {}) });
@@ -632,6 +670,20 @@ export default function FlowsView() {
       void requestRun();
     }
   }, [flowId, requestRun]);
+
+  // Requests from the command palette (it works before this tab was ever opened).
+  const intentSeq = useFlowIntent((s) => s.seq);
+  useEffect(() => {
+    const intent = takeFlowIntent(intentSeq);
+    if (!intent) return;
+    if (intent.kind === 'new') void createBlank();
+    else if (intent.kind === 'requests') setDialog({ kind: 'requests' });
+    else if (intent.kind === 'ai') setDialog({ kind: 'ai', flowId, fix: !!flowId && needsFix });
+    else if (intent.kind === 'import') void importFromFile();
+    else if (intent.kind === 'environments') setDialog({ kind: 'env' });
+    else runFromList(intent.flowId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intentSeq]);
 
   const dimmed = useMemo(() => {
     if (!flow || !runDialog?.startNodeId) return undefined;
@@ -799,6 +851,7 @@ export default function FlowsView() {
           summaries={summaries}
           loaded={loaded}
           selectedId={selectedId}
+          drafts={drafts}
           active={active && !dialog}
           onOpen={open}
           onNew={onNew}
@@ -874,6 +927,8 @@ export default function FlowsView() {
                 inspectorOpen={showInspector}
                 onToggleInspector={() => setShowInspector((v) => !v)}
               />
+              {doc.save === 'conflict' ? <ConflictBanner doc={doc} /> : null}
+              {doc.draft ? <DraftBanner offer={doc.draft} onRestore={restoreDraft} onDiscard={discardDraft} /> : null}
               <SplitPane id="flows.inspector" sizedPane="second" defaultSize={320} minSize={280} maxSize={0.6} overlayBelow={760} collapsed={showInspector ? null : 'second'} onOverlayDismiss={() => setShowInspector(false)} className="fl-split">
                 <SplitPane id="flows.runPanel" direction="vertical" sizedPane="second" defaultSize={260} minSize={140} maxSize={0.7} collapsed={panel.open && panel.runId ? null : 'second'} className="fl-split">
                   <div className="fl-stage" ref={wrapRef}>
@@ -978,6 +1033,7 @@ export default function FlowsView() {
                 open={!!picker}
                 at={picker?.client ?? null}
                 hideTriggers={!!(picker?.after || picker?.insertEdge)}
+                target={pickerTarget}
                 onPick={(type) => {
                   const r = picker;
                   setPicker(null);
@@ -1030,7 +1086,11 @@ export default function FlowsView() {
       <FromRequestsDialog
         open={dialog?.kind === 'requests'}
         initialIds={dialog?.kind === 'requests' ? dialog.ids : undefined}
-        onClose={() => setDialog(null)}
+        onClose={() => {
+          const from = dialog?.kind === 'requests' ? dialog.from : undefined;
+          setDialog(null);
+          if (from) ui.setTab(from);
+        }}
         onCreated={(id) => {
           setDialog(null);
           void switchTo(id);
@@ -1128,6 +1188,14 @@ function EditorHeader({
 
 function SaveState({ doc }: { doc: FlowDocument }) {
   const t = useT();
+  if (doc.save === 'conflict') {
+    return (
+      <span className="fl-save is-error" role="status">
+        <CircleAlert size={13} aria-hidden />
+        <span>{t('flows.conflict.short')}</span>
+      </span>
+    );
+  }
   if (doc.save === 'error') {
     return (
       <span className="fl-save is-error" role="status">
@@ -1146,6 +1214,71 @@ function SaveState({ doc }: { doc: FlowDocument }) {
       {doc.save === 'saved' ? <CircleCheck size={13} aria-hidden /> : <Spinner size={11} />}
       <span className="fl-save__text">{doc.save === 'saved' ? t('flows.save.saved') : t('flows.save.saving')}</span>
     </span>
+  );
+}
+
+/* ───────────── another window saved the flow ───────────── */
+
+function ConflictBanner({ doc }: { doc: FlowDocument }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const keepMine = async () => {
+    setBusy(true);
+    try {
+      await doc.keepMine();
+      toast.success(t('flows.conflict.savedMine'));
+    } catch (err) {
+      if (!isEditConflict(err)) toast.error(t('flows.save.failed'), { description: flowErrorText(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Callout
+      tone="warn"
+      compact
+      className="fl-draft fl-conflict"
+      title={t('flows.conflict.title')}
+      actions={
+        <>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={doc.loadTheirs}>
+            {t('flows.conflict.loadTheirs')}
+          </Button>
+          <Button size="sm" variant="primary" loading={busy} onClick={() => void keepMine()}>
+            {t('flows.conflict.saveMine')}
+          </Button>
+        </>
+      }
+    >
+      {t('flows.conflict.text')}
+    </Callout>
+  );
+}
+
+/* ───────────── unsaved edits from an earlier window ───────────── */
+
+function DraftBanner({ offer, onRestore, onDiscard }: { offer: DraftOffer; onRestore(): void; onDiscard(): void }) {
+  const t = useT();
+  return (
+    <Callout
+      tone="warn"
+      compact
+      className="fl-draft"
+      title={t('flows.draft.title')}
+      actions={
+        <>
+          <Button size="sm" variant="primary" onClick={onRestore}>
+            {t('flows.draft.restore')}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onDiscard}>
+            {t('flows.draft.discard')}
+          </Button>
+        </>
+      }
+    >
+      {t('flows.draft.text', { time: formatDateTime(offer.draft.at) })}
+      {offer.changedSince ? ` ${t('flows.draft.changedSince')}` : ''}
+    </Callout>
   );
 }
 

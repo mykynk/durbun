@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
 import { Search, TriangleAlert } from 'lucide-react';
-import { FLOW_NODE_GROUPS, FLOW_NODE_SPECS, type FlowNodeSpec } from '@durbun/protocol';
+import { FLOW_NODE_SPECS } from '@durbun/protocol';
 import { Popover } from '../../../components';
-import { fold } from '../../../lib/fuzzy';
 import { useLanguage, useT } from '../../../i18n';
 import { nodeIcon } from '../model/icons';
+import { rankSteps, stepSupport, type PickerTarget } from '../model/picker';
 import { GROUP_COLOR, groupTitle, nodeDescription, nodeTitle } from '../model/text';
 import { codeText } from './CodeText';
 
@@ -15,44 +15,22 @@ export interface NodePickerProps {
   at: { x: number; y: number } | null;
   /** Triggers cannot follow another step. */
   hideTriggers?: boolean;
+  /** The device the flow runs on: steps it cannot run are marked (they can still be added). */
+  target?: PickerTarget | null;
   onPick(type: string): void;
   onClose(): void;
 }
 
-/** Search keywords besides the titles, so "deep link", "screenshot", "bekle" find the right step in both languages. */
-const EXTRA_KEYWORDS: Record<string, string> = {
-  'http.request': 'api endpoint get post put delete istek request',
-  'wait.network': 'request istek api response yanıt',
-  'logic.condition': 'if else eğer koşul branch dal',
-  'logic.repeat': 'loop döngü poll tekrar foreach liste',
-  'check.assert': 'assert expect doğrula kontrol test',
-  'device.openUrl': 'deep link bağlantı url',
-  'device.screenshot': 'ekran görüntüsü capture evidence kanıt',
-  'device.startRecording': 'video kayıt record',
-  'mock.add': 'fake sahte stub',
-  'output.slack': 'mesaj message bildirim',
-  'flow.call': 'sub-flow alt akış call reuse',
-};
-
-export function NodePicker({ open, at, hideTriggers, onPick, onClose }: NodePickerProps) {
+export function NodePicker({ open, at, hideTriggers, target, onPick, onClose }: NodePickerProps) {
   const t = useT();
   const lang = useLanguage();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const items = useMemo(() => {
-    const q = fold(query.trim());
-    const specs = FLOW_NODE_SPECS.filter((s) => !(hideTriggers && s.group === 'trigger'));
-    const match = (s: FlowNodeSpec) => {
-      if (!q) return true;
-      const hay = fold(`${nodeTitle(s.type, lang)} ${s.title} ${s.type} ${nodeDescription(s.type, lang)} ${EXTRA_KEYWORDS[s.type] ?? ''}`);
-      return q.split(/\s+/).every((w) => hay.includes(w));
-    };
-    const out: FlowNodeSpec[] = [];
-    for (const g of FLOW_NODE_GROUPS) for (const s of specs) if (s.group === g && match(s)) out.push(s);
-    return out;
-  }, [query, hideTriggers, lang]);
+  const searching = !!query.trim();
+  const items = useMemo(() => rankSteps(FLOW_NODE_SPECS.filter((s) => !(hideTriggers && s.group === 'trigger')), query, lang), [query, hideTriggers, lang]);
+  const whereText = (places: string[]) => places.map((p) => t(`flows.picker.place.${p}`)).join(', ');
 
   const close = () => {
     setQuery('');
@@ -99,12 +77,16 @@ export function NodePicker({ open, at, hideTriggers, onPick, onClose }: NodePick
           autoFocus
         />
       </div>
+      {target ? <div className="fl-picker__target">{t('flows.picker.target', { device: target.name })}</div> : null}
       <div className="fl-picker__list" ref={listRef} id="fl-picker-list" role="listbox" aria-label={t('flows.picker.title')}>
         {items.length === 0 ? <div className="fl-picker__empty">{t('flows.picker.none')}</div> : null}
         {items.map((s, i) => {
           const Icon = nodeIcon(s.type);
-          const header = s.group !== lastGroup ? groupTitle(s.group, lang) : null;
+          // A search ranks the best match first: group headers would repeat, so they show only without one.
+          const header = !searching && s.group !== lastGroup ? groupTitle(s.group, lang) : null;
           lastGroup = s.group;
+          const support = stepSupport(s, target ?? null);
+          const unsupported = !support.ok ? t('flows.picker.unsupported', { device: target?.name ?? '', where: whereText(support.where) }) : null;
           return (
             <div key={s.type}>
               {header ? <div className="fl-picker__group">{header}</div> : null}
@@ -113,7 +95,8 @@ export function NodePicker({ open, at, hideTriggers, onPick, onClose }: NodePick
                 role="option"
                 aria-selected={i === active}
                 data-index={i}
-                className={clsx('fl-picker__item', i === active && 'is-active')}
+                className={clsx('fl-picker__item', i === active && 'is-active', unsupported && 'is-unsupported')}
+                title={unsupported ?? undefined}
                 onMouseMove={() => i !== active && setActive(i)}
                 onClick={() => pick(s.type)}
               >
@@ -125,8 +108,10 @@ export function NodePicker({ open, at, hideTriggers, onPick, onClose }: NodePick
                     {nodeTitle(s.type, lang)}
                     {s.irreversible ? <TriangleAlert size={12} className="fl-picker__warn" aria-label={t('flows.picker.irreversible')} /> : null}
                     {s.needs?.sdk ? <span className="fl-picker__tag">SDK</span> : null}
+                    {unsupported ? <span className="fl-picker__tag is-unsupported">{support.where.length ? t('flows.picker.onlyOn', { where: whereText(support.where) }) : t('flows.picker.notHere')}</span> : null}
                   </span>
                   <span className="fl-picker__desc">{codeText(nodeDescription(s.type, lang))}</span>
+                  {unsupported ? <span className="sr-only">{unsupported}</span> : null}
                 </span>
               </div>
             </div>

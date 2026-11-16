@@ -167,7 +167,7 @@ registerMessages('transfer', {
       tooLarge: 'Dosya çok büyük: Dürbün en fazla {limit, number} MB’lık paket açar.',
       automationHint: { one: 'Bu akış kendiliğinden çalışıyor; paylaşılan akışlar otomasyonu kapalı gelir.', other: '{count, number} akış kendiliğinden çalışıyor; paylaşılan akışlar otomasyonu kapalı gelir.' },
       same: { one: '{count, number} öğe burada zaten aynısıyla vardı; dokunulmadı.', other: '{count, number} öğe burada zaten aynısıyla vardı; dokunulmadı.' },
-      followUp: 'Bunlara bir bak',
+      followUp: 'Bunlara bakın',
       emptySecrets: { one: '{count, number} gizli değer boş; Akışlar → Ortamlar’da doldurun.', other: '{count, number} gizli değer boş; Akışlar → Ortamlar’da doldurun.' },
       emptyInputs: { one: '{count, number} gizli akış girdisinin varsayılanı yok; akış başlarken sorulur ya da akışın ayarlarından girersiniz.', other: '{count, number} gizli akış girdisinin varsayılanı yok; akış başlarken sorulur ya da akışın ayarlarından girersiniz.' },
       automationOff: { one: 'Bir akış otomasyonu kapalı olarak geldi; akışın ayarlarından yeniden açabilirsiniz.', other: '{count, number} akış otomasyonu kapalı olarak geldi; akışın ayarlarından yeniden açabilirsiniz.' },

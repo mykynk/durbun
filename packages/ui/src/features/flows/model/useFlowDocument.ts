@@ -5,9 +5,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { validateFlow, type FlowDoc, type FlowIssue } from '@durbun/protocol';
 import { toast } from '../../../components';
-import { api, useFlows } from '../../../data';
+import { api, isEditConflict, useFlows } from '../../../data';
 import { isConnected, useConnection } from '../../../data/stores/connection';
 import { t } from '../../../i18n/core';
+import { isDesktopApp } from '../../../lib/platform';
+import { dropDraft, readDraft, storeDraft, type FlowDraft } from './drafts';
 import { flowErrorText } from './errors';
 import { ensureLayout } from './graph';
 
@@ -28,9 +30,11 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryDelay = RETRY_MIN_MS;
 let retrying: Promise<void> | null = null;
 
-function keepPending(id: string, flow: FlowDoc, quiet = false): void {
+function keepPending(id: string, flow: FlowDoc, quiet = false, base = 0): void {
   const first = !pendingDocs.has(id);
   pendingDocs.set(id, flow);
+  // Also kept on disk: a reload or a quit before the server takes it must not lose the edits.
+  storeDraft(id, flow, base);
   if (first && !quiet) toast.error(t('flows.save.leftFailed', { name: flow.name }), { id: `flow-pending-${id}`, description: t('flows.save.leftHint'), duration: 10_000 });
   scheduleRetry();
 }
@@ -52,6 +56,7 @@ async function retryPending(): Promise<void> {
       await api.saveFlow(id, flow);
       if (pendingDocs.get(id) === flow) {
         pendingDocs.delete(id);
+        dropDraftIfSame(id, flow);
         toast.success(t('flows.save.leftSaved', { name: flow.name }), { id: `flow-pending-${id}` });
       }
     } catch (err) {
@@ -59,6 +64,7 @@ async function retryPending(): Promise<void> {
       const status = (err as { status?: number })?.status ?? 0;
       if (status >= 400 && status < 500 && status !== 408 && status !== 429 && pendingDocs.get(id) === flow) {
         pendingDocs.delete(id);
+        dropDraftIfSame(id, flow);
         if (status !== 404) toast.error(t('flows.save.leftDropped', { name: flow.name }), { id: `flow-pending-${id}`, description: flowErrorText(err), duration: 15_000 });
         else toast.dismiss(`flow-pending-${id}`);
       }
@@ -66,6 +72,17 @@ async function retryPending(): Promise<void> {
     }
   }
   retryDelay = pendingDocs.size ? Math.min(retryDelay * 2, RETRY_MAX_MS) : RETRY_MIN_MS;
+}
+
+/** Drops the stored draft of a flow once the server holds exactly that content (a newer draft stays). */
+function dropDraftIfSame(id: string, flow: FlowDoc): void {
+  const d = readDraft(id);
+  if (d && flowSignature(d.flow) === flowSignature(flow)) dropDraft(id);
+}
+
+/** True when any flow of this window has edits the server has not taken. */
+export function anyPendingSave(): boolean {
+  return pendingDocs.size > 0;
 }
 
 /** Taken by the editor when the flow is opened again: it saves the document itself from then on. */
@@ -90,7 +107,8 @@ useConnection.subscribe((s, prev) => {
   scheduleRetry(0);
 });
 
-export type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
+/** `conflict`: another window saved this flow since it was loaded here; the user picks whose version stays. */
+export type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
 
 interface Hist {
   past: FlowDoc[];
@@ -105,6 +123,13 @@ interface Hist {
 export function flowSignature(flow: FlowDoc): string {
   const { updatedAt: _u, createdAt: _c, ...rest } = flow;
   return JSON.stringify(rest);
+}
+
+/** A draft from an earlier window that never reached the server, offered back when the flow opens. */
+export interface DraftOffer {
+  draft: FlowDraft;
+  /** The flow was saved elsewhere after the draft's edits started: restoring overwrites those changes. */
+  changedSince: boolean;
 }
 
 export interface FlowDocument {
@@ -123,6 +148,18 @@ export interface FlowDocument {
   /** Saves now; resolves with the id the flow has on the server (a rename changes it). */
   flush(): Promise<string | null>;
   reload(): void;
+  /** Unsaved edits found from an earlier window (reload, quit, crash), until restored or discarded. */
+  draft: DraftOffer | null;
+  /** Puts the draft on the canvas as one undoable edit; it is saved like any other edit. */
+  restoreDraft(): void;
+  /** Forgets the draft; returns it so the caller can offer an undo. */
+  discardDraft(): FlowDraft | null;
+  /** Offers a discarded draft again (undo of discard). */
+  offerDraft(draft: FlowDraft): void;
+  /** Conflict: saves this window's version over the other one. */
+  keepMine(): Promise<string | null>;
+  /** Conflict: loads the version saved elsewhere; this window's version stays offered as a draft. */
+  loadTheirs(): void;
 }
 
 export function useFlowDocument(flowId: string | null, onRenamed?: (from: string, to: string) => void): FlowDocument {
@@ -130,8 +167,12 @@ export function useFlowDocument(flowId: string | null, onRenamed?: (from: string
   const [error, setError] = useState<unknown>();
   const [hist, setHist] = useState<Hist | null>(null);
   const [save, setSave] = useState<SaveState>('saved');
+  /** Read by the autosave effect without re-running it on every save state change. */
+  const saveRef = useRef(save);
+  saveRef.current = save;
   const [saveError, setSaveError] = useState<unknown>();
   const [reloadTick, setReloadTick] = useState(0);
+  const [draft, setDraft] = useState<DraftOffer | null>(null);
   const savedSig = useRef<string>('');
   const savedAt = useRef<number>(0);
   const serverId = useRef<string | null>(flowId);
@@ -155,6 +196,7 @@ export function useFlowDocument(flowId: string | null, onRenamed?: (from: string
     setHist(null);
     setSave('saved');
     setSaveError(undefined);
+    setDraft(null);
     if (!flowId) {
       setStatus('missing');
       return;
@@ -183,6 +225,10 @@ export function useFlowDocument(flowId: string | null, onRenamed?: (from: string
         savedSig.current = flowSignature(flow);
         savedAt.current = flow.updatedAt ?? 0;
         setHist({ past: [], present: laid, future: [] });
+        // Edits an earlier window could not save: offered back, never applied by themselves.
+        const stored = readDraft(flowId);
+        if (stored && flowSignature(stored.flow) === savedSig.current) dropDraft(flowId);
+        else if (stored) setDraft({ draft: stored, changedSince: !!stored.base && (flow.updatedAt ?? 0) > stored.base + 1 });
         setStatus('ready');
       } catch (err) {
         if ((err as { name?: string })?.name === 'AbortError') return;
@@ -204,7 +250,7 @@ export function useFlowDocument(flowId: string | null, onRenamed?: (from: string
   }, [flow, knownIds]);
 
   /* ── save ── */
-  const doSave = useCallback(async (): Promise<string | null> => {
+  const doSave = useCallback(async (overwrite = false): Promise<string | null> => {
     // Taken before waiting: when the user switches flows meanwhile, this still saves the flow they left.
     const h = histRef.current;
     const id = serverId.current;
@@ -221,12 +267,17 @@ export function useFlowDocument(flowId: string | null, onRenamed?: (from: string
     if (same()) setSave('saving');
     const work = (async () => {
       try {
-        const res = await api.saveFlow(id, h.present);
+        // Saved against the copy loaded here: a save another window made meanwhile is refused (`flow.conflict`).
+        const res = await api.saveFlow(id, h.present, overwrite || !savedAt.current ? {} : { baseUpdatedAt: savedAt.current });
         // The user moved on to another flow meanwhile: this one is saved, nothing here describes it any more.
-        if (!same()) return res.flow.id;
+        if (!same()) {
+          dropDraftIfSame(id, h.present);
+          return res.flow.id;
+        }
         savedSig.current = sig;
         savedAt.current = res.flow.updatedAt ?? Date.now();
         setSaveError(undefined);
+        dropDraftIfSame(id, h.present);
         if (res.flow.id !== id) {
           serverId.current = res.flow.id;
           renamedRef.current?.(id, res.flow.id);
@@ -236,12 +287,27 @@ export function useFlowDocument(flowId: string | null, onRenamed?: (from: string
         setSave(now && flowSignature(now.present) !== sig ? 'dirty' : 'saved');
         return res.flow.id;
       } catch (err) {
+        if (isEditConflict(err)) {
+          // Nothing is overwritten by itself: the edits wait on disk until the user picks a version.
+          const cur = same() ? histRef.current : null;
+          storeDraft(id, cur ? cur.present : h.present, savedAt.current);
+          if (same()) {
+            setSaveError(err);
+            setSave('conflict');
+          } else {
+            toast.warn(t('flows.conflict.leftTitle', { name: h.present.name }), { id: `flow-pending-${id}`, description: t('flows.conflict.leftHint'), duration: 15_000 });
+          }
+          throw err;
+        }
         if (same()) {
           setSaveError(err);
           setSave('error');
+          // Kept on disk too: closing or reloading the window now must not lose them.
+          const cur = histRef.current;
+          storeDraft(id, cur ? cur.present : h.present, savedAt.current);
         } else if ((err as { status?: number })?.status !== 404) {
           // The user left the flow: the edits stay in this window and are saved when the server takes them.
-          keepPending(id, h.present);
+          keepPending(id, h.present, false, savedAt.current);
         }
         throw err;
       } finally {
@@ -255,6 +321,11 @@ export function useFlowDocument(flowId: string | null, onRenamed?: (from: string
   useEffect(() => {
     if (!flow || status !== 'ready') return;
     if (flowSignature(flow) === savedSig.current) return;
+    // Until the user picks a version, edits only go to disk (each save would be refused again).
+    if (saveRef.current === 'conflict') {
+      if (serverId.current) storeDraft(serverId.current, flow, savedAt.current);
+      return;
+    }
     setSave((s) => (s === 'saving' ? s : 'dirty'));
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
@@ -266,14 +337,29 @@ export function useFlowDocument(flowId: string | null, onRenamed?: (from: string
     };
   }, [flow, status, doSave]);
 
-  // Leaving the flow (or the window) saves what is pending.
+  // Leaving the flow (or the window) saves what is pending. The window may be gone before the server answers, so
+  // the edits are also written to this browser's storage first; the next window offers them back.
   useEffect(() => {
-    const onHide = () => {
-      if (histRef.current && flowSignature(histRef.current.present) !== savedSig.current) void doSave().catch(() => undefined);
+    const unsaved = () => !!histRef.current && flowSignature(histRef.current.present) !== savedSig.current;
+    const onHide = (e?: Event) => {
+      if (!unsaved()) return;
+      if (e && serverId.current) storeDraft(serverId.current, histRef.current!.present, savedAt.current);
+      void doSave().catch(() => undefined);
+    };
+    // In a browser tab the page asks before it goes (the Mac app keeps the draft instead: a blocked unload there
+    // would silently stop the quit).
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!unsaved() && !pendingDocs.size) return;
+      if (serverId.current && unsaved()) storeDraft(serverId.current, histRef.current!.present, savedAt.current);
+      if (isDesktopApp()) return;
+      e.preventDefault();
+      e.returnValue = '';
     };
     window.addEventListener('pagehide', onHide);
+    window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
       window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('beforeunload', onBeforeUnload);
       onHide();
     };
   }, [flowId, doSave]);
@@ -334,6 +420,46 @@ export function useFlowDocument(flowId: string | null, onRenamed?: (from: string
 
   const reload = useCallback(() => setReloadTick((n) => n + 1), []);
 
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const restoreDraft = useCallback(() => {
+    const offer = draftRef.current;
+    if (!offer) return;
+    setDraft(null);
+    // From here on they are ordinary edits: saved shortly, kept on disk again only if that save fails.
+    if (serverId.current) dropDraft(serverId.current);
+    setHist((h) => (h ? { past: [...h.past, h.present].slice(-MAX_HISTORY), present: ensureLayout(offer.draft.flow), future: [] } : h));
+  }, []);
+  const discardDraft = useCallback((): FlowDraft | null => {
+    const offer = draftRef.current;
+    const id = serverId.current;
+    setDraft(null);
+    if (offer && id) dropDraft(id);
+    return offer?.draft ?? null;
+  }, []);
+  const offerDraft = useCallback((d: FlowDraft) => {
+    const id = serverId.current;
+    if (!id) return;
+    storeDraft(id, d.flow, d.base, d.at);
+    setDraft({ draft: d, changedSince: !!d.base && savedAt.current > d.base + 1 });
+  }, []);
+
+  const keepMine = useCallback(async () => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    setSave('saving');
+    return doSave(true);
+  }, [doSave]);
+  const loadTheirs = useCallback(() => {
+    const id = serverId.current;
+    const cur = histRef.current;
+    // Kept as a draft: the reload offers it back, so this choice loses nothing until the draft is discarded.
+    if (id && cur && flowSignature(cur.present) !== savedSig.current) storeDraft(id, cur.present, savedAt.current);
+    setReloadTick((n) => n + 1);
+  }, []);
+
   return {
     status: stale ? (flowId ? 'loading' : 'missing') : status,
     error,
@@ -348,5 +474,11 @@ export function useFlowDocument(flowId: string | null, onRenamed?: (from: string
     redo,
     flush,
     reload,
+    draft: stale ? null : draft,
+    restoreDraft,
+    discardDraft,
+    offerDraft,
+    keepMine,
+    loadTheirs,
   };
 }

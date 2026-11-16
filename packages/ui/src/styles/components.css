@@ -488,7 +488,7 @@
   box-shadow: inset 0 0 0 1px currentColor;
 }
 .chip--accent {
-  --chip-c: var(--accent);
+  --chip-c: var(--badge-accent);
   --chip-bg: var(--accent-soft);
 }
 .chip--success {
@@ -532,7 +532,7 @@
 }
 .count-badge--accent {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--badge-accent);
 }
 .count-badge--success {
   background: var(--success-soft);
@@ -622,13 +622,13 @@
   min-width: 44px;
   padding: 0 5px;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--lvl) 15%, transparent);
+  background: color-mix(in srgb, var(--lvl) 12%, transparent);
 }
 .lvl--letter {
   width: 16px;
   height: 16px;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--lvl) 16%, transparent);
+  background: color-mix(in srgb, var(--lvl) 12%, transparent);
 }
 .lvl--verbose {
   --lvl: var(--lv-verbose);
@@ -1264,8 +1264,10 @@
   font-size: var(--fs-sm);
   color: var(--text-muted);
   overflow-wrap: anywhere;
+  /* A summary of several files puts one file per line. */
+  white-space: pre-line;
   display: -webkit-box;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 6;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -2086,4 +2088,29 @@ body.is-resizing-v * {
 .code .hljs-bullet,
 .code .hljs-link {
   color: var(--json-number);
+}
+
+/* Connect Slack in place, from a share dialog. */
+.slack-connect__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.slack-connect__title {
+  color: var(--text);
+  font-weight: 600;
+}
+.slack-connect__hint {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.slack-connect__add {
+  align-self: flex-start;
+}
+.slack-connect__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }

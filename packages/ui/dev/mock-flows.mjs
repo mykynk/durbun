@@ -20,6 +20,7 @@ let environments = {
   ],
   activeId: 'staging',
 };
+let envRevision = 1;
 let uiPrefs = null;
 const backup = { enabled: false, keep: 10, intervalHours: 24, includeRuns: false, hasPassphrase: false };
 const backupFiles = [];
@@ -62,6 +63,36 @@ function seed() {
       { from: 'start', to: 'login' },
       { from: 'login', to: 'cart' },
     ],
+    createdAt: at,
+    updatedAt: at,
+  });
+  // Two flows that start on their own: the automations bar under the list, pause all / resume.
+  flows.set('crash-shot', {
+    format: 'durbun-flow',
+    version: 1,
+    id: 'crash-shot',
+    name: 'Screenshot on crash',
+    automation: { enabled: true },
+    nodes: [
+      { id: 'onCrash', type: 'trigger.event', params: { event: 'crash' }, position: { x: 0, y: 0 } },
+      { id: 'crashScreen', type: 'device.screenshot', params: { name: 'crash' }, position: { x: 260, y: 0 } },
+    ],
+    edges: [{ from: 'onCrash', to: 'crashScreen' }],
+    createdAt: at,
+    updatedAt: at,
+  });
+  flows.set('server-errors', {
+    format: 'durbun-flow',
+    version: 1,
+    id: 'server-errors',
+    name: 'Report 500 responses',
+    tags: ['alerts'],
+    automation: { enabled: true, throttleMs: 60_000 },
+    nodes: [
+      { id: 'on500', type: 'trigger.event', params: { event: 'networkError' }, position: { x: 0, y: 0 } },
+      { id: 'shot', type: 'device.screenshot', params: { name: 'server-error' }, position: { x: 260, y: 0 } },
+    ],
+    edges: [{ from: 'on500', to: 'shot' }],
     createdAt: at,
     updatedAt: at,
   });
@@ -144,7 +175,7 @@ function summary(f) {
     createdAt: f.createdAt,
     updatedAt: f.updatedAt,
     triggers: f.nodes.some((n) => n.type === 'trigger.event') ? ['event'] : ['manual'],
-    automation: false,
+    automation: !!f.automation?.enabled,
     calls: f.nodes.filter((n) => n.type === 'flow.call' && n.params?.flowId).map((n) => n.params.flowId),
     issues: { errors: 0, warnings: 0 },
     ...lastRunOf(f.id),
@@ -417,7 +448,14 @@ async function route(req, res, p, { json, readBody, broadcast }) {
     const flow = flows.get(id);
     if (!flow) return json(res, 404, { error: 'No such flow', code: 'flow.notFound', params: { id } }), true;
     if (!action && m === 'GET') return json(res, 200, { flow, issues: [] }), true;
-    if (!action && m === 'PUT') return json(res, 200, saveFlow((await body()).flow, id)), true;
+    if (!action && m === 'PUT') {
+      // Like the server: a save based on an older copy than the stored one is refused (another window saved).
+      const req = await body();
+      if (typeof req.baseUpdatedAt === 'number' && (flow.updatedAt ?? 0) > req.baseUpdatedAt + 1) {
+        return json(res, 409, { error: 'This flow was changed in another window', code: 'flow.conflict' }), true;
+      }
+      return json(res, 200, saveFlow(req.flow, id)), true;
+    }
     if (!action && m === 'DELETE') return flows.delete(id), res.writeHead(204).end(), true;
     if (action === 'duplicate') {
       const { name } = await body();
@@ -458,9 +496,15 @@ async function route(req, res, p, { json, readBody, broadcast }) {
       // Like the server: a CA that is not a PEM certificate is refused, nothing is saved.
       const bad = next.environments?.find((e) => e.tls?.ca && !/-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/.test(e.tls.ca));
       if (bad) return json(res, 400, { error: `${bad.name}: the certificate is not a PEM certificate (-----BEGIN CERTIFICATE-----)`, code: 'env.tls.invalidCa' }), true;
+      // Like the server: a document read before another window's save is refused; without `revision` it overwrites.
+      if (next.revision !== undefined && next.revision !== envRevision) {
+        return json(res, 409, { error: 'The environments were changed in another window', code: 'env.conflict' }), true;
+      }
+      delete next.revision;
       environments = next;
+      envRevision++;
     }
-    return json(res, 200, environments), true;
+    return json(res, 200, { ...environments, revision: envRevision }), true;
   }
 
   if (p === '/api/packages/export' && m === 'POST') {

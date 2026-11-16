@@ -34,38 +34,54 @@ const SESSION_EXT = /\.(json|durbun)$/i;
 const TEXT_EXT = /\.(json|durbun|md|txt|har)$/i;
 const HAR_EXT = /\.har$/i;
 
+/** What a HAR import brought in (the toasts are the caller's). */
+interface HarImported {
+  result: ImportResult;
+  requests: number;
+  notes: string[];
+  creator?: string;
+}
+
 /**
  * A HAR (browser developer tools, a proxy, Dürbün's own export) opens as an imported recording of its requests.
  * Said plainly: a HAR has no log lines, device or app, so the recording has none either.
  */
+async function sendHar(file: File): Promise<HarImported> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch {
+    throw new HarImportError('har.notHar', 'Not JSON');
+  }
+  // The recording is named after the file, without the extension (the server strips only its own ones).
+  const name = file.name.replace(/\.har$/i, '').trim() || file.name;
+  const har = harToSession(parsed, { name });
+  const result = await importSession(har.session, { name });
+  const notes = [t('shell.io.harOnlyRequests'), ...(har.skipped ? [t('shell.io.harSkipped', { count: har.skipped })] : []), ...(har.masked ? [t('transfer.data.importedMasked')] : [])];
+  return { result, requests: har.requests, notes, ...(har.creator ? { creator: har.creator } : {}) };
+}
+
+function harErrorText(err: unknown): string {
+  const code = err instanceof HarImportError ? err.code : undefined;
+  return code === 'har.empty' ? t('shell.io.harEmpty') : code === 'har.notHar' ? t('shell.io.harInvalid') : errorMessage(err);
+}
+
 async function importHar(file: File): Promise<void> {
   const id = toast({ kind: 'info', title: t('shell.io.importing', { name: file.name }), duration: 0 });
   try {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await file.text());
-    } catch {
-      throw new HarImportError('har.notHar', 'Not JSON');
-    }
-    // The recording is named after the file, without the extension (the server strips only its own ones).
-    const name = file.name.replace(/\.har$/i, '').trim() || file.name;
-    const har = harToSession(parsed, { name });
-    const result = await importSession(har.session, { name });
-    const { deviceIds } = result;
+    const { result, requests, notes, creator } = await sendHar(file);
     toast.dismiss(id);
     sayImportLimits(result);
-    const first = deviceIds[0];
-    const notes = [t('shell.io.harOnlyRequests'), ...(har.skipped ? [t('shell.io.harSkipped', { count: har.skipped })] : []), ...(har.masked ? [t('transfer.data.importedMasked')] : [])];
-    toast.success(t('shell.io.harImported', { count: har.requests }), {
-      description: `${file.name}${har.creator ? ` · ${har.creator}` : ''} · ${notes.join(' ')}`,
+    const first = result.deviceIds[0];
+    toast.success(t('shell.io.harImported', { count: requests }), {
+      description: `${file.name}${creator ? ` · ${creator}` : ''} · ${notes.join(' ')}`,
       duration: 9000,
       action: first ? { label: t('shell.io.showRequests'), onClick: () => showImported(first) } : undefined,
     });
     if (first) showImported(first);
   } catch (err) {
     toast.dismiss(id);
-    const code = err instanceof HarImportError ? err.code : undefined;
-    toast.error(t('shell.io.importFailed'), { description: code === 'har.empty' ? t('shell.io.harEmpty') : code === 'har.notHar' ? t('shell.io.harInvalid') : errorMessage(err) });
+    toast.error(t('shell.io.importFailed'), { description: harErrorText(err) });
   }
 }
 
@@ -96,33 +112,48 @@ function showImported(deviceId: string): void {
 }
 const INSTALL_EXT = /\.(apk|apks|xapk|aab|ipa|app|zip)$/i;
 
-/**
- * Import a Dürbün file, by what it holds: a package (.durbun) or a flow file asks what to bring in, a session
- * recording opens as an imported device (the scope switches to it on success).
- */
-export async function importFile(file: File): Promise<void> {
-  if (INSTALL_EXT.test(file.name) || !TEXT_EXT.test(file.name)) {
-    toast.warn(t('code.import.invalid'), {
-      description: INSTALL_EXT.test(file.name) ? t('shell.io.installHint') : t('shell.io.sessionHint'),
-    });
-    return;
-  }
+/** What a dropped or picked file is, read from its name and its first 64 KB. */
+export type ImportKind = 'install' | 'notDurbun' | 'har' | 'package' | 'flow' | 'session';
+
+export async function classifyImport(file: File): Promise<ImportKind> {
+  if (INSTALL_EXT.test(file.name)) return 'install';
+  if (!TEXT_EXT.test(file.name)) return 'notDurbun';
+  if (HAR_EXT.test(file.name)) return 'har';
   // Only the head is read to tell them apart: session recordings can be hundreds of megabytes.
   let kind: DurbunFileKind = 'unknown';
   try {
     kind = sniffFormat(await file.slice(0, 64 * 1024).text());
   } catch {
-    /* unreadable: the session import below reports it */
+    /* unreadable: the session import reports it */
   }
-  if (HAR_EXT.test(file.name)) return importHar(file);
   // A HAR saved as .json: its head says so.
   if (kind === 'unknown' && /\.json$/i.test(file.name)) {
     try {
-      if (looksLikeHar(await file.slice(0, 4096).text())) return importHar(file);
+      if (looksLikeHar(await file.slice(0, 4096).text())) return 'har';
     } catch {
-      /* unreadable: the session import below reports it */
+      /* unreadable: the session import reports it */
     }
   }
+  if (kind === 'package' || kind === 'flow') return kind;
+  // Every Dürbün file names its format first; a session file is still sent when its name says so (the server
+  // explains what is wrong with it).
+  if (!SESSION_EXT.test(file.name) || (kind === 'unknown' && !/\.durbun\.json$/i.test(file.name))) return 'notDurbun';
+  return 'session';
+}
+
+/**
+ * Import a Dürbün file, by what it holds: a package (.durbun) or a flow file asks what to bring in, a session
+ * recording opens as an imported device (the scope switches to it on success).
+ */
+export async function importFile(file: File): Promise<void> {
+  const kind = await classifyImport(file);
+  if (kind === 'install' || kind === 'notDurbun') {
+    if (kind === 'install') toast.warn(t('code.import.invalid'), { description: t('shell.io.installHint') });
+    else if (!TEXT_EXT.test(file.name)) toast.warn(t('code.import.invalid'), { description: t('shell.io.sessionHint') });
+    else toast.warn(t('shell.io.notDurbun'), { description: t('shell.io.sessionHint') });
+    return;
+  }
+  if (kind === 'har') return importHar(file);
   if (kind === 'package' || kind === 'flow') {
     try {
       const text = await file.text();
@@ -131,12 +162,6 @@ export async function importFile(file: File): Promise<void> {
     } catch (err) {
       toast.error(t('shell.io.importFailed'), { description: errorMessage(err) });
     }
-    return;
-  }
-  // Every Dürbün file names its format first; a session file is still sent when its name says so (the server
-  // explains what is wrong with it).
-  if (!SESSION_EXT.test(file.name) || (kind === 'unknown' && !/\.durbun\.json$/i.test(file.name))) {
-    toast.warn(t('shell.io.notDurbun'), { description: t('shell.io.sessionHint') });
     return;
   }
   const id = toast({ kind: 'info', title: t('shell.io.importing', { name: file.name }), duration: 0 });
@@ -160,9 +185,89 @@ export async function importFile(file: File): Promise<void> {
   }
 }
 
+/** One line per file that did not come in, for the summary. */
+interface Skipped {
+  name: string;
+  reason: string;
+}
+
+/**
+ * Several files at once (a drop, a multi-select): each is brought in by what it is, and one summary says what came
+ * in and what did not. Flow files go into one import dialog together; a package opens its own dialog (one at a
+ * time, and not together with flow files: two dialogs would stack).
+ */
+export async function importFiles(files: readonly File[]): Promise<void> {
+  if (files.length <= 1) {
+    if (files[0]) await importFile(files[0]);
+    return;
+  }
+  const progress = toast({ kind: 'info', title: t('shell.io.many.importing', { count: files.length }), duration: 0 });
+  const skipped: Skipped[] = [];
+  const flowTexts: string[] = [];
+  const packages: { name: string; text: string }[] = [];
+  let sessions = 0;
+  let hars = 0;
+  let firstDevice: { id: string; har: boolean } | undefined;
+  for (const file of files) {
+    const kind = await classifyImport(file);
+    try {
+      if (kind === 'install') skipped.push({ name: file.name, reason: t('shell.io.many.reasonInstall') });
+      else if (kind === 'notDurbun') skipped.push({ name: file.name, reason: t('shell.io.many.reasonNotDurbun') });
+      else if (kind === 'flow') flowTexts.push((await file.text()).trim());
+      else if (kind === 'package') packages.push({ name: file.name, text: await file.text() });
+      else if (kind === 'har') {
+        const r = await sendHar(file);
+        sayImportLimits(r.result);
+        hars++;
+        if (!firstDevice && r.result.deviceIds[0]) firstDevice = { id: r.result.deviceIds[0], har: true };
+      } else {
+        const r = await importSession(file);
+        sayImportLimits(r);
+        sessions++;
+        if (!firstDevice && r.deviceIds[0]) firstDevice = { id: r.deviceIds[0], har: false };
+      }
+    } catch (err) {
+      skipped.push({ name: file.name, reason: kind === 'har' ? harErrorText(err) : errorMessage(err) });
+    }
+  }
+  toast.dismiss(progress);
+
+  const parts: string[] = [];
+  if (sessions) parts.push(t('shell.io.many.sessions', { count: sessions }));
+  if (hars) parts.push(t('shell.io.many.hars', { count: hars }));
+  let pkg: { name: string; text: string } | undefined;
+  if (flowTexts.length) {
+    parts.push(t('shell.io.many.flows', { count: flowTexts.length }));
+    for (const p of packages) skipped.push({ name: p.name, reason: t('shell.io.many.reasonPackageWithFlows') });
+  } else if (packages.length) {
+    pkg = packages[0];
+    parts.push(t('shell.io.many.package', { name: pkg!.name }));
+    for (const p of packages.slice(1)) skipped.push({ name: p.name, reason: t('shell.io.many.reasonOnePackage') });
+  }
+  const came = files.length - skipped.length;
+  const description = [parts.join(' · '), ...skipped.map((x) => t('shell.io.many.skippedLine', { name: x.name, reason: x.reason }))].filter(Boolean).join('\n');
+  const show = firstDevice;
+  const opts = {
+    description,
+    duration: skipped.length ? 20_000 : 9000,
+    ...(show ? { action: { label: show.har ? t('shell.io.showRequests') : t('shell.io.show'), onClick: () => (show.har ? showImported(show.id) : setScope({ kind: 'device', deviceId: show.id })) } } : {}),
+  };
+  if (!came) toast.error(t('shell.io.many.none', { count: files.length }), opts);
+  else if (skipped.length) toast.warn(t('shell.io.many.partial', { count: came, total: files.length }), opts);
+  else toast.success(t('shell.io.many.done', { count: came }), opts);
+
+  // The first recording opens (a HAR on the Network tab); the dialogs come last so the summary stays readable.
+  if (show && !flowTexts.length && !pkg) {
+    if (show.har) showImported(show.id);
+    else setScope({ kind: 'device', deviceId: show.id });
+  }
+  if (flowTexts.length) ui.importFlows(flowTexts.length === 1 ? flowTexts[0]! : `[${flowTexts.join(',\n')}]`);
+  else if (pkg) transfer.openImport(pkg.text, pkg.name);
+}
+
 export async function pickAndImport(): Promise<void> {
-  const [file] = await pickFiles({ accept: '.json,.durbun,.md,.txt,.har,application/json' });
-  if (file) await importFile(file);
+  const files = await pickFiles({ accept: '.json,.durbun,.md,.txt,.har,application/json', multiple: true });
+  await importFiles(files);
 }
 
 export async function setDemo(enabled: boolean): Promise<void> {

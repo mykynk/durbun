@@ -4,7 +4,7 @@
  */
 import { flowNodeSpec, type FlowConditionOp, type FlowNode, type FlowNodeGroup, type I18nParams } from '@durbun/protocol';
 import { getLanguage, hasMessage, tCodeIn, translate, type Lang } from '../../../i18n';
-import { GROUP_TEXT, NODE_TEXT_TR, PARAM_LABELS_EN } from '../catalogText';
+import { DESCRIPTION_UI, GROUP_TEXT, NODE_TEXT_TR, PARAM_LABELS_EN } from '../catalogText';
 
 export function nodeTitle(type: string, lang: Lang = getLanguage()): string {
   if (lang === 'tr') {
@@ -26,6 +26,8 @@ export function stepName(step: { type: string; label?: string }, lang: Lang = ge
 }
 
 export function nodeDescription(type: string, lang: Lang = getLanguage()): string {
+  const ui = DESCRIPTION_UI[type];
+  if (ui) return ui[lang];
   if (lang === 'tr') {
     const tr = NODE_TEXT_TR[type]?.description;
     if (tr) return tr;

@@ -3,10 +3,10 @@ import { clsx } from 'clsx';
 import { ClipboardPaste, CopyPlus, Eye, EyeOff, Globe, Lock, Plus, Trash, X } from 'lucide-react';
 import { VAR_NAME_RE, type FlowEnvironment, type FlowEnvironmentTls, type FlowEnvironments } from '@durbun/protocol';
 import { Button, Callout, Checkbox, Dialog, IconButton, Tooltip, confirm, pickFiles, toast, useShortcut } from '../../../components';
-import { ApiError } from '../../../data';
+import { ApiError, isEditConflict } from '../../../data';
 import { tCode, useT } from '../../../i18n';
 import { flowErrorText } from '../model/errors';
-import { emptyEnvironments, newEnvId, parseEnvText, saveEnvironments, useEnvironments } from '../model/envStore';
+import { emptyEnvironments, loadEnvironments, newEnvId, parseEnvText, saveEnvironments, useEnvironments } from '../model/envStore';
 
 export interface EnvironmentsDialogProps {
   open: boolean;
@@ -25,6 +25,8 @@ export function EnvironmentsDialog({ open, onClose, usedKeys = [] }: Environment
   const [saving, setSaving] = useState(false);
   const [reveal, setReveal] = useState<ReadonlySet<string>>(new Set());
   const [pasting, setPasting] = useState<string | null>(null);
+  /** Another window saved the environments since this dialog read them: the user picks whose version stays. */
+  const [conflict, setConflict] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -33,6 +35,7 @@ export function EnvironmentsDialog({ open, onClose, usedKeys = [] }: Environment
     setCurrent(base.activeId ?? base.environments[0]?.id ?? null);
     setReveal(new Set());
     setPasting(null);
+    setConflict(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, !!server]);
 
@@ -73,15 +76,21 @@ export function EnvironmentsDialog({ open, onClose, usedKeys = [] }: Environment
     setCurrent(rest[0]?.id ?? null);
   };
 
-  const save = async () => {
+  const save = async (overwrite = false) => {
     if (!draft || keyProblems.size) return;
     setSaving(true);
     try {
       const clean: FlowEnvironments = { ...draft, environments: draft.environments.map((e) => ({ ...e, vars: e.vars.map((v) => ({ ...v, key: v.key.trim() })) })) };
-      await saveEnvironments(clean);
+      await saveEnvironments(clean, { overwrite });
+      setConflict(false);
       toast.success(t('flows.env.saved'));
       onClose();
     } catch (err) {
+      // Edits stay in the dialog until the user picks a version.
+      if (isEditConflict(err)) {
+        setConflict(true);
+        return;
+      }
       // A certificate that does not parse: said next to the field as well (the save was refused).
       if (err instanceof ApiError && err.code === 'env.tls.invalidCa') setCaError(flowErrorText(err));
       toast.error(t('flows.env.saveFailed'), { description: flowErrorText(err) });
@@ -90,8 +99,25 @@ export function EnvironmentsDialog({ open, onClose, usedKeys = [] }: Environment
     }
   };
 
+  const loadCurrent = async () => {
+    setSaving(true);
+    try {
+      const fresh = await loadEnvironments();
+      if (!fresh) throw new Error(t('flows.env.loadFailed'));
+      const base = structuredClone(fresh);
+      setDraft(base);
+      setCurrent((c) => (base.environments.some((e) => e.id === c) ? c : (base.activeId ?? base.environments[0]?.id ?? null)));
+      setConflict(false);
+      toast.info(t('flows.conflict.loadedEnv'));
+    } catch (err) {
+      toast.error(t('flows.env.loadFailed'), { description: flowErrorText(err) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const close = async () => {
-    if (dirty && !(await confirm({ title: t('flows.env.discardTitle'), message: t('flows.env.discardMessage'), confirmLabel: t('flows.env.discard'), danger: true }))) return;
+    if (dirty && !(await confirm({ title: t('flows.env.discardTitle'), message: t('flows.env.discardMessage'), confirmLabel: t('flows.env.discard'), cancelLabel: t('common.keepEditing'), danger: true }))) return;
     onClose();
   };
 
@@ -132,6 +158,25 @@ export function EnvironmentsDialog({ open, onClose, usedKeys = [] }: Environment
         </>
       }
     >
+      {conflict ? (
+        <Callout
+          tone="warn"
+          className="fl-conflict"
+          title={t('flows.conflict.envTitle')}
+          actions={
+            <>
+              <Button size="sm" variant="secondary" disabled={saving} onClick={() => void loadCurrent()}>
+                {t('flows.conflict.loadTheirs')}
+              </Button>
+              <Button size="sm" variant="primary" loading={saving} onClick={() => void save(true)}>
+                {t('flows.conflict.saveMine')}
+              </Button>
+            </>
+          }
+        >
+          {t('flows.conflict.envText')}
+        </Callout>
+      ) : null}
       {!draft ? null : (
         <div className="fl-env__layout">
           <div className="fl-env__list">

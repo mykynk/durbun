@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import { FLOW_ENVIRONMENTS_FORMAT, type FlowEnvironment, type FlowEnvironments } from '@durbun/protocol';
-import { api } from '../../../data';
+import { api, isEditConflict } from '../../../data';
 
 /** Flow environments ("Ortamlar"): base URLs, keys and accounts flows read as {{env.<key>}}. */
 interface EnvState {
@@ -36,10 +36,36 @@ export function useEnvironments(): FlowEnvironments | null {
   return useEnvStore((s) => s.envs);
 }
 
-export async function saveEnvironments(next: FlowEnvironments): Promise<FlowEnvironments> {
-  const saved = await api.saveFlowEnvironments(next);
+/**
+ * Saves the environments against the copy they were read from (its `revision`): when another window saved in
+ * between, the server refuses with `env.conflict` (`isEditConflict(err)`) and nothing changes here; the caller asks
+ * whether to load the current copy (`loadEnvironments()`) or save over it (`overwrite: true`).
+ */
+export async function saveEnvironments(next: FlowEnvironments, opts: { overwrite?: boolean } = {}): Promise<FlowEnvironments> {
+  const saved = await api.saveFlowEnvironments(next, opts);
   useEnvStore.setState({ envs: saved });
   return saved;
+}
+
+/**
+ * Picks the active environment. A change another window saved meanwhile is kept: on `env.conflict` the current
+ * copy is read again and only the choice is applied to it.
+ */
+export async function setActiveEnvironment(activeId: string | undefined): Promise<void> {
+  const apply = (envs: FlowEnvironments): FlowEnvironments => {
+    const { activeId: _a, ...rest } = envs;
+    return activeId ? { ...rest, activeId } : rest;
+  };
+  const envs = useEnvStore.getState().envs ?? (await loadEnvironments());
+  if (!envs) throw new Error('environments not loaded');
+  try {
+    await saveEnvironments(apply(envs));
+  } catch (err) {
+    if (!isEditConflict(err)) throw err;
+    const fresh = await api.getFlowEnvironments();
+    useEnvStore.setState({ envs: fresh });
+    await saveEnvironments(apply(fresh));
+  }
 }
 
 export function emptyEnvironments(): FlowEnvironments {

@@ -43,7 +43,7 @@ export type { CopyButtonProps } from './CopyButton';
 export { SlackButton } from './SlackButton';
 export type { SlackButtonProps } from './SlackButton';
 export { Highlight, findRanges } from './Highlight';
-export { ErrorBoundary } from './ErrorBoundary';
+export { ErrorBoundary, DialogBoundary, sayDialogCrashed } from './ErrorBoundary';
 export { FeatureContext, useFeatureActive, useFeatureTab } from './FeatureContext';
 export type { FeatureContextValue } from './FeatureContext';
 export { AndroidIcon, DurbunMark, PlatformIcon, SdkBadge, sdkLabel } from './Icons';

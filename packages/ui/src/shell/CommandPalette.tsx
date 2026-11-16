@@ -70,7 +70,7 @@ function Palette() {
     recent.forEach((cmd, i) => out.push({ cmd, indices: [], heading: i === 0 ? t('shell.palette.groups.recent') : undefined }));
     const groups = new Map<string, PaletteCommand[]>();
     for (const c of commands) {
-      if (recent.includes(c)) continue;
+      if (recent.includes(c) || c.searchOnly) continue;
       const g = c.group ?? t('shell.palette.groups.other');
       let list = groups.get(g);
       if (!list) groups.set(g, (list = []));

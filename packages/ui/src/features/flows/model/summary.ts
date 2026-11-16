@@ -19,6 +19,8 @@ function duration(ms: unknown, lang: Lang): string {
   return Number.isFinite(n) ? formatSpan(n, lang) : str(ms);
 }
 
+const onOff = (on: boolean, lang: Lang) => (on ? (lang === 'tr' ? 'Açık' : 'On') : lang === 'tr' ? 'Kapalı' : 'Off');
+
 export function nodeSummary(node: FlowNode, lang: Lang = getLanguage()): string {
   const p = node.params ?? {};
   const more = (list: unknown[], one: string) => (list.length > 1 ? `${one} +${list.length - 1}` : one);
@@ -77,7 +79,20 @@ export function nodeSummary(node: FlowNode, lang: Lang = getLanguage()): string 
     case 'device.keyEvent':
       return optionLabel(node.type, 'key', str(p.key), lang);
     case 'device.animations':
-      return p.enabled === true ? (lang === 'tr' ? 'Açık' : 'On') : lang === 'tr' ? 'Kapalı' : 'Off';
+    case 'device.airplaneMode':
+    case 'device.wifi':
+    case 'device.mobileData':
+    case 'device.dontKeepActivities':
+      return onOff(p.enabled === true, lang);
+    case 'device.permission': {
+      const name = str(p.permission).replace(/^android\.permission\./, '');
+      const verb = p.grant === false ? (lang === 'tr' ? 'geri al' : 'revoke') : lang === 'tr' ? 'ver' : 'grant';
+      return name ? `${name} · ${verb}` : '';
+    }
+    case 'device.appLanguage':
+      return str(p.locale) === 'system' ? (lang === 'tr' ? 'Telefonun dili' : 'Phone language') : str(p.locale);
+    case 'device.rotation':
+      return optionLabel(node.type, 'orientation', str(p.orientation) || 'landscape', lang);
     case 'device.screenshot':
     case 'device.stopRecording':
       return str(p.name);

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FileUp } from 'lucide-react';
 import { useT } from '../i18n';
 import { Portal } from '../components/floating';
-import { importFile } from './actions';
+import { importFiles } from './actions';
 
 function hasFiles(e: DragEvent): boolean {
   return Boolean(e.dataTransfer && [...e.dataTransfer.types].includes('Files'));
@@ -13,7 +13,7 @@ function inFeatureZone(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest('[data-dropzone]'));
 }
 
-/** Window-wide drag-and-drop import of `.durbun.json` session files. */
+/** Window-wide drag-and-drop import of Dürbün files (recordings, HAR, packages, flows), one or several at once. */
 export function DropImport() {
   const t = useT();
   const [active, setActive] = useState(false);
@@ -45,8 +45,9 @@ export function DropImport() {
       setActive(false);
       if (!hasFiles(e) || inFeatureZone(e.target)) return;
       e.preventDefault();
-      const file = e.dataTransfer?.files[0];
-      if (file) void importFile(file);
+      // Every dropped file comes in (one summary for several).
+      const files = [...(e.dataTransfer?.files ?? [])];
+      if (files.length) void importFiles(files);
     };
     window.addEventListener('dragenter', onEnter);
     window.addEventListener('dragover', onOver);

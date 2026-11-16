@@ -228,6 +228,16 @@
   color: var(--danger);
   background: var(--danger-soft);
 }
+.fl-list__badge.is-draft {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+/* Unsaved edits from an earlier window, offered back under the header. */
+.fl-draft {
+  flex-shrink: 0;
+  margin: 8px 12px 0;
+}
 
 /* ───────────── first visit ───────────── */
 
@@ -1223,6 +1233,26 @@
   color: var(--text-muted);
   font-size: 10px;
   line-height: 15px;
+}
+.fl-picker__tag.is-unsupported {
+  background: var(--warning-soft);
+  color: var(--warning);
+  white-space: nowrap;
+}
+/* A step the target cannot run: quieter, never hidden (a flow can serve several devices). */
+.fl-picker__item.is-unsupported .fl-picker__name {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.fl-picker__item.is-unsupported .fl-picker__icon {
+  opacity: 0.55;
+}
+.fl-picker__target {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
 }
 .fl-picker__desc {
   margin-top: 1px;
@@ -2302,6 +2332,9 @@ textarea.fl-input {
 .fl-env {
   min-height: 420px;
 }
+.fl-env > .fl-conflict {
+  margin-bottom: 14px;
+}
 .fl-env__layout {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
@@ -2637,6 +2670,63 @@ textarea.fl-input {
   color: var(--text-subtle);
   font-size: var(--fs-xs);
 }
+.fl-fromreq__chosen {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.fl-fromreq__chosen-title {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.fl-fromreq__chosen-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fl-fromreq__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  height: 26px;
+  padding: 0 2px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+.fl-fromreq__chip.is-more {
+  padding: 0 8px;
+  background: none;
+  color: var(--text-muted);
+}
+.fl-fromreq__chip-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.fl-fromreq__chip-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
 
 @media (max-width: 760px) {
   .fl-runpanel__body {
@@ -2700,4 +2790,124 @@ textarea.fl-input {
 }
 .fl-env__tls-row > span {
   flex: 1 1 200px;
+}
+
+/* Automations: count at the bottom of the list, the list to switch them off, pause all / resume. */
+.fl-auto {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.fl-auto.is-paused {
+  padding-left: 12px;
+}
+.fl-auto__open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fl-auto__open:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.fl-auto__open:focus-visible,
+.fl-auto__name:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+.fl-auto__icon {
+  flex: none;
+  color: var(--accent);
+}
+.fl-auto.is-paused .fl-auto__icon {
+  color: var(--text-subtle);
+}
+.fl-auto__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fl-auto__more {
+  flex: none;
+  color: var(--text-subtle);
+  font-size: var(--fs-sm);
+}
+.fl-auto__pop {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.fl-auto__title {
+  color: var(--text);
+  font-weight: 600;
+}
+.fl-auto__hint {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.fl-auto__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.fl-auto__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+.fl-auto__name {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fl-auto__name:hover {
+  background: var(--bg-hover);
+}
+.fl-auto__paused {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.fl-auto__actions {
+  display: flex;
+  justify-content: flex-end;
 }

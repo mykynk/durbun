@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
-import { ListPlus, RefreshCw, SearchX } from 'lucide-react';
+import { ListPlus, RefreshCw, SearchX, X } from 'lucide-react';
 import type { NetworkEntry } from '@durbun/protocol';
-import { Button, Checkbox, Dialog, EmptyState, Input, MethodBadge, SearchInput, StatusBadge, Toggle, formatClock, toast } from '../../../components';
-import { api, networkStore, useCompiledScope, useNetworkVersion } from '../../../data';
-import { errorText, useT } from '../../../i18n';
+import { Button, Checkbox, Dialog, EmptyState, IconButton, Input, MethodBadge, SearchInput, StatusBadge, Toggle, formatClock, toast } from '../../../components';
+import { api, networkStore, useCompiledScope, useHub, useNetworkVersion } from '../../../data';
+import { deviceDisplayName, errorText, useT } from '../../../i18n';
 
 export interface FromRequestsDialogProps {
   open: boolean;
@@ -13,6 +13,19 @@ export interface FromRequestsDialogProps {
   onClose(): void;
   onCreated(id: string): void;
 }
+
+/** The app (or device) the dialog's starting request came from: the list starts with its requests only. */
+interface Source {
+  deviceId: string;
+  appId?: string;
+}
+
+function sameSource(e: NetworkEntry, s: Source): boolean {
+  return e.deviceId === s.deviceId && (!s.appId || e.appId === s.appId);
+}
+
+/** How many chosen requests the strip above the list names before "+N". */
+const CHOSEN_SHOWN = 6;
 
 const MAX_ROWS = 400;
 const ASSET_RE = /\.(png|jpe?g|gif|webp|svg|ico|css|js|mjs|map|woff2?|ttf|otf|mp4|mp3|webm)(\?|$)/i;
@@ -32,7 +45,12 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
   const [name, setName] = useState('');
   const [saveEnv, setSaveEnv] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [source, setSource] = useState<Source | null>(null);
+  const [onlySource, setOnlySource] = useState(true);
   const anchor = useRef<string | null>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const apps = useHub((s) => s.apps);
+  const devices = useHub((s) => s.devices);
   // The list is what was captured when the dialog opened: rows that keep arriving would move under the pointer.
   const [snapshot, setSnapshot] = useState<ReadonlySet<string>>(() => new Set());
   const takeSnapshot = () => setSnapshot(new Set(networkStore.list().map((e) => e.id)));
@@ -44,7 +62,20 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
     setName('');
     takeSnapshot();
     anchor.current = null;
+    // Opened from a request: start with that app's requests (one tap shows every app again).
+    const first = initialIds?.length ? networkStore.get(initialIds[0]!) : undefined;
+    setSource(first ? { deviceId: first.deviceId, ...(first.appId ? { appId: first.appId } : {}) } : null);
+    setOnlySource(true);
   }, [open, initialIds]);
+  const filterSource = onlySource ? source : null;
+
+  // The request the dialog was opened with is in view (it may sit far down a long list).
+  useEffect(() => {
+    if (!open || !initialIds?.length) return;
+    const id = initialIds[0]!;
+    const raf = requestAnimationFrame(() => rowsRef.current?.querySelector<HTMLElement>(`[data-req-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center' }));
+    return () => cancelAnimationFrame(raf);
+  }, [open, initialIds, snapshot]);
 
   const rows = useMemo(() => {
     if (!open) return [];
@@ -54,13 +85,14 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
     for (let i = list.length - 1; i >= 0 && out.length < MAX_ROWS; i--) {
       const e = list[i]!;
       if (!snapshot.has(e.id) || e.method === '?' || e.source === 'flow' || !scope.network(e)) continue;
+      if (filterSource && !sameSource(e, filterSource) && !picked.has(e.id)) continue;
       if (hideAssets && isAsset(e) && !picked.has(e.id)) continue;
       if (q && !`${e.method} ${e.url} ${e.status ?? ''}`.toLowerCase().includes(q)) continue;
       out.push(e);
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, version, scope, query, hideAssets, snapshot]);
+  }, [open, version, scope, query, hideAssets, snapshot, filterSource]);
 
   /** Something was captured at all (in scope): an empty list then comes from the search or the asset filter. */
   const hasAny = useMemo(() => {
@@ -114,6 +146,18 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
     if (next.has(id)) next.delete(id);
     else next.add(id);
     anchor.current = id;
+    setPicked(next);
+  };
+  const sourceLabel = useMemo(() => {
+    if (!source) return '';
+    const d = devices[source.deviceId];
+    const device = d ? deviceDisplayName(d) : source.deviceId;
+    const app = source.appId ? apps[source.appId]?.app.name : undefined;
+    return app ? `${app} · ${device}` : device;
+  }, [source, apps, devices]);
+  const unpick = (id: string) => {
+    const next = new Set(picked);
+    next.delete(id);
     setPicked(next);
   };
   const allVisible = rows.length > 0 && rows.every((r) => picked.has(r.id));
@@ -181,6 +225,7 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
             aria-label={t('flows.fromRequests.selectAll')}
           />
           <SearchInput value={query} onChange={setQuery} placeholder={t('flows.fromRequests.search')} size="sm" className="fl-fromreq__search" />
+          {source ? <Toggle size="sm" checked={onlySource} onChange={setOnlySource} label={t('flows.fromRequests.onlySource', { source: sourceLabel })} /> : null}
           <Toggle size="sm" checked={hideAssets} onChange={setHideAssets} label={t('flows.fromRequests.hideAssets')} />
           <span className="grow" />
           {newer > 0 ? (
@@ -189,9 +234,30 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
             </Button>
           ) : null}
         </div>
+        {chosen.length ? (
+          // What the flow will be made of, always in view: the picked rows may sit anywhere in a long list.
+          <div className="fl-fromreq__chosen" aria-label={t('flows.fromRequests.chosen', { count: chosen.length })} role="group">
+            <span className="fl-fromreq__chosen-title">{t('flows.fromRequests.chosen', { count: chosen.length })}</span>
+            <ol className="fl-fromreq__chosen-list">
+              {chosen.slice(0, CHOSEN_SHOWN).map((e, i) => (
+                <li key={e.id} className="fl-fromreq__chip">
+                  <span className="fl-fromreq__chip-n tnum" aria-hidden>
+                    {i + 1}
+                  </span>
+                  <MethodBadge method={e.method} />
+                  <span className="fl-fromreq__chip-path" title={e.url}>
+                    {e.path}
+                  </span>
+                  <IconButton icon={X} size="xs" label={t('flows.fromRequests.unpick', { request: `${e.method} ${e.path}` })} onClick={() => unpick(e.id)} />
+                </li>
+              ))}
+              {chosen.length > CHOSEN_SHOWN ? <li className="fl-fromreq__chip is-more">{t('flows.fromRequests.chosenMore', { count: chosen.length - CHOSEN_SHOWN })}</li> : null}
+            </ol>
+          </div>
+        ) : null}
         {rows.length === 0 ? (
-          // Requests were captured but the search (or the asset filter) hides them all: say so, and undo it.
-          (query.trim() || hideAssets) && hasAny ? (
+          // Requests were captured but the search (or a filter) hides them all: say so, and undo it.
+          (query.trim() || hideAssets || filterSource) && hasAny ? (
             <EmptyState
               size="sm"
               icon={SearchX}
@@ -202,6 +268,11 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
                   {query.trim() ? (
                     <Button size="sm" variant="secondary" onClick={() => setQuery('')}>
                       {t('flows.fromRequests.clearSearch')}
+                    </Button>
+                  ) : null}
+                  {filterSource ? (
+                    <Button size="sm" variant="secondary" onClick={() => setOnlySource(false)}>
+                      {t('flows.fromRequests.allApps')}
                     </Button>
                   ) : null}
                   {hideAssets ? (
@@ -216,13 +287,14 @@ export function FromRequestsDialog({ open, initialIds, onClose, onCreated }: Fro
             <EmptyState size="sm" icon={ListPlus} title={t('flows.fromRequests.emptyTitle')} description={t('flows.fromRequests.emptyHint')} />
           )
         ) : (
-          <div className="fl-fromreq__rows" role="listbox" aria-multiselectable aria-label={t('flows.fromRequests.list')}>
+          <div className="fl-fromreq__rows" role="listbox" aria-multiselectable aria-label={t('flows.fromRequests.list')} ref={rowsRef}>
             {rows.map((e) => {
               const on = picked.has(e.id);
               const order = on ? chosen.findIndex((c) => c.id === e.id) + 1 : 0;
               return (
                 <div
                   key={e.id}
+                  data-req-id={e.id}
                   role="option"
                   aria-selected={on}
                   tabIndex={0}

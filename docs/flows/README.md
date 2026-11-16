@@ -109,6 +109,40 @@ Set `baseUrl` and a secret `password` in an environment (Flows → Environments)
   fail (its `error` edge can handle it), `passed` returns to the caller. A flow cannot call itself, directly or
   through other flows.
 
+## Steps
+
+The schema lists every parameter; this is what each step type is for. "Android" means a phone or an emulator,
+"iOS sim." the iOS simulator, "iPhone" a connected device.
+
+| Group | Type | What it does | Runs on |
+| --- | --- | --- | --- |
+| Start | `trigger.manual` | starts the run when someone presses Run | all |
+| | `trigger.event` | starts the run by itself on a crash, a log line, a failed or matching request, an app or device connecting (see Automation) | all |
+| HTTP | `http.request` | sends a request from the Mac and saves the response | all |
+| Logic | `logic.condition`, `logic.repeat`, `logic.setVariables`, `logic.delay` | branch, repeat (also over a list), set variables, wait a fixed time | all |
+| | `check.assert`, `check.noErrors` | fail the run when a check does not hold, or when the app crashed, failed requests or logged errors | all |
+| | `flow.call`, `flow.end` | run another flow with inputs, end the run (or the sub-flow) | all |
+| Device | `device.openUrl`, `device.launchApp`, `device.stopApp`, `device.restartApp`, `device.uninstallApp`, `device.installApp`, `device.screenshot`, `device.startRecording`, `device.stopRecording` | links, the app's life cycle, builds, evidence | Android, iOS sim., iPhone |
+| | `device.clearData` | delete the app's data | Android, iOS sim. |
+| | `device.appearance`, `device.fontScale` | dark / light, text size | Android, iOS sim. |
+| | `device.location` | simulated location | Android emulator, iOS sim. |
+| | `device.pushNotification`, `device.statusBar` | a push payload, a clean status bar for screenshots | iOS sim. |
+| | `device.inputText`, `device.keyEvent`, `device.animations` | type text, press a key, system animations | Android |
+| | `device.permission` | grant or revoke one of the app's permissions | Android, iOS sim. |
+| | `device.appLanguage` | the app's own language, without changing the phone's (Android 13+) | Android |
+| | `device.airplaneMode` (Android 11+), `device.wifi`, `device.mobileData` | connectivity | Android |
+| | `device.rotation` | turn the screen, or bring back auto-rotate | Android |
+| | `device.dontKeepActivities` | the developer option that ends every screen as soon as it is left | Android |
+| Wait | `wait.network`, `wait.log`, `wait.event` | wait for the app's request, a log line, or an event the app sends with the SDK | all (`wait.network` and `wait.event` need the SDK) |
+| Mocks | `mock.add`, `mock.toggle`, `mock.remove` | change what the app's SDK answers for matching requests | apps with the SDK |
+| Output | `output.marker`, `output.slack`, `output.note` | a marker in the logs, a Slack message, a line in the run report | all |
+
+The device setting steps (`device.permission`, `device.appLanguage`, `device.airplaneMode`, `device.wifi`,
+`device.mobileData`, `device.rotation`, `device.dontKeepActivities`) put the setting back as it was when the run
+ends, unless `restoreAfter` is `false`. On the iOS simulator, putting a permission back means the app asks again.
+Turning Wi-Fi off or airplane mode on is refused while the phone is connected to the Mac over Wi-Fi
+(`action.wouldDisconnect`): it would cut the connection. Connect it with USB first.
+
 ## Templates
 
 String values may contain `{{…}}`:

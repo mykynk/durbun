@@ -1,12 +1,13 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
-import { ChevronDown, CircleAlert, Copy, Ellipsis, FileDown, FileUp, ListPlus, Play, Plus, Share2, Sparkles, Trash, Workflow, Zap } from 'lucide-react';
+import { ChevronDown, CircleAlert, Copy, Ellipsis, FileDown, FilePen, FileUp, ListPlus, Play, Plus, Share2, Sparkles, Trash, Workflow, Zap } from 'lucide-react';
 import { STARTERS, type Starter, type StarterId } from '../model/starters';
 import type { FlowSummary } from '@durbun/protocol';
 import { Button, DropdownMenu, EmptyState, Highlight, SearchInput, Spinner, StatusDot, Tooltip, formatRelative, openContextMenu, type MenuItem, type Tone } from '../../../components';
 import { useFlows } from '../../../data';
 import { useT } from '../../../i18n';
 import { transfer } from '../../transfer/store';
+import { AutomationsBar } from './AutomationsBar';
 
 export type NewFlowKind = 'blank' | 'requests' | 'ai' | 'import' | `starter:${StarterId}`;
 
@@ -14,6 +15,8 @@ export interface FlowListProps {
   summaries: FlowSummary[];
   loaded: boolean;
   selectedId: string | null;
+  /** Flows with edits an earlier window could not save (offered back when the flow opens). */
+  drafts?: ReadonlySet<string>;
   active: boolean;
   onOpen(id: string): void;
   onNew(kind: NewFlowKind): void;
@@ -46,7 +49,7 @@ export function starterMenuItem(t: ReturnType<typeof useT>, s: Starter, onNew: (
 }
 
 /** Left column of the Flows tab: every saved flow with its last run, automation and problems. */
-export function FlowList({ summaries, loaded, selectedId, active, onOpen, onNew, onRun, onDuplicate, onExport, onAi, onDelete }: FlowListProps) {
+export function FlowList({ summaries, loaded, selectedId, drafts, active, onOpen, onNew, onRun, onDuplicate, onExport, onAi, onDelete }: FlowListProps) {
   const t = useT();
   const [query, setQuery] = useState('');
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -173,6 +176,13 @@ export function FlowList({ summaries, loaded, selectedId, active, onOpen, onNew,
                   ) : null}
                 </div>
                 <div className="fl-list__badges">
+                  {drafts?.has(f.id) ? (
+                    <Tooltip content={t('flows.list.draft')}>
+                      <span className="fl-list__badge is-draft">
+                        <FilePen size={12} aria-label={t('flows.list.draft')} />
+                      </span>
+                    </Tooltip>
+                  ) : null}
                   {f.automation && f.triggers.includes('event') ? (
                     <Tooltip content={t('flows.list.automation')}>
                       <span className="fl-list__badge is-auto">
@@ -215,6 +225,7 @@ export function FlowList({ summaries, loaded, selectedId, active, onOpen, onNew,
           })
         )}
       </div>
+      {loaded ? <AutomationsBar summaries={summaries} onOpen={onOpen} /> : null}
     </div>
   );
 }
