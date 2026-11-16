@@ -58,6 +58,8 @@ export interface SdkIdentity {
   version: string;
   platform: SdkPlatform;
   layers?: SdkLayer[];
+  /** Mock rule conditions (`MockRule.when` keys) this SDK evaluates; the desktop sends no rule using others. */
+  mockMatchers?: MockMatcher[];
 }
 
 export interface AppInfo {
@@ -119,7 +121,27 @@ export interface MockRule {
   apps?: string[];
   action: MockAction;
   createdAt: number;
+  /** Conditions besides method / URL / apps (mock matching v2); every one present must hold. */
+  when?: MockRuleConditions;
 }
+
+export type GraphqlOperationType = 'query' | 'mutation' | 'subscription';
+
+/** `MockRule.when.graphql`: the GraphQL operation a rule is limited to. */
+export interface MockGraphqlCondition {
+  /** Operation name, exact and case-sensitive. */
+  operationName: string;
+  /** Also require this operation type; absent = any type. */
+  operationType?: GraphqlOperationType;
+}
+
+/** Extra conditions of a mock rule; a key this SDK does not know makes the rule never match. */
+export interface MockRuleConditions {
+  graphql?: MockGraphqlCondition;
+}
+
+/** A matcher an SDK can evaluate: a key of `MockRuleConditions`. */
+export type MockMatcher = 'graphql';
 
 export interface DeviceHints {
   platform: DevicePlatform;

@@ -268,6 +268,12 @@
 }
 .mk-allapps {
   color: var(--text-subtle);
+  white-space: nowrap;
+}
+/* Action, apps and the "not sent" badge wrap as whole items in a narrow list (editor open). */
+.mk-rule__line--meta {
+  flex-wrap: wrap;
+  row-gap: 3px;
 }
 .mk-rule__hits {
   flex-shrink: 0;
@@ -574,7 +580,11 @@
   color: var(--text-subtle);
 }
 .mk-tester__count {
+  flex-shrink: 0;
   color: var(--text-subtle);
+}
+.mk-tester__app {
+  flex-shrink: 0;
 }
 .mk-tester__verdict {
   flex-shrink: 0;
@@ -800,4 +810,155 @@
 }
 .mk-conflict__choices li + li {
   margin-top: 2px;
+}
+
+/* Conditions (mock matching v2): the GraphQL operation */
+.mk-op {
+  --c: var(--info);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 220px;
+  height: 17px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+}
+.mk-op--mutation {
+  --c: var(--m-put);
+}
+.mk-op--subscription {
+  --c: var(--m-patch);
+}
+.mk-op__type {
+  font-weight: 500;
+  opacity: 0.75;
+}
+.mk-op--pick {
+  height: 22px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.mk-op--pick:hover {
+  background: color-mix(in srgb, var(--c) 22%, transparent);
+}
+.mk-op--pick.is-on {
+  border-color: color-mix(in srgb, var(--c) 60%, transparent);
+  background: color-mix(in srgb, var(--c) 22%, transparent);
+}
+.mk-cond {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border: 1px solid color-mix(in srgb, var(--info) 30%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--info) 4%, transparent);
+}
+.mk-cond__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mk-cond__title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.mk-cond__line {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.mk-cond__line > .grow {
+  min-width: 180px;
+}
+.mk-cond__type {
+  flex-shrink: 0;
+}
+.mk-cond__seen {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.mk-cond .mk-hint {
+  margin: 0;
+  line-height: 1.45;
+}
+.mk-reach {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.mk-reach.is-ok {
+  color: var(--success);
+}
+.mk-reach > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.mk-addcond-row {
+  display: flex;
+}
+.mk-addcond {
+  margin-left: -6px;
+}
+.mk-notsent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 17px;
+  white-space: nowrap;
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+.mk-tester__op {
+  width: 170px;
+  flex-shrink: 0;
+}
+.mk-tester__row.is-operationMismatch .mk-tester__url,
+.mk-tester__row.is-operationUnknown .mk-tester__url {
+  color: var(--text-subtle);
+}
+.mk-tester__row.is-notSent .mk-tester__verdict {
+  color: var(--warning);
+}
+.mk-tester__manual.is-badOperation,
+.mk-tester__manual.is-notSent {
+  color: var(--warning);
+}
+.mk-cap__gap {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
+  color: var(--warning);
+}
+.mk-import__list .mk-op {
+  margin-left: auto;
 }

@@ -26,7 +26,7 @@ import type {
 } from '@durbun/protocol';
 import { LOG_LEVELS, PROTOCOL_VERSION } from '@durbun/protocol';
 import { randomUUID } from 'node:crypto';
-import { normSdkLayers } from '../hub/sanitize';
+import { normMockMatchers, normSdkLayers } from '../hub/sanitize';
 
 const LEVELS = new Set<string>(LOG_LEVELS);
 const SDK_PLATFORMS = new Set<string>(['flutter', 'android', 'ios', 'react-native', 'js', 'dart-vm', 'demo']);
@@ -182,6 +182,9 @@ export function parseHello(v: Obj): SdkHello | undefined {
   // core is attached); unknown values are dropped, nothing left = unknown.
   const layers = normSdkLayers(sdkIn.layers);
   if (layers) hello.sdk.layers = layers;
+  // Mock rule conditions it evaluates (mock matching v2): rules that use others are never sent to it.
+  const mockMatchers = normMockMatchers(sdkIn.mockMatchers);
+  if (mockMatchers) hello.sdk.mockMatchers = mockMatchers;
   for (const key of ['version', 'build', 'processName'] as const) {
     const s = short(appIn[key]);
     if (s) hello.app[key] = s;

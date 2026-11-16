@@ -3,7 +3,7 @@
  * an SDK would (headers, bodies, timings), honoring the mock rules the session received.
  */
 import type { Header, MockRule, SdkNetError, SdkNetRequest, SdkNetResponse, SdkToServer, Timings, WireBody } from '@durbun/protocol';
-import { findMockRule, isTextContentType, unsafeRegexReason } from '@durbun/protocol';
+import { findMockRuleForRequest, isTextContentType, unsafeRegexReason } from '@durbun/protocol';
 import type { Rng } from './rng';
 
 export interface SimBody {
@@ -139,7 +139,15 @@ export class HttpSim {
 
     // A regex rule that can backtrack exponentially would block the server: the simulated app skips it.
     const rules = this.host.mocks().filter((r) => r.match !== 'regex' || !unsafeRegexReason(r.url));
-    const rule = findMockRule(rules, plan.method, plan.url, this.host.bundleId);
+    // Like a real SDK: the body text it holds is read for conditions (a GraphQL operation); a session that did not
+    // declare a condition never receives such a rule (the server filters them).
+    const rule = findMockRuleForRequest(rules, {
+      method: plan.method,
+      url: plan.url,
+      appId: this.host.bundleId,
+      contentType: plan.body?.contentType,
+      body: plan.body && plan.body.base64 === undefined ? plan.body.text : undefined,
+    });
     if (rule) {
       this.applyMock(id, start, plan, rule);
       return id;

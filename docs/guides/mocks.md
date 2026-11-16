@@ -142,9 +142,13 @@ most 2 minutes. See [Flows](../../README.md#flows).
 
 ## Limits
 
-- A rule matches on method, URL and app only: not on headers or the request body.
-- GraphQL requests share one URL, so a rule catches every GraphQL operation at that address. The editor warns
-  about this.
+- A rule matches on method, URL and app, plus an optional GraphQL operation: not on headers or other parts of
+  the request body.
+- GraphQL requests share one URL. Add the **GraphQL operation** condition (name, optionally query / mutation /
+  subscription) to answer one operation only. The app's SDK reads the operation from the request body it
+  already holds as text; a body it cannot read (a stream, a file, more than 65,536 characters) is not matched and goes to the
+  network. Today the JavaScript / React Native SDK reads operations; an app whose SDK does not is never sent
+  such a rule, and the Mocks tab says which apps did not get it.
 - Only requests the SDK captures can be mocked. A client that is not captured (for example `HttpURLConnection`
   on Android, a background `URLSession` on iOS, a Flutter request in a background isolate) is not mocked
   either; see [What gets captured](../../README.md#what-gets-captured).

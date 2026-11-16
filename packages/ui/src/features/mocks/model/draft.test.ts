@@ -66,11 +66,28 @@ describe('draftFromRequest', () => {
     expect(custom.draft.action).toEqual({ type: 'fail', error: 'custom', message: 'Weird thing happened' });
   });
 
-  it('flags GraphQL (shared URL) and names the rule after the operation', () => {
+  it('a named GraphQL operation becomes the condition: the rule answers only that operation', () => {
     const e = entry({ method: 'POST', url: 'https://gql.pati.app/graphql', path: '/graphql', graphql: { operationType: 'query', operationName: 'GetPet' } });
     const { draft, notes } = draftFromRequest(e, detail(e, { encoding: 'utf8', data: '{"data":{}}', size: 11 }));
-    expect(notes).toContain('graphqlSharedUrl');
+    expect(notes).not.toContain('graphqlSharedUrl');
     expect(draft.name).toBe('query GetPet');
+    expect(draft).toMatchObject({ method: 'POST', url: 'https://gql.pati.app/graphql', match: 'exact', when: { graphql: { operationName: 'GetPet', operationType: 'query' } } });
+    // persisted queries: the name only (any type)
+    const persisted = draftFromRequest({ ...e, graphql: { operationName: 'GetPet' } }, null).draft;
+    expect(persisted.when).toEqual({ graphql: { operationName: 'GetPet' } });
+  });
+
+  it('a GET GraphQL request matches its address without the variables in the query string', () => {
+    const url = 'https://gql.pati.app/graphql?operationName=GetPet&variables=%7B%22id%22%3A1%7D';
+    const { draft } = draftFromRequest(entry({ method: 'GET', url, path: '/graphql', graphql: { operationType: 'query', operationName: 'GetPet' } }), null);
+    expect(draft).toMatchObject({ url: 'https://gql.pati.app/graphql', match: 'contains', when: { graphql: { operationName: 'GetPet' } } });
+  });
+
+  it('an anonymous GraphQL operation keeps the shared-URL note and gets no condition', () => {
+    const e = entry({ method: 'POST', url: 'https://gql.pati.app/graphql', path: '/graphql', graphql: { operationType: 'query' } });
+    const { draft, notes } = draftFromRequest(e, null);
+    expect(notes).toContain('graphqlSharedUrl');
+    expect(draft.when).toBeUndefined();
   });
 
   it('pending requests start from a 200 JSON skeleton; unknown methods match any', () => {

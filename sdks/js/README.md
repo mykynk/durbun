@@ -163,6 +163,8 @@ try {
 `body` may be a string, bytes, a Blob or a plain object (shown as JSON); for a download written to a file,
 pass `bodySize` instead. To apply Dürbün's mock rules in your own client, `Durbun.network.findMock(method, url)`
 returns the matching rule; answer with `rule.action` and report it with `call.response({ …, mockRuleId: rule.id })`.
+Pass the request body for rules limited to a GraphQL operation:
+`findMock('POST', url, { body: jsonText, contentType: 'application/json' })`; without a body such rules do not match.
 
 ### Logs and events
 
@@ -254,6 +256,10 @@ Rules from the Mac app's Mocks tab ([writing mock rules](../../docs/guides/mocks
   network instead and the Mac app shows a warning line saying why. Text, JSON and `arraybuffer` responses are
   mocked as usual.
 - Requests to URLs in `ignoreUrls` are never mocked.
+- Rules limited to a GraphQL operation read the operation from a request body that is already text (a string,
+  or bytes up to 192 KB): JSON `operationName`, else the first named operation in `query`; a batch matches when
+  any of its operations does. A `Request` object's body, a `Blob`, `FormData` or a stream is never read for this:
+  such a request goes to the network.
 - Launch requests (remote config, login) can wait for the rules with `waitForDesktop` (see [Options](#options)).
 
 ## Tools

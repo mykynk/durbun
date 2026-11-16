@@ -37,6 +37,7 @@ import { flowSummaries, handleFlowsApi } from './mock-flows.mjs';
 import { createMockMedia, mediaClock } from './mock-media.mjs';
 import { appDataArchive, appDataReply } from './mock-app-data.mjs';
 import { createMockWireless } from './mock-wireless.mjs';
+import { createMockRules } from './mock-rules.mjs';
 
 const args = process.argv.slice(2);
 const argValue = (name, fallback) => {
@@ -217,7 +218,8 @@ function baseApps() {
       id: 'app:2',
       sessionKey: 's-pati',
       deviceId: PIXEL,
-      sdk: { name: 'durbun', version: '0.2.0', platform: 'flutter', layers: ['dart', 'android'] },
+      // Declares the GraphQL operation matcher; Pati on the simulator and Kasa run older SDKs that do not.
+      sdk: { name: 'durbun', version: '0.2.0', platform: 'flutter', layers: ['dart', 'android'], mockMatchers: ['graphql'] },
       app: { name: 'Pati', id: 'com.mykynk.pati', version: '1.4.2', build: '42', pid: 12345, processName: 'com.mykynk.pati', debug: true },
       transport: 'adb-reverse',
       connected: true,
@@ -309,12 +311,17 @@ function baseDeviceApps() {
 let devices = empty ? [] : baseDevices();
 let apps = empty ? [] : baseApps();
 let deviceApps = empty ? [] : baseDeviceApps();
-let mocks = [
+/**
+ * The rule list, validated and normalized like the server's (mock-rules.mjs); its revision is the server's
+ * `mocksRevision`: a save from an older list is refused.
+ */
+const mockRules = createMockRules([
   { id: 'm1', enabled: true, name: 'Payment error', method: 'POST', url: '/v1/payments', match: 'contains', action: { type: 'respond', status: 502, headers: [['Content-Type', 'application/json']], body: '{"error":"gateway"}' }, createdAt: startedAt - 90_000 },
   { id: 'm2', enabled: false, name: 'Slow feed', method: 'GET', url: 'https://api.pati.app/v1/feed*', match: 'glob', action: { type: 'delay', delayMs: 2500 }, createdAt: startedAt - 60_000 },
-];
-/** Revision of the mock list (server config.ts `mocksRevision`): a save from an older list is refused. */
-let mocksRevision = 1;
+  // Two rules on one GraphQL address, one per operation: not a conflict.
+  { id: 'm3', enabled: true, name: 'Empty feed', method: 'POST', url: 'https://api.pati.app/graphql', match: 'exact', when: { graphql: { operationName: 'PetFeed', operationType: 'query' } }, action: { type: 'respond', status: 200, headers: [['Content-Type', 'application/json']], body: '{"data":{"feed":[]}}' }, createdAt: startedAt - 45_000 },
+  { id: 'm4', enabled: true, name: 'Like fails', method: 'POST', url: 'https://api.pati.app/graphql', match: 'exact', when: { graphql: { operationName: 'LikeStory' } }, action: { type: 'respond', status: 200, headers: [['Content-Type', 'application/json']], body: '{"errors":[{"message":"Too many likes"}]}' }, createdAt: startedAt - 30_000 },
+]);
 /**
  * Requests each rule answered since this server started (server hub/mockHits.ts): counted once per request when it
  * ends mocked; a rule deleted from the list loses its count; clearing requests keeps them.
@@ -536,7 +543,11 @@ const ENDPOINTS = [
   { method: 'GET', url: 'https://api.pati.app/v1/pets?page=2&limit=20', status: 200, ct: 'application/json', body: () => JSON.stringify({ page: 2, total: 148, items: Array.from({ length: 20 }, (_, i) => ({ id: 20 + i, name: pick(['Karabaş', 'Pamuk', 'Boncuk', 'Duman', 'Zeytin']), species: pick(['dog', 'cat']), ageMonths: int(2, 120), vaccinated: chance(0.8), owner: { id: int(1, 900), city: pick(['İstanbul', 'Ankara', 'İzmir']) } })) }) },
   { method: 'GET', url: 'https://api.pati.app/v1/pets/42', status: 200, ct: 'application/json', body: () => JSON.stringify({ id: 42, name: 'Karabaş', tags: ['friendly', 'trained'], photos: ['https://cdn.pati.app/p/42/1.jpg'], health: { weightKg: 18.4, lastVisit: '2026-10-21' } }) },
   { method: 'POST', url: 'https://api.pati.app/v1/auth/refresh', status: 200, ct: 'application/json', req: '{"refreshToken":"rt_9f…"}', body: () => '{"accessToken":"eyJhbGciOi…","expiresIn":3600}' },
-  { method: 'POST', url: 'https://api.pati.app/graphql', status: 200, ct: 'application/json', req: '{"operationName":"PetFeed","query":"query PetFeed($first:Int){ feed(first:$first){ id title } }","variables":{"first":10}}', graphql: { operationName: 'PetFeed', operationType: 'query' }, body: () => '{"data":{"feed":[{"id":"1","title":"First day at the park"}]}}' },
+  { method: 'POST', url: 'https://api.pati.app/graphql', status: 200, ct: 'application/json', req: '{"operationName":"PetFeed","query":"query PetFeed($first:Int){ feed(first:$first){ id title } }","variables":{"first":10}}', graphql: { operationName: 'PetFeed', operationType: 'query' }, mockRuleId: 'm3', mockApps: ['app:2'], mockBody: () => '{"data":{"feed":[]}}', body: () => '{"data":{"feed":[{"id":"1","title":"First day at the park"}]}}' },
+  // Same URL, other operations: one rule per operation (mock matching v2). LikeStory is answered by rule m4, but only
+  // in the Pixel's Pati session: the only one whose SDK declared the GraphQL matcher (`sdk.mockMatchers`).
+  { method: 'POST', url: 'https://api.pati.app/graphql', status: 200, ct: 'application/json', req: '{"operationName":"PetStories","query":"query PetStories($petId:ID!){ stories(petId:$petId){ id text likes } }","variables":{"petId":"42"}}', graphql: { operationName: 'PetStories', operationType: 'query' }, body: () => '{"data":{"stories":[{"id":"s7","text":"Found a stick","likes":12}]}}' },
+  { method: 'POST', url: 'https://api.pati.app/graphql', status: 200, ct: 'application/json', req: '{"query":"mutation LikeStory($id:ID!){ likeStory(id:$id){ id likes } }","variables":{"id":"s7"}}', graphql: { operationName: 'LikeStory', operationType: 'mutation' }, mockRuleId: 'm4', mockApps: ['app:2'], mockBody: () => '{"errors":[{"message":"Too many likes"}]}', body: () => '{"data":{"likeStory":{"id":"s7","likes":13}}}' },
   { method: 'GET', url: 'https://cdn.pati.app/p/42/1.jpg?w=640', status: 200, ct: 'image/jpeg', body: null, size: 84_211 },
   { method: 'PUT', url: 'https://api.pati.app/v1/profile', status: 204, ct: 'application/json', req: '{"displayName":"Jane","city":"İstanbul"}', body: () => '' },
   { method: 'DELETE', url: 'https://api.pati.app/v1/cart/items/77', status: 404, ct: 'application/json', body: () => '{"error":"not_found","message":"Cart item 77 does not exist"}' },
@@ -562,6 +573,7 @@ function makeRequest(appId) {
   const u = new URL(ep.url);
   const id = `${appId}:${netSeq++}`;
   const start = Date.now();
+  const mockedBy = ep.mocked ? 'm1' : ep.mockRuleId && (!ep.mockApps || ep.mockApps.includes(appId)) ? ep.mockRuleId : undefined;
   const entry = {
     id,
     appId,
@@ -595,7 +607,7 @@ function makeRequest(appId) {
     if (ep.fail) {
       Object.assign(cur, { state: 'failed', error: ep.fail, endTs: end, duration });
     } else {
-      const body = ep.body ? ep.body() : null;
+      const body = mockedBy && ep.mockBody ? ep.mockBody() : ep.body ? ep.body() : null;
       Object.assign(cur, {
         state: 'complete',
         status: ep.status,
@@ -614,8 +626,8 @@ function makeRequest(appId) {
         protocol: 'h2',
         remoteAddress: '104.18.32.7:443',
         timings: { dns: int(0, 20), connect: int(5, 40), tls: int(10, 60), send: 1, wait: Math.max(1, duration - 60), receive: int(1, 20) },
-        mocked: ep.mocked || undefined,
-        mockRuleId: ep.mocked ? 'm1' : undefined,
+        mocked: mockedBy ? true : undefined,
+        mockRuleId: mockedBy,
       });
     }
     queue.network.push(strip(cur));
@@ -1247,8 +1259,8 @@ function snapshot() {
     devices,
     apps,
     network: [...network.values()].map(strip),
-    mocks,
-    mocksRevision,
+    mocks: mockRules.rules,
+    mocksRevision: mockRules.revision,
     mockHits: mockHitsWire(),
     drivers: drivers(),
     processes: [...processes.values()],
@@ -1688,20 +1700,17 @@ function handleCommand(ws, { requestId, command }) {
     }
     case 'mocks.set': {
       // Another window saved since this list was loaded: refused with the current list (server http/commands.ts).
-      if (typeof command.baseRevision === 'number' && command.baseRevision !== mocksRevision) {
-        return reply({ rules: mocks, revision: mocksRevision }, false, 'The mock rules were changed elsewhere; reload them or save again to overwrite', 'mocks.conflict');
-      }
-      const next = Array.isArray(command.rules) ? command.rules : mocks;
-      if (JSON.stringify(next) !== JSON.stringify(mocks)) mocksRevision++;
-      mocks = next;
-      const ids = new Set(mocks.map((r) => r.id));
+      // Each rule validated and normalized; one bad rule refuses the list (config.invalid).
+      const r = mockRules.set(command);
+      if (!r.ok) return reply(r.data, false, r.error, r.code);
+      const ids = new Set(mockRules.rules.map((x) => x.id));
       for (const id of [...mockHits.keys()]) {
         if (ids.has(id)) continue;
         mockHits.delete(id);
         mockHitsChanged = true;
       }
-      broadcast({ type: 'mocks', rules: mocks, revision: mocksRevision });
-      return reply(mocks);
+      broadcast({ type: 'mocks', rules: mockRules.rules, revision: mockRules.revision });
+      return reply(mockRules.rules);
     }
     case 'settings.update':
       settings = { ...settings, ...(command.patch ?? {}) };

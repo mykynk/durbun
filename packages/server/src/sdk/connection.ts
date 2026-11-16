@@ -70,7 +70,8 @@ export interface ConnectionHost {
   readonly timings: SdkTimings;
   readonly serverVersion: string;
   configFor(deviceId: string): SdkConfig;
-  mocksFor(bundleId: string): MockRule[];
+  /** The rules for this app that a session declaring `mockMatchers` can evaluate (others are never sent to it). */
+  mocksFor(bundleId: string, mockMatchers?: readonly string[]): MockRule[];
   onEstablished(conn: SdkConnection): void;
   onClosed(conn: SdkConnection): void;
   onCommandResult(conn: SdkConnection, msg: SdkCommandResult): void;
@@ -99,6 +100,8 @@ export class SdkConnection {
   deviceId: string | undefined;
   /** App bundle id / package name from `hello` (mock rule filtering). */
   bundleId: string | undefined;
+  /** Mock rule conditions the SDK declared (`hello.sdk.mockMatchers`): rules using others are never sent. */
+  mockMatchers: readonly string[] | undefined;
   appName: string | undefined;
   /** Session lives on a `net:` device whose state follows its connections. */
   networkDevice = false;
@@ -330,6 +333,7 @@ export class SdkConnection {
     this.appId = app.id;
     this.deviceId = resolved.deviceId;
     this.bundleId = hello.app.id;
+    this.mockMatchers = hello.sdk.mockMatchers;
     this.appName = hello.app.name;
     this.hints = hello.device;
     this.networkDevice = resolved.network;
@@ -350,7 +354,7 @@ export class SdkConnection {
       server: `durbun/${this.host.serverVersion}`,
       appId: app.id,
       config,
-      mocks: this.host.mocksFor(hello.app.id),
+      mocks: this.host.mocksFor(hello.app.id, this.mockMatchers),
     });
     if (this.keepalive) {
       this.pingTimer = setInterval(() => this.sendPing(), this.host.timings.pingIntervalMs);

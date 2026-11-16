@@ -54,6 +54,7 @@ import {
   normKind,
   normLevel,
   normOrigin,
+  normMockMatchers,
   normSdkLayers,
   sanitizeImportedApp,
   sanitizeImportedDevice,
@@ -103,11 +104,15 @@ const appOrigin = (app: AppSession): LogOrigin =>
   app.transport === 'vm-service' ? 'vm-service' : app.transport === 'import' ? 'import' : 'sdk';
 
 const sessionIndexKey = (deviceId: string, sessionKey: string) => `${deviceId}\u0000${sessionKey}`;
-/** AppSession.sdk with its own copy of the known layers (SPEC §10.6; unknown values dropped). */
+/** AppSession.sdk with its own copy of the known layers (SPEC §10.6) and mock matchers (unknown values dropped). */
 function copySdk(sdk: AppSession['sdk']): AppSession['sdk'] {
-  const { layers: raw, ...rest } = sdk;
+  const { layers: raw, mockMatchers: rawMatchers, ...rest } = sdk;
+  const out: AppSession['sdk'] = { ...rest };
   const layers = normSdkLayers(raw);
-  return layers ? { ...rest, layers } : rest;
+  if (layers) out.layers = layers;
+  const mockMatchers = normMockMatchers(rawMatchers);
+  if (mockMatchers) out.mockMatchers = mockMatchers;
+  return out;
 }
 const copyApp = (app: AppSession): AppSession => ({ ...app, stats: { ...app.stats } });
 const limitsFrom = (s: ServerSettings): NetworkLimits => ({

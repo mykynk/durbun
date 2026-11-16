@@ -9,7 +9,7 @@ export interface PackageNoticeLike {
 }
 
 /** The ways a mock rule can be wrong (`package.mock.invalid` params.expected); anything else reads "is not valid". */
-export const MOCK_EXPECTED = ['required', 'text', 'number', 'range', 'oneOf', 'maxLength', 'base64', 'httpMethod', 'headerList', 'appIdList', 'object', 'tooMany', 'list'] as const;
+export const MOCK_EXPECTED = ['required', 'text', 'number', 'range', 'oneOf', 'maxLength', 'base64', 'httpMethod', 'headerList', 'appIdList', 'object', 'tooMany', 'list', 'graphqlName', 'unknownCondition'] as const;
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : typeof v === 'number' ? String(v) : undefined);
 

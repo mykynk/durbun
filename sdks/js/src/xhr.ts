@@ -26,7 +26,7 @@ import {
   utf8Length,
 } from './body.js';
 import { findHeader, parseRawHeaders, toRawHeaders } from './headers.js';
-import { describeMockFailure, mockDelayMs, statusText, type RespondAction } from './mocks.js';
+import { describeMockFailure, heldBodyText, mockDelayMs, statusText, type RespondAction } from './mocks.js';
 import { fetchGuard, type NetworkHost } from './network.js';
 import { patchMethod, type Patch } from './patch.js';
 import type { Header, MockRule, SdkNetRequest, Timings, WireBody } from './protocol.js';
@@ -934,7 +934,11 @@ export function installXhrPatch(host: NetworkHost): Patch[] {
   function sendNow(xhr: AnyRecord, rec: XhrRecord, original: (...args: unknown[]) => unknown, args: unknown[]): unknown {
     let rule: MockRule | undefined;
     try {
-      rule = host.findMock(rec.method, rec.url);
+      const body = args[0];
+      rule = host.findMock(rec.method, rec.url, {
+        contentType: findHeader(rec.headers, 'content-type') || inferContentType(body),
+        body: () => heldBodyText(body),
+      });
     } catch (e) {
       host.debug('xhr send', e);
     }

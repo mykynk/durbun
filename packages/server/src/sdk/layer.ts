@@ -6,7 +6,7 @@
 import net from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { DeviceActionResult, MockRule, SdkCommandResult, SdkConfig, ServerSettings, ServerToSdk } from '@durbun/protocol';
-import { DEFAULT_SETTINGS, MAX_FRAME_BYTES } from '@durbun/protocol';
+import { DEFAULT_SETTINGS, MAX_FRAME_BYTES, mockRuleSendableTo } from '@durbun/protocol';
 import type { WebSocket } from 'ws';
 import type { CreateSdkLayerOptions, Hub, HubChange, SdkAttachMeta, SdkLayer, VirtualSdkSession } from '../types';
 import { configKey, type ConnectionHost, DEFAULT_SDK_TIMINGS, SdkConnection, type SdkTimings } from './connection';
@@ -125,9 +125,15 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
       return config;
     },
 
-    mocksFor(bundleId: string): MockRule[] {
+    mocksFor(bundleId: string, mockMatchers?: readonly string[]): MockRule[] {
+      // A rule with a condition the SDK did not declare is never sent: an SDK that does not know the condition would
+      // ignore it and answer every request to that URL.
       return currentMocks().filter(
-        (r) => !!r && r.enabled === true && (!Array.isArray(r.apps) || r.apps.length === 0 || r.apps.includes(bundleId)),
+        (r) =>
+          !!r &&
+          r.enabled === true &&
+          (!Array.isArray(r.apps) || r.apps.length === 0 || r.apps.includes(bundleId)) &&
+          mockRuleSendableTo(r, mockMatchers),
       );
     },
 
@@ -620,7 +626,7 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
 
     setMocks(rules: MockRule[]): void {
       mocksOverride = Array.isArray(rules) ? [...rules] : [];
-      for (const conn of established()) conn.send({ type: 'mocks', rules: host.mocksFor(conn.bundleId ?? '') });
+      for (const conn of established()) conn.send({ type: 'mocks', rules: host.mocksFor(conn.bundleId ?? '', conn.mockMatchers) });
     },
 
     setConfig(patch: Partial<SdkConfig>): void {

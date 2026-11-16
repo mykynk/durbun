@@ -16,7 +16,7 @@ import { formatArgs } from './format.js';
 import { connectionHint } from './hints.js';
 import { errorInfo, isErrorLike, previewValue, toJsonSafe } from './jsonSafe.js';
 import { MetricsSampler, metricsSupported } from './metrics.js';
-import { findMockRule, normalizeRules } from './mocks.js';
+import { MOCK_MATCHERS, findMockRuleForRequest, normalizeRules, type MockRequestBody } from './mocks.js';
 import type { NetworkHost } from './network.js';
 import { resolveOptions, type DurbunOptions, type ResolvedOptions } from './options.js';
 import { restoreAll, type Patch } from './patch.js';
@@ -489,9 +489,23 @@ export class DurbunClient implements NetworkHost {
     if (gate) gate.release();
   }
 
-  findMock(method: string, url: string): MockRule | undefined {
+  findMock(method: string, url: string, request?: MockRequestBody): MockRule | undefined {
     if (!this.mocks.length) return undefined;
-    return findMockRule(this.mocks, method, url, this.env.app.id);
+    const appId = this.env.app.id;
+    // The body text is read only if a rule with a condition (a GraphQL operation) matches method / URL / app.
+    return findMockRuleForRequest(this.mocks, {
+      method,
+      url,
+      appId,
+      contentType: request?.contentType,
+      get body() {
+        try {
+          return request?.body?.();
+        } catch {
+          return undefined;
+        }
+      },
+    });
   }
 
   isIgnored(url: string): boolean {
@@ -709,7 +723,13 @@ export class DurbunClient implements NetworkHost {
     return {
       type: 'hello',
       protocol: PROTOCOL_VERSION,
-      sdk: { name: SDK_NAME, version: SDK_VERSION, platform: this.env.sdkPlatform },
+      sdk: {
+        name: SDK_NAME,
+        version: SDK_VERSION,
+        platform: this.env.sdkPlatform,
+        // Rules with these conditions are sent only to SDKs that declare them (an older SDK would ignore them).
+        ...(this.networkCaptured ? { mockMatchers: MOCK_MATCHERS.slice() } : {}),
+      },
       app: this.env.app,
       device: this.env.device,
       session: this.sessionKey,

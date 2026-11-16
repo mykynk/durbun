@@ -329,6 +329,12 @@ export interface SdkIdentity {
   version: string;
   platform: SdkPlatform;
   layers?: SdkLayer[];
+  /**
+   * Mock rule conditions (`MockRule.when` keys, see MOCK_MATCHERS) this SDK evaluates, e.g. ['graphql']. The server
+   * sends a rule that uses a condition only to sessions that declared it; absent = none (older SDKs: they get only
+   * the rules without conditions). Unknown values are dropped by the server.
+   */
+  mockMatchers?: MockMatcher[];
 }
 
 export interface AppInfo {
@@ -663,6 +669,305 @@ export interface MockRule {
   apps?: string[];
   action: MockAction;
   createdAt: number;
+  /**
+   * Conditions besides method / URL / apps (mock matching v2): the rule matches only when every condition present
+   * holds too. Absent = method / URL / apps only (the rules every SDK understands). The server sends a rule with a
+   * condition only to SDKs that declared that matcher in `hello.sdk.mockMatchers` (see `mockRuleSendableTo`).
+   */
+  when?: MockRuleConditions;
+}
+
+export type GraphqlOperationType = 'query' | 'mutation' | 'subscription';
+export const GRAPHQL_OPERATION_TYPES: readonly GraphqlOperationType[] = ['query', 'mutation', 'subscription'];
+/** GraphQL name syntax (operation names). */
+export const GRAPHQL_NAME_RE = /^[_A-Za-z][_0-9A-Za-z]*$/;
+/** Longest operation name a rule may hold. */
+export const MAX_GRAPHQL_OPERATION_NAME = 128;
+
+/** `MockRule.when.graphql`: the GraphQL operation a rule is limited to. */
+export interface MockGraphqlCondition {
+  /** Operation name, exact and case-sensitive (`GetUser`): GRAPHQL_NAME_RE, at most MAX_GRAPHQL_OPERATION_NAME chars. */
+  operationName: string;
+  /** Also require this operation type; absent = any type. A request whose type cannot be read does not match it. */
+  operationType?: GraphqlOperationType;
+}
+
+/**
+ * Extra conditions of a mock rule. Each key is one matcher; later matchers (headers, body text, devices, times)
+ * are added here as new optional keys. An SDK evaluates only the keys it declared in `hello.sdk.mockMatchers`;
+ * a rule carrying a key the SDK does not know never matches there (never "every request to that URL").
+ */
+export interface MockRuleConditions {
+  graphql?: MockGraphqlCondition;
+}
+
+/** A matcher an SDK can evaluate: a key of `MockRuleConditions`. */
+export type MockMatcher = 'graphql';
+export const MOCK_MATCHERS: readonly MockMatcher[] = ['graphql'];
+
+/** The condition keys a rule uses (keys of `when` with a value), in order; unknown keys included ('when' itself when it is not an object). */
+export function mockRuleMatchersUsed(rule: Pick<MockRule, 'when'>): string[] {
+  const when = rule.when as unknown;
+  if (when === undefined || when === null) return [];
+  // Not an object: a condition nobody can evaluate (never matches, never sent).
+  if (typeof when !== 'object' || Array.isArray(when)) return ['when'];
+  const rec = when as Record<string, unknown>;
+  return Object.keys(rec).filter((k) => rec[k] !== undefined && rec[k] !== null);
+}
+
+/**
+ * Whether a rule may be sent to an SDK session that declared `declared` (`hello.sdk.mockMatchers`; absent = none):
+ * every condition the rule uses must be declared. Rules without conditions go to every SDK.
+ */
+export function mockRuleSendableTo(rule: Pick<MockRule, 'when'>, declared: readonly string[] | undefined): boolean {
+  const used = mockRuleMatchersUsed(rule);
+  return used.length === 0 || used.every((m) => !!declared && declared.includes(m));
+}
+
+/** What a mock rule is matched against: what an SDK knows about a request when it intercepts it. */
+export interface MockRequestInput {
+  method: string;
+  url: string;
+  /** Bundle / package id of the app. */
+  appId?: string;
+  /** The request's Content-Type header, if any. */
+  contentType?: string;
+  /**
+   * The request body as text, only when the SDK holds it already (a string, or bytes it decodes as UTF-8 without
+   * reading a stream). Undefined = no body or not available (stream, file, form data, not read).
+   */
+  body?: string;
+}
+
+/** One GraphQL operation of a request. `name` absent = an anonymous operation; `type` absent = not known. */
+export interface GraphqlOperationRef {
+  name?: string;
+  type?: GraphqlOperationType;
+}
+
+/** Longest text (UTF-16 code units: a body or a `query` URL parameter) the GraphQL reading looks at. */
+export const MOCK_GRAPHQL_MAX_CHARS = 64 * 1024;
+
+const isGqlNameStart = (c: string | undefined): boolean => c !== undefined && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '_');
+const isGqlNameChar = (c: string | undefined): boolean => isGqlNameStart(c) || (c !== undefined && c >= '0' && c <= '9');
+
+/**
+ * The operation definitions of a GraphQL document, in order (fragments skipped). Tokens: `#` comments run to the
+ * end of the line; "strings" (backslash escapes, ending at the closing quote or the line end) and """block
+ * strings""" (`\"""` escaped) are skipped; whitespace, commas and U+FEFF are insignificant. At brace depth 0 and
+ * outside parentheses: the word `query` / `mutation` / `subscription` starts an operation whose name is the next
+ * name token after whitespace / commas / comments, if one follows (anything else: anonymous); `fragment` starts a fragment; a `{` that no definition word
+ * preceded is an anonymous query (shorthand). Malformed input never throws: whatever was read is returned.
+ */
+export function graphqlDocumentOperations(doc: string): { type: GraphqlOperationType; name?: string }[] {
+  const ops: { type: GraphqlOperationType; name?: string }[] = [];
+  const n = doc.length;
+  let i = 0;
+  let depth = 0;
+  let parens = 0;
+  // A definition word was read at depth 0 and its selection set has not started yet.
+  let pending: 'operation' | 'fragment' | null = null;
+  while (i < n) {
+    const c = doc[i];
+    if (c === '#') {
+      while (i < n && doc[i] !== '\n' && doc[i] !== '\r') i++;
+    } else if (c === '"') {
+      if (doc.startsWith('"""', i)) {
+        i += 3;
+        while (i < n && !doc.startsWith('"""', i)) i += doc.startsWith('\\"""', i) ? 4 : 1;
+        i = Math.min(n, i + 3);
+      } else {
+        i++;
+        while (i < n && doc[i] !== '"' && doc[i] !== '\n') i += doc[i] === '\\' ? 2 : 1;
+        i = Math.min(n, i + 1);
+      }
+    } else if (c === '(') {
+      parens++;
+      i++;
+    } else if (c === ')') {
+      parens = Math.max(0, parens - 1);
+      i++;
+    } else if (c === '{') {
+      if (depth === 0 && parens === 0) {
+        if (pending === null) ops.push({ type: 'query' });
+        pending = null;
+      }
+      depth++;
+      i++;
+    } else if (c === '}') {
+      depth = Math.max(0, depth - 1);
+      i++;
+    } else if (isGqlNameStart(c)) {
+      const start = i;
+      while (i < n && isGqlNameChar(doc[i])) i++;
+      if (depth === 0 && parens === 0 && pending === null) {
+        const word = doc.slice(start, i);
+        if (word === 'query' || word === 'mutation' || word === 'subscription') {
+          let j = i;
+          while (j < n) {
+            if (doc[j] === '#') while (j < n && doc[j] !== '\n' && doc[j] !== '\r') j++;
+            else if (doc[j] === ' ' || doc[j] === '\t' || doc[j] === '\n' || doc[j] === '\r' || doc[j] === ',' || doc[j] === '﻿') j++;
+            else break;
+          }
+          if (isGqlNameStart(doc[j])) {
+            let k = j;
+            while (k < n && isGqlNameChar(doc[k])) k++;
+            ops.push({ type: word, name: doc.slice(j, k) });
+            i = k;
+          } else {
+            ops.push({ type: word });
+          }
+          pending = 'operation';
+        } else if (word === 'fragment') {
+          pending = 'fragment';
+        }
+      }
+    } else {
+      i++;
+    }
+  }
+  return ops;
+}
+
+/** One `{ query?, operationName? }` payload: the operation the server runs (see `graphqlOperationsOf`). */
+function graphqlPayloadOperation(query: unknown, operationName: unknown): GraphqlOperationRef | null {
+  const name = typeof operationName === 'string' && operationName !== '' ? operationName : undefined;
+  if (typeof query === 'string') {
+    if (query.length > MOCK_GRAPHQL_MAX_CHARS) return null;
+    const ops = graphqlDocumentOperations(query);
+    if (name !== undefined) {
+      const named = ops.find((o) => o.name === name);
+      return named ? { name, type: named.type } : { name };
+    }
+    const first = ops[0];
+    if (!first) return null;
+    return first.name !== undefined ? { name: first.name, type: first.type } : { type: first.type };
+  }
+  return name !== undefined ? { name } : null;
+}
+
+function trimAsciiWhitespace(s: string): string {
+  const ws = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\r';
+  let a = 0;
+  let b = s.length;
+  while (a < b && ws(s[a])) a++;
+  while (b > a && ws(s[b - 1])) b--;
+  return s.slice(a, b);
+}
+
+/** `name=value` pairs of a URL's query string (`+` = space, percent-decoded); null when one cannot be decoded. */
+function urlQueryParams(url: string): Map<string, string> | null {
+  const q = url.indexOf('?');
+  const params = new Map<string, string>();
+  if (q < 0) return params;
+  const hash = url.indexOf('#', q);
+  const query = url.slice(q + 1, hash < 0 ? undefined : hash);
+  for (const part of query.split('&')) {
+    if (part === '') continue;
+    const eq = part.indexOf('=');
+    const rawKey = eq < 0 ? part : part.slice(0, eq);
+    const rawValue = eq < 0 ? '' : part.slice(eq + 1);
+    try {
+      const key = decodeURIComponent(rawKey.replace(/\+/g, ' '));
+      if (!params.has(key)) params.set(key, decodeURIComponent(rawValue.replace(/\+/g, ' ')));
+    } catch {
+      return null;
+    }
+  }
+  return params;
+}
+
+/**
+ * Reference: the GraphQL operation(s) of a request, from what an SDK has when it intercepts it. Every SDK
+ * implements exactly these rules (parity vectors: packages/protocol/vectors/mock-graphql.json):
+ *  1. `body` present and not empty after trimming ASCII whitespace (space, tab, CR, LF; lengths count UTF-16 code
+ *     units, JSON is strict RFC 8259):
+ *     - `body` (untrimmed) longer than MOCK_GRAPHQL_MAX_CHARS → unknown (null);
+ *     - content type contains `application/graphql` and not `json` → the body is a GraphQL document: its first
+ *       operation (none → null);
+ *     - trimmed body starts with `{` or `[` → parsed as JSON (invalid JSON → null). An object is one payload; an
+ *       array (batched operations) gives one operation per payload element that has one (none → null). A payload:
+ *       `operationName` (non-empty string) wins — its type is the type of that named operation in `query`, else
+ *       unknown; without it, the first operation of `query`; with only `operationName` (persisted queries) the
+ *       name alone; neither → no operation. A `query` longer than MOCK_GRAPHQL_MAX_CHARS → no operation;
+ *     - any other body → null.
+ *  2. No body and method GET (case-insensitive): the URL's `query` and `operationName` parameters, read like one
+ *     payload. The query string runs from the first `?` to `#`; pairs split on `&` and the first `=`; `+` becomes a
+ *     space, then percent-decoding (UTF-8); the first occurrence of a name wins; an undecodable pair → null.
+ *  3. Otherwise null.
+ * null means "unknown": a rule with a GraphQL condition does not match, the request goes to the network.
+ */
+export function graphqlOperationsOf(req: Pick<MockRequestInput, 'method' | 'url' | 'contentType' | 'body'>): GraphqlOperationRef[] | null {
+  const held = req.body; // read once (a caller may compute it lazily)
+  const raw = typeof held === 'string' ? held : '';
+  const body = trimAsciiWhitespace(raw);
+  if (body !== '') {
+    if (raw.length > MOCK_GRAPHQL_MAX_CHARS) return null;
+    const ct = (req.contentType ?? '').toLowerCase();
+    if (ct.includes('application/graphql') && !ct.includes('json')) {
+      const first = graphqlDocumentOperations(body)[0];
+      if (!first) return null;
+      return [first.name !== undefined ? { name: first.name, type: first.type } : { type: first.type }];
+    }
+    if (body[0] !== '{' && body[0] !== '[') return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return null;
+    }
+    const payloads = Array.isArray(parsed) ? parsed : [parsed];
+    const ops: GraphqlOperationRef[] = [];
+    for (const p of payloads) {
+      if (typeof p !== 'object' || p === null || Array.isArray(p)) continue;
+      const rec = p as Record<string, unknown>;
+      const op = graphqlPayloadOperation(rec.query, rec.operationName);
+      if (op) ops.push(op);
+    }
+    return ops.length > 0 ? ops : null;
+  }
+  if (req.method.toUpperCase() !== 'GET') return null;
+  const params = urlQueryParams(req.url);
+  if (!params) return null;
+  const op = graphqlPayloadOperation(params.get('query'), params.get('operationName'));
+  return op ? [op] : null;
+}
+
+/** Whether the request's operations satisfy a rule's GraphQL condition (unknown operations never do). */
+function graphqlConditionHolds(cond: unknown, ops: GraphqlOperationRef[] | null): boolean {
+  if (!ops || typeof cond !== 'object' || cond === null) return false;
+  const c = cond as Record<string, unknown>;
+  if (typeof c.operationName !== 'string' || c.operationName === '') return false;
+  const type = c.operationType;
+  if (type !== undefined && type !== null && type !== 'query' && type !== 'mutation' && type !== 'subscription') return false;
+  return ops.some((op) => op.name === c.operationName && (type === undefined || type === null || op.type === type));
+}
+
+/**
+ * Reference matcher v2: `mockRuleMatches` on method / URL / apps, then every condition of `rule.when`:
+ *  - `graphql`: one of `graphqlOperationsOf(req)` has exactly that name (case-sensitive) and, when the condition
+ *    names a type, that type; unknown operations (null) never match. Batched bodies match when any element does;
+ *  - any other key (a matcher this code does not know) → the rule never matches.
+ * `ops` lets a caller read the request once for many rules (pass what `graphqlOperationsOf(req)` returned).
+ */
+export function mockRuleMatchesRequest(rule: MockRule, req: MockRequestInput, ops?: GraphqlOperationRef[] | null): boolean {
+  if (!mockUrlRuleMatches(rule, req.method, req.url, req.appId)) return false;
+  const used = mockRuleMatchersUsed(rule);
+  if (used.length === 0) return true;
+  for (const key of used) if (key !== 'graphql') return false;
+  return graphqlConditionHolds(rule.when?.graphql, ops === undefined ? graphqlOperationsOf(req) : ops);
+}
+
+/** First enabled matching rule for a request (rules are ordered; first match wins). Reads the body at most once. */
+export function findMockRuleForRequest(rules: readonly MockRule[], req: MockRequestInput): MockRule | undefined {
+  let ops: GraphqlOperationRef[] | null | undefined;
+  for (const rule of rules) {
+    if (!mockUrlRuleMatches(rule, req.method, req.url, req.appId)) continue;
+    if (mockRuleMatchersUsed(rule).length === 0) return rule;
+    if (ops === undefined) ops = graphqlOperationsOf(req);
+    if (mockRuleMatchesRequest(rule, req, ops)) return rule;
+  }
+  return undefined;
 }
 
 /**
@@ -672,8 +977,16 @@ export interface MockRule {
  *    and must match the WHOLE url;
  *  - regex: pattern used as-is (case-sensitive), searched anywhere in the url; invalid regex never matches;
  *  - apps: empty/undefined = all apps, otherwise must contain the app id.
+ * A rule with conditions (`when`) is checked as `mockRuleMatchesRequest` with no body: a GraphQL condition can then
+ * only be read from a GET request's URL, otherwise it does not match.
  */
 export function mockRuleMatches(rule: MockRule, method: string, url: string, appId?: string): boolean {
+  if (mockRuleMatchersUsed(rule).length === 0) return mockUrlRuleMatches(rule, method, url, appId);
+  return mockRuleMatchesRequest(rule, { method, url, appId });
+}
+
+/** Method / URL / apps part of the reference matcher (see `mockRuleMatches`). */
+function mockUrlRuleMatches(rule: MockRule, method: string, url: string, appId?: string): boolean {
   if (!rule.enabled) return false;
   if (rule.apps && rule.apps.length > 0 && (!appId || !rule.apps.includes(appId))) return false;
   if (rule.method !== '*' && rule.method.toUpperCase() !== method.toUpperCase()) return false;

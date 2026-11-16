@@ -6,7 +6,8 @@
  * the sidebar badges, the "Neler görünüyor?" panel and the Network / Performance / Mocks empty states all
  * render from it so they can never disagree.
  */
-import type { AppInstallSource, AppSession, DeviceActionId, DeviceApp, DeviceInfo, DriverStatus, DeviceReaderState, DeviceUnavailableAction, NetworkEntry, SdkLayer, SdkPlatform } from '@durbun/protocol';
+import type { AppInstallSource, AppSession, DeviceActionId, DeviceApp, DeviceInfo, DriverStatus, DeviceReaderState, DeviceUnavailableAction, MockRule, NetworkEntry, SdkLayer, SdkPlatform } from '@durbun/protocol';
+import { mockRuleMatchersUsed, mockRuleSendableTo } from '@durbun/protocol';
 
 /** One row of the matrix. */
 export type ExplainCapability = 'logs' | 'network' | 'metrics' | 'crashes' | 'mocks' | 'tools';
@@ -799,4 +800,64 @@ export function streamCaptureState(input: {
   if (input.session && !input.session.capabilities.includes('streams')) return 'noCapability';
   if (input.captureStreams === false) return 'captureOff';
   return 'ok';
+}
+
+/**
+ * Where a mock rule with conditions (`MockRule.when`, e.g. a GraphQL operation) can run right now. The server sends
+ * such a rule only to SDK sessions that declared the condition (`AppSession.sdk.mockMatchers`); an app whose SDK did
+ * not is never mocked by it. Considers the connected sessions that apply mock rules and that the rule's app scope
+ * covers (one per device + app).
+ *  - 'plain': the rule has no conditions (every SDK applies it);
+ *  - 'noApps': no connected app it applies to;
+ *  - 'all' / 'some' / 'nowhere': how many of those apps received it; `missing` lists the ones that did not.
+ */
+export type MockRuleReachState = 'plain' | 'noApps' | 'all' | 'some' | 'nowhere';
+
+export function mockRuleReach(
+  rule: Pick<MockRule, 'when' | 'apps'>,
+  sessions: readonly Pick<AppSession, 'id' | 'deviceId' | 'connected' | 'capabilities' | 'app' | 'sdk' | 'connectedAt'>[],
+): { state: MockRuleReachState; reached: AppSession['app'][]; missing: AppSession['app'][]; reachedSessions: string[]; missingSessions: string[] } {
+  const none = { reached: [], missing: [], reachedSessions: [], missingSessions: [] };
+  if (mockRuleMatchersUsed(rule).length === 0) return { state: 'plain', ...none };
+  const scoped = (id: string) => !rule.apps || rule.apps.length === 0 || rule.apps.includes(id);
+  const newest = new Map<string, (typeof sessions)[number]>();
+  for (const s of sessions) {
+    if (!s.connected || !s.capabilities.includes('mocks') || !scoped(s.app.id)) continue;
+    const key = `${s.deviceId}\u0000${s.app.id}`;
+    const cur = newest.get(key);
+    if (!cur || s.connectedAt > cur.connectedAt) newest.set(key, s);
+  }
+  if (newest.size === 0) return { state: 'noApps', ...none };
+  const reached: AppSession['app'][] = [];
+  const missing: AppSession['app'][] = [];
+  const reachedSessions: string[] = [];
+  const missingSessions: string[] = [];
+  for (const s of newest.values()) {
+    if (mockRuleSendableTo(rule, s.sdk.mockMatchers)) {
+      reached.push(s.app);
+      reachedSessions.push(s.id);
+    } else {
+      missing.push(s.app);
+      missingSessions.push(s.id);
+    }
+  }
+  const state: MockRuleReachState = missing.length === 0 ? 'all' : reached.length === 0 ? 'nowhere' : 'some';
+  return { state, reached, missing, reachedSessions, missingSessions };
+}
+
+/**
+ * Sessions in the rule's app scope, connected or not, whose SDK did not declare a condition the rule uses: requests
+ * they sent are never answered by the rule (the live tester's "not sent"). Empty for rules without conditions.
+ */
+export function mockRuleUnsupportedSessions(
+  rule: Pick<MockRule, 'when' | 'apps'>,
+  sessions: readonly Pick<AppSession, 'id' | 'app' | 'sdk'>[],
+): Set<string> {
+  const out = new Set<string>();
+  if (mockRuleMatchersUsed(rule).length === 0) return out;
+  for (const s of sessions) {
+    if (rule.apps && rule.apps.length > 0 && !rule.apps.includes(s.app.id)) continue;
+    if (!mockRuleSendableTo(rule, s.sdk.mockMatchers)) out.add(s.id);
+  }
+  return out;
 }

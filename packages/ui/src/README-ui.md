@@ -128,6 +128,10 @@ answers set runs (`/api/flow-batches`, one finished `smoke` set seeded), version
 seeded for `login`), deleted flows (`/api/flow-trash`, one seeded), `/api/flows/schema` and
 `/api/flows/from-requests` (it reads the mock's own `/api/network/:id`). `packages/server/test/flows/mockContract.test.ts`
 compares these answers with the real handlers, so the mock cannot drift from them unnoticed.
+Mock rules are saved by `dev/mock-rules.mjs` with the server's validation and normalization (`config.invalid`,
+`mocks.conflict`); `packages/server/test/http/mocksContract.test.ts` compares its `mocks.set` replies with the real
+server's. Two seeded rules share `https://api.pati.app/graphql`, one per operation (`when.graphql`); only Pixel's Pati
+declares the GraphQL matcher (`sdk.mockMatchers`), so Pati on the simulator and Kasa show the "not sent" state.
 `--no-flows` starts with no flows (the Flows welcome page and starters). The showcase lines (seeded once) cover
 SDK earlier-launch reports, the low-memory killer, startup times, navigation and lifecycle lines, too-large
 bodies and a self-signed server for replay; Pixel's Pati has a clock 47 s behind the Mac, Kasa a newer SDK protocol.
@@ -355,6 +359,9 @@ Use `compiled.key` as the memo key for scans (it changes when the app's sessions
   a fresh screenshot, and the reason it shows when not), `hiddenDeviceCards(device)` (the Device tab's actions an
   online physical iPhone cannot offer yet and why: developer mode, devicectl, screenshot tool, screen recording,
   syslog; shown by `features/device/HiddenCards.tsx`, which links to the System check).
+  `mockRuleReach(rule, sessions)` → `{ state: plain | noApps | all | some | nowhere, reached, missing, missingSessions }`:
+  which connected apps in the rule's scope get a rule with conditions (`when`), from each SDK's
+  `sdk.mockMatchers`; the Mocks tab uses it for the editor's reach line, the list's "not sent" badge and the tester.
 - `src/sources/`: `useAppExplain(groupKey)`, `useScopeExplain()`, `pickEmptyReason(capability, scope, {includePartial})`,
   `<SourceBadge badge short?>`, `<BuildBadgeChip>`, `<SourcesPanel item>`, `<WhatCanISeeButton groupKey>` (the ⓘ popover),
   `<ScopeSourcesButton>` (top bar), `<ExplainEmpty capability fallback onAction? includePartial?>` (renders the reasons when

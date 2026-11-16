@@ -2,10 +2,10 @@
  * GraphQL operation detection for captured requests: JSON bodies (`{ query, operationName }`, batched
  * arrays, persisted queries), `application/graphql` bodies and GET requests with a `query` parameter.
  */
-import type { WireBody } from '@durbun/protocol';
-import { isTextContentType } from '@durbun/protocol';
+import type { GraphqlOperationType, WireBody } from '@durbun/protocol';
+import { graphqlDocumentOperations, isTextContentType } from '@durbun/protocol';
 
-export type GraphqlOperationType = 'query' | 'mutation' | 'subscription';
+export type { GraphqlOperationType };
 
 export interface GraphqlInfo {
   operationName?: string;
@@ -20,115 +20,9 @@ interface OperationDef {
 /** Bodies larger than this are only scanned with regexes (never JSON-parsed) to keep ingestion cheap. */
 const MAX_PARSE_CHARS = 512 * 1024;
 
-const isNameStart = (c: string | undefined): boolean =>
-  c !== undefined && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '_');
-const isNameChar = (c: string | undefined): boolean => isNameStart(c) || (c !== undefined && c >= '0' && c <= '9');
-
-/** Skips whitespace, commas (insignificant in GraphQL) and `#` comments. */
-function skipIgnored(doc: string, i: number): number {
-  const n = doc.length;
-  while (i < n) {
-    const c = doc[i];
-    if (c === '#') {
-      while (i < n && doc[i] !== '\n' && doc[i] !== '\r') i++;
-    } else if (c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === ',' || c === '﻿') {
-      i++;
-    } else {
-      break;
-    }
-  }
-  return i;
-}
-
-function skipString(doc: string, i: number): number {
-  const n = doc.length;
-  if (doc.startsWith('"""', i)) {
-    i += 3;
-    while (i < n) {
-      if (doc[i] === '\\' && doc.startsWith('\\"""', i)) i += 4;
-      else if (doc.startsWith('"""', i)) return i + 3;
-      else i++;
-    }
-    return n;
-  }
-  i++;
-  while (i < n) {
-    const c = doc[i];
-    if (c === '\\') i += 2;
-    else if (c === '"' || c === '\n') return i + 1;
-    else i++;
-  }
-  return n;
-}
-
-/** Lists the operation definitions of a GraphQL document (fragments and SDL are skipped). */
+/** Lists the operation definitions of a GraphQL document (fragments and SDL are skipped): the protocol's scanner. */
 export function listOperations(doc: string): OperationDef[] {
-  const ops: OperationDef[] = [];
-  const n = doc.length;
-  let i = 0;
-  let depth = 0;
-  let parens = 0;
-  // A definition header was read at depth 0 and its selection set has not started yet.
-  let pending: 'operation' | 'fragment' | null = null;
-  while (i < n) {
-    const c = doc[i];
-    if (c === '#') {
-      while (i < n && doc[i] !== '\n' && doc[i] !== '\r') i++;
-      continue;
-    }
-    if (c === '"') {
-      i = skipString(doc, i);
-      continue;
-    }
-    if (c === '(') {
-      parens++;
-      i++;
-      continue;
-    }
-    if (c === ')') {
-      parens = Math.max(0, parens - 1);
-      i++;
-      continue;
-    }
-    if (c === '{') {
-      if (depth === 0 && parens === 0) {
-        if (pending === null) ops.push({ type: 'query' }); // shorthand `{ ... }` query
-        pending = null;
-      }
-      depth++;
-      i++;
-      continue;
-    }
-    if (c === '}') {
-      depth = Math.max(0, depth - 1);
-      i++;
-      continue;
-    }
-    if (isNameStart(c)) {
-      const start = i;
-      while (i < n && isNameChar(doc[i])) i++;
-      if (depth === 0 && parens === 0 && pending === null) {
-        const word = doc.slice(start, i);
-        if (word === 'query' || word === 'mutation' || word === 'subscription') {
-          const j = skipIgnored(doc, i);
-          let name: string | undefined;
-          if (isNameStart(doc[j])) {
-            let k = j;
-            while (k < n && isNameChar(doc[k])) k++;
-            name = doc.slice(j, k);
-            i = k;
-          }
-          ops.push(name ? { type: word, name } : { type: word });
-          pending = 'operation';
-        } else if (word === 'fragment') {
-          pending = 'fragment';
-        }
-      }
-      continue;
-    }
-    i++;
-  }
-  return ops;
+  return graphqlDocumentOperations(doc);
 }
 
 /** Operation type/name of a GraphQL document; `operationName` selects among several operations. */

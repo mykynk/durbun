@@ -5,20 +5,33 @@ import type { MockRule } from '@durbun/protocol';
 import { networkStore, ui, useHub, useNetworkVersion } from '../../../data';
 import { IconButton, Input, MethodBadge, Select, TagChip, useFeatureActive } from '../../../components';
 import { useT } from '../../../i18n';
-import { collectCandidates, evaluateTester, testRequest, withDraft, type TesterRow, type TesterVerdict } from '../model/tester';
-import { ruleLabel } from '../model/rules';
+import { collectCandidates, evaluateTester, parseOperationInput, testRequest, withDraft, type TesterRow, type TesterVerdict } from '../model/tester';
+import { graphqlCondition, looksLikeGraphql, ruleLabel } from '../model/rules';
 
 const SHOWN = 8;
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 
 function VerdictIcon({ v }: { v: TesterVerdict }) {
   if (v === 'applies') return <CircleCheck size={14} className="mk-tester__ok" aria-hidden />;
-  if (v === 'shadowed') return <CornerDownRight size={14} className="mk-tester__warn" aria-hidden />;
+  if (v === 'shadowed' || v === 'notSent') return <CornerDownRight size={14} className="mk-tester__warn" aria-hidden />;
   return <Ban size={14} className="mk-tester__miss" aria-hidden />;
 }
 
-/** Recent requests the edited rule would catch (exact SDK semantics via `mockRuleMatches`). */
-export function LiveTester({ draft, rules, insertAt, appNames }: { draft: MockRule | null; rules: readonly MockRule[]; insertAt: number; appNames: ReadonlyMap<string, string> }) {
+/** Recent requests the edited rule would catch (SDK semantics via the protocol's `mockRuleMatchesRequest`). */
+export function LiveTester({
+  draft,
+  rules,
+  insertAt,
+  appNames,
+  notSentTo,
+}: {
+  draft: MockRule | null;
+  rules: readonly MockRule[];
+  insertAt: number;
+  appNames: ReadonlyMap<string, string>;
+  /** Sessions (`AppSession.id`) whose SDK does not receive this rule (it uses a condition they did not declare). */
+  notSentTo?: ReadonlySet<string>;
+}) {
   const t = useT();
   const active = useFeatureActive();
   const v = useNetworkVersion({ throttleMs: 1000, enabled: active });
@@ -32,14 +45,22 @@ export function LiveTester({ draft, rules, insertAt, appNames }: { draft: MockRu
   const [expanded, setExpanded] = useState(false);
   const [tryMethod, setTryMethod] = useState('GET');
   const [tryUrl, setTryUrl] = useState('');
+  const [tryOp, setTryOp] = useState('');
 
   const candidates = useMemo(() => {
     const apps = useHub.getState().apps;
     return collectCandidates(networkStore.list(), (appId) => (appId ? apps[appId]?.app.id : undefined));
   }, [v, bundleSig]); // eslint-disable-line react-hooks/exhaustive-deps
   const list = useMemo(() => (deferred ? withDraft(rules, deferred, insertAt) : rules.slice()), [rules, deferred, insertAt]);
-  const result = useMemo(() => (deferred ? evaluateTester(deferred, list, candidates) : null), [deferred, list, candidates]);
-  const manual = useMemo(() => (deferred && tryUrl.trim() ? testRequest(deferred, list, tryMethod, tryUrl.trim(), undefined) : null), [deferred, list, tryMethod, tryUrl]);
+  const result = useMemo(() => (deferred ? evaluateTester(deferred, list, candidates, notSentTo) : null), [deferred, list, candidates, notSentTo]);
+  // The operation field shows for rules with a GraphQL condition or a GraphQL-looking address.
+  const opField = !!draft && (!!graphqlCondition(draft) || looksLikeGraphql(draft.url));
+  const typedOp = opField ? parseOperationInput(tryOp) : undefined;
+  const manual = useMemo(() => {
+    if (!deferred || !tryUrl.trim()) return null;
+    if (typedOp === null) return { verdict: 'badOperation' as const, winner: undefined };
+    return testRequest(deferred, list, tryMethod, tryUrl.trim(), undefined, typedOp);
+  }, [deferred, list, tryMethod, tryUrl, typedOp]);
 
   const rows: TesterRow[] = result ? (expanded ? result.rows : result.rows.slice(0, SHOWN)) : [];
   // A rule for every app that catches several apps' requests: easy to miss when one app was meant.
@@ -50,6 +71,18 @@ export function LiveTester({ draft, rules, insertAt, appNames }: { draft: MockRu
     return ids.size > 1 ? [...ids] : [];
   }, [deferred, result]);
   const hidden = result ? result.rows.length - rows.length : 0;
+  // The same app from two devices: name the device (one may get a rule with a condition and the other not).
+  const rowLabel = useMemo(() => {
+    const sessions = new Map<string, Set<string>>();
+    for (const r of result?.rows ?? []) if (r.bundleId && r.appId) sessions.set(r.bundleId, (sessions.get(r.bundleId) ?? new Set()).add(r.appId));
+    const { apps, devices } = useHub.getState();
+    return (r: TesterRow): string => {
+      const name = r.bundleId ? (appNames.get(r.bundleId) ?? r.bundleId) : '';
+      if (!r.bundleId || !r.appId || (sessions.get(r.bundleId)?.size ?? 0) < 2) return name;
+      const deviceId = apps[r.appId]?.deviceId;
+      return deviceId ? `${name} · ${devices[deviceId]?.name ?? deviceId}` : name;
+    };
+  }, [result, appNames]);
 
   return (
     <section className="mk-tester" aria-label={t('mocks.tester.title')}>
@@ -63,6 +96,7 @@ export function LiveTester({ draft, rules, insertAt, appNames }: { draft: MockRu
               ? t('mocks.tester.noTraffic')
               : t('mocks.tester.summary', { count: result?.applies ?? 0 })}
           {result && result.shadowed > 0 ? ` · ${t('mocks.tester.shadowedSummary', { count: result.shadowed })}` : ''}
+          {result && result.notSent > 0 ? ` · ${t('mocks.tester.notSentSummary', { count: result.notSent })}` : ''}
         </span>
       </header>
       {draft && !draft.enabled && result && result.applies > 0 ? <p className="mk-tester__note">{t('mocks.tester.disabled')}</p> : null}
@@ -80,15 +114,20 @@ export function LiveTester({ draft, rules, insertAt, appNames }: { draft: MockRu
               <span className="mk-tester__url mono truncate" title={r.url}>
                 {r.url}
               </span>
-              {r.bundleId ? <TagChip name={appNames.get(r.bundleId) ?? r.bundleId} title={r.bundleId} maxWidth={110} /> : null}
+              {r.operation?.name ? (
+                <span className={clsx('mk-op', `mk-op--${r.operation.type ?? 'query'}`)} title={t('mocks.list.operation', { op: r.operation.name })}>
+                  {r.operation.name}
+                </span>
+              ) : null}
+              {r.bundleId ? <TagChip name={rowLabel(r)} title={r.bundleId} maxWidth={150} className="mk-tester__app" /> : null}
               {r.count > 1 ? <span className="mk-tester__count tnum">{t('mocks.tester.count', { count: r.count })}</span> : null}
               <span className="mk-tester__verdict">
                 {r.verdict === 'applies'
                   ? t('mocks.tester.applies')
                   : r.verdict === 'shadowed'
                     ? t('mocks.tester.shadowed', { rule: r.winner ? ruleLabel(r.winner) : '?' })
-                    : r.verdict === 'appMismatch'
-                      ? t('mocks.tester.appMismatch')
+                    : r.verdict === 'appMismatch' || r.verdict === 'methodMismatch' || r.verdict === 'operationMismatch' || r.verdict === 'operationUnknown' || r.verdict === 'notSent'
+                      ? t(`mocks.tester.${r.verdict}`)
                       : t('mocks.tester.methodMismatch')}
               </span>
               <IconButton icon={ExternalLink} size="xs" label={t('mocks.tester.open')} onClick={() => ui.focusNetwork(r.sampleId)} />
@@ -104,10 +143,23 @@ export function LiveTester({ draft, rules, insertAt, appNames }: { draft: MockRu
       <div className="mk-tester__try">
         <Select size="sm" value={tryMethod} onChange={(e) => setTryMethod(e.target.value)} options={METHODS.map((m) => ({ value: m, label: m }))} aria-label={t('mocks.editor.method')} />
         <Input size="sm" mono value={tryUrl} onChange={(e) => setTryUrl(e.target.value)} placeholder={t('mocks.tester.tryPlaceholder')} aria-label={t('mocks.tester.tryUrl')} wrapperClassName="grow" className="grow" />
+        {opField ? (
+          <Input
+            size="sm"
+            mono
+            value={tryOp}
+            onChange={(e) => setTryOp(e.target.value)}
+            placeholder={t('mocks.tester.tryOperationPlaceholder')}
+            aria-label={t('mocks.tester.tryOperation')}
+            invalid={typedOp === null}
+            wrapperClassName="mk-tester__op"
+            spellCheck={false}
+          />
+        ) : null}
       </div>
       {manual ? (
         <p className={clsx('mk-tester__manual', `is-${manual.verdict}`)} role="status">
-          <VerdictIcon v={manual.verdict} />
+          {manual.verdict === 'badOperation' ? null : <VerdictIcon v={manual.verdict} />}
           {manual.verdict === 'shadowed'
             ? t('mocks.tester.result.shadowed', { rule: manual.winner ? ruleLabel(manual.winner) : '?' })
             : t(`mocks.tester.result.${manual.verdict}`)}

@@ -13,7 +13,7 @@
  */
 import { bodyFromBytes, captureRequestBody, inferContentType, isStreamingContentType, utf8Encode, base64Decode, type BodyConfig } from './body.js';
 import { findHeader, headersFromInit } from './headers.js';
-import { describeMockFailure, mockDelayMs, statusText, type FailAction, type RespondAction } from './mocks.js';
+import { describeMockFailure, heldBodyText, mockDelayMs, statusText, type FailAction, type RespondAction } from './mocks.js';
 import { fetchGuard, type NetworkHost } from './network.js';
 import { patchMethod, type Patch } from './patch.js';
 import type { Header, MockRule, SdkNetError, SdkNetRequest, SdkNetSse, WireBody } from './protocol.js';
@@ -410,7 +410,12 @@ export function installFetchPatch(host: NetworkHost, runtime: Runtime): Patch[] 
         // go ahead without waiting
       }
       try {
-        rule = host.findMock(info.method, info.url);
+        // A condition (a GraphQL operation) reads the body only when it is already held: a string or small bytes;
+        // a Request object's body is a stream and is never read for matching.
+        rule = host.findMock(info.method, info.url, {
+          contentType: findHeader(info.headers, 'content-type') || inferContentType(info.body),
+          body: () => heldBodyText(info.body),
+        });
       } catch {
         rule = undefined;
       }

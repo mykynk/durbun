@@ -105,7 +105,7 @@ export * as api from './api';
 export { ApiError } from './api';
 
 /* "what can I see / where from / why not" (SPEC §10) */
-export { explainSources, explainContext, explainRow, buildBadgeOf, buildKindOf, EXPLAIN_CAPABILITIES } from './explain';
+export { explainSources, explainContext, explainRow, buildBadgeOf, buildKindOf, EXPLAIN_CAPABILITIES, mockRuleReach, mockRuleUnsupportedSessions } from './explain';
 export { bundlePrefix, isDeveloperInstall, ownAppIndex, isOwnApp } from './ownApps';
 export type { OwnAppIndex } from './ownApps';
 export type {
@@ -123,5 +123,6 @@ export type {
   ExplainTransport,
   ExplainBuild,
   BuildBadge,
+  MockRuleReachState,
 } from './explain';
 export { scopeDisplayName } from './scopeName';

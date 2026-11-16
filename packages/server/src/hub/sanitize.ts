@@ -10,13 +10,14 @@ import type {
   LogLevel,
   LogOrigin,
   LogSource,
+  MockMatcher,
   NetworkDetail,
   SdkLayer,
   StreamInfo,
   StreamMessage,
   WireBody,
 } from '@durbun/protocol';
-import { LOG_LEVELS } from '@durbun/protocol';
+import { LOG_LEVELS, MOCK_MATCHERS } from '@durbun/protocol';
 
 const LEVELS = new Set<string>(LOG_LEVELS);
 const KINDS = new Set<string>(['text', 'crash', 'anr', 'flutter-error', 'event', 'network', 'lifecycle', 'marker']);
@@ -69,6 +70,17 @@ export function normSdkLayers(v: unknown): SdkLayer[] | undefined {
   if (!Array.isArray(v)) return undefined;
   const out: SdkLayer[] = [];
   for (const l of v) if (typeof l === 'string' && SDK_LAYERS.has(l) && !out.includes(l as SdkLayer)) out.push(l as SdkLayer);
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * `hello.sdk.mockMatchers`: the known mock rule conditions once each, in order; undefined when none is left (an SDK
+ * that declares nothing, or only conditions this server does not know, gets no rule that uses a condition).
+ */
+export function normMockMatchers(v: unknown): MockMatcher[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: MockMatcher[] = [];
+  for (const m of v) if (typeof m === 'string' && (MOCK_MATCHERS as readonly string[]).includes(m) && !out.includes(m as MockMatcher)) out.push(m as MockMatcher);
   return out.length > 0 ? out : undefined;
 }
 
@@ -304,6 +316,8 @@ export function sanitizeImportedApp(v: unknown): AppSession | undefined {
   };
   const layers = normSdkLayers(sdk.layers);
   if (layers) app.sdk.layers = layers;
+  const mockMatchers = normMockMatchers(sdk.mockMatchers);
+  if (mockMatchers) app.sdk.mockMatchers = mockMatchers;
   const disconnectedAt = finite(v.disconnectedAt);
   if (disconnectedAt !== undefined) app.disconnectedAt = disconnectedAt;
   for (const key of ['version', 'build', 'processName'] as const) {

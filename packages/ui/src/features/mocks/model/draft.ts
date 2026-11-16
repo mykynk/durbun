@@ -1,10 +1,12 @@
-import type { MockAction, NetworkDetail, NetworkEntry } from '@durbun/protocol';
+import { GRAPHQL_NAME_RE, type MockAction, type MockGraphqlCondition, type NetworkDetail, type NetworkEntry } from '@durbun/protocol';
 import type { MockRuleDraft } from '../../../data';
 import type { FailError } from './rules';
 
 /**
  * "Mock oluştur" from a captured request: method + exact URL, the response status, its content-type
- * and body (text or base64). Failed requests become a "fail" rule with the same kind of error.
+ * and body (text or base64). Failed requests become a "fail" rule with the same kind of error. A GraphQL request
+ * with a named operation gets that operation as a condition (`when.graphql`), so the rule answers only it; a GET
+ * one matches its address without the query string (the variables travel there).
  */
 
 export type DraftNote = 'bodyNotCaptured' | 'bodyTruncated' | 'bodyEvicted' | 'graphqlSharedUrl' | 'noResponse' | 'detailUnavailable';
@@ -32,7 +34,9 @@ export function draftFromRequest(
   bundleId?: string,
 ): { draft: MockRuleDraft; notes: DraftNote[] } {
   const notes: DraftNote[] = [];
-  if (entry.graphql) notes.push('graphqlSharedUrl');
+  const operation = entry.graphql?.operationName && GRAPHQL_NAME_RE.test(entry.graphql.operationName) ? entry.graphql.operationName : undefined;
+  // An anonymous operation cannot be told apart from the others at that URL.
+  if (entry.graphql && !operation) notes.push('graphqlSharedUrl');
   let action: MockAction;
   if (typeof entry.status === 'number' && entry.status >= 100 && entry.status <= 599) {
     action = { type: 'respond', status: entry.status };
@@ -58,14 +62,18 @@ export function draftFromRequest(
     notes.push('noResponse');
     action = { type: 'respond', status: 200, headers: [['content-type', 'application/json; charset=utf-8']], body: '{}', bodyEncoding: 'utf8' };
   }
-  const draft: MockRuleDraft = {
-    enabled: true,
-    name: shortName(entry),
-    method: entry.method && entry.method !== '?' ? entry.method.toUpperCase() : '*',
-    url: entry.url,
-    match: 'exact',
-    action,
-  };
+  const method = entry.method && entry.method !== '?' ? entry.method.toUpperCase() : '*';
+  const draft: MockRuleDraft = { enabled: true, name: shortName(entry), method, url: entry.url, match: 'exact', action };
+  if (operation) {
+    const graphql: MockGraphqlCondition = { operationName: operation };
+    if (entry.graphql?.operationType) graphql.operationType = entry.graphql.operationType;
+    draft.when = { graphql };
+    const q = entry.url.indexOf('?');
+    if (method === 'GET' && q > 0) {
+      draft.url = entry.url.slice(0, q);
+      draft.match = 'contains';
+    }
+  }
   if (bundleId) draft.apps = [bundleId];
   return { draft, notes };
 }

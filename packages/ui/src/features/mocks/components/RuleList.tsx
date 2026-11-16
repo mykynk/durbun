@@ -1,10 +1,11 @@
 import { useState, type DragEvent, type KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
-import { ArrowDown, ArrowUp, Copy, Ellipsis, GripVertical, Network, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, CircleAlert, Copy, Ellipsis, GripVertical, Network, Pencil, Trash2 } from 'lucide-react';
 import type { MockRule } from '@durbun/protocol';
 import { DropdownMenu, IconButton, MethodBadge, TagChip, Toggle, Tooltip, type MenuItem } from '../../../components';
 import { useLanguage, useT } from '../../../i18n';
-import { actionSummary, dropTarget, ruleLabel } from '../model/rules';
+import { actionSummary, dropTarget, graphqlCondition, graphqlLabel, ruleLabel } from '../model/rules';
+import { listNames, type RuleReach } from './Conditions';
 
 export interface RuleListProps {
   rules: readonly MockRule[];
@@ -16,6 +17,8 @@ export interface RuleListProps {
   /** Open the Network tab on the requests a rule answered. */
   onShowHits: (id: string) => void;
   appNames: ReadonlyMap<string, string>;
+  /** Rules with conditions: which connected apps received them (no entry = plain rule). */
+  reach: ReadonlyMap<string, RuleReach>;
   onOpen: (id: string) => void;
   onToggle: (id: string, enabled: boolean) => void;
   onMove: (from: number, to: number) => void;
@@ -23,7 +26,7 @@ export interface RuleListProps {
   onDelete: (id: string) => void;
 }
 
-export function RuleList({ rules, visibleIds, selectedId, hits, appNames, onShowHits, onOpen, onToggle, onMove, onDuplicate, onDelete }: RuleListProps) {
+export function RuleList({ rules, visibleIds, selectedId, hits, appNames, reach, onShowHits, onOpen, onToggle, onMove, onDuplicate, onDelete }: RuleListProps) {
   const t = useT();
   const lang = useLanguage();
   const [armed, setArmed] = useState<string | null>(null);
@@ -76,6 +79,9 @@ export function RuleList({ rules, visibleIds, selectedId, hits, appNames, onShow
       {shown.map((r) => {
         const index = indexOf(r.id);
         const name = ruleLabel(r);
+        const gql = graphqlCondition(r);
+        const where = r.enabled ? reach.get(r.id) : undefined;
+        const notSent = where && (where.state === 'some' || where.state === 'nowhere') ? where : undefined;
         const hit = hits.get(r.id);
         const count = hit?.session ?? 0;
         const inMemory = hit?.inMemory ?? 0;
@@ -130,8 +136,14 @@ export function RuleList({ rules, visibleIds, selectedId, hits, appNames, onShow
                 <span className="mk-rule__url mono truncate" title={r.url}>
                   {r.url}
                 </span>
+                {gql ? (
+                  <span className={clsx('mk-op', `mk-op--${gql.operationType ?? 'query'}`)} title={t('mocks.list.operation', { op: graphqlLabel(gql) })}>
+                    {gql.operationType ? <span className="mk-op__type">{gql.operationType}</span> : null}
+                    {gql.operationName}
+                  </span>
+                ) : null}
               </span>
-              <span className="mk-rule__line mk-rule__line--sub">
+              <span className="mk-rule__line mk-rule__line--sub mk-rule__line--meta">
                 <span className={clsx('mk-action', `mk-action--${r.action.type}`, r.action.type === 'respond' && r.action.status >= 400 && 'mk-action--err')}>{actionSummary(r.action, t, lang)}</span>
                 {r.apps && r.apps.length > 0 ? (
                   r.apps.slice(0, 3).map((a) => <TagChip key={a} name={appNames.get(a) ?? a} title={a} maxWidth={140} />)
@@ -139,6 +151,14 @@ export function RuleList({ rules, visibleIds, selectedId, hits, appNames, onShow
                   <span className="mk-allapps">{t('mocks.list.allApps')}</span>
                 )}
                 {r.apps && r.apps.length > 3 ? <span className="mk-allapps">+{r.apps.length - 3}</span> : null}
+                {notSent ? (
+                  <Tooltip content={t('mocks.list.notSentTip', { apps: listNames(notSent.missing, lang) })}>
+                    <span className="mk-notsent">
+                      <CircleAlert size={12} aria-hidden />
+                      {notSent.state === 'nowhere' ? t('mocks.list.notSentNowhere') : t('mocks.list.notSentSome', { count: new Set(notSent.missing).size })}
+                    </span>
+                  </Tooltip>
+                ) : null}
               </span>
             </button>
             <Tooltip content={hitsTip}>

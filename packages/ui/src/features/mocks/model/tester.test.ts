@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MockRule, NetworkEntry } from '@durbun/protocol';
-import { collectCandidates, evaluateTester, testRequest, withDraft } from './tester';
+import { collectCandidates, evaluateTester, parseOperationInput, testRequest, withDraft } from './tester';
 
 function rule(id: string, p: Partial<MockRule> = {}): MockRule {
   return { id, enabled: true, method: '*', url: '/v1/pets', match: 'contains', action: { type: 'respond', status: 200 }, createdAt: 1, ...p };
@@ -103,5 +103,59 @@ describe('live tester verdicts (protocol matcher)', () => {
     expect(res.requests).toBe(2);
     expect(res.shadowed).toBe(1);
     expect(res.rows.map((r) => `${r.verdict}:${r.url}`)).toEqual(['applies:https://api.pati.app/v1/pets/2', 'shadowed:https://api.pati.app/v1/pets/1']);
+  });
+});
+
+describe('GraphQL operation rules in the tester', () => {
+  const gql = 'https://gql.pati.app/graphql';
+  const op = (e: NetworkEntry, operationName?: string, operationType?: 'query' | 'mutation'): NetworkEntry => ({ ...e, graphql: { operationName, operationType } });
+  const user = rule('user', { method: 'POST', url: '/graphql', name: 'GetUser', when: { graphql: { operationName: 'GetUser', operationType: 'query' } } });
+
+  it('candidates are told apart by operation', () => {
+    const entries = [op(entry('POST', gql), 'GetUser', 'query'), op(entry('POST', gql), 'GetFeed', 'query'), op(entry('POST', gql), 'GetUser', 'query')];
+    const c = collectCandidates(entries, bundleOf);
+    expect(c.map((x) => `${x.operation?.name} ×${x.count}`)).toEqual(['GetUser ×2', 'GetFeed ×1']);
+  });
+
+  it('applies only to its operation; other operations at the URL are near misses, unknown ones too', () => {
+    expect(testRequest(user, [user], 'POST', gql, undefined, { name: 'GetUser', type: 'query' }).verdict).toBe('applies');
+    expect(testRequest(user, [user], 'POST', gql, undefined, { name: 'GetFeed', type: 'query' }).verdict).toBe('operationMismatch');
+    expect(testRequest(user, [user], 'POST', gql, undefined, { name: 'GetUser', type: 'mutation' }).verdict).toBe('operationMismatch');
+    expect(testRequest(user, [user], 'POST', gql, undefined, undefined).verdict).toBe('operationUnknown');
+    expect(testRequest(user, [user], 'GET', gql, undefined, { name: 'GetUser', type: 'query' }).verdict).toBe('methodMismatch');
+  });
+
+  it('two rules on one URL with different operations do not shadow each other', () => {
+    const feed = rule('feed', { method: 'POST', url: '/graphql', name: 'GetFeed', when: { graphql: { operationName: 'GetFeed' } } });
+    const list = [feed, user];
+    expect(testRequest(user, list, 'POST', gql, undefined, { name: 'GetUser', type: 'query' }).verdict).toBe('applies');
+    // a rule without an operation before it does shadow it
+    const all = rule('all', { method: 'POST', url: '/graphql', name: 'Everything' });
+    const shadowed = testRequest(user, [all, user], 'POST', gql, undefined, { name: 'GetUser', type: 'query' });
+    expect(shadowed).toMatchObject({ verdict: 'shadowed', winner: { id: 'all' } });
+  });
+
+  it('an app whose SDK did not get the rule is "not sent", never "applies"', () => {
+    const entries = [op(entry('POST', gql), 'GetUser', 'query'), op(entry('POST', gql, 'app:2'), 'GetUser', 'query')];
+    const res = evaluateTester(user, [user], collectCandidates(entries, bundleOf), new Set(['app:2']));
+    expect(res.applies).toBe(1);
+    expect(res.notSent).toBe(1);
+    expect(res.rows.map((r) => `${r.verdict}:${r.bundleId}`)).toEqual(['applies:com.mykynk.pati', 'notSent:com.mykynk.mahalle']);
+  });
+
+  it('the same app on two devices: only the session whose SDK did not get the rule is "not sent"', () => {
+    const twoPati = (id: string | undefined) => (id === 'app:1' || id === 'app:9' ? 'com.mykynk.pati' : undefined);
+    const entries = [op(entry('POST', gql, 'app:1'), 'GetUser', 'query'), op(entry('POST', gql, 'app:9'), 'GetUser', 'query')];
+    const c = collectCandidates(entries, twoPati);
+    expect(c.map((x) => x.appId)).toEqual(['app:9', 'app:1']);
+    const res = evaluateTester(user, [user], c, new Set(['app:9']));
+    expect(res.rows.map((r) => `${r.verdict}:${r.appId}`)).toEqual(['applies:app:1', 'notSent:app:9']);
+  });
+
+  it('reads a typed operation', () => {
+    expect(parseOperationInput('')).toBeUndefined();
+    expect(parseOperationInput(' GetUser ')).toEqual({ name: 'GetUser' });
+    expect(parseOperationInput('mutation LikeStory')).toEqual({ name: 'LikeStory', type: 'mutation' });
+    expect(parseOperationInput('Get User')).toBeNull();
   });
 });

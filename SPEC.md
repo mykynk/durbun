@@ -218,14 +218,17 @@ virtual sessions (used by the Flutter VM module and the demo driver).
   no guess with two); what it sent so far stays, an empty `net:` row is removed; line `app.deviceFound`.
 - Register/reuse an `AppSession` (same `sessionKey` + device → reuse, mark connected, `app.reconnected`).
 - Reply `welcome` with `appId`, `SdkConfig` (`deviceLogsAvailable` = that device's `logs.status ===
-  'streaming'`) and the mock rules applicable to the app (`rule.apps` empty or contains `app.id`).
+  'streaming'`) and the mock rules applicable to the app (`rule.apps` empty or contains `app.id`) whose
+  conditions the SDK declared in `hello.sdk.mockMatchers` (`mockRuleSendableTo`; a rule with `when.graphql` never
+  reaches an SDK that did not declare `'graphql'`).
 - `ping` every 15 s (and right after `welcome`, again at 3 s); close after 45 s without any inbound data.
 - Device clock: each `pong` carries the device clock; offset = midpoint of the round trip − `pong.ts`, the
   shortest round trip wins (≤ 2 s). Published as `AppSession.clockOffsetMs` (Mac − device) and
   `clockOffsetAccuracyMs` (half the round trip); two samples beyond 5 s → one `app.clockBehind` /
   `app.clockAhead` line per launch. Timestamps are never rewritten (the hello `ts` is not used: SDKs resend a
   stale hello on reconnect).
-- `mocks.set` from the UI → broadcast `{type:'mocks'}` to every connected session (filtered per app).
+- `mocks.set` from the UI → broadcast `{type:'mocks'}` to every connected session (filtered per app and per
+  declared matchers, like `welcome`; rules a flow run adds go through the same filter).
 - `sendCommand(appId, name, params)` → `{type:'command', id}`; resolves on `command.result` (timeout 10 s).
 - `event` messages become logs: `kind:'event'`, `tag:'event'`, `message: name`, `data: props`,
   `level:'info'`. `metric` → `MetricSample` (`source: 'sdk'`, or `'vm-service'`/`'demo'` per transport).
@@ -483,6 +486,14 @@ others → ok).
   the network (after `delayMs`); `delay` → wait then perform the real request; `fail` → raise the
   platform's natural error (timeout / connection refused / DNS / TLS) after `delayMs`. Report the
   request normally with `mocked: true, mockRuleId`.
+  Conditions (mock matching v2): `rule.when` holds extra matchers, today `graphql {operationName, operationType?}`
+  (exact, case-sensitive). An SDK that implements one lists it in `hello.sdk.mockMatchers`; a rule with a
+  condition the SDK does not know never matches. The operation comes from the body the SDK already holds as text
+  (`graphqlOperationsOf`): JSON `operationName`, else the first named operation of `query`; a batched array matches
+  when any element matches; a persisted query (no `query`) gives the name only, so a rule that asks for a type does
+  not match it; `application/graphql` bodies are a document; a GET without a body reads the URL's `operationName` /
+  `query`. Bodies over `MOCK_GRAPHQL_MAX_CHARS` (64 Ki UTF-16 units), streams, files and unparsable bodies are
+  unknown: no match, the request goes to the network. Shared vectors: `packages/protocol/vectors/mock-graphql.json`.
 - **Commands** (capability `commands`): handle `command` → reply `command.result`. Unknown → `ok:false`.
 - **Metrics** (capability `metrics`): every `config.metricsIntervalMs` send `metric`.
 - **Release safety**: SDKs are no-ops in release/production builds unless explicitly forced, and never
@@ -750,7 +761,9 @@ copy or save as .md), replay and edit-&-replay, create mock from request,
 HAR export (filtered / single), compare two responses (diff). Mocks tab: rule list (enable, reorder,
 duplicate, delete, hit count), editor (method, URL pattern + match type with live tester against recent
 requests, action respond/delay/fail, status presets, header rows, body editor with JSON validate/format,
-delay, app scope), master enable switch, capability hints per connected app.
+delay, app scope, GraphQL operation condition with operations seen at the address), master enable switch,
+capability hints per connected app; a rule with a condition an app's SDK did not declare says it was not sent
+to that app (editor, list badge, tester).
 
 ### 7.6 Performance & 7.7 Device (owner ui-device-perf, phase 2)
 Performance: target picker (apps in scope / device processes), stat tiles (CPU, memory now/peak, FPS,

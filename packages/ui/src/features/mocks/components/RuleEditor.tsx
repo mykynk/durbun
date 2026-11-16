@@ -9,6 +9,7 @@ import { reasonPhrase } from '../../network/model/http';
 import {
   CONTENT_TYPE_PRESETS,
   DELAY_PRESETS,
+  looksLikeGraphql,
   FAIL_ERRORS,
   MATCH_TYPES,
   METHOD_OPTIONS,
@@ -22,6 +23,7 @@ import {
 import { HeaderRowsEditor } from './HeaderRowsEditor';
 import { BodyEditor } from './BodyEditor';
 import { LiveTester } from './LiveTester';
+import { AddCondition, GraphqlConditionEditor, type RuleReach, type SeenOperation } from './Conditions';
 
 export interface KnownApp {
   id: string;
@@ -44,6 +46,12 @@ export interface RuleEditorProps {
   insertAt: number;
   knownApps: readonly KnownApp[];
   appNames: ReadonlyMap<string, string>;
+  /** Where the edited rule (as it would be saved) runs among the connected apps; null without conditions. */
+  reach: RuleReach | null;
+  /** Bundle ids whose connected SDK would not receive the edited rule (the tester says "not sent" for them). */
+  notSentTo: ReadonlySet<string>;
+  /** GraphQL operations seen in captured traffic at the rule's method + URL (suggestions). */
+  seenOperations: readonly SeenOperation[];
 }
 
 function DelayInput({ value, onChange, id, invalid, slider }: { value: string; onChange: (v: string) => void; id?: string; invalid?: boolean; slider?: boolean }) {
@@ -80,12 +88,13 @@ function DelayInput({ value, onChange, id, invalid, slider }: { value: string; o
 export function RuleEditor(props: RuleEditorProps) {
   const { mode, form, onChange, dirty, saving, showErrors } = props;
   const t = useT();
+  const lang = useLanguage();
   const uid = useId();
   const [appInput, setAppInput] = useState('');
   const issues = useMemo(() => validateForm(form), [form]);
   const fieldIssue = (field: FormField): { error?: string; hint?: ReactNode } => {
     const err = issues.errors.find((i) => i.field === field);
-    const live = err && (showErrors || err.code === 'regexInvalid' || err.code === 'headerNameInvalid');
+    const live = err && (showErrors || err.code === 'regexInvalid' || err.code === 'headerNameInvalid' || err.code === 'gqlNameInvalid' || err.code === 'gqlNameTooLong');
     if (err && live) return { error: msg(err) };
     const warn = issues.warnings.find((i) => i.field === field);
     return warn ? { hint: <span className="mk-warn">{msg(warn)}</span> } : {};
@@ -96,7 +105,8 @@ export function RuleEditor(props: RuleEditorProps) {
   const statusNum = Number(form.status);
   const reason = /^\d{3}$/.test(form.status) ? reasonPhrase(statusNum) : undefined;
   const allApps = form.apps.length === 0;
-  const looksGraphql = /graphql/i.test(form.url) && form.match !== 'regex';
+  // GraphQL endpoints share one URL: offer the operation condition right there instead of hiding it in a menu.
+  const looksGraphql = (looksLikeGraphql(form.url) && form.match !== 'regex') || props.seenOperations.length > 0;
 
   const title = mode === 'edit' ? t('mocks.editor.editTitle') : mode === 'draft' ? t('mocks.editor.draftTitle') : t('mocks.editor.newTitle');
   const moreItems: MenuItem[] = [
@@ -176,12 +186,34 @@ export function RuleEditor(props: RuleEditorProps) {
             />
             <span className="mk-hint">{t(`mocks.match.hint.${form.match}`)}</span>
           </div>
-          {looksGraphql ? (
-            <Callout tone="warn" compact>
+          {form.gqlOn ? (
+            <GraphqlConditionEditor
+              form={form}
+              onChange={(patch) => onChange({ ...form, ...patch })}
+              error={fieldIssue('graphql').error}
+              seen={props.seenOperations}
+              reach={props.reach}
+              lang={lang}
+              idPrefix={uid}
+            />
+          ) : looksGraphql ? (
+            <Callout
+              tone="warn"
+              compact
+              actions={
+                <Button size="sm" onClick={() => onChange({ ...form, gqlOn: true })}>
+                  {t('mocks.editor.limitToOperation')}
+                </Button>
+              }
+            >
               {t('mocks.editor.graphqlShared')}
             </Callout>
-          ) : null}
-          <LiveTester draft={props.testerDraft} rules={props.rules} insertAt={props.insertAt} appNames={props.appNames} />
+          ) : (
+            <div className="mk-addcond-row">
+              <AddCondition onAddGraphql={() => onChange({ ...form, gqlOn: true })} />
+            </div>
+          )}
+          <LiveTester draft={props.testerDraft} rules={props.rules} insertAt={props.insertAt} appNames={props.appNames} notSentTo={props.notSentTo} />
         </fieldset>
 
         <fieldset className="mk-sec">

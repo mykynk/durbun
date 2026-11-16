@@ -72,9 +72,11 @@ export interface DurbunNetworkApi {
   begin(request: DurbunRequestReport): DurbunNetworkCall;
   /**
    * The desktop's mock rule for this request, if one applies, so your own client can answer with it
-   * (`rule.action`). Report the answer with `call.response({ ..., mockRuleId: rule.id })`.
+   * (`rule.action`). Report the answer with `call.response({ ..., mockRuleId: rule.id })`. Pass the request body
+   * text (and its content type) so rules limited to a GraphQL operation can match; without it such a rule matches
+   * only GET requests that carry the operation in the URL.
    */
-  findMock(method: string, url: string): MockRule | undefined;
+  findMock(method: string, url: string, request?: { body?: string; contentType?: string }): MockRule | undefined;
 }
 
 const shared = sharedState();
@@ -115,11 +117,13 @@ const network: DurbunNetworkApi = {
     }
   },
 
-  findMock(method: string, url: string): MockRule | undefined {
+  findMock(method: string, url: string, request?: { body?: string; contentType?: string }): MockRule | undefined {
     const c = current();
     if (!c) return undefined;
     try {
-      return c.findMock(String(method || 'GET').toUpperCase(), String(url));
+      const body = request && typeof request.body === 'string' ? request.body : undefined;
+      const contentType = request && typeof request.contentType === 'string' ? request.contentType : undefined;
+      return c.findMock(String(method || 'GET').toUpperCase(), String(url), { contentType, body: () => body });
     } catch {
       return undefined;
     }

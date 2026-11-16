@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { ArrowLeftRight, Drama, FileDown, FileUp, Plus, Power, Save } from 'lucide-react';
-import type { MockRule } from '@durbun/protocol';
-import { isEditConflict, networkStore, resolveMocksConflict, saveMocks, ui, useCompiledScope, useHub, useMocks, useNetworkVersion, useScopeMockHits, useUi, type MockRuleDraft } from '../../data';
+import { mockRuleMatchesRequest, type AppSession, type MockRule } from '@durbun/protocol';
+import { isEditConflict, mockRuleReach, mockRuleUnsupportedSessions, networkStore, resolveMocksConflict, saveMocks, ui, useCompiledScope, useHub, useMocks, useNetworkVersion, useScopeMockHits, useUi, type MockRuleDraft } from '../../data';
 import {
   Button,
   EmptyState,
@@ -31,6 +31,8 @@ import {
   exportRules,
   formSignature,
   formToRule,
+  graphqlCondition,
+  graphqlLabel,
   hitCounts,
   mergeImported,
   moveItem,
@@ -47,6 +49,7 @@ import { ConflictNotice } from './components/ConflictNotice';
 import { sessionHits, useHitLedgerVersion } from './model/hitLedger';
 import { RuleEditor, type KnownApp } from './components/RuleEditor';
 import { CapabilityHints, ImportDialog, type PendingImport } from './components/Extras';
+import type { RuleReach, SeenOperation } from './components/Conditions';
 import { ExplainCallout, ExplainEmpty, pickEmptyReason, useScopeExplain } from '../../sources';
 import { sniffFormat, transfer } from '../transfer/store';
 import './i18n';
@@ -61,8 +64,10 @@ interface EditorState {
 
 function matchesSearch(r: MockRule, q: string, summary: string): boolean {
   const s = q.toLowerCase();
+  const gql = graphqlCondition(r);
   return (
     (r.name ?? '').toLowerCase().includes(s) ||
+    (!!gql && graphqlLabel(gql).toLowerCase().includes(s)) ||
     r.url.toLowerCase().includes(s) ||
     r.method.toLowerCase() === s ||
     summary.toLowerCase().includes(s) ||
@@ -79,7 +84,7 @@ export default function MocksView() {
   // App stats change with every batch; subscribe only to what this view shows (identity, connection, caps).
   const appsSig = useHub((s) =>
     Object.values(s.apps)
-      .map((a) => [a.id, a.app.id, a.app.name, a.deviceId, a.connected ? 1 : 0, a.sdk.platform, a.capabilities.join(','), a.connectedAt].join('\u0001'))
+      .map((a) => [a.id, a.app.id, a.app.name, a.deviceId, a.connected ? 1 : 0, a.sdk.platform, a.capabilities.join(','), (a.sdk.mockMatchers ?? []).join(','), a.connectedAt].join('\u0001'))
       .join('\u0002'),
   );
   const allApps = useMemo(() => Object.values(useHub.getState().apps).sort((a, b) => b.connectedAt - a.connectedAt), [appsSig]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -391,6 +396,55 @@ export default function MocksView() {
     return formToRule(editor.form, { id: editor.ruleId ?? '__durbun_draft__', createdAt: 0 });
   }, [editor]);
 
+  /* ── conditions: where rules with a condition run (the server sends them only to SDKs that declared it) ── */
+  const reachOf = useCallback((rule: Pick<MockRule, 'when' | 'apps'>): RuleReach | null => {
+    const r = mockRuleReach(rule, allApps);
+    if (r.state === 'plain') return null;
+    // "Pati (iPhone 16 Pro)" when the same app runs on several devices: one may get the rule and the other not.
+    const byId = new Map(allApps.map((a) => [a.id, a]));
+    const reached = r.reachedSessions.map((id) => byId.get(id)).filter((a) => !!a);
+    const missing = r.missingSessions.map((id) => byId.get(id)).filter((a) => !!a);
+    const seen = new Map<string, number>();
+    for (const a of [...reached, ...missing]) seen.set(a.app.name, (seen.get(a.app.name) ?? 0) + 1);
+    const devices = useHub.getState().devices;
+    const label = (a: AppSession) => ((seen.get(a.app.name) ?? 0) > 1 ? `${a.app.name} (${devices[a.deviceId]?.name ?? a.deviceId})` : a.app.name);
+    return { state: r.state, reached: reached.map(label), missing: missing.map(label) };
+  }, [allApps]);
+  const reachById = useMemo(() => {
+    const out = new Map<string, RuleReach>();
+    for (const r of rules) {
+      const reach = reachOf(r);
+      if (reach) out.set(r.id, reach);
+    }
+    return out;
+  }, [rules, reachOf]);
+  const editorRule = useMemo(() => (editor ? formToRule(editor.form, { id: editor.ruleId ?? '__durbun_draft__', createdAt: 0 }) : null), [editor]);
+  const editorReach = useMemo(() => (editorRule ? reachOf(editorRule) : null), [editorRule, reachOf]);
+  const notSentTo = useMemo(() => (editorRule ? mockRuleUnsupportedSessions(editorRule, allApps) : new Set<string>()), [editorRule, allApps]);
+  // Sessions that miss a condition some enabled rule uses (the capability bar says so per app).
+  const conditionGaps = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of rules) if (r.enabled) for (const id of mockRuleReach(r, allApps).missingSessions) ids.add(id);
+    return ids;
+  }, [rules, allApps]);
+  // GraphQL operations captured at the edited method + URL (newest first): one click fills the condition.
+  const urlKey = editor ? `${editor.form.method}\u0001${editor.form.match}\u0001${editor.form.url}` : '';
+  const seenOperations = useMemo((): SeenOperation[] => {
+    if (!editorRule || !editorRule.url.trim()) return [];
+    const probe: MockRule = { ...editorRule, enabled: true, apps: undefined, when: undefined };
+    const seen = new Map<string, SeenOperation>();
+    const list = networkStore.list();
+    for (let i = list.length - 1, n = 0; i >= 0 && n < 2000 && seen.size < 12; i--, n++) {
+      const e = list[i]!;
+      const name = e.graphql?.operationName;
+      if (!name || !/^[_A-Za-z][_0-9A-Za-z]*$/.test(name)) continue;
+      const key = `${e.graphql?.operationType ?? ''}:${name}`;
+      if (seen.has(key) || !mockRuleMatchesRequest(probe, { method: e.method, url: e.url })) continue;
+      seen.set(key, e.graphql?.operationType ? { name, type: e.graphql.operationType } : { name });
+    }
+    return [...seen.values()];
+  }, [urlKey, v]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /* ── render ── */
   const empty = loaded && rules.length === 0 && !editor;
   return (
@@ -419,7 +473,7 @@ export default function MocksView() {
       ) : null}
       {conflict ? <ConflictNotice onReload={reloadAfterConflict} onOverwrite={overwriteAfterConflict} /> : null}
       {/* With no rules yet the explanation is the empty state itself (below); with rules it sits above the list. */}
-      {mocksStructural ? empty ? null : <ExplainCallout capability="mocks" className="mk-explain" /> : <CapabilityHints apps={scopedApps} />}
+      {mocksStructural ? empty ? null : <ExplainCallout capability="mocks" className="mk-explain" /> : <CapabilityHints apps={scopedApps} conditionGaps={conditionGaps} />}
       <SplitPane id="mocks.editor" sizedPane="second" defaultSize={600} minSize={420} maxSize={0.72} collapsed={editor ? null : 'second'} onOverlayDismiss={() => void closeEditor()} className="mk-split">
         <div className="mk-listpane">
           {!loaded ? (
@@ -477,6 +531,7 @@ export default function MocksView() {
                   selectedId={editor?.ruleId ?? null}
                   hits={hits}
                   appNames={appNames}
+                  reach={reachById}
                   onShowHits={showHits}
                   onOpen={(id) => void openRule(id)}
                   onToggle={toggleRule}
@@ -506,6 +561,9 @@ export default function MocksView() {
             insertAt={0}
             knownApps={knownApps}
             appNames={appNames}
+            reach={editorReach}
+            notSentTo={notSentTo}
+            seenOperations={seenOperations}
           />
         ) : (
           <span />

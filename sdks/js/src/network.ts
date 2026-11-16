@@ -1,4 +1,5 @@
 import type { BodyConfig } from './body.js';
+import type { MockRequestBody } from './mocks.js';
 import type { MockRule, SdkNetError, SdkNetRequest, SdkNetResponse, SdkNetSse, SdkNetWs } from './protocol.js';
 
 /** What the XHR / fetch patches need from the client. */
@@ -18,8 +19,11 @@ export interface NetworkHost {
    * launch request can still be mocked. Undefined when the request should go right away.
    */
   mocksPending(): Promise<void> | undefined;
-  /** First enabled matching mock rule for this request, if any. */
-  findMock(method: string, url: string): MockRule | undefined;
+  /**
+   * First enabled matching mock rule for this request, if any. `request` gives what a condition (a GraphQL operation)
+   * needs: the content type and the body text when already held (read only if such a rule matches the URL).
+   */
+  findMock(method: string, url: string, request?: MockRequestBody): MockRule | undefined;
   /** Requests that must never be captured or mocked (the desktop itself, the Metro dev server, user list). */
   isIgnored(url: string): boolean;
   debug(message: string, error?: unknown): void;

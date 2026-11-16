@@ -417,6 +417,12 @@ All notable changes to Dürbün are listed here. The format follows
 - Device: screenshots and screen recordings are kept in a library on this Mac (30 days, up to 2 GB or 1000
   items, oldest removed first) and survive a reload and a restart. Each one leaves a line on the device's log
   timeline that opens it.
+- Mocks: a rule can match one **GraphQL operation** (its name and, if you want, query / mutation /
+  subscription), so two rules on the same `/graphql` address answer different operations. **Create mock**
+  on a GraphQL request fills the operation in; the rule list shows it, and the live tester takes it into
+  account. A batched request matches when one of its operations does; a request whose body the app cannot read
+  goes to the real server. An app whose SDK cannot match operations is never sent such a rule, and the rule
+  says where it is not active. The React Native / JavaScript SDK matches operations.
 - Device: **Pull app data** saves a debuggable Android app's data folder, or a simulator app's data
   container, as one `.tar.gz` (up to 1 GiB, caches left out). Each refusal says why: not a debug build, not
   installed, phone locked, too large.

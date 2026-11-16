@@ -12,7 +12,10 @@ import {
   exportRules,
   formSignature,
   formToRule,
+  graphqlCondition,
+  graphqlLabel,
   headerRow,
+  looksLikeGraphql,
   hitCounts,
   mergeImported,
   moveItem,
@@ -171,6 +174,66 @@ describe('hit counts', () => {
       ['a', 2],
       ['c', 1],
     ]);
+  });
+});
+
+describe('GraphQL operation condition', () => {
+  const gqlForm = (p: Partial<RuleForm> = {}): RuleForm => ({ ...emptyForm(), method: 'POST', url: 'https://api.pati.app/graphql', match: 'exact', gqlOn: true, gqlName: 'GetUser', ...p });
+
+  it('round-trips form ⇄ rule, with and without a type', () => {
+    const r = rule('g', { method: 'POST', url: 'https://api.pati.app/graphql', match: 'exact', when: { graphql: { operationName: 'GetUser', operationType: 'query' } } });
+    const form = ruleToForm(r);
+    expect(form).toMatchObject({ gqlOn: true, gqlName: 'GetUser', gqlType: 'query' });
+    expect(formToRule(form, { id: 'g', createdAt: 1 })).toEqual(r);
+    const anyType = rule('h', { when: { graphql: { operationName: 'LikeStory' } } });
+    expect(formToRule(ruleToForm(anyType), { id: 'h', createdAt: 1 })).toEqual(anyType);
+    expect(ruleToForm(rule('p'))).toMatchObject({ gqlOn: false, gqlName: '', gqlType: '' });
+  });
+
+  it('trims the name; a removed condition leaves no `when`', () => {
+    expect(formToRule(gqlForm({ gqlName: '  GetUser ' }), { id: 'x', createdAt: 1 }).when).toEqual({ graphql: { operationName: 'GetUser' } });
+    expect(formToRule(gqlForm({ gqlOn: false }), { id: 'x', createdAt: 1 })).not.toHaveProperty('when');
+  });
+
+  it('validates the operation name like the server', () => {
+    const codes = (f: RuleForm) => validateForm(f).errors.map((e) => `${e.field}:${e.code}`);
+    expect(codes(gqlForm())).toEqual([]);
+    expect(codes(gqlForm({ gqlName: '_private2' }))).toEqual([]);
+    expect(codes(gqlForm({ gqlName: '  ' }))).toEqual(['graphql:gqlNameRequired']);
+    expect(codes(gqlForm({ gqlName: 'Get User' }))).toEqual(['graphql:gqlNameInvalid']);
+    expect(codes(gqlForm({ gqlName: '2fa' }))).toEqual(['graphql:gqlNameInvalid']);
+    expect(codes(gqlForm({ gqlName: 'query GetUser' }))).toEqual(['graphql:gqlNameInvalid']);
+    expect(codes(gqlForm({ gqlName: 'A'.repeat(129) }))).toEqual(['graphql:gqlNameTooLong']);
+    expect(validateForm(gqlForm({ gqlName: 'A'.repeat(129) })).errors[0]?.params).toEqual({ max: 128 });
+  });
+
+  it('labels and recognizes GraphQL addresses', () => {
+    expect(graphqlLabel({ operationName: 'GetUser', operationType: 'query' })).toBe('query GetUser');
+    expect(graphqlLabel({ operationName: 'GetUser' })).toBe('GetUser');
+    expect(graphqlCondition(rule('p'))).toBeUndefined();
+    expect(looksLikeGraphql('https://api.pati.app/graphql')).toBe(true);
+    expect(looksLikeGraphql('*/v2/GraphQL*')).toBe(true);
+    expect(looksLikeGraphql('https://x.dev/gql')).toBe(true);
+    expect(looksLikeGraphql('https://x.dev/gql/v1')).toBe(true);
+    expect(looksLikeGraphql('https://x.dev/v1/pets')).toBe(false);
+    expect(looksLikeGraphql('https://gqlx.dev/v1')).toBe(false);
+  });
+
+  it('imports conditions like the server: trimmed, empty type dropped, unknown or invalid refused', () => {
+    const base = { url: 'https://api.pati.app/graphql', action: { type: 'delay', delayMs: 1 } };
+    const text = JSON.stringify([
+      { ...base, when: { graphql: { operationName: ' GetUser ', operationType: '' } } },
+      { ...base, when: { graphql: null } },
+      { ...base, when: { header: { name: 'x' } } },
+      { ...base, when: 'GetUser' },
+      { ...base, when: { graphql: { operationName: 'Get User' } } },
+      { ...base, when: { graphql: { operationName: 'GetUser', operationType: 'Query' } } },
+    ]);
+    const { rules, issues } = parseRulesFile(text, 100);
+    expect(rules.map((r) => r.when)).toEqual([{ graphql: { operationName: 'GetUser' } }, undefined]);
+    expect(issues.map((i) => `${i.index}:${i.code}`)).toEqual(['3:conditionUnknown', '4:conditionInvalid', '5:graphqlInvalid', '6:graphqlInvalid']);
+    const exported = [rule('g', { when: { graphql: { operationName: 'LikeStory', operationType: 'mutation' } } })];
+    expect(parseRulesFile(exportRules(exported, 7)).rules).toEqual(exported);
   });
 });
 

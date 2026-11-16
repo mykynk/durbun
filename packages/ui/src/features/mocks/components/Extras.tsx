@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react';
 import { clsx } from 'clsx';
-import { Check, FileUp, X } from 'lucide-react';
+import { Check, CircleAlert, FileUp, X } from 'lucide-react';
 import type { AppSession, MockRule } from '@durbun/protocol';
 import { useHub } from '../../../data';
 import { Button, Callout, Dialog, MethodBadge, SdkBadge, SegmentedControl, Tooltip } from '../../../components';
 import { useLanguage, useT } from '../../../i18n';
-import { actionSummary, ruleLabel, type ImportIssue } from '../model/rules';
+import { actionSummary, graphqlCondition, graphqlLabel, ruleLabel, type ImportIssue } from '../model/rules';
 
-/** "Pati (Flutter) ✓ mock destekli · Pati (Dart VM) ✗" for the connected apps in scope. */
-export function CapabilityHints({ apps }: { apps: readonly AppSession[] }) {
+/**
+ * "Pati (Flutter) ✓ mock destekli · Pati (Dart VM) ✗" for the connected apps in scope. `conditionGaps`: sessions whose
+ * SDK misses a condition an enabled rule uses (those rules are not sent to it).
+ */
+export function CapabilityHints({ apps, conditionGaps }: { apps: readonly AppSession[]; conditionGaps?: ReadonlySet<string> }) {
   const t = useT();
   const deviceSig = useHub((s) =>
     Object.values(s.devices)
@@ -35,14 +38,21 @@ export function CapabilityHints({ apps }: { apps: readonly AppSession[] }) {
       {connected.length === 0 ? <span className="mk-caps__none">{t('mocks.caps.none')}</span> : null}
       {connected.map((a) => {
         const ok = a.capabilities.includes('mocks');
+        const gap = ok && !!conditionGaps?.has(a.id);
         return (
-          <Tooltip key={a.id} content={ok ? `${a.app.id}` : t('mocks.caps.unsupportedHint')}>
-            <span className={clsx('mk-cap', ok ? 'is-ok' : 'is-no')} tabIndex={0}>
+          <Tooltip key={a.id} content={ok ? (gap ? t('mocks.caps.conditionsMissingHint') : `${a.app.id}`) : t('mocks.caps.unsupportedHint')}>
+            <span className={clsx('mk-cap', ok ? 'is-ok' : 'is-no', gap && 'has-gap')} tabIndex={0}>
               <span className="mk-cap__name">{a.app.name}</span>
               <SdkBadge platform={a.sdk.platform} />
               {deviceNames.get(a.deviceId) ? <span className="mk-cap__dev">{deviceNames.get(a.deviceId)}</span> : null}
               {ok ? <Check size={12} aria-hidden /> : <X size={12} aria-hidden />}
               <span className="mk-cap__state">{ok ? t('mocks.caps.supported') : t('mocks.caps.unsupported')}</span>
+              {gap ? (
+                <span className="mk-cap__gap">
+                  <CircleAlert size={11} aria-hidden />
+                  {t('mocks.caps.conditionsMissing')}
+                </span>
+              ) : null}
             </span>
           </Tooltip>
         );
@@ -90,6 +100,7 @@ export function ImportDialog({ pending, existing, onClose, onConfirm }: { pendin
               <li key={r.id}>
                 {r.method === '*' ? <span className="mk-anymethod">*</span> : <MethodBadge method={r.method} />}
                 <span className="truncate">{ruleLabel(r)}</span>
+                {graphqlCondition(r) ? <span className="mk-op">{graphqlLabel(graphqlCondition(r)!)}</span> : null}
                 <span className="mk-import__sum">{actionSummary(r.action, t, lang)}</span>
               </li>
             ))}

@@ -1,4 +1,4 @@
-import type { Header, MockAction, MockRule, NetworkEntry, UrlMatchType } from '@durbun/protocol';
+import { GRAPHQL_NAME_RE, GRAPHQL_OPERATION_TYPES, MAX_GRAPHQL_OPERATION_NAME, MOCK_MATCHERS, type GraphqlOperationType, type Header, type MockAction, type MockGraphqlCondition, type MockRule, type NetworkEntry, type UrlMatchType } from '@durbun/protocol';
 import type { MockRuleDraft } from '../../../data';
 import { getLanguage, type Lang, type TFunction } from '../../../i18n';
 import { formatShortDuration } from './format';
@@ -90,6 +90,11 @@ export interface RuleForm {
   failError: FailError;
   failMessage: string;
   failDelayMs: string;
+  /** The GraphQL operation condition is on (`when.graphql`). */
+  gqlOn: boolean;
+  gqlName: string;
+  /** '' = any operation type. */
+  gqlType: '' | GraphqlOperationType;
 }
 
 export function emptyForm(): RuleForm {
@@ -110,6 +115,9 @@ export function emptyForm(): RuleForm {
     failError: 'timeout',
     failMessage: '',
     failDelayMs: '',
+    gqlOn: false,
+    gqlName: '',
+    gqlType: '',
   };
 }
 
@@ -121,6 +129,12 @@ export function ruleToForm(rule: MockRule | MockRuleDraft): RuleForm {
   f.url = rule.url;
   f.match = rule.match;
   f.apps = [...(rule.apps ?? [])];
+  const gql = graphqlCondition(rule);
+  if (gql) {
+    f.gqlOn = true;
+    f.gqlName = gql.operationName;
+    f.gqlType = gql.operationType ?? '';
+  }
   const a = rule.action;
   f.type = a.type;
   if (a.type === 'respond') {
@@ -139,7 +153,7 @@ export function ruleToForm(rule: MockRule | MockRuleDraft): RuleForm {
   return f;
 }
 
-export type FormField = 'name' | 'url' | 'method' | 'status' | 'headers' | 'body' | 'respondDelayMs' | 'delayMs' | 'failDelayMs' | 'failMessage' | 'apps';
+export type FormField = 'name' | 'url' | 'method' | 'status' | 'headers' | 'body' | 'respondDelayMs' | 'delayMs' | 'failDelayMs' | 'failMessage' | 'apps' | 'graphql';
 
 export interface FormIssue {
   field: FormField;
@@ -187,6 +201,12 @@ export function validateForm(form: RuleForm): { errors: FormIssue[]; warnings: F
   if (url !== url.trim() && url.trim()) warnings.push({ field: 'url', code: 'urlSpaces' });
   const method = form.method.trim();
   if (method !== '*' && !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(method)) errors.push({ field: 'method', code: 'methodInvalid' });
+  if (form.gqlOn) {
+    const op = form.gqlName.trim();
+    if (!op) errors.push({ field: 'graphql', code: 'gqlNameRequired' });
+    else if (op.length > MAX_GRAPHQL_OPERATION_NAME) errors.push({ field: 'graphql', code: 'gqlNameTooLong', params: { max: MAX_GRAPHQL_OPERATION_NAME } });
+    else if (!GRAPHQL_NAME_RE.test(op)) errors.push({ field: 'graphql', code: 'gqlNameInvalid' });
+  }
 
   const checkDelay = (field: FormField, value: string) => {
     const d = parseDelay(value);
@@ -254,7 +274,48 @@ export function formToRule(form: RuleForm, base: { id: string; createdAt: number
   };
   if (form.name.trim()) rule.name = form.name.trim();
   if (form.apps.length > 0) rule.apps = [...new Set(form.apps)];
+  if (form.gqlOn && form.gqlName.trim()) {
+    const graphql: MockGraphqlCondition = { operationName: form.gqlName.trim() };
+    if (form.gqlType) graphql.operationType = form.gqlType;
+    rule.when = { graphql };
+  }
   return rule;
+}
+
+/* ───────────── Conditions (mock matching v2) ───────────── */
+
+/** The rule's GraphQL operation condition, when it has a valid one. */
+export function graphqlCondition(rule: Pick<MockRule, 'when'>): MockGraphqlCondition | undefined {
+  const g = rule.when?.graphql;
+  return g && typeof g.operationName === 'string' && g.operationName ? g : undefined;
+}
+
+/** "query GetUser", "GetUser" (any type). */
+export function graphqlLabel(g: MockGraphqlCondition): string {
+  return g.operationType ? `${g.operationType} ${g.operationName}` : g.operationName;
+}
+
+/** The URL pattern or the request looks like a GraphQL endpoint (the editor offers the operation condition). */
+export function looksLikeGraphql(url: string): boolean {
+  return /graphql|\/gql(\b|\/|$)/i.test(url);
+}
+
+/** Parse an imported `when` like the server does; an unknown condition is refused (dropping it would widen the rule). */
+function normalizeConditions(raw: unknown): { when?: MockRule['when'] } | { issue: string } {
+  if (raw === undefined || raw === null) return {};
+  if (!isObj(raw)) return { issue: 'conditionInvalid' };
+  let graphql: MockGraphqlCondition | undefined;
+  for (const [key, value] of Object.entries(raw)) {
+    if (value === undefined || value === null) continue;
+    if (!(MOCK_MATCHERS as readonly string[]).includes(key)) return { issue: 'conditionUnknown' };
+    if (!isObj(value)) return { issue: 'graphqlInvalid' };
+    const name = typeof value.operationName === 'string' ? value.operationName.trim() : '';
+    if (!name || name.length > MAX_GRAPHQL_OPERATION_NAME || !GRAPHQL_NAME_RE.test(name)) return { issue: 'graphqlInvalid' };
+    const type = value.operationType;
+    if (type !== undefined && type !== null && type !== '' && !(GRAPHQL_OPERATION_TYPES as readonly unknown[]).includes(type)) return { issue: 'graphqlInvalid' };
+    graphql = typeof type === 'string' && type ? { operationName: name, operationType: type as GraphqlOperationType } : { operationName: name };
+  }
+  return graphql ? { when: { graphql } } : {};
 }
 
 /** Comparable snapshot of a form (header row ids ignored) for dirty checks. */
@@ -405,6 +466,8 @@ export function normalizeImportedRule(raw: unknown, index: number, now: number):
   const method = typeof raw.method === 'string' && raw.method.trim() ? raw.method.trim() : '*';
   if (method !== '*' && !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(method)) return bad('methodInvalid');
   if (raw.apps !== undefined && raw.apps !== null && (!Array.isArray(raw.apps) || raw.apps.some((a) => typeof a !== 'string'))) return bad('appsInvalid');
+  const conditions = normalizeConditions(raw.when);
+  if ('issue' in conditions) return bad(conditions.issue);
   const a = raw.action;
   if (!isObj(a)) return bad('actionInvalid');
   const delay = (v: unknown): number | undefined => {
@@ -458,6 +521,7 @@ export function normalizeImportedRule(raw: unknown, index: number, now: number):
   if (typeof raw.name === 'string' && raw.name.trim()) rule.name = raw.name.trim().slice(0, 200);
   const apps = Array.isArray(raw.apps) ? [...new Set((raw.apps as string[]).map((s) => s.trim()).filter(Boolean))] : [];
   if (apps.length) rule.apps = apps;
+  if (conditions.when) rule.when = conditions.when;
   return { rule };
 }
 

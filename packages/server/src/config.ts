@@ -17,9 +17,15 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   DEFAULT_SETTINGS,
+  GRAPHQL_NAME_RE,
+  GRAPHQL_OPERATION_TYPES,
+  MAX_GRAPHQL_OPERATION_NAME,
+  MOCK_MATCHERS,
+  type GraphqlOperationType,
   type Header,
   type MockAction,
   type MockRule,
+  type MockRuleConditions,
   type ServerSettings,
   type UrlMatchType,
 } from '@durbun/protocol';
@@ -279,7 +285,7 @@ export interface MockRuleProblem {
   ok: false;
   problem: string;
   field: string;
-  /** 'required' | 'text' | 'number' | 'range' {min,max} | 'oneOf' {options} | 'maxLength' {max} | 'base64' | 'httpMethod' | 'headerList' | 'appIdList' | 'object' | 'tooMany' {max} | 'list'. */
+  /** 'required' | 'text' | 'number' | 'range' {min,max} | 'oneOf' {options} | 'maxLength' {max} | 'base64' | 'httpMethod' | 'headerList' | 'appIdList' | 'object' | 'tooMany' {max} | 'list' | 'graphqlName' | 'unknownCondition'. */
   expected: string;
   extra?: Record<string, string | number>;
 }
@@ -359,6 +365,35 @@ function validateAction(raw: unknown, where: string): { ok: true; action: MockAc
   }
 }
 
+/**
+ * `when` (mock matching v2). A condition this server does not know is refused rather than dropped: dropping it would
+ * turn the rule into one that answers every request to its URL.
+ */
+function validateConditions(raw: unknown, where: string): { ok: true; when?: MockRuleConditions } | MockRuleProblem {
+  if (raw === undefined || raw === null) return { ok: true };
+  if (!isPlainObject(raw)) return bad(`${where}: when must be an object`, 'when', 'object');
+  const when: MockRuleConditions = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (value === undefined || value === null) continue;
+    if (key !== 'graphql') return bad(`${where}: unknown condition "${key.slice(0, 60)}" (this version of Dürbün knows: ${MOCK_MATCHERS.join(', ')})`, `when.${key.slice(0, 60)}`, 'unknownCondition');
+    if (!isPlainObject(value)) return bad(`${where}: when.graphql must be an object`, 'when.graphql', 'object');
+    const name = typeof value.operationName === 'string' ? value.operationName.trim() : value.operationName;
+    if (typeof name !== 'string' || name === '') return bad(`${where}: the GraphQL operation name is missing`, 'when.graphql.operationName', 'required');
+    if (name.length > MAX_GRAPHQL_OPERATION_NAME) {
+      return bad(`${where}: the GraphQL operation name is longer than ${MAX_GRAPHQL_OPERATION_NAME} characters`, 'when.graphql.operationName', 'maxLength', { max: MAX_GRAPHQL_OPERATION_NAME });
+    }
+    if (!GRAPHQL_NAME_RE.test(name)) {
+      return bad(`${where}: "${name.slice(0, 60)}" is not a GraphQL operation name (letters, digits and _; not starting with a digit)`, 'when.graphql.operationName', 'graphqlName');
+    }
+    const type = value.operationType;
+    if (type !== undefined && type !== null && type !== '' && !(GRAPHQL_OPERATION_TYPES as readonly unknown[]).includes(type)) {
+      return bad(`${where}: the GraphQL operation type must be one of ${GRAPHQL_OPERATION_TYPES.join(', ')}`, 'when.graphql.operationType', 'oneOf', { options: GRAPHQL_OPERATION_TYPES.join(', ') });
+    }
+    when.graphql = typeof type === 'string' && type !== '' ? { operationName: name, operationType: type as GraphqlOperationType } : { operationName: name };
+  }
+  return Object.keys(when).length > 0 ? { ok: true, when } : { ok: true };
+}
+
 export function validateMockRule(raw: unknown, index = 0, now = Date.now()): { ok: true; rule: MockRule } | MockRuleProblem {
   const where = `rule #${index + 1}`;
   if (!isPlainObject(raw)) return bad(`${where}: must be an object`, 'rule', 'object');
@@ -380,6 +415,8 @@ export function validateMockRule(raw: unknown, index = 0, now = Date.now()): { o
     }
     apps = [...new Set((raw.apps as string[]).map((a) => a.trim()).filter(Boolean))];
   }
+  const when = validateConditions(raw.when, label);
+  if (!when.ok) return when;
   const action = validateAction(raw.action, label);
   if (!action.ok) return action;
   const id = typeof raw.id === 'string' && raw.id.trim() && raw.id.length <= 200 ? raw.id.trim() : newMockRuleId();
@@ -396,6 +433,7 @@ export function validateMockRule(raw: unknown, index = 0, now = Date.now()): { o
   const name = optionalString(raw.name, 200);
   if (name) rule.name = name;
   if (apps && apps.length > 0) rule.apps = apps;
+  if (when.when) rule.when = when.when;
   return { ok: true, rule };
 }
 
