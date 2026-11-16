@@ -16,6 +16,9 @@ import okhttp3.Response
  *     .build()
  * ```
  *
+ * Server-Sent Events (`text/event-stream`) show up as one entry with their events, and a WebSocket's handshake as
+ * one entry; for the WebSocket's messages, open it with [DurbunWebSocketFactory].
+ *
  * Until [Durbun.start] has run (and always in release builds, or with [DurbunOptions.captureNetwork] off —
  * in Flutter apps `DurbunOptions(captureNetwork: false)` on the Dart side) it is a plain pass-through.
  *
@@ -31,7 +34,10 @@ class DurbunInterceptor @JvmOverloads constructor(
         val core = Durbun.coreOrNull()
         if (core == null || !core.options.captureNetwork) return chain.proceed(chain.request())
         val ignored = try {
-            core.ignoresHost(chain.request().url.host)
+            val request = chain.request()
+            val url = request.url
+            val upgrade = "websocket".equals(request.header("Upgrade"), ignoreCase = true)
+            core.ignoresHost(url.host) || core.isDesktopEndpoint(url.host, url.port, url.encodedPath, upgrade)
         } catch (_: Throwable) {
             false
         }

@@ -64,4 +64,30 @@ class NoopApiTest {
         assertEquals(204, response.code)
         response.close()
     }
+
+    @Test
+    fun webSocketFactoryOpensExactlyWhatTheDelegateOpens() {
+        val request = Request.Builder().url("ws://localhost/chat").build()
+        val listener = object : okhttp3.WebSocketListener() {}
+        val opened = object : okhttp3.WebSocket {
+            override fun request(): Request = request
+            override fun queueSize(): Long = 0
+            override fun send(text: String): Boolean = true
+            override fun send(bytes: okio.ByteString): Boolean = true
+            override fun close(code: Int, reason: String?): Boolean = true
+            override fun cancel() = Unit
+        }
+        var seen: Pair<Request, okhttp3.WebSocketListener>? = null
+        val factory = DurbunWebSocketFactory(
+            object : okhttp3.WebSocket.Factory {
+                override fun newWebSocket(request: Request, listener: okhttp3.WebSocketListener): okhttp3.WebSocket {
+                    seen = request to listener
+                    return opened
+                }
+            },
+        )
+        assertSame(opened, factory.newWebSocket(request, listener))
+        assertSame(request, seen!!.first)
+        assertSame(listener, seen!!.second)
+    }
 }

@@ -202,6 +202,81 @@ internal class DurbunCore(
     /** Effective per-body capture limit in bytes. */
     val maxBodyBytes: Int get() = (options.maxBodyBytes ?: config.maxBodyBytes).coerceIn(0, MAX_BODY_BYTES)
 
+    /**
+     * Send WebSocket messages and SSE events: only while the latest config says `captureStreams: true` (a desktop
+     * that leaves the field out cannot take them) and network capture is on. Read per message, so a `config` that
+     * changes it applies to the next message.
+     */
+    val captureStreams: Boolean get() = options.captureNetwork && config.captureStreams && !stopped.get()
+
+    /**
+     * Payload cap of one stream message in bytes; 0 = sizes only. The desktop's value, unless the app overrides
+     * body capture ([DurbunOptions.captureBodies], [DurbunOptions.maxBodyBytes]) the way it does for HTTP bodies.
+     */
+    val maxStreamMessageBytes: Int
+        get() {
+            val forced = options.captureBodies
+            if (forced == false) return 0
+            val config = config
+            val cap = if (forced == true && !config.captureBodies && config.maxStreamMessageBytes == 0) {
+                DEFAULT_STREAM_MESSAGE_BYTES // the desktop sent 0 only because its body capture is off
+            } else {
+                config.maxStreamMessageBytes
+            }
+            return minOf(cap, maxBodyBytes, MAX_STREAM_MESSAGE_BYTES).coerceAtLeast(0)
+        }
+
+    /**
+     * True for the desktop's own endpoints: anything on its SDK port, and a WebSocket handshake ([webSocket]) to
+     * its `/sdk` or `/ui` socket on a desktop address. Dürbün never reports its own traffic, even when an app, a
+     * JavaScript SDK in the same process or a test reaches the desktop through OkHttp. A plain HTTP request to
+     * such a path is the app's own (a local development server) and is reported as usual.
+     */
+    fun isDesktopEndpoint(host: String, port: Int, path: String, webSocket: Boolean = true): Boolean {
+        val ownPath = webSocket && (path == "/sdk" || path == "/ui")
+        val lan = lanEndpoint()
+        if (!ownPath && port != basePort() && port != lan?.port) return false
+        val lower = host.lowercase().removePrefix("[").removeSuffix("]")
+        if (lower == "localhost" || lower == LOOPBACK || lower == "::1" || lower == EMULATOR_HOST) return true
+        if (lan?.host?.lowercase() == lower) return true
+        return hostState.endpoint?.host?.lowercase() == lower
+    }
+
+    private val untaggedWebSocket = AtomicBoolean(false)
+    private val webSocketHinted = AtomicBoolean(false)
+
+    /**
+     * [dev.durbun.DurbunInterceptor] saw a WebSocket handshake that did not come through
+     * [dev.durbun.DurbunWebSocketFactory]: its messages cannot be seen. Said once, while the desktop wants them.
+     */
+    fun noteUntaggedWebSocket() {
+        untaggedWebSocket.set(true)
+        webSocketHintIfNeeded()
+    }
+
+    private fun webSocketHintIfNeeded() {
+        try {
+            if (!untaggedWebSocket.get() || !captureStreams || !webSocketHinted.compareAndSet(false, true)) return
+            val message = "This app opened a WebSocket with OkHttpClient.newWebSocket, so Dürbün shows its handshake " +
+                "but not its messages. Open it with DurbunWebSocketFactory(client).newWebSocket(request, listener) " +
+                "(or pass DurbunWebSocketFactory(client) where a library asks for a WebSocket.Factory)."
+            logger.info(message)
+            send(
+                Wire.log(
+                    ts = env.nowMs(),
+                    level = Level.INFO.wireName,
+                    tag = SDK_TAG,
+                    message = message,
+                    // Stable for the desktop, which can word the line in the viewer's language.
+                    data = linkedMapOf("reason" to "noWebSocketFactory"),
+                    kind = "text",
+                ),
+            )
+        } catch (t: Throwable) {
+            logger.warn("Could not report the WebSocket setup", t)
+        }
+    }
+
     fun start() {
         startedAtNanos = System.nanoTime()
         if (relay != null) {
@@ -243,6 +318,11 @@ internal class DurbunCore(
     /** Encoded message → outgoing queue (dropped when stopped). */
     fun send(line: String) {
         if (!stopped.get()) queue.offer(line)
+    }
+
+    /** A `net.ws` / `net.sse` message: the queue drops these first when it is full. */
+    fun sendStream(line: String) {
+        if (!stopped.get()) queue.offer(line, stream = true)
     }
 
     /* ───────────── public API backends ───────────── */
@@ -810,6 +890,7 @@ internal class DurbunCore(
         if (stopped.get()) return
         if (options.captureMetrics) startMetrics(config.metricsIntervalMs)
         applyLogcat()
+        webSocketHintIfNeeded()
     }
 
     /**
@@ -946,7 +1027,8 @@ internal class DurbunCore(
 
     private fun capabilities(): List<String> {
         val caps = mutableListOf("logs")
-        if (options.captureNetwork) caps += listOf("network", "mocks")
+        // `streams`: it can send net.ws / net.sse; it still does only while config.captureStreams is true.
+        if (options.captureNetwork) caps += listOf("network", "mocks", "streams")
         caps += listOf("events", "commands")
         if (options.captureCrashes) caps += "crash"
         if (options.captureMetrics && metricsSampler != null) caps += "metrics"
@@ -978,6 +1060,12 @@ internal class DurbunCore(
 
         /** Bodies above this are always truncated, whatever the desktop asks (keeps frames < 16 MiB). */
         const val MAX_BODY_BYTES = 8 * 1024 * 1024
+
+        /** Stream payloads are capped here whatever the desktop asks (a chatty socket must stay cheap). */
+        const val MAX_STREAM_MESSAGE_BYTES = 1024 * 1024
+
+        /** The desktop's own cap (min(maxBodyBytes, 64 KiB)), used when the app forces body capture on. */
+        const val DEFAULT_STREAM_MESSAGE_BYTES = 64 * 1024
 
         private const val MIN_METRICS_INTERVAL_MS = 250L
         private const val MAX_METRICS_INTERVAL_MS = 60_000L

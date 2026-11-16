@@ -356,6 +356,12 @@ All notable changes to Dürbün are listed here. The format follows
   reasons); SSE from `XMLHttpRequest`-based libraries such as `react-native-sse`, from `fetch` streams and from
   the browser's `EventSource`. They are sent only while the Mac app asks for them, and their payloads follow the
   body settings.
+- Android SDK: Server-Sent Events (okhttp-sse, Retrofit `@Streaming`, plain calls) show as one entry with their
+  events, the end of the stream, a cancel or an error; `DurbunInterceptor` is all they need.
+- Android SDK: `DurbunWebSocketFactory` opens OkHttp WebSockets whose text, binary and close frames, in both
+  directions, show under the handshake entry. It is a `WebSocket.Factory`, so it also fits Ktor's OkHttp engine.
+  A socket opened with `client.newWebSocket` shows its handshake and one line saying how to see its messages.
+  A busy socket drops its own oldest messages before any log or request.
 - Logs and Performance: the cold start time the Android and iOS SDKs measure (`durbun.launch`) reads as a line
   in Logs ("Cold start 1.24 s"; a prewarmed iOS launch is named and carries no time) and as a Launch tile in
   Performance that opens the line.

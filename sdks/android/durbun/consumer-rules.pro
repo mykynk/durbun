@@ -21,9 +21,13 @@
 -dontwarn okhttp3.Response$Builder
 -dontwarn okhttp3.ResponseBody
 -dontwarn okhttp3.Route
+-dontwarn okhttp3.WebSocket
+-dontwarn okhttp3.WebSocket$Factory
+-dontwarn okhttp3.WebSocketListener
 -dontwarn okio.Buffer
 -dontwarn okio.BufferedSink
 -dontwarn okio.BufferedSource
+-dontwarn okio.ByteString
 -dontwarn okio.Okio
 -dontwarn okio.Sink
 -dontwarn okio.Source

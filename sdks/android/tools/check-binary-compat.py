@@ -34,6 +34,7 @@ PUBLIC_CLASSES = [
     "dev.durbun.DurbunAction$SelectHandler",
     "dev.durbun.DurbunInterceptor",
     "dev.durbun.DurbunEventListenerFactory",
+    "dev.durbun.DurbunWebSocketFactory",
     "dev.durbun.DurbunConnectionStatus",
     "dev.durbun.DurbunConnectionListener",
 ]

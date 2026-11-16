@@ -24,7 +24,7 @@ run code inside the app.
 | Device logs (logcat, all processes) | Read by the Mac app over USB or wireless adb; no SDK needed |
 | `Durbun.log(...)`, Timber | Sent by the SDK as structured entries: tag, level, JSON data and full stack trace |
 | The app's own logcat over Wi-Fi (no adb) | Read and forwarded by the SDK (multi-line messages are merged back) |
-| Network (OkHttp) | `DurbunInterceptor`; DNS / connect / TLS times with `DurbunEventListenerFactory` |
+| Network (OkHttp) | `DurbunInterceptor`; DNS / connect / TLS times with `DurbunEventListenerFactory`; WebSocket messages with `DurbunWebSocketFactory` |
 | Crashes | Uncaught exceptions; a crash that cannot reach the Mac app is sent on the next launch |
 | How earlier launches ended | ANRs, native crashes and kills by the system, on the next launch (Android 11+, see [Earlier launches](#earlier-launches-anrs-native-crashes-system-kills)) |
 
@@ -178,8 +178,8 @@ val client = OkHttpClient.Builder()
 - Reporting order: the request is reported first with its size, then again (same id) with its body once
   written. The response is reported at the end of the body, when the capture limit is reached, or when the app
   closes the body. A body closed unread shows its size only; a response that is never closed (leaked) stays
-  pending in the Mac app. SSE (`text/event-stream`), NDJSON, WebSocket, gRPC and audio/video streams are
-  reported with their size only.
+  pending in the Mac app. NDJSON, gRPC and audio/video streams are reported with their size only; for SSE and
+  WebSockets see [WebSockets and Server-Sent Events](#websockets-and-server-sent-events).
 - To observe bodies, the interceptor hands request bodies (except `FormBody`) and captured response bodies
   down the chain in a thin wrapper (content type, length, and one-shot / duplex flags are forwarded). If your
   own interceptors check body classes (for example `body is MultipartBody`), add `DurbunInterceptor` after
@@ -195,6 +195,37 @@ OkHttp engine build for themselves. Traffic over `HttpURLConnection` is not seen
 ExoPlayer / Media3 `DefaultHttpDataSource`, Glide's default loader, Ktor's CIO and Android engines, Cronet,
 WebView and native (C/C++) code. When OkHttp is in the app but no `DurbunInterceptor` was created 30 seconds
 after start, the Mac app shows one line saying so, so an empty network list has a reason.
+
+#### WebSockets and Server-Sent Events
+
+A long-lived connection is one entry in the network list, with its messages in the order the app saw them.
+
+- **Server-Sent Events** need nothing more than `DurbunInterceptor`: okhttp-sse `EventSources`, Retrofit
+  `@Streaming` calls and plain calls that read a `text/event-stream` response. The entry is reported as soon as
+  the headers arrive, then each event (`event`, `id`, `retry` and the data), and the end of the stream. Events
+  are read from a copy of what the app reads: nothing is read ahead or held back. Closing the response early
+  shows as cancelled; a stream that breaks shows the error.
+- **WebSockets:** OkHttp gives the messages to no interceptor, so open the socket through
+  `DurbunWebSocketFactory` instead of `client.newWebSocket(...)`:
+
+  ```kotlin
+  val webSockets = DurbunWebSocketFactory(client)
+  val socket = webSockets.newWebSocket(request, listener)   // was: client.newWebSocket(request, listener)
+  ```
+
+  Text, binary and close frames in both directions are shown (OkHttp does not expose pings). Your listener
+  gets every callback as before, with the socket the factory returned. It is a `WebSocket.Factory`, so it also
+  goes where a library takes one, for example Ktor's OkHttp engine:
+  `engine { webSocketFactory = DurbunWebSocketFactory(client) }`. With `DurbunInterceptor` on the client its
+  entry is the handshake (mocks apply to it); without it, the factory reports the handshake itself.
+- A socket opened with `client.newWebSocket(...)` on a client with `DurbunInterceptor` shows only its handshake,
+  and the Mac app gets one line saying how to see its messages.
+- Messages are sent while the Mac app asks for them (Settings → "Capture WebSocket and SSE messages", on by
+  default); an older Mac app, or the setting off, gets the plain request entries as before. Payloads follow
+  body capture and are cut at the Mac app's per-message limit (64 KB by default); sizes are always shown. A
+  busy socket never pushes out logs or requests: when the SDK's buffer is full, the oldest stream messages are
+  dropped first.
+- `durbun-noop` has the same factory: it opens the socket exactly as `client.newWebSocket(...)` would.
 
 ### Logs and events
 

@@ -8,3 +8,6 @@
 -dontwarn okhttp3.Interceptor$Chain
 -dontwarn okhttp3.Request
 -dontwarn okhttp3.Response
+-dontwarn okhttp3.WebSocket
+-dontwarn okhttp3.WebSocket$Factory
+-dontwarn okhttp3.WebSocketListener

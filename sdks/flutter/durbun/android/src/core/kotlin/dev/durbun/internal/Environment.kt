@@ -42,15 +42,26 @@ internal data class SdkConfig(
     val maxBodyBytes: Int = 1_048_576,
     val metricsIntervalMs: Long = 1_000,
     val deviceLogsAvailable: Boolean = false,
+    /** Send `net.ws` / `net.sse`. Only a config that says `true` turns it on (older desktops leave it out). */
+    val captureStreams: Boolean = false,
+    /** Payload cap of one stream message in bytes (0: sizes only). */
+    val maxStreamMessageBytes: Int = 0,
 ) {
     companion object {
-        /** Merges a `config` object over [previous] (unknown / missing fields keep their old value). */
+        /**
+         * Merges a `config` object over [previous] (unknown / missing fields keep their old value), except the
+         * stream fields: a config without them comes from a desktop that cannot take stream messages, so they
+         * fall back to "off" even when an earlier config had them on.
+         */
         fun from(map: Map<String, Any?>, previous: SdkConfig): SdkConfig = SdkConfig(
             captureBodies = map.bool("captureBodies") ?: previous.captureBodies,
             maxBodyBytes = map.num("maxBodyBytes")?.toLong()?.coerceIn(0L, Int.MAX_VALUE.toLong())?.toInt()
                 ?: previous.maxBodyBytes,
             metricsIntervalMs = map.num("metricsIntervalMs")?.toLong() ?: previous.metricsIntervalMs,
             deviceLogsAvailable = map.bool("deviceLogsAvailable") ?: previous.deviceLogsAvailable,
+            captureStreams = map.bool("captureStreams") == true,
+            maxStreamMessageBytes = map.num("maxStreamMessageBytes")?.toLong()?.coerceIn(0L, Int.MAX_VALUE.toLong())?.toInt()
+                ?: 0,
         )
     }
 }

@@ -1,5 +1,6 @@
 package dev.durbun.internal
 
+import okhttp3.Call
 import okhttp3.FormBody
 import okhttp3.Headers
 import okhttp3.Interceptor
@@ -50,7 +51,16 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         val startWall = System.currentTimeMillis()
         val startNs = System.nanoTime()
         val method = request.method
-        val url = request.url.toString()
+        val upgrade = StreamRequests.isWebSocketUpgrade(request)
+        // While the desktop takes stream messages a WebSocket entry shows the ws(s):// URL the app wrote; otherwise
+        // the entry stays what it always was.
+        val url = if (upgrade && core.captureStreams) {
+            StreamRequests.webSocketUrl(request.url.toString())
+        } else {
+            request.url.toString()
+        }
+        // A socket opened through DurbunWebSocketFactory: its messages take this handshake's id.
+        if (upgrade) guard(core) { request.tag(StreamTag::class.java)?.id = id }
 
         val found = guard(core) { core.findMock(method, url) }
         // A network interceptor must call proceed() exactly once, so it cannot answer from a mock.
@@ -282,6 +292,12 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         val remote = remoteAddress(chain)
         // Read now: the call's listener lets go of it when the body ends, before the body's report goes out.
         val phases = phasesOf(chain)
+        // A WebSocket opened with OkHttpClient.newWebSocket: the handshake is all Dürbün can see of it. The desktop
+        // is told (`noStream`) so it does not wait for messages that never come; the app gets one hint line.
+        val noStream = code == 101 && (guard(core) {
+            StreamRequests.isWebSocketUpgrade(request) && request.tag(StreamTag::class.java) == null
+        } ?: false)
+        if (noStream) guard(core) { core.noteUntaggedWebSocket() }
         val send = { body: WireBody?, receiveMs: Double? ->
             core.send(
                 Wire.netResponse(
@@ -296,6 +312,7 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
                     timings = timings(response, startWall, receiveMs, phases),
                     mocked = mock != null,
                     mockRuleId = mock?.id,
+                    noStream = noStream,
                 ),
             )
         }
@@ -306,6 +323,14 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         }
         val length = body.contentLength()
         val contentType = body.contentType()?.toString() ?: response.header("Content-Type", null)
+        if (SseCapture.applies(response, contentType)) {
+            // Reported as soon as the headers arrive. While the desktop takes stream messages: without a body, the
+            // events follow as `net.sse`; otherwise exactly as before (size only), and events follow only if it
+            // starts asking while the stream is open.
+            val streams = core.captureStreams
+            send(if (streams) null else WireBody.sizeOnly(length), null)
+            return guard(core) { SseCapture.wrap(core, callOf(chain), id, response, streams) } ?: response
+        }
         if (!core.captureBodies || length == 0L || isStream(request, response, contentType)) {
             send(WireBody.sizeOnly(length), null)
             return response
@@ -479,6 +504,12 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         chain.connection() != null
     } catch (_: Throwable) {
         false
+    }
+
+    private fun callOf(chain: Interceptor.Chain): Call? = try {
+        chain.call()
+    } catch (_: Throwable) {
+        null
     }
 
     private fun isCanceled(chain: Interceptor.Chain): Boolean = try {

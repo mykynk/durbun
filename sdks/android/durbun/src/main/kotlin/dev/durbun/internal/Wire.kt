@@ -101,6 +101,8 @@ internal object Wire {
         timings: Map<String, Any?>?,
         mocked: Boolean,
         mockRuleId: String?,
+        /** A WebSocket handshake whose messages the SDK cannot see (opened without `DurbunWebSocketFactory`). */
+        noStream: Boolean = false,
     ): String {
         val map = linkedMapOf<String, Any?>("type" to "net.response", "id" to id, "ts" to ts, "status" to status)
         if (!statusText.isNullOrEmpty()) map["statusText"] = statusText
@@ -113,6 +115,7 @@ internal object Wire {
             map["mocked"] = true
             if (mockRuleId != null) map["mockRuleId"] = mockRuleId
         }
+        if (noStream) map["noStream"] = true
         return Json.encode(map)
     }
 
@@ -124,6 +127,55 @@ internal object Wire {
             if (mockRuleId != null) map["mockRuleId"] = mockRuleId
         }
         return Json.encode(map)
+    }
+
+    /** One WebSocket message of the connection whose handshake was `net.request` [id] (SPEC §6.1.1). */
+    fun netWs(
+        id: String,
+        ts: Long,
+        dir: String,
+        opcode: String,
+        size: Long,
+        body: WireBody?,
+        closeCode: Int? = null,
+        closeReason: String? = null,
+    ): String {
+        val map = linkedMapOf<String, Any?>(
+            "type" to "net.ws",
+            "id" to id,
+            "ts" to ts,
+            "dir" to dir,
+            "opcode" to opcode,
+            "size" to size,
+        )
+        if (body != null) map["body"] = body.toJson()
+        if (closeCode != null) map["closeCode"] = closeCode
+        if (!closeReason.isNullOrEmpty()) map["closeReason"] = capField(closeReason)
+        return Json.encode(map)
+    }
+
+    /** One Server-Sent Events event of the response to `net.request` [id]; `event` "message" is left out. */
+    fun netSse(id: String, ts: Long, event: String?, eventId: String?, retry: Long?, size: Long, body: WireBody?): String {
+        val map = linkedMapOf<String, Any?>("type" to "net.sse", "id" to id, "ts" to ts)
+        if (!event.isNullOrEmpty() && event != "message") map["event"] = capField(event)
+        if (!eventId.isNullOrEmpty()) map["eventId"] = capField(eventId)
+        if (retry != null) map["retry"] = retry
+        map["size"] = size
+        if (body != null) map["body"] = body.toJson()
+        return Json.encode(map)
+    }
+
+    /** The server ended the event stream of [id] normally. */
+    fun netSseEnd(id: String, ts: Long): String =
+        Json.encode(linkedMapOf("type" to "net.sse", "id" to id, "ts" to ts, "end" to true))
+
+    /** `closeReason`, `event` and `eventId` are kept to this many characters (the desktop cuts them there too). */
+    const val MAX_STREAM_FIELD_CHARS = 256
+
+    private fun capField(value: String): String {
+        if (value.length <= MAX_STREAM_FIELD_CHARS) return value
+        val end = if (Character.isHighSurrogate(value[MAX_STREAM_FIELD_CHARS - 1])) MAX_STREAM_FIELD_CHARS - 1 else MAX_STREAM_FIELD_CHARS
+        return value.substring(0, end)
     }
 
     fun metric(ts: Long, values: Map<String, Any?>): String {
