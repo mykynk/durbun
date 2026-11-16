@@ -11,6 +11,8 @@ export interface HistogramProps {
   visible: { from: number; to: number } | null;
   /** Jump to the first row at or after this time. */
   onJump(ts: number): void;
+  /** Shift-drag: show only the lines between these two moments. */
+  onSelectRange?(from: number, to: number): void;
 }
 
 const BAR_W = 3; // px per display bucket (incl. 1px gap)
@@ -28,7 +30,7 @@ function cssVar(el: Element, name: string, fallback: string): string {
  * filter, the visible window highlighted. Click or drag to jump. Aggregation is incremental (per-second
  * base buckets) and redrawn at most 4× per second.
  */
-export const Histogram = memo(function Histogram({ hist, version, visible, onJump }: HistogramProps) {
+export const Histogram = memo(function Histogram({ hist, version, visible, onJump, onSelectRange }: HistogramProps) {
   useT(); // re-render on language change (memoized)
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -126,10 +128,21 @@ export const Histogram = memo(function Histogram({ hist, version, visible, onJum
   };
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
 
+  // Shift-drag draws a window instead of jumping; letting go narrows the list to it.
+  const [brush, setBrush] = useState<{ x0: number; x1: number } | null>(null);
+  const localX = (clientX: number) => {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    return rect ? Math.min(Math.max(clientX - rect.left, 0), width) : 0;
+  };
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || view.count === 0) return;
-    drag.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
+    if (e.shiftKey && onSelectRange) {
+      const x = localX(e.clientX);
+      setBrush({ x0: x, x1: x });
+      return;
+    }
+    drag.current = true;
     jumpAt(e.clientX);
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
@@ -138,10 +151,15 @@ export const Histogram = memo(function Histogram({ hist, version, visible, onJum
       const x = e.clientX - rect.left;
       setHover({ x, i: Math.min(view.count - 1, Math.max(0, Math.floor((x / Math.max(1, width)) * view.count))) });
     }
-    if (drag.current) jumpAt(e.clientX);
+    if (brush) setBrush({ x0: brush.x0, x1: localX(e.clientX) });
+    else if (drag.current) jumpAt(e.clientX);
   };
   const endDrag = () => {
     drag.current = false;
+    if (brush) {
+      setBrush(null);
+      if (Math.abs(brush.x1 - brush.x0) >= 4 && onSelectRange) onSelectRange(xToTs(Math.min(brush.x0, brush.x1)), xToTs(Math.max(brush.x0, brush.x1)));
+    }
   };
 
   let win: { left: number; width: number } | null = null;
@@ -176,6 +194,7 @@ export const Histogram = memo(function Histogram({ hist, version, visible, onJum
     >
       <canvas ref={canvasRef} className="lg-hist__canvas" aria-hidden />
       {win ? <div className="lg-hist__window" style={{ left: win.left, width: win.width }} aria-hidden /> : null}
+      {brush ? <div className="lg-hist__brush" style={{ left: Math.min(brush.x0, brush.x1), width: Math.max(2, Math.abs(brush.x1 - brush.x0)) }} aria-hidden /> : null}
       {hover && readout ? (
         <>
           <div className="lg-hist__cursor" style={{ left: hover.x }} aria-hidden />

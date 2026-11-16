@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import {
   ArrowLeftRight,
@@ -12,6 +12,7 @@ import {
   PencilLine,
   RotateCw,
   ScrollText,
+  Search,
   Share2,
   X,
   Workflow,
@@ -44,6 +45,9 @@ import { FORMAT_LABEL, copyEntryAs, copyUrl, createMockFrom, downloadBody, expor
 import { useNetworkDetail } from '../detailCache';
 import { BodyViewer } from './BodyViewer';
 import { ruleLabel } from '../../mocks/model/rules';
+import { findMatchPlace, type MatchPlace } from '../model/findMatch';
+import { useFindHighlight } from '../useFindHighlight';
+import { JwtNotes } from './JwtView';
 
 export type DetailTab = 'general' | 'request' | 'response' | 'timing';
 const DETAIL_TABS: readonly DetailTab[] = ['general', 'request', 'response', 'timing'];
@@ -59,13 +63,34 @@ export interface DetailPanelProps {
   onShare: () => void;
   /** "Report a bug" anchored to this request. */
   onReport?: () => void;
+  /** The body search's text: the panel opens where it occurs and marks it. */
+  find?: string;
 }
 
-export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCompare, onShare, onReport }: DetailPanelProps) {
+export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCompare, onShare, onReport, find }: DetailPanelProps) {
   const t = useT();
-  const [savedTab, setTab] = usePersistentState<DetailTab>('network.detailTab', 'response');
-  const tab = DETAIL_TABS.includes(savedTab) ? savedTab : 'response';
+  const [savedTab, setSavedTab] = usePersistentState<DetailTab>('network.detailTab', 'response');
   const { detail, loading, error, reload } = useNetworkDetail(gone ? null : entry);
+  // Body search: open the tab / section holding the match once (the saved tab stays the user's choice), mark it.
+  const [findOn, setFindOn] = useState(true);
+  const needle = find?.trim() && findOn ? find.trim() : '';
+  const place = useMemo<MatchPlace | null>(() => (needle ? findMatchPlace(entry, detail, needle) : null), [needle, entry, detail]);
+  const [jump, setJump] = useState<MatchPlace | null>(null);
+  const jumped = useRef(false);
+  useEffect(() => {
+    if (!place || jumped.current) return;
+    // Wait for the bodies: a header match must not win over the body match the search was about.
+    if (!detail && (entry.hasRequestBody || entry.hasResponseBody) && loading) return;
+    jumped.current = true;
+    setJump(place);
+  }, [place, detail, loading, entry.hasRequestBody, entry.hasResponseBody]);
+  const tab: DetailTab = jump ? jump.tab : DETAIL_TABS.includes(savedTab) ? savedTab : 'response';
+  const setTab = (next: DetailTab) => {
+    setJump(null);
+    setSavedTab(next);
+  };
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useFindHighlight(bodyRef, needle || undefined, [tab, detail, jump]);
 
   const copyItems: MenuItem[] = [
     { label: t('network.menu.copyUrl'), icon: Link2, onSelect: () => void copyUrl(entry) },
@@ -127,6 +152,17 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
           </Callout>
         </div>
       ) : null}
+      {needle ? (
+        <div className="net-findnote" role="status">
+          <Search size={13} aria-hidden />
+          <span className="truncate">
+            <span className="mono net-findnote__q">«{needle}»</span> {place ? t(`network.find.in.${place.tab}.${place.section}`) : t('network.find.notShown')}
+          </span>
+          <Button size="sm" variant="ghost" onClick={() => setFindOn(false)}>
+            {t('network.find.off')}
+          </Button>
+        </div>
+      ) : null}
       <Tabs<DetailTab>
         value={tab}
         onChange={setTab}
@@ -140,10 +176,14 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
           { value: 'timing', label: t('network.detail.tabs.timing') },
         ]}
       />
-      <div className="net-detail__body" role="tabpanel" id={`net-detail-panel-${tab}`} aria-labelledby={`net-detail-tab-${tab}`}>
+      <div ref={bodyRef} className="net-detail__body" role="tabpanel" id={`net-detail-panel-${tab}`} aria-labelledby={`net-detail-tab-${tab}`}>
         {tab === 'general' ? <GeneralTab entry={entry} /> : null}
-        {tab === 'request' ? <MessageTab entry={entry} which="request" detail={detail} loading={loading} error={error} onRetry={reload} /> : null}
-        {tab === 'response' ? <MessageTab entry={entry} which="response" detail={detail} loading={loading} error={error} onRetry={reload} /> : null}
+        {tab === 'request' ? (
+          <MessageTab entry={entry} which="request" detail={detail} loading={loading} error={error} onRetry={reload} find={needle} forced={jump?.tab === 'request' ? jump.section : undefined} onPicked={() => setJump(null)} />
+        ) : null}
+        {tab === 'response' ? (
+          <MessageTab entry={entry} which="response" detail={detail} loading={loading} error={error} onRetry={reload} find={needle} forced={jump?.tab === 'response' ? jump.section : undefined} onPicked={() => setJump(null)} />
+        ) : null}
         {tab === 'timing' ? <TimingTab entry={entry} /> : null}
       </div>
     </section>
@@ -315,6 +355,9 @@ function MessageTab({
   loading,
   error,
   onRetry,
+  find,
+  forced,
+  onPicked,
 }: {
   entry: NetworkEntry;
   which: 'request' | 'response';
@@ -322,6 +365,11 @@ function MessageTab({
   loading: boolean;
   error: unknown;
   onRetry: () => void;
+  /** Body search text to mark in the body. */
+  find?: string;
+  /** Section the body search's match is in (until the user picks one). */
+  forced?: Section;
+  onPicked?: () => void;
 }) {
   const t = useT();
   const headers = which === 'request' ? entry.requestHeaders : (entry.responseHeaders ?? []);
@@ -334,7 +382,16 @@ function MessageTab({
   const counts: Record<Section, number> = { body: hasBody ? 1 : 0, headers: headers.length, query: params.length, cookies: cookieCount };
   const [pref, setPref] = usePersistentState<Section>(`network.section.${which}`, 'body');
   // Prefer the user's last section, unless it is empty for this request (GET without body → headers).
-  const section: Section = sections.includes(pref) && counts[pref] > 0 ? pref : (sections.find((s) => counts[s] > 0) ?? 'headers');
+  const section: Section =
+    forced && sections.includes(forced) && (forced === 'body' || counts[forced] > 0)
+      ? forced
+      : sections.includes(pref) && counts[pref] > 0
+        ? pref
+        : (sections.find((s) => counts[s] > 0) ?? 'headers');
+  const pickSection = (s: Section) => {
+    onPicked?.();
+    setPref(s);
+  };
 
   const label = (s: Section) => {
     const base = t(`network.sections.${s}`);
@@ -349,7 +406,7 @@ function MessageTab({
   return (
     <div className="net-col">
       <div className="net-subnav">
-        <SegmentedControl<Section> size="sm" value={section} onChange={setPref} options={sections.map((s) => ({ value: s, label: label(s), disabled: s !== 'body' && counts[s] === 0 }))} aria-label={t('network.sections.label')} />
+        <SegmentedControl<Section> size="sm" value={section} onChange={pickSection} options={sections.map((s) => ({ value: s, label: label(s), disabled: s !== 'body' && counts[s] === 0 }))} aria-label={t('network.sections.label')} />
       </div>
       {entry.tooLarge?.part === which ? (
         <div className="net-pad net-pad--b0">
@@ -363,9 +420,10 @@ function MessageTab({
       ) : null}
       <div className="net-col net-subbody">
         {/* The body of a part too large for Dürbün never arrived: the note above says so, no "no body" state. */}
-        {section === 'body' && entry.tooLarge?.part !== which ? <BodyViewer entry={entry} which={which} detail={detail} loading={loading} error={error} onRetry={onRetry} /> : null}
+        {section === 'body' && entry.tooLarge?.part !== which ? <BodyViewer entry={entry} which={which} detail={detail} loading={loading} error={error} onRetry={onRetry} find={find} /> : null}
         {section === 'headers' ? (
           <div className="net-col net-scroll net-pad">
+            <JwtNotes at={entry.startTs} values={headers.map(([k, v]) => ({ name: k, value: v }))} />
             <KeyValueTable
               rows={headers}
               filterable
@@ -377,11 +435,13 @@ function MessageTab({
         ) : null}
         {section === 'query' ? (
           <div className="net-col net-scroll net-pad">
+            <JwtNotes at={entry.startTs} values={params.map((p) => ({ name: p.name, value: p.value }))} />
             <KeyValueTable rows={params.map((p) => ({ key: p.name, value: p.value, copyValue: p.value }))} filterable={params.length > 8} copyAll emptyText={t('network.sections.noQuery')} aria-label={t('network.sections.query')} />
           </div>
         ) : null}
         {section === 'cookies' ? (
           <div className="net-col net-scroll net-pad">
+            <JwtNotes at={entry.startTs} values={which === 'request' ? reqCookies.map((c) => ({ name: c.name, value: c.value })) : resCookies.map((c) => ({ name: c.name, value: c.value }))} />
             {which === 'request' ? (
               <KeyValueTable rows={reqCookies.map((c) => ({ key: c.name, value: c.value, copyValue: c.value }))} copyAll emptyText={t('network.sections.noCookies')} aria-label={t('network.sections.cookies')} />
             ) : (

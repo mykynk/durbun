@@ -1,10 +1,15 @@
 import { useMemo } from 'react';
 import { clsx } from 'clsx';
 import { Highlighter, Plus, RotateCcw, Trash2, VolumeX } from 'lucide-react';
-import { Button, Checkbox, Dialog, IconButton, Input, Select, Toggle } from '../../../components';
+import { Button, Checkbox, Dialog, IconButton, Input, Select, Toggle, toast } from '../../../components';
 import { DEFAULT_NOISE_RULES, HIGHLIGHT_COLORS, usePrefs, type HighlightColor, type HighlightRule, type NoiseRule } from '../../../data';
 import { t } from '../../../i18n';
 import type { SavedFilter } from '../model/queryEdit';
+
+/** Removing a rule or a saved filter is one click and can be taken back (same pattern as mock rules). */
+export function undoToast(message: string, restore: () => void): void {
+  toast.info(message, { duration: 6000, action: { label: t('logs.undo'), onClick: restore } });
+}
 
 const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -15,7 +20,11 @@ export function NoiseRulesDialog({ open, onClose, keepsCrashLines }: { open: boo
   const rules = usePrefs((s) => s.noiseRules);
   const setPref = usePrefs((s) => s.setPref);
   const update = (id: string, patch: Partial<NoiseRule>) => setPref('noiseRules', rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  const remove = (id: string) => setPref('noiseRules', rules.filter((r) => r.id !== id));
+  const remove = (id: string) => {
+    const before = rules;
+    setPref('noiseRules', rules.filter((r) => r.id !== id));
+    undoToast(t('logs.rules.removed'), () => setPref('noiseRules', before));
+  };
   const add = () => setPref('noiseRules', [...rules, { id: newId('noise'), field: 'tag', match: 'exact', value: '', enabled: true }]);
   return (
     <Dialog
@@ -27,7 +36,15 @@ export function NoiseRulesDialog({ open, onClose, keepsCrashLines }: { open: boo
       size="lg"
       footer={
         <>
-          <Button variant="ghost" icon={RotateCcw} onClick={() => setPref('noiseRules', DEFAULT_NOISE_RULES)}>
+          <Button
+            variant="ghost"
+            icon={RotateCcw}
+            onClick={() => {
+              const before = rules;
+              setPref('noiseRules', DEFAULT_NOISE_RULES);
+              undoToast(t('logs.rules.resetDone'), () => setPref('noiseRules', before));
+            }}
+          >
             {t('logs.rules.reset')}
           </Button>
           <span className="grow" />
@@ -85,7 +102,11 @@ export function HighlightRulesDialog({ open, onClose }: { open: boolean; onClose
   const rules = usePrefs((s) => s.highlightRules);
   const setPref = usePrefs((s) => s.setPref);
   const update = (id: string, patch: Partial<HighlightRule>) => setPref('highlightRules', rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  const remove = (id: string) => setPref('highlightRules', rules.filter((r) => r.id !== id));
+  const remove = (id: string) => {
+    const before = rules;
+    setPref('highlightRules', rules.filter((r) => r.id !== id));
+    undoToast(t('logs.rules.removed'), () => setPref('highlightRules', before));
+  };
   const add = () => {
     const used = new Set(rules.map((r) => r.color));
     const color = HIGHLIGHT_COLORS.find((c) => !used.has(c)) ?? 'yellow';
@@ -206,7 +227,11 @@ export function SavedFiltersDialog({
             >
               {t('logs.saved.apply')}
             </Button>
-            <IconButton icon={Trash2} label={t('logs.saved.remove')} size="sm" tone="danger" onClick={() => onChange(list.filter((x) => x.id !== f.id))} />
+            <IconButton icon={Trash2} label={t('logs.saved.remove')} size="sm" tone="danger" onClick={() => {
+                const before = list;
+                onChange(list.filter((x) => x.id !== f.id));
+                undoToast(t('logs.saved.removed', { name: f.name }), () => onChange(before));
+              }} />
           </div>
         ))}
       </div>

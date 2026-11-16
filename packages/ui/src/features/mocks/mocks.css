@@ -769,3 +769,32 @@
   justify-content: center;
   gap: 6px;
 }
+
+/* "12 hits" opens the requests the rule answered. */
+.mk-rule__hits--link {
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+}
+.mk-rule__hits--link:hover {
+  text-decoration: underline;
+}
+.mk-rule__hits--link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A save refused because another window changed the rules first. */
+.mk-conflict {
+  margin: 8px 12px 0;
+}
+.mk-conflict__choices {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.mk-conflict__choices li + li {
+  margin-top: 2px;
+}

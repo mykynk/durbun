@@ -4,8 +4,8 @@ import { MAX_SHARED_BODY_CHARS, fenced, shareTime } from '../../network/model/sh
 /**
  * The share report of one log line: what a teammate needs in Slack, Jira or an e-mail without Dürbün.
  * Same light Markdown as the request report (`network/model/shareReport.ts`); the Flutter in-app panel
- * builds the same text (`share_report.dart`, `buildLogReport`). Log text is shown as it is: a free-form
- * message has no field names to mask, so the preview is what goes out.
+ * builds the same text (`share_report.dart`, `buildLogReport`). The Share dialog masks secret-looking values
+ * first (`maskLog.ts`, on by default); the preview is exactly what goes out.
  */
 
 export interface LogShareInput {
@@ -51,6 +51,60 @@ function capped(out: string[], text: string, labels: LogShareLabels, language = 
   }
   fenced(out, language, shown);
   if (rest > 0) out.push(labels.more(rest), '');
+}
+
+/** Several lines (a selection, a time range): a short head and the lines as plain text. */
+export interface LinesShareInput {
+  /** "12 log lines" (already localized). */
+  title: string;
+  /** Oldest and newest line time (epoch ms). */
+  from: number;
+  to: number;
+  utcOffsetMinutes?: number;
+  /** "All devices", "Shop · Pixel 8". */
+  scope?: string;
+  /** Set when every line comes from one app / one device. */
+  app?: string;
+  device?: string;
+  /** The lines, one logcat-like line each (continuation lines indented). */
+  text: string;
+  /** "Secret values were masked" when anything was masked. */
+  maskedNote?: string;
+}
+
+export interface LinesShareLabels {
+  range: string;
+  scope: string;
+  app: string;
+  device: string;
+  more: (chars: number) => string;
+}
+
+/** Lines are cut here: a chat message or a ticket stays readable (the .txt export has everything). */
+export const MAX_SHARED_LINES_CHARS = 60_000;
+
+export function buildLinesReport(input: LinesShareInput, labels: LinesShareLabels): string {
+  const out: string[] = [input.title, ''];
+  const from = shareTime(input.from, input.utcOffsetMinutes);
+  const to = shareTime(input.to, input.utcOffsetMinutes);
+  out.push(`- ${labels.range}: ${input.from === input.to ? from : `${from.split(' (')[0]} – ${to.split(' · ')[0]}`}`);
+  if (input.scope) out.push(`- ${labels.scope}: ${input.scope}`);
+  if (input.app) out.push(`- ${labels.app}: ${input.app}`);
+  if (input.device) out.push(`- ${labels.device}: ${input.device}`);
+  out.push('');
+  let text = input.text.replace(/\s+$/, '');
+  let rest = 0;
+  if (text.length > MAX_SHARED_LINES_CHARS) {
+    // Cut at a line end so the last line is whole.
+    const nl = text.lastIndexOf('\n', MAX_SHARED_LINES_CHARS);
+    const cut = nl > MAX_SHARED_LINES_CHARS / 2 ? nl : MAX_SHARED_LINES_CHARS;
+    rest = text.length - cut;
+    text = text.slice(0, cut);
+  }
+  fenced(out, '', text);
+  if (rest > 0) out.push(labels.more(rest), '');
+  if (input.maskedNote) out.push(`_${input.maskedNote}_`);
+  return out.join('\n').trimEnd();
 }
 
 export function buildLogReport(input: LogShareInput, labels: LogShareLabels): string {

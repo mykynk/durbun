@@ -31,6 +31,8 @@ export interface LogListProps {
   structure: number;
   d: RowDisplay;
   selectedId: number | null;
+  /** Rows picked with Shift / ⌘-click (copy, share): shown selected too. */
+  marked: ReadonlySet<number>;
   expanded: ReadonlyMap<number, number>;
   flashId: number | null;
   following: boolean;
@@ -67,7 +69,7 @@ const END_SLACK = 6;
  * row so trimming the ring's head never moves what you are reading.
  */
 export const LogList = memo(function LogList(props: LogListProps) {
-  const { model, d, selectedId, expanded, flashId, following, frozen, rowHeight, active } = props;
+  const { model, d, selectedId, marked, expanded, flashId, following, frozen, rowHeight, active } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(following);
   followingRef.current = following && !frozen;
@@ -261,9 +263,10 @@ export const LogList = memo(function LogList(props: LogListProps) {
     const target = ev.target as HTMLElement;
     // Clicks inside expanded content (JSON tree, …) belong to that content.
     if (target.closest('.lg-expand')) return;
-    // Selecting text must not select the row / open the detail panel.
+    // Selecting text must not select the row / open the detail panel (Shift / ⌘-click pick rows instead).
     const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && sel.toString().length > 0 && (ev.currentTarget as HTMLElement).contains(sel.anchorNode)) return;
+    const picking = ev.shiftKey || ev.metaKey || ev.ctrlKey;
+    if (!picking && sel && !sel.isCollapsed && sel.toString().length > 0 && (ev.currentTarget as HTMLElement).contains(sel.anchorNode)) return;
     const actEl = target.closest<HTMLElement>('[data-act]');
     if (actEl) {
       ev.stopPropagation();
@@ -271,6 +274,15 @@ export const LogList = memo(function LogList(props: LogListProps) {
       return;
     }
     props.onRowClick(hit.row, hit.index, ev);
+  };
+
+  // Shift / ⌘-click picks rows: the browser must not start a text selection instead.
+  const onMouseDown = (ev: MouseEvent) => {
+    if (ev.button !== 0 || !(ev.shiftKey || ev.metaKey || ev.ctrlKey)) return;
+    const target = ev.target as HTMLElement;
+    if (!target.closest('[data-row]') || target.closest('.lg-expand')) return;
+    ev.preventDefault();
+    window.getSelection()?.removeAllRanges();
   };
 
   const onContextMenu = (ev: MouseEvent) => {
@@ -292,9 +304,11 @@ export const LogList = memo(function LogList(props: LogListProps) {
       style={style}
       role="listbox"
       aria-label={t('logs.list.label')}
+      aria-multiselectable={marked.size > 0 ? true : undefined}
       aria-activedescendant={activeDescendant && model.indexOfRow(selectedId!) >= 0 ? activeDescendant : undefined}
       tabIndex={0}
       onClick={onClick}
+      onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
     >
       <div className="lg-canvas" style={{ height: virtualizer.getTotalSize() }}>
@@ -312,7 +326,7 @@ export const LogList = memo(function LogList(props: LogListProps) {
               className="lg-pos"
               style={{ transform: `translateY(${vi.start}px)` }}
               role="option"
-              aria-selected={row.id === selectedId}
+              aria-selected={row.id === selectedId || marked.has(row.id)}
               aria-posinset={vi.index + 1}
               aria-setsize={total}
             >
@@ -320,7 +334,7 @@ export const LogList = memo(function LogList(props: LogListProps) {
                 row={row}
                 time={rowTime(row.e, prev, base, d.timeFormat)}
                 net={net}
-                selected={row.id === selectedId}
+                selected={row.id === selectedId || marked.has(row.id)}
                 expanded={expanded.get(row.flap?.key ?? row.id) ?? 0}
                 flash={row.id === flashId}
                 d={d}

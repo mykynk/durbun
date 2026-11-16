@@ -1339,3 +1339,134 @@
 .net-diff__skipbtn:hover {
   background: var(--accent-soft);
 }
+
+/* Body search: where the match is, marked with the CSS Custom Highlight API (no DOM changes). */
+.net-findnote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.net-findnote > .truncate {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.net-findnote__q {
+  color: var(--text);
+}
+::highlight(durbun-net-find) {
+  background-color: var(--hl-mark-current);
+  color: var(--text);
+}
+
+/* Decoded JWTs above headers / cookies / query values. */
+.net-jwt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.net-jwt__item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  padding: 6px 8px 8px 10px;
+  min-width: 0;
+}
+.net-jwt__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.net-jwt__icon {
+  color: var(--text-muted);
+  flex: none;
+}
+.net-jwt__name {
+  max-width: 40%;
+  font-weight: 600;
+}
+.net-jwt__spacer {
+  flex: 1 1 auto;
+}
+.net-jwt__line {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+.net-jwt__body {
+  margin-top: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.net-jwt__note {
+  margin: 10px 0 0;
+  color: var(--text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* Device column: the device's hue, like the device chips of the Logs tab. */
+.net-dev {
+  color: var(--text-muted);
+}
+.net-dev--mark::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: oklch(68% 0.15 var(--dev-h));
+}
+
+/* Part of an app's traffic cannot be seen (calm note above the list, closable per app). */
+.net-banner--partial {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 2px 4px 2px 12px;
+  background: color-mix(in srgb, var(--info-soft) 70%, transparent);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.net-partial__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.net-partial__head > svg {
+  flex: 0 0 auto;
+  color: var(--info);
+}
+.net-partial__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+}
+.net-partial__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 8px 8px 21px;
+  font-size: var(--fs-sm);
+}
+.net-partial__app .src-reasons {
+  margin: 2px 0 6px;
+}
+
+/* The list narrowed to one mock rule's answers ("12 hits" on a rule). */
+.net-fchip--rule {
+  max-width: 240px;
+  gap: 4px;
+}

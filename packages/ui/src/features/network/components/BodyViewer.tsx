@@ -48,6 +48,8 @@ export interface BodyViewerProps {
   loading: boolean;
   error: unknown;
   onRetry: () => void;
+  /** Body search text: the JSON tree expands to and marks it. */
+  find?: string;
 }
 
 const HEX_PAGE = 64 * 1024;
@@ -79,7 +81,7 @@ function modesFor(kind: BodyKind, hasText: boolean): BodyMode[] {
 }
 
 /** Body of a request or response: preview (JSON tree, image, form, multipart, GraphQL…), code and hex. */
-export function BodyViewer({ entry, which, detail, loading, error, onRetry }: BodyViewerProps) {
+export function BodyViewer({ entry, which, detail, loading, error, onRetry, find }: BodyViewerProps) {
   const t = useT();
   const wire = which === 'request' ? detail?.requestBody : detail?.responseBody;
   const contentType = which === 'request' ? entry.requestContentType : entry.responseContentType;
@@ -127,7 +129,7 @@ export function BodyViewer({ entry, which, detail, loading, error, onRetry }: Bo
     return <EmptyState size="sm" icon={FileQuestion} title={which === 'request' ? t('network.body.noRequestBody') : t('network.body.noResponseBody')} />;
   }
   if (body.notCaptured) return <NotCaptured size={body.size} />;
-  return <LoadedBody key={`${entry.id}:${which}`} entry={entry} which={which} body={body} contentType={contentType} />;
+  return <LoadedBody key={`${entry.id}:${which}`} entry={entry} which={which} body={body} contentType={contentType} find={find} />;
 }
 
 function NotCaptured({ size }: { size: number | undefined }) {
@@ -147,7 +149,7 @@ function NotCaptured({ size }: { size: number | undefined }) {
   );
 }
 
-function LoadedBody({ entry, which, body, contentType }: { entry: NetworkEntry; which: 'request' | 'response'; body: DecodedBody; contentType?: string }) {
+function LoadedBody({ entry, which, body, contentType, find }: { entry: NetworkEntry; which: 'request' | 'response'; body: DecodedBody; contentType?: string; find?: string }) {
   const t = useT();
   const kind = useMemo(() => classifyBody(contentType, body), [contentType, body]);
   const text = kind === 'image' || kind === 'binary' ? null : body.text;
@@ -232,7 +234,7 @@ function LoadedBody({ entry, which, body, contentType }: { entry: NetworkEntry; 
             }
           />
         ) : (
-          <Preview entry={entry} which={which} kind={kind} body={body} text={text} contentType={contentType} gqlOps={gqlOps} onHex={() => setSavedMode('hex')} />
+          <Preview entry={entry} which={which} kind={kind} body={body} text={text} contentType={contentType} gqlOps={gqlOps} onHex={() => setSavedMode('hex')} find={find} />
         )}
       </div>
     </div>
@@ -248,6 +250,7 @@ function Preview({
   contentType,
   gqlOps,
   onHex,
+  find,
 }: {
   entry: NetworkEntry;
   which: 'request' | 'response';
@@ -257,12 +260,13 @@ function Preview({
   contentType?: string;
   gqlOps: GraphqlOperation[] | null;
   onHex: () => void;
+  find?: string;
 }) {
   const t = useT();
   if (gqlOps) return <GraphqlRequestPreview ops={gqlOps} />;
   switch (kind) {
     case 'json':
-      return <JsonPreview text={text ?? ''} graphql={which === 'response' && !!entry.graphql} truncated={body.truncated} />;
+      return <JsonPreview text={text ?? ''} graphql={which === 'response' && !!entry.graphql} truncated={body.truncated} find={find} />;
     case 'image':
     case 'svg':
       return <ImagePreview entry={entry} which={which} body={body} contentType={contentType} />;
@@ -298,7 +302,7 @@ function Preview({
   }
 }
 
-function JsonPreview({ text, graphql, truncated }: { text: string; graphql: boolean; truncated: boolean }) {
+function JsonPreview({ text, graphql, truncated, find }: { text: string; graphql: boolean; truncated: boolean; find?: string }) {
   const t = useT();
   const parsed = useMemo(() => {
     try {
@@ -339,7 +343,7 @@ function JsonPreview({ text, graphql, truncated }: { text: string; graphql: bool
         </div>
       ) : null}
       <div className="net-pad net-json">
-        <JsonTree data={parsed.value} toolbar defaultExpandDepth={2} rootLabel="body" aria-label={t('network.body.jsonLabel')} />
+        <JsonTree data={parsed.value} toolbar defaultExpandDepth={2} search={find || undefined} rootLabel="body" aria-label={t('network.body.jsonLabel')} />
       </div>
     </div>
   );

@@ -32,6 +32,12 @@ export interface RevealRequest {
   center?: boolean;
 }
 
+/** Who sent a request, for the App and Device columns (names come from the hub, not the entry). */
+export interface RowWho {
+  app: (e: NetworkEntry) => { name: string; title: string } | null;
+  device: (e: NetworkEntry) => { name: string; title: string; hue?: number };
+}
+
 export interface NetworkTableProps {
   rowIds: readonly string[];
   /** Store version (rows read live entries). */
@@ -64,6 +70,8 @@ export interface NetworkTableProps {
   empty?: ReactNode;
   /** Whether the first / last rows are on screen (or within the overscan): where the oldest requests are. */
   onEdgesChange?: (top: boolean, bottom: boolean) => void;
+  /** Names for the App and Device columns (only needed while one of them shows). */
+  who?: RowWho;
   'aria-label': string;
 }
 
@@ -248,6 +256,7 @@ export const NetworkTable = memo(function NetworkTable(props: NetworkTableProps)
                   now={now}
                   slowMs={props.slowMs}
                   lang={props.lang}
+                  who={props.who}
                   onClick={props.onRowClick}
                   onContextMenu={props.onRowContextMenu}
                 />
@@ -354,6 +363,7 @@ interface RowProps {
   now: number;
   slowMs: number;
   lang: Lang;
+  who?: RowWho;
   onClick: (id: string, e: MouseEvent) => void;
   onContextMenu: (id: string, at: MenuPoint) => void;
 }
@@ -367,7 +377,7 @@ function rowTone(e: NetworkEntry): string | undefined {
 }
 
 const Row = memo(
-  function Row({ entry: e, index, top, selected, marked, colIds, range, now, slowMs, onClick, onContextMenu }: RowProps) {
+  function Row({ entry: e, index, top, selected, marked, colIds, range, now, slowMs, who, onClick, onContextMenu }: RowProps) {
     const cols = colIds.split(',') as ColumnId[];
     return (
       <div
@@ -383,7 +393,7 @@ const Row = memo(
       >
         {cols.map((c) => (
           <div key={c} className={clsx('net-td', `net-td--${c}`)} role="gridcell">
-            {renderCell(c, e, range, now, slowMs)}
+            {renderCell(c, e, range, now, slowMs, who)}
           </div>
         ))}
       </div>
@@ -397,6 +407,7 @@ const Row = memo(
     a.colIds === b.colIds &&
     a.slowMs === b.slowMs &&
     a.lang === b.lang &&
+    a.who === b.who &&
     a.index === b.index &&
     a.onClick === b.onClick &&
     a.onContextMenu === b.onContextMenu &&
@@ -508,7 +519,7 @@ function WaterfallCell({ e, range, now }: { e: NetworkEntry; range: TimeRange | 
   );
 }
 
-function renderCell(c: ColumnId, e: NetworkEntry, range: TimeRange | null, now: number, slowMs: number): ReactNode {
+function renderCell(c: ColumnId, e: NetworkEntry, range: TimeRange | null, now: number, slowMs: number, who: RowWho | undefined): ReactNode {
   switch (c) {
     case 'status':
       return <StatusCell e={e} />;
@@ -534,6 +545,25 @@ function renderCell(c: ColumnId, e: NetworkEntry, range: TimeRange | null, now: 
       return <WaterfallCell e={e} range={range} now={now} />;
     case 'source':
       return <span className="net-dim truncate">{e.source}</span>;
+    case 'app': {
+      const a = who?.app(e);
+      return a ? (
+        <span className="truncate" title={a.title}>
+          {a.name}
+        </span>
+      ) : (
+        <span className="net-dim">—</span>
+      );
+    }
+    case 'device': {
+      const d = who?.device(e);
+      if (!d) return null;
+      return (
+        <span className={clsx('net-dev truncate', d.hue !== undefined && 'net-dev--mark')} style={d.hue !== undefined ? ({ '--dev-h': d.hue } as CSSProperties) : undefined} title={d.title}>
+          {d.name}
+        </span>
+      );
+    }
   }
 }
 

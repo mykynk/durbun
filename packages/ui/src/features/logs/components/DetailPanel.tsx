@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { Bug, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Funnel, FunnelX, History, LocateFixed, Share2, X } from 'lucide-react';
+import { Bug, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Funnel, FunnelX, History, LocateFixed, Share2, Timer, X } from 'lucide-react';
 import type { DeviceInfo, LogEntry, NetworkEntry } from '@durbun/protocol';
 import { Button, CodeView, CopyButton, IconButton, JsonTree, LevelBadge, MethodBadge, StatusBadge, copyText, formatBytes, formatClock, formatDateTime, formatDuration, sdkLabel, toast } from '../../../components';
 import { networkStore, useHub, useNetworkVersion } from '../../../data';
@@ -30,6 +30,8 @@ export interface DetailPanelProps {
   onNext(): void;
   onFilter(field: QueryField, value: string | number, exclude: boolean): void;
   onShowInContext(entryId: number): void;
+  /** Narrow the list to the moments around this line (±30 s, all lines of the scope). */
+  onShowAround?(entryId: number): void;
   onOpenNetwork(netId: string): void;
   /** Share dialog (report, Copy, Send to Slack). */
   onShare?(): void;
@@ -121,7 +123,7 @@ interface MetaRow {
   filter?: { field: QueryField; value: string | number; exclude?: boolean };
 }
 
-export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, onNext, onFilter, onShowInContext, onOpenNetwork, onShare, onReport }: DetailPanelProps) {
+export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, onNext, onFilter, onShowInContext, onShowAround, onOpenNetwork, onShare, onReport }: DetailPanelProps) {
   const a = analyzeEntry(e);
   const devices = useHub((s) => s.devices);
   const apps = useHub((s) => s.apps);
@@ -420,6 +422,11 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
         <Button size="sm" variant="primary" icon={LocateFixed} title={t('logs.detail.showInContextTip')} onClick={() => onShowInContext(e.id)}>
           {t('logs.detail.showInContext')}
         </Button>
+        {onShowAround ? (
+          <Button size="sm" icon={Timer} title={t('logs.detail.aroundTip')} onClick={() => onShowAround(e.id)}>
+            {t('logs.detail.around')}
+          </Button>
+        ) : null}
         <Button size="sm" icon={Copy} onClick={() => void copy(row?.id === e.id ? rowAsLines(row) : entryAsLine(e))}>
           {t('logs.detail.copyLine')}
         </Button>

@@ -49,7 +49,7 @@ export type { LogQueryHelpProps } from './LogQueryHelp';
 export { QueryHighlight } from './QueryHighlight';
 export { queryHighlightRanges, queryUsesApps } from './compile';
 export { queryErrorText } from './i18n';
-export { queryTerm, appendQueryTerm } from './terms';
+export { queryTerm, appendQueryTerm, removeTopLevelKey } from './terms';
 export { isStackFrameLine } from './analysis';
 export type { QueryKey, QueryOp, IsValue } from './syntax';
 

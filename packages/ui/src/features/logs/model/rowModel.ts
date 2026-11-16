@@ -224,6 +224,7 @@ export class RowModel {
    */
   private classify(e: LogEntry, f: RowFilter): number {
     if (!f.scope(e)) return -1;
+    if (f.range && (e.ts < f.range.from || e.ts > f.range.to)) return -1;
     const rank = rankOf(e.level);
     if (rank < f.queryMinRank) return -1;
     if (rank < f.minRank && !isStructural(e)) return -1;

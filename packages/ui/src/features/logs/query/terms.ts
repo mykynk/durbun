@@ -44,6 +44,25 @@ function topLevelUnits(lexemes: readonly Lexeme[]): Array<{ from: number; to: nu
 }
 
 /**
+ * The query without its top-level positive `key:` terms (`level:error foo` − level → `foo`). A query with a
+ * top-level OR, or with the key only inside groups / negations, comes back unchanged.
+ */
+export function removeTopLevelKey(query: string, key: QueryKey): string {
+  const { lexemes } = lex(query);
+  const units = topLevelUnits(lexemes);
+  if (!units) return query;
+  const drop = units.filter((u) => {
+    const inside = lexemes.filter((l) => l.from >= u.from && l.to <= u.to);
+    const only = inside[0];
+    return inside.length === 1 && only?.type === 'term' && only.key === key;
+  });
+  if (drop.length === 0) return query;
+  let out = query;
+  for (const u of [...drop].reverse()) out = `${out.slice(0, u.from).trimEnd()} ${out.slice(u.to).trimStart()}`;
+  return out.trim();
+}
+
+/**
  * AND a term to a query: no-op when the same term is already there, replaces its opposite (`tag:x` ↔
  * `-tag:x`), and wraps a top-level OR in parentheses so the meaning is kept (`a | b` + `c` → `(a | b) c`).
  */

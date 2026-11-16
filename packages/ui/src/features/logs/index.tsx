@@ -17,6 +17,7 @@ import {
   Pause,
   Search,
   Share2,
+  Timer,
   Trash2,
   VolumeX,
   WrapText,
@@ -43,7 +44,9 @@ import {
   usePrefs,
   scopeLogCounts,
   scopeLogTotal,
+  useScopeEvictions,
   useServerSettings,
+  useStoreLimits,
   useUi,
 } from '../../data';
 import {
@@ -51,7 +54,9 @@ import {
   confirm,
   copyText,
   downloadText,
+  formatClock,
   formatCompact,
+  isMac,
   notificationPermission,
   openContextMenu,
   requestNotificationPermission,
@@ -63,7 +68,7 @@ import {
   type MenuItem,
 } from '../../components';
 import { deviceDisplayName, errorText, t, useLanguage, useT } from '../../i18n';
-import { compileLogQuery, parseLogQuery, queryMinLevel, type QuerySuggestData } from './query';
+import { compileLogQuery, parseLogQuery, queryMinLevel, removeTopLevelKey, type QuerySuggestData } from './query';
 import './i18n';
 import './logs.css';
 import { RowModel } from './model/rowModel';
@@ -80,16 +85,32 @@ import { EXPAND_JSON, EXPAND_LINES, EXPAND_STACK, type DeviceMark, type RowDispl
 import { deviceMarks, keepCrashRelevant } from './model/devices';
 import { FilterChips, LogsToolbar, SourceFilters } from './components/Toolbar';
 import { DetailPanel, displayText, rowAsLines } from './components/DetailPanel';
-import { ShareDialog } from './components/ShareDialog';
+import { ShareDialog, type LinesShareContext } from './components/ShareDialog';
+import { RangeBar, SelectionBar } from './components/RangeBars';
+import { DEFAULT_AROUND, inRange, rangeAround, rangeBetween, rowsAsText, type LogTimeRange } from './model/timeRange';
+import { useLogsMoment, logsNav } from './nav';
 import { bugReport } from '../report/store';
 import { Histogram } from './components/Histogram';
 import { ContextBar, CrashBanner, DroppedNote, IosScopeNote, NewLinesPill, PausedBar } from './components/Banners';
 import { NoLogsState, NoMatchState, type ActiveFilter } from './components/EmptyStates';
 import { ClockSkewNote, CrashRecordsNote, ExplainEmpty, NotRunningNote, crashReaderText, crashRecordsState, useIosSystemLinesHidden } from '../../sources';
 import { markApplying } from './hangGuard';
-import { HighlightRulesDialog, NoiseRulesDialog, SavedFiltersDialog } from './components/RulesDialogs';
+import { HighlightRulesDialog, NoiseRulesDialog, SavedFiltersDialog, undoToast } from './components/RulesDialogs';
 
 const ALL_SOURCES: SourceToggles = { device: true, app: true, system: true };
+const NO_MARKS: ReadonlySet<number> = new Set();
+/** Shift-click / Shift+↓ pick at most this many rows at once. */
+const MAX_MARKED = 20_000;
+
+/** The entries of rows (a merged connection row gives each of its events), oldest first. */
+function rowEntries(rows: readonly LogRow[]): LogEntry[] {
+  const out: LogEntry[] = [];
+  for (const r of rows) {
+    if (r.flap) out.push(...r.flap.events);
+    else out.push(r.e);
+  }
+  return out.sort((a, b) => a.id - b.id);
+}
 
 /** A query that looks for crashes / ANRs (`is:crash`, `is:anr`): its empty result says whether records can be read. */
 const CRASH_QUERY = /(^|\s)is:(crash|anr)\b/i;
@@ -148,9 +169,9 @@ function createWindowStore() {
 
 type WindowStore = ReturnType<typeof createWindowStore>;
 
-function HistogramSlot({ model, version, win, onJump }: { model: RowModel; version: number; win: WindowStore; onJump(ts: number): void }) {
+function HistogramSlot({ model, version, win, onJump, onSelectRange }: { model: RowModel; version: number; win: WindowStore; onJump(ts: number): void; onSelectRange(from: number, to: number): void }) {
   const visible = useSyncExternalStore(win.subscribe, win.get, win.get);
-  return <Histogram hist={model.hist} version={version} visible={visible} onJump={onJump} />;
+  return <Histogram hist={model.hist} version={version} visible={visible} onJump={onJump} onSelectRange={onSelectRange} />;
 }
 
 export default function LogsView() {
@@ -195,7 +216,15 @@ export default function LogsView() {
   const [expanded, setExpanded] = useState<ReadonlyMap<number, number>>(() => new Map());
   const [flashId, setFlashId] = useState<number | null>(null);
   const [dialog, setDialog] = useState<'noise' | 'highlight' | 'saved' | null>(null);
-  const [shareEntry, setShareEntry] = useState<LogEntry | null>(null);
+  const [share, setShare] = useState<{ entries: LogEntry[]; context?: LinesShareContext } | null>(null);
+  const setShareEntry = useCallback((e: LogEntry) => setShare({ entries: [e] }), []);
+  /** Rows picked with Shift / ⌘-click (row ids), and the row a Shift-click extends from. */
+  const [marked, setMarked] = useState<ReadonlySet<number>>(NO_MARKS);
+  const markAnchor = useRef<number | null>(null);
+  /** The list narrowed to a time window (never saved). */
+  const [range, setRange] = useState<LogTimeRange | null>(null);
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
   const [ageTick, setAgeTick] = useState(0);
   const listRef = useRef<LogListHandle>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -322,8 +351,9 @@ export default function LogsView() {
       query: compiledQuery,
       dedupe,
       fold,
+      range: range ? { from: range.from, to: range.to } : null,
     }),
-    [scopeFn, minLevel, queryMin, sources, effHideNoise, noiseFn, effShowNetwork, compiledQuery, dedupe, fold],
+    [scopeFn, minLevel, queryMin, sources, effHideNoise, noiseFn, effShowNetwork, compiledQuery, dedupe, fold, range],
   );
 
   /* ───── rows (incremental; frozen while paused) ───── */
@@ -480,8 +510,30 @@ export default function LogsView() {
 
   const selectRow = useCallback((row: LogRow, open: boolean) => {
     setSel({ id: row.id, entry: row.e });
+    markAnchor.current = row.id;
     if (open) setDetailOpen(true);
   }, []);
+
+  /** Pick the rows between the anchor and `index` (Shift-click, Shift+↑/↓); `add` keeps the rows picked before. */
+  const markTo = useCallback(
+    (index: number, add: boolean) => {
+      const anchorId = markAnchor.current ?? sel?.id ?? null;
+      let a = anchorId !== null ? model.indexOfRow(anchorId) : -1;
+      if (a < 0) a = index;
+      const from = Math.max(Math.min(a, index), Math.max(a, index) - MAX_MARKED + 1);
+      const to = Math.max(a, index);
+      setMarked((cur) => {
+        const next = new Set(add ? cur : NO_MARKS);
+        for (let i = from; i <= to; i++) {
+          const r = model.row(i);
+          if (r) next.add(r.id);
+        }
+        return next;
+      });
+      if (anchorId === null) markAnchor.current = model.row(a)?.id ?? null;
+    },
+    [model, sel],
+  );
 
   const move = useCallback(
     (delta: number) => {
@@ -495,10 +547,33 @@ export default function LogsView() {
       const row = model.row(next);
       if (!row) return;
       setSel({ id: row.id, entry: row.e });
+      markAnchor.current = row.id;
+      setMarked(NO_MARKS);
       setFollowing(false);
       listRef.current?.scrollToIndex(next, 'auto');
     },
     [model, sel, setFollowing],
+  );
+
+  /** Shift+↑/↓: grow (or shrink) the picked rows from the anchor. */
+  const extend = useCallback(
+    (delta: number) => {
+      if (model.count === 0) return;
+      const idx = sel ? model.indexOfRow(sel.id) : -1;
+      if (idx < 0) {
+        move(delta);
+        return;
+      }
+      if (markAnchor.current === null || model.indexOfRow(markAnchor.current) < 0) markAnchor.current = sel!.id;
+      const next = Math.max(0, Math.min(model.count - 1, idx + delta));
+      const row = model.row(next);
+      if (!row) return;
+      markTo(next, false);
+      setSel({ id: row.id, entry: row.e });
+      setFollowing(false);
+      listRef.current?.scrollToIndex(next, 'auto');
+    },
+    [model, sel, move, markTo, setFollowing],
   );
 
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -532,6 +607,18 @@ export default function LogsView() {
       usePrefs.getState().setPref('showNetworkInLogs', shown);
     },
     [commitCtx],
+  );
+
+  /** The level control: a level condition in the query goes with it, so the two never disagree. */
+  const pickLevel = useCallback(
+    (l: LogLevel) => {
+      if (queryMin) {
+        const q = removeTopLevelKey(query, 'level');
+        if (q !== query) setQueryUser(q);
+      }
+      setMinLevel(l);
+    },
+    [queryMin, query, setQueryUser, setMinLevel],
   );
 
   const applyTerm = useCallback((term: string) => setQueryUser(toggleTerm(query, term)), [query, setQueryUser]);
@@ -577,6 +664,9 @@ export default function LogsView() {
         toast.info(t('logs.reveal.gone'));
         return;
       }
+      // A time window that leaves the line out goes (the user asked for this line).
+      if (rangeRef.current && !inRange(rangeRef.current, e.ts)) setRange(null);
+      setMarked(NO_MARKS);
       // Outside the scope (a jump from another tab, a notification): all devices, and "Back" returns to the scope.
       let leftScope: Scope | undefined;
       if (opts.anyScope && !scopeRef.current.logs(e)) {
@@ -687,10 +777,32 @@ export default function LogsView() {
   }, []);
 
   const onRowClick = useCallback(
-    (row: LogRow) => {
+    (row: LogRow, index: number, ev: MouseEvent) => {
+      const mod = isMac ? ev.metaKey : ev.ctrlKey;
+      if (ev.shiftKey) {
+        markTo(index, mod);
+        setSel({ id: row.id, entry: row.e });
+        setFollowing(false);
+        return;
+      }
+      if (mod) {
+        setMarked((cur) => {
+          const next = new Set(cur);
+          // The row already selected is the first pick.
+          if (next.size === 0 && sel && sel.id !== row.id && model.indexOfRow(sel.id) >= 0) next.add(sel.id);
+          if (next.has(row.id)) next.delete(row.id);
+          else next.add(row.id);
+          return next;
+        });
+        markAnchor.current = row.id;
+        setSel({ id: row.id, entry: row.e });
+        setFollowing(false);
+        return;
+      }
+      setMarked(NO_MARKS);
       selectRow(row, true);
     },
-    [selectRow],
+    [selectRow, markTo, sel, model, setFollowing],
   );
 
   const onRowAction = useCallback(
@@ -732,15 +844,24 @@ export default function LogsView() {
   const onRowContextMenu = useCallback(
     (row: LogRow, _index: number, ev: MouseEvent) => {
       const e = row.e;
-      selectRow(row, false);
-      const items: MenuItem[] = [
+      const picked = marked.size > 1 && marked.has(row.id);
+      if (!picked && marked.size) setMarked(NO_MARKS);
+      if (picked) setSel({ id: row.id, entry: row.e });
+      else selectRow(row, false);
+      const items: MenuItem[] = [];
+      if (picked) {
+        items.push({ label: t('logs.ctx.copySelected', { count: marked.size }), icon: Copy, shortcut: 'Mod+C', onSelect: () => void copyMarked() });
+        items.push({ label: t('logs.ctx.shareSelected', { count: marked.size }), icon: Share2, onSelect: shareMarked });
+        items.push({ type: 'separator' });
+      }
+      items.push(
         { label: t('logs.ctx.copyMessage'), icon: Copy, onSelect: () => void copy(displayText(e)) },
         { label: t('logs.ctx.copyLine'), onSelect: () => void copy(rowAsLines(row)) },
         { label: t('logs.ctx.copyJson'), icon: Braces, onSelect: () => void copy(JSON.stringify(e, null, 2)) },
         { label: t('logs.share.menu'), icon: Share2, onSelect: () => setShareEntry(e) },
         { label: t('report.openEllipsis'), icon: Bug, onSelect: () => bugReport.open({ kind: 'log', logId: e.id }) },
         { type: 'separator' },
-      ];
+      );
       if (e.tag) {
         items.push({ label: t('logs.ctx.filterTag', { tag: e.tag }), icon: Funnel, onSelect: () => filterBy('tag', e.tag, false) });
         items.push({ label: t('logs.ctx.excludeTag', { tag: e.tag }), icon: FunnelX, onSelect: () => filterBy('tag', e.tag, true) });
@@ -752,10 +873,12 @@ export default function LogsView() {
       items.push({ type: 'separator' });
       items.push({ label: t('logs.ctx.openDetail'), shortcut: 'Enter', onSelect: () => selectRow(row, true) });
       items.push({ label: t('logs.ctx.showInContext'), icon: LocateFixed, onSelect: () => revealEntry(e.id, { open: true, context: true }) });
+      items.push({ label: t('logs.ctx.around'), icon: Timer, onSelect: () => showAround(e.id) });
       if (e.kind === 'network' && e.netId && networkStore.get(e.netId)) items.push({ label: t('logs.ctx.openNetwork'), icon: ExternalLink, onSelect: () => ui.focusNetwork(e.netId!) });
       openContextMenu(ev, items);
     },
-    [copy, filterBy, revealEntry, selectRow],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [copy, filterBy, revealEntry, selectRow, marked],
   );
 
   // The top of the list is on screen: where the user looks for older lines (the memory-limit note shows there).
@@ -783,6 +906,134 @@ export default function LogsView() {
     },
     [model, setFollowing],
   );
+
+  /* ───── time range ("the moments around this line", Shift-drag on the histogram) ───── */
+  /** Narrow the list to ±half around a line, with every line of the scope (filters suspended, as "Show in context"). */
+  const showAround = useCallback(
+    (entryId: number, half: number = DEFAULT_AROUND) => {
+      const e = logStore.getById(entryId) ?? (sel?.entry.id === entryId ? sel.entry : undefined);
+      if (!e) {
+        toast.info(t('logs.reveal.gone'));
+        return;
+      }
+      revealEntry(entryId, { context: true, open: detailOpen });
+      setRange(rangeAround(e, half));
+    },
+    [sel, revealEntry, detailOpen],
+  );
+  const onRangeStep = useCallback((half: number) => {
+    const r = rangeRef.current;
+    if (!r?.anchor) return;
+    setRange({ from: r.anchor.ts - half, to: r.anchor.ts + half, anchor: r.anchor, half });
+  }, []);
+  const onHistogramRange = useCallback(
+    (from: number, to: number) => {
+      setRange(rangeBetween(from, to));
+      setMarked(NO_MARKS);
+      setFollowing(false);
+    },
+    [setFollowing],
+  );
+  const clearRange = useCallback(() => setRange(null), []);
+
+  /** A jump by time from another tab (a request whose own line was dropped): the moments around it. */
+  /* ── what the limits deleted from this view (server counts, or this window's own trims with the dev mock) ── */
+  const evictions = useScopeEvictions();
+  const storeLimits = useStoreLimits((s) => s.limits);
+  const logLimit = storeLimits?.maxLogEntries ?? logStore.maxEntries;
+
+  const moment = useLogsMoment();
+  const momentHandled = useRef(0);
+  useEffect(() => {
+    if (!moment || momentHandled.current === moment.seq) return;
+    momentHandled.current = moment.seq;
+    logsNav.consume(moment.seq);
+    // The line closest in time, preferring the request's app / device (the ring is in arrival order, close to time order).
+    let best: LogEntry | undefined;
+    let bestScore = Infinity;
+    const entries = logStore.entries;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i]!;
+      const dt = Math.abs(e.ts - moment.ts);
+      if (dt > DEFAULT_AROUND) {
+        if (e.ts < moment.ts - 10 * DEFAULT_AROUND) break;
+        continue;
+      }
+      const score = dt + (moment.appId && e.appId === moment.appId ? 0 : moment.deviceId && e.deviceId === moment.deviceId ? 5_000 : 20_000);
+      if (score < bestScore) {
+        best = e;
+        bestScore = score;
+      }
+    }
+    if (!best) {
+      toast.info(t('logs.jump.noneTitle'), { description: t('logs.jump.noneBody', { time: formatClock(moment.ts) }) });
+      return;
+    }
+    revealEntry(best.id, { anyScope: true, context: true });
+    setRange({ from: moment.ts - DEFAULT_AROUND, to: moment.ts + DEFAULT_AROUND, anchor: { id: best.id, ts: moment.ts }, half: DEFAULT_AROUND });
+    toast.info(t('logs.jump.title'), { description: t('logs.jump.body', { time: formatClock(moment.ts) }) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moment?.seq]);
+
+  /* ───── picked rows: copy, share ───── */
+  const markedRows = useCallback((): LogRow[] => {
+    const out: LogRow[] = [];
+    if (marked.size === 0) return out;
+    for (let i = 0; i < model.count; i++) {
+      const r = model.row(i)!;
+      if (marked.has(r.id)) out.push(r);
+    }
+    return out;
+  }, [marked, model]);
+  const copyRows = useCallback(async (rows: readonly LogRow[], doneKey: string) => {
+    if (rows.length === 0) {
+      toast.info(t('logs.selection.gone'));
+      return;
+    }
+    const ok = await copyText(rowsAsText(rows, { text: displayText }));
+    if (ok) toast.success(t(doneKey, { count: rows.length }));
+    else toast.error(t('common.copyFailed'));
+  }, []);
+  const copyMarked = useCallback(() => copyRows(markedRows(), 'logs.selection.copied'), [copyRows, markedRows]);
+  const shareMarked = useCallback(() => {
+    const rows = markedRows();
+    if (rows.length === 0) {
+      toast.info(t('logs.selection.gone'));
+      return;
+    }
+    setShare({ entries: rowEntries(rows), context: { scope: scopeDisplayName(scopeRef.current.scope, useHub.getState()), origin: t('logs.selection.label') } });
+  }, [markedRows]);
+  const rangeRows = useCallback((): LogRow[] => model.rows.slice(model.start), [model]);
+  const copyRange = useCallback(() => copyRows(rangeRows(), 'logs.range.copied'), [copyRows, rangeRows]);
+  const shareRange = useCallback(() => {
+    const r = rangeRef.current;
+    const rows = rangeRows();
+    if (!r || rows.length === 0) return;
+    const ms = r.to - r.from < 10_000;
+    setShare({
+      entries: rowEntries(rows),
+      context: { scope: scopeDisplayName(scopeRef.current.scope, useHub.getState()), origin: t('logs.range.title', { from: formatClock(r.from, { ms }), to: formatClock(r.to, { ms }) }) },
+    });
+  }, [rangeRows]);
+  /** Picked rows that span a stretch of time: show only that stretch. */
+  const rangeOfMarked = useCallback(() => {
+    const rows = markedRows();
+    if (rows.length < 2) return;
+    setRange(rangeBetween(rows[0]!.e.ts, (rows[rows.length - 1]!.last ?? rows[rows.length - 1]!.e).ts));
+    setMarked(NO_MARKS);
+  }, [markedRows]);
+  const markedSpan = useMemo(() => {
+    if (marked.size < 2) return 0;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const id of marked) {
+      const e = logStore.getById(id);
+      if (!e) continue;
+      if (e.ts < lo) lo = e.ts;
+      if (e.ts > hi) hi = e.ts;
+    }
+    return hi > lo ? hi - lo : 0;
+  }, [marked]);
 
   /* ───── commands: marker, clear, export ───── */
   const addMarker = useCallback(async (label?: string) => {
@@ -820,6 +1071,7 @@ export default function LogsView() {
         else if (scope.kind === 'app') await sendCommand({ name: 'clear', target: 'logs', appId: scope.appId });
         setPaused(false);
         setSel(null);
+        setMarked(NO_MARKS);
         setDetailOpen(false);
         setExpanded(new Map());
         setFollowing(true);
@@ -934,6 +1186,20 @@ export default function LogsView() {
   /* ───── shortcuts (only while the tab is visible) ───── */
   useShortcut(['ArrowDown', 'J'], () => move(1), { enabled: active, allowRepeat: true });
   useShortcut(['ArrowUp', 'K'], () => move(-1), { enabled: active, allowRepeat: true });
+  useShortcut(['Shift+ArrowDown', 'Shift+J'], () => extend(1), { enabled: active, allowRepeat: true });
+  useShortcut(['Shift+ArrowUp', 'Shift+K'], () => extend(-1), { enabled: active, allowRepeat: true });
+  useShortcut(
+    'Mod+C',
+    (e) => {
+      // Text the user selected, or a field, keeps the normal copy.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('input, textarea, [contenteditable="true"]')) return false;
+      const s = window.getSelection();
+      if (s && !s.isCollapsed && s.toString()) return false;
+      void copyMarked();
+    },
+    { enabled: active && marked.size > 0 },
+  );
   useShortcut(
     'Enter',
     () => {
@@ -945,6 +1211,10 @@ export default function LogsView() {
   useShortcut(
     'Escape',
     () => {
+      if (marked.size) {
+        setMarked(NO_MARKS);
+        return;
+      }
       if (detailOpen) {
         setDetailOpen(false);
         return;
@@ -990,8 +1260,16 @@ export default function LogsView() {
     { id: 'logs.clearFilters', title: t('logs.cmd.clearFilters'), group, icon: FunnelX, keywords: ['filter', 'filtre', 'reset'], run: clearFilters },
     { id: 'logs.noiseRules', title: t('logs.cmd.noiseRules'), group, icon: VolumeX, keywords: ['noise', 'gürültü', 'rules', 'kural'], run: () => { ui.setTab('logs'); setDialog('noise'); } },
     { id: 'logs.highlightRules', title: t('logs.cmd.highlightRules'), group, icon: HighlighterIcon, keywords: ['highlight', 'vurgu', 'color', 'renk'], run: () => { ui.setTab('logs'); setDialog('highlight'); } },
+    ...(range ? [{ id: 'logs.range.clear', title: t('logs.cmd.clearRange'), group, icon: Timer, keywords: ['range', 'aralık', 'time', 'zaman'], run: clearRange }] : []),
+    ...(marked.size > 0
+      ? [
+          { id: 'logs.marked.copy', title: t('logs.cmd.copySelected'), subtitle: t('logs.selection.count', { count: marked.size }), group, icon: Copy, shortcut: 'Mod+C', keywords: ['copy', 'kopyala', 'selected', 'seçili'], run: () => void copyMarked() },
+          { id: 'logs.marked.share', title: t('logs.cmd.shareSelected'), subtitle: t('logs.selection.count', { count: marked.size }), group, icon: Share2, keywords: ['share', 'paylaş', 'slack', 'selected', 'seçili'], run: shareMarked },
+        ]
+      : []),
     ...(sel
       ? [
+          { id: 'logs.sel.around', title: t('logs.cmd.around'), group, icon: Timer, keywords: ['around', 'çevre', 'context', 'bağlam', 'time', 'zaman', 'range', 'aralık'], run: () => { ui.setTab('logs'); showAround(sel.entry.id); } },
           { id: 'logs.sel.share', title: t('logs.share.title'), group, icon: Share2, keywords: ['share', 'paylaş', 'slack', 'report', 'rapor'], run: () => setShareEntry(sel.entry) },
           { id: 'logs.sel.report', title: t('logs.cmd.reportLine'), group, icon: Bug, keywords: ['bug', 'hata', 'report', 'rapor', 'zip', 'jira'], run: () => bugReport.open({ kind: 'log', logId: sel.entry.id }) },
         ]
@@ -1026,7 +1304,15 @@ export default function LogsView() {
     },
     [setSaved],
   );
-  const onRemoveChip = useCallback((id: string) => setSaved((cur) => sanitizeSavedFilters(cur).filter((f) => f.id !== id)), [setSaved]);
+  const onRemoveChip = useCallback(
+    (id: string) => {
+      const before = sanitizeSavedFilters(savedRaw);
+      const gone = before.find((f) => f.id === id);
+      setSaved(before.filter((f) => f.id !== id));
+      if (gone) undoToast(t('logs.saved.removed', { name: gone.name }), () => setSaved(before));
+    },
+    [setSaved, savedRaw, t],
+  );
 
   /* ───── scope notes ───── */
   // Physical iPhones whose system-process lines the server leaves out ('apps' log scope): said once.
@@ -1073,6 +1359,7 @@ export default function LogsView() {
         onNext={() => move(1)}
         onFilter={filterBy}
         onShowInContext={(id) => revealEntry(id, { open: true, context: true })}
+        onShowAround={(id) => showAround(id)}
         onOpenNetwork={(id) => ui.focusNetwork(id)}
         onShare={() => setShareEntry(sel.entry)}
         onReport={() => bugReport.open({ kind: 'log', logId: sel.entry.id })}
@@ -1090,7 +1377,8 @@ export default function LogsView() {
         onQuerySubmit={submitQuery}
         getSuggestData={getSuggestData}
         minLevel={minLevel}
-        onMinLevel={setMinLevel}
+        queryLevel={queryMin}
+        onMinLevel={pickLevel}
         following={following}
         paused={paused}
         onFollow={onFollowButton}
@@ -1117,9 +1405,18 @@ export default function LogsView() {
       </div>
       {bannerCrashes.length ? <CrashBanner crashes={bannerCrashes} appName={appName} device={deviceMark} onGoto={gotoCrash} onReport={reportCrash} onDismiss={dismissCrash} /> : null}
       {paused ? <PausedBar pending={snap.pending} onResume={togglePause} /> : null}
+      {range ? <RangeBar range={range} count={snap.count} lang={lang} onStep={onRangeStep} onCopy={() => void copyRange()} onShare={shareRange} onClear={clearRange} /> : null}
+      {marked.size > 1 ? <SelectionBar count={marked.size} spanMs={markedSpan} onCopy={() => void copyMarked()} onShare={shareMarked} onAround={markedSpan > 0 ? rangeOfMarked : undefined} onClear={() => setMarked(NO_MARKS)} /> : null}
       {ctx ? <ContextBar parts={contextPartKeys(ctx)} queryName={ctx.query ? queryChipName(userApplied, saved) : undefined} scopeName={ctx.scope ? scopeDisplayName(ctx.scope, useHub.getState()) : undefined} onBack={leaveContext} /> : null}
-      {!empty && atTop && (logStore.dropped > 0 || logStore.size >= logStore.maxEntries) ? (
-        <DroppedNote dropped={logStore.dropped} limit={logStore.maxEntries} since={model.row(0)?.e.ts} onOpenSettings={() => ui.openSettings('logs')} />
+      {!empty && atTop && (evictions.logs > 0 || logStore.size >= logLimit) ? (
+        <DroppedNote
+          dropped={evictions.logs}
+          limit={logLimit}
+          memoryLimit={storeLimits?.maxLogBytes}
+          byMemory={evictions.logsByMemory}
+          since={model.row(0)?.e.ts}
+          onOpenSettings={() => ui.openSettings('logs')}
+        />
       ) : null}
       {iosPhones.length > 0 ? (
         <IosScopeNote device={iosPhones.length === 1 ? deviceDisplayName(iosPhones[0]) : undefined} onOpenSettings={() => ui.openSettings('logs')} onDismiss={() => setIosNoteSeen(true)} />
@@ -1131,7 +1428,7 @@ export default function LogsView() {
       {!empty ? <ClockSkewNote session={compiledScope.app} className="lg-clock" /> : null}
       <SplitPane id="logs.detail" sizedPane="second" defaultSize={460} minSize={340} maxSize={0.62} collapsed={detail ? null : 'second'} onOverlayDismiss={() => setDetailOpen(false)} className="lg-split">
         <div className="lg-main">
-          {!empty ? <HistogramSlot model={model} version={snap.version} win={win} onJump={onHistogramJump} /> : null}
+          {!empty ? <HistogramSlot model={model} version={snap.version} win={win} onJump={onHistogramJump} onSelectRange={onHistogramRange} /> : null}
           <div className="lg-listwrap">
             {empty ? (
               <div className="lg-empty">
@@ -1161,6 +1458,7 @@ export default function LogsView() {
                 structure={snap.structure}
                 d={d}
                 selectedId={sel?.id ?? null}
+                marked={marked}
                 expanded={expanded}
                 flashId={flashId}
                 following={following}
@@ -1181,7 +1479,7 @@ export default function LogsView() {
         </div>
         {detail}
       </SplitPane>
-      {shareEntry ? <ShareDialog entry={shareEntry} onClose={() => setShareEntry(null)} /> : null}
+      {share ? <ShareDialog entries={share.entries} context={share.context} onClose={() => setShare(null)} /> : null}
       <NoiseRulesDialog open={dialog === 'noise'} onClose={() => setDialog(null)} keepsCrashLines={iosAppsScope && hiddenIphones.length > 0} />
       <HighlightRulesDialog open={dialog === 'highlight'} onClose={() => setDialog(null)} />
       <SavedFiltersDialog open={dialog === 'saved'} onClose={() => setDialog(null)} saved={saved} onChange={(next) => setSaved(next)} onApply={setQueryUser} />

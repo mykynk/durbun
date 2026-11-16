@@ -102,12 +102,14 @@ export interface FilterBarProps {
   hostItems: () => MenuItem[];
   hasQuery: boolean;
   onClearQuery: () => void;
+  /** Name of the mock rule the list is narrowed to (`filters.mockRule`). */
+  mockRuleName?: string;
 }
 
 /** Below this width the content-type chips collapse into a menu (keeps the bar to two calm lines). */
 const COMPACT_TYPES_BELOW = 1080;
 
-export function FilterBar({ filters, onChange, onReset, hostItems, hasQuery, onClearQuery }: FilterBarProps) {
+export function FilterBar({ filters, onChange, onReset, hostItems, hasQuery, onClearQuery, mockRuleName }: FilterBarProps) {
   const t = useT();
   const lang = useLanguage();
   const count = activeFilterCount(filters);
@@ -197,6 +199,12 @@ export function FilterBar({ filters, onChange, onReset, hostItems, hasQuery, onC
           <Drama size={12} aria-hidden />
           {t('network.filters.mocked')}
         </FilterChip>
+        {filters.mockRule ? (
+          <button type="button" className="net-fchip net-fchip--mock net-fchip--rule is-on" onClick={() => onChange({ mockRule: null })} aria-label={t('network.filters.mockRuleClear', { rule: mockRuleName ?? '' })} title={t('network.filters.mockRuleClear', { rule: mockRuleName ?? '' })}>
+            <span className="truncate">{t('network.filters.mockRule', { rule: mockRuleName ?? '' })}</span>
+            <X size={12} aria-hidden />
+          </button>
+        ) : null}
       </div>
       {count > 0 || hasQuery ? (
         <Button

@@ -1679,3 +1679,87 @@
   color: var(--text-subtle);
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
+
+/* ───────────── time range, picked rows ───────────── */
+/* Shift-drag on the histogram: the window being drawn. */
+.lg-hist__brush {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  box-shadow:
+    inset 1px 0 0 var(--accent),
+    inset -1px 0 0 var(--accent);
+  pointer-events: none;
+}
+/* The list is narrowed to a time window / several rows are picked: what, how many, and the actions on them. */
+.lg-rangebar,
+.lg-selbar {
+  background: var(--accent-soft);
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.lg-rangebar > svg,
+.lg-selbar > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.lg-rangebar__text {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.lg-rangebar__title {
+  font-weight: 600;
+}
+.lg-rangebar__tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.lg-paused .lg-rangebar__tools .btn {
+  margin-left: 0;
+}
+.lg-rangebar__steps {
+  flex: 0 0 auto;
+}
+.lg-selbar__hint {
+  font-size: var(--fs-xs);
+}
+@container logs (max-width: 860px) {
+  .lg-selbar__hint,
+  .lg-rangebar__span {
+    display: none;
+  }
+}
+/* The level comes from the query ("Errors only", `level:error`): the picked segment says so with a dashed edge. */
+.lg-levels--query .seg__item.is-selected {
+  outline: 1px dashed var(--accent);
+  outline-offset: -2px;
+}
+/* Share dialog: the mask switch and how many values it hid, above the preview. */
+.lg-share {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.lg-share__options {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.lg-share__options .toggle-row {
+  flex: 1 1 320px;
+}
+.lg-share__masked {
+  flex: 0 0 auto;
+  padding-top: 2px;
+}

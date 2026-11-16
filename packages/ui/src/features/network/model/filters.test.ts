@@ -100,6 +100,10 @@ describe('chips and toggles', () => {
     expect(run(all, '', { slowOnly: true })).toEqual(['slow']);
     expect(run(all, '', { slowOnly: true, slowMs: 100 })).toEqual(['ok', 'nf', 'se', 'broken', 'slow', 'gql', 'mock', 'img']);
     expect(run(all, '', { mockedOnly: true })).toEqual(['mock']);
+    expect(run(all, '', { mockRule: 'r1' })).toEqual(['mock']);
+    expect(run(all, '', { mockRule: 'other' })).toEqual([]);
+    expect(activeFilterCount({ ...DEFAULT_FILTERS, mockRule: 'r1' })).toBe(1);
+    expect(sanitizeFilters({ mockRule: 'r1' }).mockRule).toBe('r1');
   });
   it('counts active filters and sanitizes persisted values', () => {
     expect(activeFilterCount({ ...DEFAULT_FILTERS, methods: ['GET', 'POST'], errorsOnly: true })).toBe(3);

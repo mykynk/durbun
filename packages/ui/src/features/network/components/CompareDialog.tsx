@@ -232,7 +232,7 @@ function BodyDiff({ which, a, b, da, db }: { which: 'request' | 'response'; a: N
       {la.kind === 'none' && lb.kind === 'none' ? (
         <EmptyState size="sm" title={which === 'request' ? t('network.compare.noRequestBodies') : t('network.compare.noResponseBodies')} />
       ) : (
-        <DiffView a={la.lines} b={lb.lines} onlyChanges={onlyChanges} />
+        <DiffView a={la.lines} b={lb.lines} onlyChanges={onlyChanges} onShowAll={() => setOnlyChanges(false)} />
       )}
     </div>
   );
@@ -240,7 +240,7 @@ function BodyDiff({ which, a, b, da, db }: { which: 'request' | 'response'; a: N
 
 const DIFF_ROW_H = 20;
 
-function DiffView({ a, b, onlyChanges }: { a: string[]; b: string[]; onlyChanges: boolean }) {
+function DiffView({ a, b, onlyChanges, onShowAll }: { a: string[]; b: string[]; onlyChanges: boolean; onShowAll: () => void }) {
   const t = useT();
   const result = useMemo(() => diffLines(a, b), [a, b]);
   const rows = useMemo(() => sideBySide(result.ops), [result]);
@@ -249,6 +249,22 @@ function DiffView({ a, b, onlyChanges }: { a: string[]; b: string[]; onlyChanges
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({ count: display.length, getScrollElement: () => scrollRef.current, estimateSize: () => DIFF_ROW_H, overscan: 20 });
   const same = result.added === 0 && result.removed === 0;
+  if (same && onlyChanges && !result.truncated) {
+    // Nothing to compare line by line: say so plainly instead of an almost empty table.
+    return (
+      <EmptyState
+        size="sm"
+        icon={Equal}
+        title={t('network.compare.identical')}
+        description={t('network.compare.identicalLines', { count: a.length })}
+        actions={
+          <Button size="sm" onClick={onShowAll}>
+            {t('network.compare.showWhole')}
+          </Button>
+        }
+      />
+    );
+  }
   return (
     <div className="net-col">
       <div className="net-cmp__stats">

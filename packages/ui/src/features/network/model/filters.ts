@@ -29,6 +29,8 @@ export interface NetFilters {
   /** "Slow" threshold in ms (default 1 s). */
   slowMs: number;
   mockedOnly: boolean;
+  /** Only the requests this mock rule answered (id), null = any. */
+  mockRule: string | null;
 }
 
 export const DEFAULT_SLOW_MS = 1000;
@@ -42,6 +44,7 @@ export const DEFAULT_FILTERS: NetFilters = {
   slowOnly: false,
   slowMs: DEFAULT_SLOW_MS,
   mockedOnly: false,
+  mockRule: null,
 };
 
 function pickList<T extends string>(raw: unknown, allowed: readonly T[]): T[] {
@@ -62,12 +65,13 @@ export function sanitizeFilters(raw: unknown): NetFilters {
     slowOnly: r.slowOnly === true,
     slowMs: Number.isFinite(slow) && slow >= 50 && slow <= 600_000 ? Math.round(slow) : DEFAULT_SLOW_MS,
     mockedOnly: r.mockedOnly === true,
+    mockRule: typeof r.mockRule === 'string' && r.mockRule ? r.mockRule : null,
   };
 }
 
 /** Number of active chip/toggle filters (the slow threshold alone does not count). */
 export function activeFilterCount(f: NetFilters): number {
-  return f.methods.length + f.statuses.length + f.types.length + (f.host ? 1 : 0) + (f.errorsOnly ? 1 : 0) + (f.slowOnly ? 1 : 0) + (f.mockedOnly ? 1 : 0);
+  return f.methods.length + f.statuses.length + f.types.length + (f.host ? 1 : 0) + (f.errorsOnly ? 1 : 0) + (f.slowOnly ? 1 : 0) + (f.mockedOnly ? 1 : 0) + (f.mockRule ? 1 : 0);
 }
 
 export function toggleIn<T>(list: readonly T[], item: T): T[] {
@@ -495,6 +499,7 @@ export function compileFilter(filters: NetFilters, query: ParsedQuery, ctx: Filt
     if (filters.errorsOnly && !isErrorEntry(e)) return false;
     if (filters.slowOnly && !((e.duration ?? 0) >= filters.slowMs)) return false;
     if (filters.mockedOnly && !e.mocked) return false;
+    if (filters.mockRule && (!e.mocked || e.mockRuleId !== filters.mockRule)) return false;
     let freeSeen = false;
     for (const c of clauses) {
       if (c.key === null && !c.negate && body) {

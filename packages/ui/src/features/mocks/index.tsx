@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { ArrowLeftRight, Drama, FileDown, FileUp, Plus, Power, Save } from 'lucide-react';
 import type { MockRule } from '@durbun/protocol';
-import { networkStore, saveMocks, ui, useCompiledScope, useHub, useMocks, useNetworkVersion, useUi, type MockRuleDraft } from '../../data';
+import { isEditConflict, networkStore, resolveMocksConflict, saveMocks, ui, useCompiledScope, useHub, useMocks, useNetworkVersion, useUi, type MockRuleDraft } from '../../data';
 import {
   Button,
   EmptyState,
@@ -43,6 +43,9 @@ import {
   type RuleForm,
 } from './model/rules';
 import { RuleList } from './components/RuleList';
+import { ConflictNotice } from './components/ConflictNotice';
+import { sessionHits, useHitLedgerVersion } from './model/hitLedger';
+import { networkNav } from '../network/nav';
 import { RuleEditor, type KnownApp } from './components/RuleEditor';
 import { CapabilityHints, ImportDialog, type PendingImport } from './components/Extras';
 import { ExplainCallout, ExplainEmpty, pickEmptyReason, useScopeExplain } from '../../sources';
@@ -100,7 +103,27 @@ export default function MocksView() {
 
   /* ── derived ── */
   const v = useNetworkVersion({ throttleMs: 1000, enabled: active });
-  const hits = useMemo(() => hitCounts(networkStore.list()), [v]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ledger = useHitLedgerVersion();
+  const showHits = useCallback(
+    (id: string) => {
+      if (!networkStore.list().some((e) => e.mocked && e.mockRuleId === id)) {
+        toast.info(t('mocks.list.hitsGoneTitle'), { description: t('mocks.list.hitsGone') });
+        return;
+      }
+      networkNav.showMockHits(id);
+    },
+    [t],
+  );
+  const hits = useMemo(() => {
+    const inMemory = hitCounts(networkStore.list());
+    const out = new Map<string, { session: number; inMemory: number }>();
+    for (const r of rules) {
+      const mem = inMemory.get(r.id) ?? 0;
+      const session = Math.max(sessionHits(r.id), mem);
+      if (session > 0) out.set(r.id, { session, inMemory: mem });
+    }
+    return out;
+  }, [v, ledger, rules]); // eslint-disable-line react-hooks/exhaustive-deps
   const knownApps: KnownApp[] = useMemo(() => {
     const map = new Map<string, string>();
     for (const a of allApps) if (!map.has(a.app.id)) map.set(a.app.id, a.app.name);
@@ -125,6 +148,27 @@ export default function MocksView() {
   dirtyRef.current = dirty;
 
   /* ── persistence ── */
+  const conflict = useMocks((s) => s.conflict);
+  /** The editor save a conflict may have refused (to reopen it as saved after "Save mine"). */
+  const lastSave = useRef<{ ruleId: string; form: EditorState['form'] } | null>(null);
+  const reloadAfterConflict = () => {
+    void resolveMocksConflict('reload');
+    toast.info(t('mocks.conflict.reloaded'));
+  };
+  const overwriteAfterConflict = async () => {
+    try {
+      const saved = await resolveMocksConflict('overwrite');
+      toast.success(t('mocks.conflict.overwritten'));
+      const last = lastSave.current;
+      const canonical = last ? saved.find((r) => r.id === last.ruleId) : undefined;
+      if (canonical) {
+        const form = ruleToForm(canonical);
+        setEditor((e) => (e ? { mode: 'edit', ruleId: canonical.id, form, baseline: form } : e));
+      }
+    } catch (err) {
+      if (!isEditConflict(err)) toast.error(t('mocks.saveFailed'), { description: errorText(err) });
+    }
+  };
   const persist = useCallback(
     async (next: MockRule[], success?: string): Promise<MockRule[] | null> => {
       try {
@@ -132,7 +176,8 @@ export default function MocksView() {
         if (success) toast.success(success);
         return saved;
       } catch (err) {
-        toast.error(t('mocks.saveFailed'), { description: errorText(err) });
+        // Changed in another window first: the notice above the list offers the choice (no error toast).
+        if (!isEditConflict(err)) toast.error(t('mocks.saveFailed'), { description: errorText(err) });
         return null;
       }
     },
@@ -188,6 +233,7 @@ export default function MocksView() {
     const rule = formToRule(editor.form, existing ? { id: existing.id, createdAt: existing.createdAt } : { id: newRuleId(), createdAt: Date.now() });
     const next = existing ? current.map((r) => (r.id === existing.id ? rule : r)) : [rule, ...current];
     setSaving(true);
+    lastSave.current = { ruleId: rule.id, form: editor.form };
     const saved = await persist(next, existing ? t('mocks.editor.saved') : t('mocks.editor.created'));
     setSaving(false);
     if (!saved) return;
@@ -368,6 +414,7 @@ export default function MocksView() {
           <span>{enabledCount > 0 ? t('mocks.master.active', { count: enabledCount }) : t('mocks.master.inactive')}</span>
         </div>
       ) : null}
+      {conflict ? <ConflictNotice onReload={reloadAfterConflict} onOverwrite={overwriteAfterConflict} /> : null}
       {/* With no rules yet the explanation is the empty state itself (below); with rules it sits above the list. */}
       {mocksStructural ? empty ? null : <ExplainCallout capability="mocks" className="mk-explain" /> : <CapabilityHints apps={scopedApps} />}
       <SplitPane id="mocks.editor" sizedPane="second" defaultSize={600} minSize={420} maxSize={0.72} collapsed={editor ? null : 'second'} onOverlayDismiss={() => void closeEditor()} className="mk-split">
@@ -427,6 +474,7 @@ export default function MocksView() {
                   selectedId={editor?.ruleId ?? null}
                   hits={hits}
                   appNames={appNames}
+                  onShowHits={showHits}
                   onOpen={(id) => void openRule(id)}
                   onToggle={toggleRule}
                   onMove={moveRule}

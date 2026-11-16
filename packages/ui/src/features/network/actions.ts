@@ -1,5 +1,5 @@
 import type { NetworkEntry, ReplayOverrides } from '@durbun/protocol';
-import { api, logStore, onNotice, sendCommand, ui, useHub } from '../../data';
+import { api, compileScope, getScope, logStore, onNotice, sendCommand, ui, useHub } from '../../data';
 import { copyText, downloadUrl, formatBytes, formatDuration, toast } from '../../components';
 import { errorText, t } from '../../i18n';
 import { copyAs, type CopyFormat, type CopyNote } from './model/copyAs';
@@ -7,6 +7,7 @@ import { safeFileStem } from './model/http';
 import { cachedDetail, loadDetail } from './detailCache';
 import { draftFromRequest, type DraftNote } from '../mocks/model/draft';
 import { transfer } from '../transfer/store';
+import { logsNav } from '../logs/nav';
 import './i18n';
 
 /** Actions on a captured request, shared by the table's context menu, the detail panel and the palette. */
@@ -21,6 +22,15 @@ export const FORMAT_LABEL: Record<CopyFormat, string> = {
 
 export function bundleIdOf(appId: string | undefined): string | undefined {
   return appId ? useHub.getState().apps[appId]?.app.id : undefined;
+}
+
+/**
+ * The app a request belongs to when its session is no longer known: the scoped app, when the request is in that
+ * scope (a mock made from it then targets that app, not every app).
+ */
+function scopeBundleOf(e: NetworkEntry): string | undefined {
+  const compiled = compileScope(getScope(), useHub.getState());
+  return compiled.bundleId && compiled.network(e) ? compiled.bundleId : undefined;
 }
 
 export async function copyUrl(e: NetworkEntry): Promise<void> {
@@ -93,7 +103,10 @@ export async function replayRequest(e: NetworkEntry, overrides?: ReplayOverrides
   }
 }
 
-/** Jump to the log row of this request (scans the log ring from the newest end). */
+/**
+ * Jump to the log row of this request (scans the log ring from the newest end). The log memory fills at its own
+ * pace: when the request's own line is gone, Logs opens the moments around the request's start instead.
+ */
 export function showInLogs(e: NetworkEntry): void {
   const entries = logStore.entries;
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -103,7 +116,7 @@ export function showInLogs(e: NetworkEntry): void {
       return;
     }
   }
-  toast.info(t('network.toast.noLogRow'));
+  logsNav.showMoment(e.startTs, { deviceId: e.deviceId, appId: e.appId, reason: 'requestLineGone' });
 }
 
 function draftNoteText(n: DraftNote): string | null {
@@ -133,7 +146,7 @@ export async function createMockFrom(e: NetworkEntry): Promise<void> {
       detail = null;
     }
   }
-  const { draft, notes } = draftFromRequest(e, detail, bundleIdOf(e.appId));
+  const { draft, notes } = draftFromRequest(e, detail, bundleIdOf(e.appId) ?? scopeBundleOf(e));
   ui.newMockFromDraft(draft);
   const texts = notes.map(draftNoteText).filter((s): s is string => !!s);
   if (texts.length > 0) toast.warn(t('network.mockNotes.title'), { description: texts.join(' '), duration: 9000 });

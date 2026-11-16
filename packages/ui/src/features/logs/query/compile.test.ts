@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LogEntry } from '@durbun/protocol';
-import { appendQueryTerm, compileLogQuery, parseLogQuery, queryHighlightRanges, queryMinLevel, queryTerm, queryUsesApps } from './index';
+import { appendQueryTerm, compileLogQuery, removeTopLevelKey, parseLogQuery, queryHighlightRanges, queryMinLevel, queryTerm, queryUsesApps } from './index';
 import { ALL, APPS, FX, NOW, entry } from './fixtures.test-data';
 
 type FxName = keyof typeof FX;
@@ -295,6 +295,13 @@ describe('click-filter helpers', () => {
     }
   });
 
+  it('removeTopLevelKey drops plain top-level terms of a key only', () => {
+    expect(removeTopLevelKey('level:error foo', 'level')).toBe('foo');
+    expect(removeTopLevelKey('foo level:warn tag:x', 'level')).toBe('foo tag:x');
+    expect(removeTopLevelKey('level:error | tag:x', 'level')).toBe('level:error | tag:x');
+    expect(removeTopLevelKey('(level:error tag:x) foo', 'level')).toBe('(level:error tag:x) foo');
+    expect(removeTopLevelKey('-level:debug foo', 'level')).toBe('-level:debug foo');
+  });
   it('appendQueryTerm ANDs, dedupes, flips and protects OR', () => {
     expect(appendQueryTerm('', 'tag:a')).toBe('tag:a');
     expect(appendQueryTerm('level:e', 'tag:a')).toBe('level:e tag:a');

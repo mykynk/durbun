@@ -15,6 +15,9 @@ import {
   useHub,
   useNetworkVersion,
   usePrefs,
+  useMocks,
+  useScopeEvictions,
+  useStoreLimits,
   useUi,
 } from '../../data';
 import {
@@ -35,7 +38,8 @@ import {
   useShortcut,
   type MenuItem,
 } from '../../components';
-import { errorText, useLanguage, useT } from '../../i18n';
+import { deviceDisplayName, errorText, useLanguage, useT } from '../../i18n';
+import { deviceMarks } from '../logs/model/devices';
 import { NetRowIndex } from './model/rows';
 import { DEFAULT_FILTERS, compileFilter, parseQuery, sanitizeFilters, type NetFilters } from './model/filters';
 import {
@@ -45,26 +49,33 @@ import {
   isChronological,
   nextSort,
   sanitizeColumnPrefs,
+  columnMode,
   sanitizeSort,
   sortEntries,
+  toggleColumn,
   visibleColumns,
+  type ColumnNames,
   type ColumnId,
   type ColumnPrefs,
   type SortKey,
   type SortState,
 } from './model/columns';
 import { COPY_FORMATS } from './model/copyAs';
-import { NetworkTable, type MenuPoint, type RevealRequest } from './components/NetworkTable';
+import { NetworkTable, type MenuPoint, type RevealRequest, type RowWho } from './components/NetworkTable';
 import { FilterBar, MainToolbar } from './components/Toolbars';
 import { DetailPanel } from './components/DetailPanel';
 import { ReplayDialog } from './components/ReplayDialog';
 import { CompareDialog } from './components/CompareDialog';
 import { ShareDialog } from './components/ShareDialog';
+import { PartialCaptureNote } from './components/PartialCaptureNote';
+import { useNetworkMockHits, networkNav } from './nav';
+import { ruleLabel } from '../mocks/model/rules';
+import { startHitLedger } from '../mocks/model/hitLedger';
 import { bugReport } from '../report/store';
 import { copyEntryAs, copyUrl, createMockFrom, exportHarFor, harFileName, harLabel, replayRequest, showInLogs } from './actions';
 import { harFileStamp } from '../transfer/dataExport';
 import { useBodySearch } from './useBodySearch';
-import { ExplainEmpty } from '../../sources';
+import { ExplainEmpty, guideTabFor, useScopeExplain } from '../../sources';
 import './i18n';
 import './network.css';
 
@@ -107,7 +118,6 @@ export default function NetworkView() {
   const sort = useMemo(() => sanitizeSort(rawSort), [rawSort]);
   const [rawCols, setRawCols] = usePersistentState<ColumnPrefs>('network.columns', DEFAULT_COLUMN_PREFS);
   const colPrefs = useMemo(() => sanitizeColumnPrefs(rawCols), [rawCols]);
-  const columns = useMemo(() => visibleColumns(colPrefs), [colPrefs]);
   const [bodySearch, setBodySearch] = usePersistentState('network.bodySearch', false);
   const [query, setQuery] = useState('');
   const parsed = useMemo(() => parseQuery(query), [query]);
@@ -172,6 +182,51 @@ export default function NetworkView() {
   if (!paused && frozen.current) frozen.current.total = networkStore.totalReceived;
   const waiting = paused && frozen.current ? Math.max(0, networkStore.totalReceived - frozen.current.total) : 0;
 
+  /* ── who sent it: App and Device columns, shown by themselves when the list mixes devices / apps ── */
+  const hubDevices = useHub((s) => s.devices);
+  const hubApps = useHub((s) => s.apps);
+  const mix = useMemo(() => {
+    const devices = new Set<string>();
+    const apps = new Set<string>();
+    for (const id of ids) {
+      const e = networkStore.get(id);
+      if (!e) continue;
+      devices.add(e.deviceId);
+      apps.add(e.appId ?? '');
+      if (devices.size > 1 && apps.size > 1) break;
+    }
+    return { devices: [...devices].sort().join('\n'), multiDevice: devices.size > 1, multiApp: apps.size > 1 };
+  }, [ids]);
+  const columns = useMemo(
+    () => visibleColumns(colPrefs, (id) => (id === 'device' ? mix.multiDevice : id === 'app' ? mix.multiApp : false)),
+    [colPrefs, mix.multiDevice, mix.multiApp],
+  );
+  const names = useMemo<ColumnNames>(
+    () => ({
+      app: (e) => (e.appId ? (hubApps[e.appId]?.app.name ?? e.appId) : ''),
+      device: (e) => deviceDisplayName(hubDevices[e.deviceId], e.deviceId),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hubApps, hubDevices, lang],
+  );
+  const showWho = columns.some((c) => c.id === 'app' || c.id === 'device');
+  const who = useMemo<RowWho | undefined>(() => {
+    if (!showWho) return undefined;
+    const marks = deviceMarks(mix.devices.split('\n').filter(Boolean).map((id) => ({ id, name: deviceDisplayName(hubDevices[id], id) })));
+    return {
+      app: (e) => {
+        const a = e.appId ? hubApps[e.appId] : undefined;
+        return a ? { name: a.app.name, title: `${a.app.name} · ${a.app.id}${a.app.version ? ` ${a.app.version}` : ''}` } : null;
+      },
+      device: (e) => {
+        const m = marks.get(e.deviceId);
+        const name = m?.name ?? deviceDisplayName(hubDevices[e.deviceId], e.deviceId);
+        return { name: m?.short ?? name, title: name, hue: m?.hue };
+      },
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showWho, mix.devices, hubApps, hubDevices, lang]);
+
   const rowIds = useMemo(() => {
     if (sort.key === 'seq') return sort.dir === 'asc' ? ids : ids.slice().reverse();
     const list: NetworkEntry[] = [];
@@ -179,10 +234,10 @@ export default function NetworkView() {
       const e = networkStore.get(id);
       if (e) list.push(e);
     }
-    return sortEntries(list, sort).map((e) => e.id);
+    return sortEntries(list, sort, names).map((e) => e.id);
     // value sorts re-run on store changes (throttled); arrival order only when the list changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ids, sort, sort.key === 'seq' ? 0 : v]);
+  }, [ids, sort, names, sort.key === 'seq' ? 0 : v]);
 
   const scopeTotal = useMemo(() => scopeNetworkCounts(compiled, networkStore).total, [scopeKey, v]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -201,7 +256,10 @@ export default function NetworkView() {
   const [edges, setEdges] = useState({ top: true, bottom: true });
   const onEdgesChange = useCallback((top: boolean, bottom: boolean) => setEdges((e) => (e.top === top && e.bottom === bottom ? e : { top, bottom })), []);
   const oldestInView = followEdge === 'bottom' ? edges.top : followEdge === 'top' ? edges.bottom : true;
-  const memoryFull = networkStore.dropped > 0 || networkStore.size >= networkStore.maxEntries;
+  const evictions = useScopeEvictions();
+  const storeLimits = useStoreLimits((s) => s.limits);
+  const requestLimit = storeLimits?.maxNetworkEntries ?? networkStore.maxEntries;
+  const memoryFull = evictions.requests > 0 || networkStore.size >= requestLimit;
   const oldestTs = memoryFull ? networkStore.get(networkStore.order[0] ?? '')?.startTs : undefined;
 
   /* ── selected entry ── */
@@ -345,14 +403,10 @@ export default function NetworkView() {
     ...COLUMNS.filter((c) => c.hideable).map(
       (c): MenuItem => ({
         label: t(`network.columns.${c.id}`),
-        checked: !colPrefs.hidden.includes(c.id),
+        checked: columns.some((x) => x.id === c.id),
+        hint: c.auto && columnMode(colPrefs, c.id) === 'auto' ? t('network.columns.auto') : undefined,
         keepOpen: true,
-        onSelect: () =>
-          setRawCols((p) => {
-            const cur = sanitizeColumnPrefs(p);
-            const hidden = cur.hidden.includes(c.id) ? cur.hidden.filter((x) => x !== c.id) : [...cur.hidden, c.id];
-            return { ...cur, hidden };
-          }),
+        onSelect: () => setRawCols((p) => toggleColumn(sanitizeColumnPrefs(p), c.id, columns.some((x) => x.id === c.id))),
       }),
     ),
     { type: 'separator' },
@@ -452,6 +506,51 @@ export default function NetworkView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.seq]);
 
+  // SDK guide for the empty state: the scoped apps' own SDK (all of them alike), Flutter otherwise.
+  const scopeExplain = useScopeExplain();
+  const guideTab = useMemo(() => {
+    const tabs = new Set(scopeExplain.items.map((i) => guideTabFor(i.result.context)));
+    return tabs.size === 1 ? [...tabs][0]! : 'flutter';
+  }, [scopeExplain]);
+
+  /* ── "12 hits" on a mock rule: the requests it answered ── */
+  const mockRules = useMocks((s) => s.rules);
+  const mockRule = filters.mockRule ? mockRules.find((r) => r.id === filters.mockRule) : undefined;
+  const mockRuleName = filters.mockRule ? (mockRule ? ruleLabel(mockRule) : t('network.filters.mockRuleGone')) : undefined;
+  // Counting starts with the first view that shows rules or requests, so clearing the list later keeps the counts.
+  useEffect(() => startHitLedger(), []);
+  const hitsRequest = useNetworkMockHits();
+  const hitsHandled = useRef(0);
+  useEffect(() => {
+    if (!hitsRequest || hitsHandled.current === hitsRequest.seq) return;
+    hitsHandled.current = hitsRequest.seq;
+    networkNav.consume(hitsRequest.seq);
+    const ruleId = hitsRequest.ruleId;
+    const answered = networkStore.list().filter((e) => e.mocked && e.mockRuleId === ruleId);
+    const before = { query, filters: rawFilters };
+    setQuery('');
+    setRawFilters((f) => ({ ...DEFAULT_FILTERS, slowMs: sanitizeFilters(f).slowMs, mockRule: ruleId }));
+    setPaused(false);
+    const inScopeCount = answered.filter((e) => compiled.network(e)).length;
+    const outOfScope = answered.length > 0 && inScopeCount === 0;
+    if (outOfScope) setScope(ALL_SCOPE);
+    const rule = useMocks.getState().rules.find((r) => r.id === ruleId);
+    toast.info(t('network.toast.mockHits', { count: outOfScope ? answered.length : inScopeCount, rule: rule ? ruleLabel(rule) : '' }), {
+      description: outOfScope ? t('network.toast.mockHitsAll') : undefined,
+      duration: 10_000,
+      action: {
+        label: t('network.toast.restoreFilters'),
+        onClick: () => {
+          setQuery(before.query);
+          setRawFilters(before.filters);
+        },
+      },
+    });
+    const last = outOfScope ? answered[answered.length - 1] : answered.filter((e) => compiled.network(e)).pop();
+    if (last) select(last.id, { reveal: true, center: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hitsRequest?.seq]);
+
   // A selection that left the store stays readable (marked as gone) until closed.
   useEffect(() => {
     if (!selectedId) setFallbackEntry(null);
@@ -512,12 +611,14 @@ export default function NetworkView() {
         description={noNetworkCapability ? t('network.empty.noCapability') : t('network.empty.description')}
         actions={
           <>
-            <Button variant="primary" icon={BookOpen} onClick={() => ui.openSdkGuide('flutter')}>
+            <Button variant="primary" icon={BookOpen} onClick={() => ui.openSdkGuide(guideTab)}>
               {t('network.empty.sdkGuide')}
             </Button>
-            <Button variant="ghost" onClick={() => ui.openSdkGuide('flutter')}>
-              {t('network.empty.vmService')}
-            </Button>
+            {guideTab === 'flutter' ? (
+              <Button variant="ghost" onClick={() => ui.openSdkGuide('flutter', 'vm')}>
+                {t('network.empty.vmService')}
+              </Button>
+            ) : null}
           </>
         }
       >
@@ -578,7 +679,7 @@ export default function NetworkView() {
         shown={rowIds.length}
         total={scopeTotal}
       />
-      <FilterBar filters={filters} onChange={patchFilters} onReset={resetFilters} hostItems={hostItems} hasQuery={query.trim() !== ''} onClearQuery={() => setQuery('')} />
+      <FilterBar filters={filters} onChange={patchFilters} onReset={resetFilters} hostItems={hostItems} hasQuery={query.trim() !== ''} onClearQuery={() => setQuery('')} mockRuleName={mockRuleName} />
       {paused ? (
         <div className="net-banner net-banner--paused" role="status">
           <Pause size={13} aria-hidden />
@@ -592,7 +693,7 @@ export default function NetworkView() {
         <div className="net-banner net-banner--dropped" role="note">
           <Archive size={13} aria-hidden />
           <span>
-            <strong>{networkStore.dropped > 0 ? t('network.dropped.title', { count: networkStore.dropped }) : t('network.dropped.titleFull')}</strong> {t('network.dropped.body', { limit: networkStore.maxEntries })}
+            <strong>{evictions.requests > 0 ? t('network.dropped.title', { count: evictions.requests }) : t('network.dropped.titleFull')}</strong> {t('network.dropped.body', { limit: requestLimit })}
             {oldestTs !== undefined ? ` ${t('network.dropped.since', { time: formatClock(oldestTs, { ms: false }) })}` : ''}
           </span>
           <Button size="sm" variant="ghost" icon={Settings2} onClick={() => ui.openSettings('network')}>
@@ -600,6 +701,7 @@ export default function NetworkView() {
           </Button>
         </div>
       ) : null}
+      {rowIds.length > 0 ? <PartialCaptureNote /> : null}
       {baseEntry ? (
         <div className="net-banner net-banner--compare" role="status">
           <ArrowLeftRight size={13} aria-hidden />
@@ -644,6 +746,7 @@ export default function NetworkView() {
           active={active}
           empty={empty}
           onEdgesChange={onEdgesChange}
+          who={who}
           aria-label={t('network.table.label')}
         />
         {selected ? (
@@ -657,6 +760,7 @@ export default function NetworkView() {
             onCompare={() => setCompareBase(selected.id)}
             onShare={() => setShareEntry(selected)}
             onReport={() => bugReport.open({ kind: 'request', netId: selected.id })}
+            find={serverText || undefined}
           />
         ) : (
           <span />

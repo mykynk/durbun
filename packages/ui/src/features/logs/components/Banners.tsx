@@ -1,7 +1,7 @@
 import { memo, type CSSProperties } from 'react';
 import { ArrowDown, Archive, Bug, Hourglass, Info, LocateFixed, OctagonX, Pause, Play, Settings2, TriangleAlert, Undo2, X } from 'lucide-react';
 import type { LogEntry } from '@durbun/protocol';
-import { Button, IconButton, formatClock } from '../../../components';
+import { Button, IconButton, formatBytes, formatClock } from '../../../components';
 import { t, useT } from '../../../i18n';
 import { analyzeEntry } from '../model/analyze';
 import { isVisibleMemoryKill } from '../model/records';
@@ -156,14 +156,31 @@ export const ContextBar = memo(function ContextBar({ parts, scopeName, queryName
  * The oldest lines were dropped by the memory limit (or are about to be): said where the user looks for them, at
  * the top of the list, with how many, since when the list starts, and the setting that moves the limit.
  */
-export const DroppedNote = memo(function DroppedNote({ dropped, limit, since, onOpenSettings }: { dropped: number; limit: number; since?: number; onOpenSettings(): void }) {
+export const DroppedNote = memo(function DroppedNote({
+  dropped,
+  limit,
+  memoryLimit,
+  byMemory,
+  since,
+  onOpenSettings,
+}: {
+  /** Lines of this view the limits deleted. */
+  dropped: number;
+  limit: number;
+  /** Log memory budget (bytes), when the server reports it. */
+  memoryLimit?: number;
+  /** The memory budget filled before the line limit. */
+  byMemory?: boolean;
+  since?: number;
+  onOpenSettings(): void;
+}) {
   useT(); // re-render on language change (memoized)
   return (
     <div className="lg-note lg-dropped" role="note">
       <Archive size={13} aria-hidden />
       <p className="lg-note__text">
         <strong>{dropped > 0 ? t('logs.dropped.title', { count: dropped }) : t('logs.dropped.titleFull')}</strong>{' '}
-        {t('logs.dropped.body', { limit })}
+        {byMemory && memoryLimit ? t('logs.dropped.bodyMemory', { limit, size: formatBytes(memoryLimit) }) : t('logs.dropped.body', { limit })}
         {since !== undefined ? ` ${t('logs.dropped.since', { time: formatClock(since, { ms: false }) })}` : ''}
       </p>
       <Button size="sm" variant="ghost" icon={Settings2} onClick={onOpenSettings}>

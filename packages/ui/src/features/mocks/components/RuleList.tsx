@@ -1,6 +1,6 @@
 import { useState, type DragEvent, type KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
-import { ArrowDown, ArrowUp, Copy, Ellipsis, GripVertical, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Copy, Ellipsis, GripVertical, Network, Pencil, Trash2 } from 'lucide-react';
 import type { MockRule } from '@durbun/protocol';
 import { DropdownMenu, IconButton, MethodBadge, TagChip, Toggle, Tooltip, type MenuItem } from '../../../components';
 import { useLanguage, useT } from '../../../i18n';
@@ -11,7 +11,10 @@ export interface RuleListProps {
   /** Rules shown (search); reordering is only possible when every rule is shown. */
   visibleIds: ReadonlySet<string> | null;
   selectedId: string | null;
-  hits: ReadonlyMap<string, number>;
+  /** Requests each rule answered: this session (kept when the request list is cleared) and still in memory. */
+  hits: ReadonlyMap<string, { session: number; inMemory: number }>;
+  /** Open the Network tab on the requests a rule answered. */
+  onShowHits: (id: string) => void;
   appNames: ReadonlyMap<string, string>;
   onOpen: (id: string) => void;
   onToggle: (id: string, enabled: boolean) => void;
@@ -20,7 +23,7 @@ export interface RuleListProps {
   onDelete: (id: string) => void;
 }
 
-export function RuleList({ rules, visibleIds, selectedId, hits, appNames, onOpen, onToggle, onMove, onDuplicate, onDelete }: RuleListProps) {
+export function RuleList({ rules, visibleIds, selectedId, hits, appNames, onShowHits, onOpen, onToggle, onMove, onDuplicate, onDelete }: RuleListProps) {
   const t = useT();
   const lang = useLanguage();
   const [armed, setArmed] = useState<string | null>(null);
@@ -73,10 +76,14 @@ export function RuleList({ rules, visibleIds, selectedId, hits, appNames, onOpen
       {shown.map((r) => {
         const index = indexOf(r.id);
         const name = ruleLabel(r);
-        const count = hits.get(r.id) ?? 0;
+        const hit = hits.get(r.id);
+        const count = hit?.session ?? 0;
+        const inMemory = hit?.inMemory ?? 0;
+        const hitsTip = count === 0 ? t('mocks.list.hitsNone') : inMemory === count ? t('mocks.list.hitsAll', { count }) : t('mocks.list.hitsSome', { count, inMemory });
         const menu: MenuItem[] = [
           { label: t('mocks.list.edit'), icon: Pencil, onSelect: () => onOpen(r.id) },
           { label: t('mocks.list.duplicate'), icon: Copy, onSelect: () => onDuplicate(r.id) },
+          { label: t('mocks.list.showHits'), icon: Network, disabled: inMemory === 0, onSelect: () => onShowHits(r.id) },
           { type: 'separator' },
           { label: t('mocks.order.moveUp'), icon: ArrowUp, shortcut: 'Alt+ArrowUp', disabled: !reorderable || index === 0, onSelect: () => onMove(index, index - 1) },
           { label: t('mocks.order.moveDown'), icon: ArrowDown, shortcut: 'Alt+ArrowDown', disabled: !reorderable || index === rules.length - 1, onSelect: () => onMove(index, index + 1) },
@@ -134,8 +141,14 @@ export function RuleList({ rules, visibleIds, selectedId, hits, appNames, onOpen
                 {r.apps && r.apps.length > 3 ? <span className="mk-allapps">+{r.apps.length - 3}</span> : null}
               </span>
             </button>
-            <Tooltip content={t('mocks.list.hitsTitle')}>
-              <span className={clsx('mk-rule__hits tnum', count > 0 && 'has-hits')}>{t('mocks.list.hits', { count })}</span>
+            <Tooltip content={hitsTip}>
+              {count > 0 ? (
+                <button type="button" className="mk-rule__hits mk-rule__hits--link tnum has-hits" onClick={() => onShowHits(r.id)} aria-label={`${t('mocks.list.hits', { count })}: ${hitsTip}`}>
+                  {t('mocks.list.hits', { count })}
+                </button>
+              ) : (
+                <span className="mk-rule__hits tnum">{t('mocks.list.hits', { count })}</span>
+              )}
             </Tooltip>
             <span className="mk-rule__tools">
               <IconButton icon={Copy} size="sm" label={t('mocks.list.duplicate')} onClick={() => onDuplicate(r.id)} />

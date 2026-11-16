@@ -39,6 +39,8 @@ export interface LogsToolbarProps {
   onQuerySubmit(q: string): void;
   getSuggestData(): QuerySuggestData;
   minLevel: LogLevel;
+  /** Lowest level the applied query requires (`level:error`, the "Errors only" chip): the control shows it. */
+  queryLevel?: LogLevel;
   onMinLevel(l: LogLevel): void;
   following: boolean;
   paused: boolean;
@@ -97,25 +99,7 @@ export const LogsToolbar = memo(function LogsToolbar(p: LogsToolbarProps) {
       </div>
 
       <div className="lg-tb-group">
-        <SegmentedControl
-          size="sm"
-          value={LEVELS.includes(p.minLevel) ? p.minLevel : 'verbose'}
-          onChange={p.onMinLevel}
-          aria-label={t('logs.level.label')}
-          className="lg-levels"
-          options={LEVELS.map((l) => ({
-            value: l,
-            label: (
-              <>
-                <span className={`lg-seg-lvl lg-seg-lvl--${l}`} aria-hidden>
-                  {LETTER[l]}
-                </span>
-                <span className="sr-only">{t(`logs.level.${l}`)}</span>
-              </>
-            ),
-            tooltip: t(`logs.level.${l}`),
-          }))}
-        />
+        <LevelControl minLevel={p.minLevel} queryLevel={p.queryLevel} onMinLevel={p.onMinLevel} />
       </div>
 
       <div className="lg-tb-group lg-tb-actions">
@@ -136,6 +120,44 @@ export const LogsToolbar = memo(function LogsToolbar(p: LogsToolbarProps) {
     </div>
   );
 });
+
+const RANK: Record<LogLevel, number> = { verbose: 0, debug: 1, info: 2, warn: 3, error: 4, fatal: 5 };
+/** Level names in prose (technical names, SPEC §7.1). */
+const LEVEL_NAME: Record<LogLevel, string> = { verbose: 'Verbose', debug: 'Debug', info: 'Info', warn: 'Warn', error: 'Error', fatal: 'Fatal' };
+
+/**
+ * The minimum level. When the query already asks for a higher level (`level:error`, the "Errors only" chip), the
+ * control shows that level, marked as coming from the query, so the two never say different things; picking a
+ * level here takes the level condition out of the query (the parent does that).
+ */
+function LevelControl({ minLevel, queryLevel, onMinLevel }: { minLevel: LogLevel; queryLevel?: LogLevel; onMinLevel(l: LogLevel): void }) {
+  const t = useT();
+  const own: LogLevel = LEVELS.includes(minLevel) ? minLevel : 'verbose';
+  const fromQuery = !!queryLevel && RANK[queryLevel] > RANK[own];
+  const shown: LogLevel = fromQuery ? (queryLevel === 'fatal' ? 'error' : queryLevel!) : own;
+  const queryHint = fromQuery ? t('logs.level.fromQuery', { level: LEVEL_NAME[queryLevel!] }) : '';
+  return (
+    <SegmentedControl
+      size="sm"
+      value={shown}
+      onChange={onMinLevel}
+      aria-label={fromQuery ? `${t('logs.level.label')} · ${queryHint}` : t('logs.level.label')}
+      className={clsx('lg-levels', fromQuery && 'lg-levels--query')}
+      options={LEVELS.map((l) => ({
+        value: l,
+        label: (
+          <>
+            <span className={`lg-seg-lvl lg-seg-lvl--${l}`} aria-hidden>
+              {LETTER[l]}
+            </span>
+            <span className="sr-only">{t(`logs.level.${l}`)}</span>
+          </>
+        ),
+        tooltip: fromQuery && l === shown ? queryHint : t(`logs.level.${l}`),
+      }))}
+    />
+  );
+}
 
 export interface SourceFiltersProps {
   sources: SourceToggles;
@@ -310,9 +332,11 @@ export const FilterChips = memo(function FilterChips({ query, saved, onApply, on
       {PRESETS.map((p) => {
         const on = normalizeQuery(p.query) === norm;
         return (
-          <button key={p.id} type="button" className={clsx('lg-chip', on && 'is-on')} aria-pressed={on} title={p.query} onClick={() => onApply(on ? '' : p.query)}>
-            {t(p.labelKey)}
-          </button>
+          <Tooltip key={p.id} content={t('logs.presets.queryTip', { query: p.query })}>
+            <button type="button" className={clsx('lg-chip', on && 'is-on')} aria-pressed={on} onClick={() => onApply(on ? '' : p.query)}>
+              {t(p.labelKey)}
+            </button>
+          </Tooltip>
         );
       })}
       {saved.length ? <span className="lg-chips__sep" aria-hidden /> : null}
@@ -320,9 +344,11 @@ export const FilterChips = memo(function FilterChips({ query, saved, onApply, on
         const on = normalizeQuery(f.query) === norm;
         return (
           <span key={f.id} className={clsx('lg-chip lg-chip--saved', on && 'is-on')}>
-            <button type="button" className="lg-chip__main" aria-pressed={on} title={f.query} onClick={() => onApply(on ? '' : f.query)}>
-              {f.name}
-            </button>
+            <Tooltip content={t('logs.presets.queryTip', { query: f.query })}>
+              <button type="button" className="lg-chip__main" aria-pressed={on} onClick={() => onApply(on ? '' : f.query)}>
+                {f.name}
+              </button>
+            </Tooltip>
             <button type="button" className="lg-chip__x" aria-label={`${t('logs.saved.remove')}: ${f.name}`} title={t('logs.saved.remove')} onClick={() => onRemove(f.id)}>
               <X size={10} aria-hidden />
             </button>

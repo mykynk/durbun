@@ -474,6 +474,16 @@ const ENDPOINTS = [
   { method: 'POST', url: 'https://api.pati.app/v1/payments', status: 502, ct: 'application/json', mocked: true, body: () => '{"error":"gateway"}' },
 ];
 
+/** A decodable (unsigned, fake) access token: about one request in six carries one that had already expired. */
+let jwtSeq = 0;
+function mockJwt(start) {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const sec = Math.floor(start / 1000);
+  const expired = ++jwtSeq % 6 === 0;
+  const claims = { sub: 'user_4821', iss: 'https://auth.pati.app', aud: 'pati-mobile', scope: 'pets:read pets:write', iat: sec - (expired ? 3900 : 600), exp: sec + (expired ? -300 : 3000) };
+  return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64(claims)}.bW9jay1zaWduYXR1cmU`;
+}
+
 function makeRequest(appId) {
   const ep = pick(ENDPOINTS);
   const app = apps.find((a) => a.id === appId);
@@ -493,7 +503,7 @@ function makeRequest(appId) {
     state: 'pending',
     requestHeaders: [
       ['Accept', 'application/json'],
-      ['Authorization', 'Bearer eyJhbGciOiJIUzI1NiJ9…'],
+      ['Authorization', `Bearer ${mockJwt(start)}`],
       ['User-Agent', app?.sdk.platform === 'android' ? 'okhttp/4.12.0' : 'Dart/3.10 (dart:io)'],
       ...(ep.req ? [['Content-Type', 'application/json']] : []),
     ],

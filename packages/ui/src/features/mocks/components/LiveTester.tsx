@@ -42,6 +42,13 @@ export function LiveTester({ draft, rules, insertAt, appNames }: { draft: MockRu
   const manual = useMemo(() => (deferred && tryUrl.trim() ? testRequest(deferred, list, tryMethod, tryUrl.trim(), undefined) : null), [deferred, list, tryMethod, tryUrl]);
 
   const rows: TesterRow[] = result ? (expanded ? result.rows : result.rows.slice(0, SHOWN)) : [];
+  // A rule for every app that catches several apps' requests: easy to miss when one app was meant.
+  const otherApps = useMemo(() => {
+    if (!deferred || (deferred.apps && deferred.apps.length > 0) || !result) return [];
+    const ids = new Set<string>();
+    for (const r of result.rows) if (r.verdict === 'applies' && r.bundleId) ids.add(r.bundleId);
+    return ids.size > 1 ? [...ids] : [];
+  }, [deferred, result]);
   const hidden = result ? result.rows.length - rows.length : 0;
 
   return (
@@ -59,6 +66,11 @@ export function LiveTester({ draft, rules, insertAt, appNames }: { draft: MockRu
         </span>
       </header>
       {draft && !draft.enabled && result && result.applies > 0 ? <p className="mk-tester__note">{t('mocks.tester.disabled')}</p> : null}
+      {otherApps.length > 0 ? (
+        <p className="mk-tester__note" role="note">
+          {t('mocks.tester.manyApps', { count: otherApps.length, apps: otherApps.map((id) => appNames.get(id) ?? id).join(', ') })}
+        </p>
+      ) : null}
       {rows.length > 0 ? (
         <ul className="mk-tester__list">
           {rows.map((r) => (

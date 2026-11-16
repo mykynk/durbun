@@ -51,6 +51,8 @@ export interface RowFilter {
   dedupe: boolean;
   /** Fold identical consecutive lines into one row with a ×N counter. */
   fold: boolean;
+  /** Only lines whose time is inside [from, to] (epoch ms, inclusive); absent / null = any time. */
+  range?: { from: number; to: number } | null;
 }
 
 /** Minimal view of the log store the row model reads (tests pass a fake). */

@@ -56,6 +56,11 @@ All notable changes to Dürbün are listed here. The format follows
   Dürbün writes a line when it drops a message from an app because it is too large or unreadable.
 - React Native console lines on Android no longer show twice (once from the SDK, once from logcat).
 - A search that froze the page is cleared on reload instead of coming back.
+- A slow regular expression in a flow condition or URL rule can no longer freeze Dürbün.
+- A flow whose header reported an error still showed "Ready" on the run button.
+- A mock made from a request targets that request's app.
+- Comparing two requests with identical bodies shows a short "identical" state instead of an empty table;
+  the SDK guide buttons on the empty Network screen open the guide for the selected app's platform.
 - React Native: large text responses fetched as Blobs no longer stall the app; the platform decodes them, and
   where it cannot, decoding runs in short slices.
 - An app connected over Wi-Fi moves under the plugged-in phone it runs on once that phone reports it.
@@ -90,6 +95,19 @@ All notable changes to Dürbün are listed here. The format follows
 - React Native / JS SDK: while Dürbün is closed the SDK stops reading bodies after 30 seconds and keeps at
   most about 8 MB waiting; the oldest bodies are dropped before any request row.
 - React Native / JS SDK: FPS measurement stops while the app is in the background.
+- When the connection to Dürbün drops and comes back, the window continues where it was instead of loading
+  everything again.
+- When the memory limit deletes older log lines or requests, Logs and Network say how many went in the
+  current view and why; the window keeps exactly what the server keeps.
+- Turning Wi-Fi off or airplane mode on is refused for a device connected over Wi-Fi, because it would cut
+  its connection.
+- Device tab: reasons and action errors are worded in the interface language, with the tool, the versions
+  and the install command as data, instead of English text inside the sentence.
+- Light theme: level, method, status and SDK colours are darker where they were hard to read; a test checks
+  every text and background pair (WCAG AA).
+- Status bar badges open what they describe; "Connect Slack" in a share dialog connects in place.
+- Removing a noise rule, a highlight rule or a saved filter can be undone; the level buttons show a level
+  set in the search.
 - `npm run app:release` stops when the Developer ID or notarization variables are missing
   (`DURBUN_ALLOW_UNSIGNED=1` for a deliberate ad-hoc build) and verifies the built apps.
   `scripts/check-versions.mjs` covers lockfiles, the no-op SDK and the install snippets in the docs, and can
@@ -175,6 +193,30 @@ All notable changes to Dürbün are listed here. The format follows
   the installed copy and install again, after a warning.
 - Device tab: a picker for Android users and work profiles; app actions apply to the chosen one.
 - Device tab: a full Android device report with progress and cancel, also offered from Report a bug.
+- Logs: show only the lines around a moment (±10 s to ±5 min) or a span dragged on the histogram with
+  Shift; select several lines with Shift/⌘-click or Shift+↑/↓; copy or share just those lines. Shared lines
+  mask passwords, tokens, cookies and keys by default.
+- Network: App and Device columns, shown by themselves when the list mixes devices or apps; a note above the
+  list when some of an app's requests cannot be captured, with the fix.
+- Network: JWTs in headers, cookies and query values are decoded on your Mac: claims, header, and whether
+  the token was still valid when the request was sent.
+- Network: with body search on, the request detail opens where the text was found and highlights it; "Show
+  in logs" opens the moments around a request when its own log line is no longer in memory.
+- Mocks: a rule's hit count keeps the session total when the request list is cleared, and clicking it opens
+  the requests it answered; Live test warns when an all-apps rule catches several apps.
+- Flows: unsaved edits are kept on this Mac and offered back when the flow is opened again.
+- Flows: new device steps for app permissions, app language, airplane mode, Wi-Fi, mobile data, screen
+  rotation and "Don't keep activities"; each puts the setting back when the run ends unless you turn that
+  off.
+- Flows: a bar under the list shows every flow that runs on its own; switch one off, or pause them all and
+  resume later. The step picker puts an exact name first, explains steps in plain words and marks steps
+  that cannot run on the flow's device.
+- Command palette: screenshot, record, restart the app, device info, open or run a flow, open a mock rule
+  and pause automations; the shortcuts window lists every shortcut, including the flow editor.
+- The first-launch screen can open a file or restore a backup; dropping several files imports all of them
+  with one summary. The SDK guide says when your app has connected and what to check if it does not.
+- When another window changed the mock rules, a flow or the environments first, a save stops and asks: load
+  the current version or save yours.
 - Keyboard: the sidebar is one Tab stop with arrow keys, `i` opens "What can I see?", and Shift+F10 opens a
   request's menu in the network list. Flow steps announce their connections to screen readers.
 - Mac app: `.durbun` packages and backups and `.durbun.json` recordings open from Finder (double click, Open

@@ -3,7 +3,7 @@ import { shortTypeLabel } from './filters';
 
 /** Table columns, persisted column preferences and sorting. */
 
-export type ColumnId = 'status' | 'method' | 'host' | 'path' | 'type' | 'size' | 'duration' | 'start' | 'waterfall' | 'source';
+export type ColumnId = 'status' | 'method' | 'host' | 'path' | 'type' | 'size' | 'duration' | 'start' | 'waterfall' | 'source' | 'app' | 'device';
 
 export interface ColumnDef {
   id: ColumnId;
@@ -15,6 +15,11 @@ export interface ColumnDef {
   sortable: boolean;
   hideable: boolean;
   defaultVisible: boolean;
+  /**
+   * Shown by itself when the list mixes several of what it names (devices, apps), unless the user turned it on or
+   * off in the column menu.
+   */
+  auto?: boolean;
 }
 
 export const COLUMNS: readonly ColumnDef[] = [
@@ -28,6 +33,8 @@ export const COLUMNS: readonly ColumnDef[] = [
   { id: 'start', width: 104, min: 76, sortable: true, hideable: true, defaultVisible: true },
   { id: 'waterfall', width: 170, min: 80, sortable: false, hideable: true, defaultVisible: true },
   { id: 'source', width: 88, min: 56, sortable: true, hideable: true, defaultVisible: false },
+  { id: 'app', width: 120, min: 64, sortable: true, hideable: true, defaultVisible: false, auto: true },
+  { id: 'device', width: 116, min: 64, sortable: true, hideable: true, defaultVisible: false, auto: true },
 ];
 
 export const COLUMN_IDS: readonly ColumnId[] = COLUMNS.map((c) => c.id);
@@ -35,12 +42,17 @@ export const COLUMN_IDS: readonly ColumnId[] = COLUMNS.map((c) => c.id);
 export interface ColumnPrefs {
   hidden: ColumnId[];
   widths: Partial<Record<ColumnId, number>>;
+  /** Automatic columns the user turned on (shown even when the list has one device / app). */
+  shown?: ColumnId[];
 }
 
 export const DEFAULT_COLUMN_PREFS: ColumnPrefs = {
-  hidden: COLUMNS.filter((c) => !c.defaultVisible).map((c) => c.id),
+  hidden: COLUMNS.filter((c) => !c.defaultVisible && !c.auto).map((c) => c.id),
   widths: {},
+  shown: [],
 };
+
+const isAuto = (id: ColumnId) => COLUMNS.some((c) => c.id === id && c.auto);
 
 export function sanitizeColumnPrefs(raw: unknown): ColumnPrefs {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -54,11 +66,33 @@ export function sanitizeColumnPrefs(raw: unknown): ColumnPrefs {
       if (Number.isFinite(w) && w >= def.min && w <= 1200) widths[def.id] = Math.round(w);
     }
   }
-  return { hidden, widths };
+  const shown = Array.isArray(r.shown) ? [...new Set(r.shown.filter((x): x is ColumnId => typeof x === 'string' && isAuto(x as ColumnId)))].filter((x) => !hidden.includes(x)) : [];
+  return { hidden, widths, shown };
 }
 
-export function visibleColumns(prefs: ColumnPrefs): ColumnDef[] {
-  return COLUMNS.filter((c) => !prefs.hidden.includes(c.id));
+/** Whether an automatic column is on (several devices / apps in the list). Ordinary columns ignore it. */
+export type AutoColumns = (id: ColumnId) => boolean;
+
+/** 'on' / 'off' when the user chose, 'auto' when an automatic column follows the list. */
+export function columnMode(prefs: ColumnPrefs, id: ColumnId): 'on' | 'off' | 'auto' {
+  if (prefs.hidden.includes(id)) return 'off';
+  if (!isAuto(id) || prefs.shown?.includes(id)) return 'on';
+  return 'auto';
+}
+
+export function visibleColumns(prefs: ColumnPrefs, autoOn: AutoColumns = () => false): ColumnDef[] {
+  return COLUMNS.filter((c) => {
+    const mode = columnMode(prefs, c.id);
+    return mode === 'on' || (mode === 'auto' && autoOn(c.id));
+  });
+}
+
+/** Column menu click: an ordinary column toggles; an automatic one becomes explicitly on / off (from what shows now). */
+export function toggleColumn(prefs: ColumnPrefs, id: ColumnId, visibleNow: boolean): ColumnPrefs {
+  const hidden = prefs.hidden.filter((x) => x !== id);
+  const shown = (prefs.shown ?? []).filter((x) => x !== id);
+  if (visibleNow) return { ...prefs, hidden: [...hidden, id], shown };
+  return { ...prefs, hidden, shown: isAuto(id) ? [...shown, id] : shown };
 }
 
 export function columnWidth(prefs: ColumnPrefs, def: ColumnDef): number {
@@ -76,7 +110,7 @@ export function minTableWidth(cols: readonly ColumnDef[], prefs: ColumnPrefs): n
 }
 
 /** Columns given up first when the table is narrow (detail panel open, small window). */
-const DROP_ORDER: readonly ColumnId[] = ['waterfall', 'source', 'start', 'type', 'host', 'size'];
+const DROP_ORDER: readonly ColumnId[] = ['waterfall', 'source', 'start', 'type', 'app', 'host', 'device', 'size'];
 
 /**
  * The visible columns that fit `width` px: low-priority columns are dropped (not hidden in the prefs)
@@ -94,7 +128,7 @@ export function fitColumns(cols: readonly ColumnDef[], prefs: ColumnPrefs, width
 
 /* ───────────── Sorting ───────────── */
 
-export type SortKey = 'seq' | Exclude<ColumnId, 'waterfall'>;
+export type SortKey = 'seq' | Exclude<ColumnId, 'waterfall' | 'app' | 'device'> | 'app' | 'device';
 
 export interface SortState {
   key: SortKey;
@@ -103,7 +137,7 @@ export interface SortState {
 
 export const DEFAULT_SORT: SortState = { key: 'seq', dir: 'asc' };
 
-const SORT_KEYS: readonly SortKey[] = ['seq', 'status', 'method', 'host', 'path', 'type', 'size', 'duration', 'start', 'source'];
+const SORT_KEYS: readonly SortKey[] = ['seq', 'status', 'method', 'host', 'path', 'type', 'size', 'duration', 'start', 'source', 'app', 'device'];
 
 export function sanitizeSort(raw: unknown): SortState {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -132,8 +166,16 @@ function statusRank(e: NetworkEntry): number {
 
 const str = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+/** Display names for the app and device columns (sorting by what the user reads, not by ids). */
+export interface ColumnNames {
+  app: (e: NetworkEntry) => string;
+  device: (e: NetworkEntry) => string;
+}
+
+const ID_NAMES: ColumnNames = { app: (e) => e.appId ?? '', device: (e) => e.deviceId };
+
 /** Ascending comparator for a sort key ('seq' keeps arrival order and is handled by the caller). */
-export function comparatorFor(key: SortKey): ((a: NetworkEntry, b: NetworkEntry) => number) | null {
+export function comparatorFor(key: SortKey, names: ColumnNames = ID_NAMES): ((a: NetworkEntry, b: NetworkEntry) => number) | null {
   switch (key) {
     case 'seq':
       return null;
@@ -155,12 +197,16 @@ export function comparatorFor(key: SortKey): ((a: NetworkEntry, b: NetworkEntry)
       return (a, b) => a.startTs - b.startTs;
     case 'source':
       return (a, b) => str(a.source, b.source);
+    case 'app':
+      return (a, b) => str(names.app(a).toLowerCase(), names.app(b).toLowerCase());
+    case 'device':
+      return (a, b) => str(names.device(a).toLowerCase(), names.device(b).toLowerCase());
   }
 }
 
 /** Sorted copy of `entries` (already in arrival order; the sort is stable so ties keep it). */
-export function sortEntries(entries: readonly NetworkEntry[], sort: SortState): NetworkEntry[] {
-  const cmp = comparatorFor(sort.key);
+export function sortEntries(entries: readonly NetworkEntry[], sort: SortState, names?: ColumnNames): NetworkEntry[] {
+  const cmp = comparatorFor(sort.key, names);
   if (!cmp) return sort.dir === 'asc' ? entries.slice() : entries.slice().reverse();
   const out = entries.slice().sort(cmp);
   if (sort.dir === 'desc') out.reverse();
