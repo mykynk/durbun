@@ -10,6 +10,7 @@ export 'src/core/http/http_client.dart'
     show DurbunHttpClient, DurbunHttpOverrides, HttpCaptureHost;
 export 'src/core/http/recorder.dart' show NetworkRecorder;
 export 'src/core/http/response.dart' show DurbunHttpTuning;
+export 'src/core/streams/stream_host.dart' show StreamCaptureHost;
 export 'src/core/mocks.dart'
     show MockAction, MockRule, findMockRule, mockRuleMatches;
 export 'src/core/options.dart' show DurbunOptions;

@@ -16,6 +16,7 @@ import 'json_safe.dart';
 import 'mocks.dart';
 import 'options.dart';
 import 'protocol.dart';
+import 'streams/stream_host.dart';
 import 'transport/transport.dart';
 import 'types.dart';
 
@@ -38,7 +39,7 @@ typedef DurbunCommandHandler =
 /// await client.flush(const Duration(seconds: 2));
 /// await client.dispose();
 /// ```
-class DurbunClient implements HttpCaptureHost {
+class DurbunClient implements HttpCaptureHost, StreamCaptureHost {
   DurbunClient._({
     required this.options,
     required this.sdkPlatform,
@@ -807,12 +808,7 @@ class DurbunClient implements HttpCaptureHost {
   void _setConfig(SdkConfig desktop) {
     // `captureBodies: false` in the options holds whatever the desktop says.
     final config = options.captureBodies == false && desktop.captureBodies
-        ? SdkConfig(
-            captureBodies: false,
-            maxBodyBytes: desktop.maxBodyBytes,
-            metricsIntervalMs: desktop.metricsIntervalMs,
-            deviceLogsAvailable: desktop.deviceLogsAvailable,
-          )
+        ? desktop.copyWith(captureBodies: false)
         : desktop;
     _config = config;
     _configKnown = true;
@@ -938,6 +934,17 @@ class DurbunClient implements HttpCaptureHost {
   @override
   String nextRequestId() => '${++_netSeq}';
 
+  /* ───────────────────────────── StreamCaptureHost ───────────────────────────── */
+
+  @override
+  bool get captureStreams => networkEnabled && _config.captureStreams;
+
+  @override
+  int get streamMessageCap => _config.streamMessageCap;
+
+  @override
+  bool get streamsWanted => networkEnabled && (_config.captureStreams || !_configKnown);
+
   @override
   void sendNetMessage(Map<String, Object?> message) => _send(message);
 
@@ -949,6 +956,7 @@ class DurbunClient implements HttpCaptureHost {
     SdkCapability.commands,
     if (options.captureNetwork) SdkCapability.network,
     if (options.captureNetwork) SdkCapability.mocks,
+    if (options.captureNetwork) SdkCapability.streams,
     if (options.captureErrors) SdkCapability.crash,
     for (final c in extraCapabilities)
       if (c != SdkCapability.metrics || options.metrics) c,

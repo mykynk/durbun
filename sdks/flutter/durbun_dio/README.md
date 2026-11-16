@@ -75,6 +75,10 @@ encoded again. Keeping the interceptor while you switch to the adapter is safe: 
   not show that header.
 - Bodies are kept only up to the body limit (`maxBodyBytes`); large JSON responses are not re-encoded in full.
 - With `ResponseType.stream`, a row ends when your code reads the stream to the end or stops reading it.
+- Server-Sent Events (`text/event-stream` read with `ResponseType.stream`): while the Mac app asks for WebSocket
+  and event stream messages, the response shows as soon as its headers arrive and each event follows under the
+  same row; a stream your code stops reading shows as cancelled. Otherwise the row ends with the body as above.
+  Event streams through Dio's default adapter are captured by `package:durbun` itself.
 
 ## Mocks
 

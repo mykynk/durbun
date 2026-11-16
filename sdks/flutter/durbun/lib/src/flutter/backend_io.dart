@@ -15,6 +15,7 @@ import '../core/mocks.dart';
 import '../core/options.dart';
 import '../core/print_capture.dart';
 import '../core/protocol.dart';
+import '../core/streams/stream_calls.dart';
 import '../core/types.dart';
 import '../inspector/inspector.dart' show inspectorPanelBuilder;
 import '../inspector/panel.dart' show InspectorPanelHost;
@@ -602,6 +603,33 @@ class IoDurbunBackend implements DurbunBackend {
       return null;
     }
   }
+
+  @override
+  bool get capturesStreams {
+    final client = _client;
+    return client != null && !client.isDisposed && client.captureStreams;
+  }
+
+  @override
+  DurbunWebSocketCall? beginWebSocket({
+    required Uri url,
+    required List<List<String>> headers,
+    required String source,
+  }) {
+    final client = _client;
+    if (client == null || client.isDisposed || !client.networkEnabled) return null;
+    try {
+      return WebSocketCall.start(
+        client,
+        url: url,
+        headers: headers,
+        source: source,
+        redact: (h) => _redact(client, h),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 List<List<String>> _redact(DurbunClient client, List<List<String>> headers) => [
@@ -678,5 +706,23 @@ class _TrackedCall implements DurbunHttpCall {
     try {
       _tracker.fail(error, cancelled: cancelled);
     } catch (_) {}
+  }
+
+  @override
+  DurbunEventStreamCall? eventStream({
+    required int status,
+    String? statusText,
+    List<List<String>> headers = const <List<String>>[],
+  }) {
+    try {
+      return EventStreamCall.start(
+        _tracker,
+        status: status,
+        statusText: statusText,
+        headers: _redact(_client, headers),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 }

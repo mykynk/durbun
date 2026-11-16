@@ -73,6 +73,17 @@ class FakeNativeAdapter implements HttpClientAdapter {
         return ResponseBody(controller.stream, 200, headers: {
           Headers.contentTypeHeader: ['application/json'],
         });
+      case '/events':
+        return ResponseBody(
+          Stream<Uint8List>.fromIterable(<Uint8List>[
+            Uint8List.fromList(utf8.encode(': hi\nevent: tick\nid: 1\ndata: bi')),
+            Uint8List.fromList(utf8.encode('r\n\ndata: iki\n\n')),
+          ]),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['text/event-stream'],
+          },
+        );
       case '/missing':
         return ResponseBody.fromString('{"error":"nope"}', 404, headers: {
           Headers.contentTypeHeader: ['application/json'],
@@ -536,6 +547,57 @@ void main() {
         utf8.decode(bodyBytesForReport({'a': 1, 'b': 'x y'}, 'application/x-www-form-urlencoded', limit: 100)!.bytes),
         'a=1&b=x+y',
       );
+    });
+  });
+
+  group('Server-Sent Events', () {
+    Future<void> streams(bool? on) async {
+      conn.send(<String, Object?>{
+        'type': 'config',
+        'config': <String, Object?>{
+          ...FakeDesktop.defaultConfig(),
+          if (on != null) 'captureStreams': on,
+          'maxStreamMessageBytes': 1024,
+        },
+      });
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (DurbunNetwork.capturesStreams != (on == true)) {
+        if (DateTime.now().isAfter(deadline)) throw TimeoutException('config not applied');
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    }
+
+    setUp(() => streams(true));
+    tearDown(() => streams(null));
+
+    Future<String> read(Dio dio, String path) async {
+      final res = await dio.get<ResponseBody>(path, options: Options(responseType: ResponseType.stream));
+      return utf8.decode(await res.data!.stream.expand((c) => c).toList());
+    }
+
+    for (final via in ['adapter', 'interceptor']) {
+      test('$via: the response at its headers, one message per event, the end', () async {
+        final dio = via == 'adapter' ? wrappedDio(FakeNativeAdapter()) : nativeDio(FakeNativeAdapter());
+        final text = await read(dio, '/events?via=$via');
+        expect(text, contains('data: iki'), reason: 'the app reads every byte');
+        final req = await conn.waitFor((m) => m['type'] == 'net.request' && '${m['url']}'.endsWith('/events?via=$via'));
+        final id = req['id']! as String;
+        final messages = await conn.waitForCount((m) => m['id'] == id, 5);
+        expect(messages.map((m) => m['type']), <String>['net.request', 'net.response', 'net.sse', 'net.sse', 'net.sse']);
+        expect(messages[1].containsKey('body'), isFalse);
+        expect(messages[2]['event'], 'tick');
+        expect((messages[2]['body']! as Map)['data'], 'bir');
+        expect((messages[3]['body']! as Map)['data'], 'iki');
+        expect(messages[4]['end'], isTrue);
+      });
+    }
+
+    test('a desktop without stream messages gets the body as before', () async {
+      await streams(null);
+      await read(wrappedDio(FakeNativeAdapter()), '/events?via=old');
+      final (req, end) = await net('/events?via=old');
+      expect((end['body']! as Map)['data'], contains('data: iki'));
+      expect(conn.received.where((m) => m['type'] == 'net.sse' && m['id'] == req['id']), isEmpty);
     });
   });
 }

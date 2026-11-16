@@ -43,6 +43,10 @@ class RequestTracker {
   HeaderPairs Function()? headersSnapshot;
   String? Function()? contentTypeSnapshot;
 
+  /// The URL `net.request` reports when it differs from [url] (a WebSocket
+  /// handshake: `ws(s)://`).
+  String? reportedUrl;
+
   /// Time spent in a mock `delay`/`respond` wait (counted as server wait).
   int injectedDelayUs = 0;
 
@@ -84,7 +88,7 @@ class RequestTracker {
         id: id,
         ts: startEpochMs,
         method: method,
-        url: url,
+        url: reportedUrl ?? url,
         headers: headers,
         body: requestBody.toPending(contentType: contentType),
         source: source,
@@ -105,6 +109,7 @@ class RequestTracker {
     String? protocol,
     Object? thenError,
     bool bodyUnread = false,
+    bool noStream = false,
   }) {
     if (_finished) return;
     sendRequest();
@@ -124,6 +129,7 @@ class RequestTracker {
         timings: _timings(endUs),
         mocked: mockRule != null,
         mockRuleId: mockRule?.id,
+        noStream: noStream,
       ),
     );
     if (thenError != null) {

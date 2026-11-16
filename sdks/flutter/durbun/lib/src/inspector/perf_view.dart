@@ -278,7 +278,9 @@ class _RingPainter extends CustomPainter {
 }
 
 /// A figure in a card: the label with a small note on the right (an
-/// average, a peak), and the value with its unit.
+/// average, a peak), and the value with its unit. With [subBelow] the note
+/// goes under the value instead (a remark about the figure, e.g. how many
+/// of the failures were timeouts).
 class StatTile extends StatelessWidget {
   const StatTile(
       {super.key,
@@ -289,7 +291,8 @@ class StatTile extends StatelessWidget {
       this.sub,
       this.subColor,
       this.color,
-      this.lead = false});
+      this.lead = false,
+      this.subBelow = false});
 
   /// The page's main figure: larger, on its own row.
   final bool lead;
@@ -303,8 +306,20 @@ class StatTile extends StatelessWidget {
   final Color? subColor;
   final Color? color;
 
-  StatTile withWidth(double w) =>
-      StatTile(key: key, width: w, label: label, value: value, unit: unit, sub: sub, subColor: subColor, color: color, lead: lead);
+  /// The note under the value instead of next to the label.
+  final bool subBelow;
+
+  StatTile withWidth(double w) => StatTile(
+      key: key,
+      width: w,
+      label: label,
+      value: value,
+      unit: unit,
+      sub: sub,
+      subColor: subColor,
+      color: color,
+      lead: lead,
+      subBelow: subBelow);
 
   @override
   Widget build(BuildContext context) {
@@ -326,7 +341,7 @@ class StatTile extends StatelessWidget {
             runSpacing: 2,
             children: <Widget>[
               Text(label, style: DurbunType.ui(size: DurbunType.body, color: c.textMuted, weight: FontWeight.w500)),
-              if (sub != null)
+              if (sub != null && !subBelow)
                 Text(sub!, style: DurbunType.monoStyle(size: DurbunType.monoRow, color: subColor ?? c.textMuted, height: 1.35)),
             ],
           ),
@@ -341,6 +356,10 @@ class StatTile extends StatelessWidget {
               ],
             ),
           ),
+          if (sub != null && subBelow) ...<Widget>[
+            const SizedBox(height: 4),
+            Text(sub!, style: DurbunType.ui(size: DurbunType.sm, color: subColor ?? c.textMuted, height: 1.35)),
+          ],
         ],
       ),
     );

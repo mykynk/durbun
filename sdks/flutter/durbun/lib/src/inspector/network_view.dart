@@ -10,6 +10,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../core/streams/sse_parser.dart' show isEventStreamContentType;
 import 'body_search.dart';
 import 'compare_view.dart';
 import 'filter_ui.dart';
@@ -1913,6 +1914,7 @@ class _HttpTabState extends State<_HttpTab> {
         hasBody: widget.request ? call.hasRequestBody : call.hasResponseBody,
         contentType: widget.request ? call.requestContentType : call.responseContentType,
         dropped: call.bodiesDropped,
+        webSocket: !widget.request && call.status == 101 && call.url.startsWith('ws'),
         initialQuery: widget.bodyQuery ?? '',
         initialMode: widget.memory.bodyMode,
         onModeChanged: (m) => widget.memory.bodyMode = m,
@@ -2171,6 +2173,7 @@ class BodyPane extends StatefulWidget {
       required this.hasBody,
       this.contentType,
       this.dropped = false,
+      this.webSocket = false,
       this.initialQuery = '',
       this.leading,
       this.initialMode = 0,
@@ -2180,6 +2183,9 @@ class BodyPane extends StatefulWidget {
   final bool hasBody;
   final String? contentType;
   final bool dropped;
+
+  /// The response of a WebSocket handshake: its messages are not shown here.
+  final bool webSocket;
 
   /// Find text to open with (the list's body search).
   final String initialQuery;
@@ -2303,7 +2309,11 @@ class _BodyPaneState extends State<BodyPane> {
     final b = widget.body;
     if (b == null || b.data.isEmpty) {
       final Widget empty;
-      if (b == null) {
+      if (widget.webSocket) {
+        empty = EmptyState(title: t.webSocketBody, body: t.webSocketBodyHint);
+      } else if (!widget.dropped && isEventStreamContentType(widget.contentType)) {
+        empty = EmptyState(title: t.eventStreamBody, body: t.eventStreamBodyHint);
+      } else if (b == null) {
         empty = EmptyState(
           title: widget.dropped ? t.bodiesDropped : (widget.hasBody ? t.bodyNotCaptured : t.noBody),
           body: widget.dropped || widget.hasBody ? null : t.noBodyHint,

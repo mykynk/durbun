@@ -426,6 +426,16 @@ class InspectorStrings {
   String get collapseAll => _('Tümünü kapat', 'Collapse all');
   String get noBody => _('Gövde yok', 'No body');
   String get noBodyHint => _('Bu istekte gövde gönderilmedi ya da boş geldi', 'No body was sent, or it was empty');
+  String get webSocketBody => _('WebSocket bağlantısı', 'WebSocket connection');
+  String get webSocketBodyHint => _(
+    'Bağlantı WebSocket’e geçti. Gidip gelen mesajlar bu panelde değil, Mac’teki Dürbün’de görünür.',
+    'The connection switched to WebSocket. Its messages show in Dürbün on the Mac, not in this panel.',
+  );
+  String get eventStreamBody => _('Olay akışı', 'Event stream');
+  String get eventStreamBodyHint => _(
+    'Yanıt bir olay akışı (text/event-stream). Olaylar bu panelde değil, Mac’teki Dürbün’de görünür.',
+    'The response is an event stream (text/event-stream). Its events show in Dürbün on the Mac, not in this panel.',
+  );
   String get bodyNotCaptured => _('Gövde kaydedilmedi', 'Body not captured');
   String get bodyNotCapturedHint => _(
     'Masaüstünde gövde kaydı kapalı ya da gövde boyut sınırını aştı; yalnızca boyutu biliniyor',
@@ -682,10 +692,10 @@ class InspectorStrings {
     'WebView içindeki sayfanın istekleri ve konsol satırları yakalanmaz.',
     'Requests and console lines of the page inside a WebView are not captured.',
   );
-  String get ncWebSocket => _('WebSocket mesajları', 'WebSocket messages');
+  String get ncWebSocket => _('WebSocket ve olay akışı mesajları', 'WebSocket and event stream messages');
   String get ncWebSocketWhy => _(
-    'Yalnızca bağlantının açılışı (101) görünür, gidip gelen mesajlar görünmez.',
-    'Only the opening of the connection (101) shows, not the messages sent and received.',
+    'Bu panel yalnızca bağlantının açılışını gösterir. Mesajlar ve olaylar Mac’teki Dürbün’de görünür.',
+    'This panel shows only the opening of the connection. Messages and events show in Dürbün on the Mac.',
   );
   String get ncEarlyClients => _('SDK’dan önce açılan istemciler', 'Clients opened before the SDK');
   String get ncEarlyClientsWhy => _(

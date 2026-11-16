@@ -91,6 +91,16 @@ class _StubBackend implements DurbunBackend {
   }) => null;
 
   @override
+  bool get capturesStreams => false;
+
+  @override
+  DurbunWebSocketCall? beginWebSocket({
+    required Uri url,
+    required List<List<String>> headers,
+    required String source,
+  }) => null;
+
+  @override
   Map<String, Object?>? inspectorState() => null;
 
   @override

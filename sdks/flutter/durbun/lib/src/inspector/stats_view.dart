@@ -148,6 +148,7 @@ class _StatsViewState extends State<StatsView> {
                         label: t.statsFailed,
                         value: '${s.failed}',
                         sub: s.timeouts > 0 ? t.statsTimeouts(s.timeouts) : null,
+                        subBelow: true,
                         color: s.failed > 0 ? c.danger : null),
                   ]),
                   const SizedBox(height: 12),

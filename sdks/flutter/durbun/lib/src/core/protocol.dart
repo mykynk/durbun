@@ -31,6 +31,11 @@ const int kMaxFrameBytes = 16 * 1024 * 1024;
 /// so no peer can make the SDK hold huge bodies.
 const int kMaxBodyBytesCeiling = 10 * 1024 * 1024;
 
+/// Highest `config.maxStreamMessageBytes` the SDK honours: the desktop keeps
+/// at most this much of one WebSocket message / SSE event
+/// (`STREAM_MESSAGE_CAP` in `packages/server/src/hub/streams.ts`).
+const int kMaxStreamMessageBytesCeiling = 64 * 1024;
+
 /// Same as Flutter's `kReleaseMode` / `kProfileMode` / `kDebugMode`, without
 /// importing Flutter.
 const bool kDurbunReleaseMode = bool.fromEnvironment('dart.vm.product');
@@ -64,6 +69,7 @@ abstract final class SdkCapability {
   static const String events = 'events';
   static const String crash = 'crash';
   static const String commands = 'commands';
+  static const String streams = 'streams';
 }
 
 /// `SdkLayer` values (`hello.sdk.layers`): the parts of the app that feed one
@@ -92,9 +98,12 @@ class SdkConfig {
     required this.maxBodyBytes,
     required this.metricsIntervalMs,
     required this.deviceLogsAvailable,
+    this.captureStreams = false,
+    this.maxStreamMessageBytes = 0,
   });
 
-  /// Used until the first `welcome` arrives (matches `DEFAULT_SETTINGS`).
+  /// Used until the first `welcome` arrives (matches `DEFAULT_SETTINGS`;
+  /// stream messages stay off until a desktop asks for them).
   static const SdkConfig defaults = SdkConfig(
     captureBodies: true,
     maxBodyBytes: 1048576,
@@ -116,11 +125,35 @@ class SdkConfig {
   /// not shown twice.
   final bool deviceLogsAvailable;
 
+  /// Whether `net.ws` / `net.sse` messages may be sent. Only a config that
+  /// says `true` turns them on: an older desktop leaves the field out, which
+  /// means off even when an earlier config had it on.
+  final bool captureStreams;
+
+  /// Payload cap of one stream message in bytes (0: sizes only), at most
+  /// [kMaxStreamMessageBytesCeiling].
+  final int maxStreamMessageBytes;
+
+  /// Payload bytes of one stream message the SDK keeps right now: 0 when
+  /// bodies are off.
+  int get streamMessageCap => captureBodies ? maxStreamMessageBytes : 0;
+
+  /// A copy with the given fields replaced.
+  SdkConfig copyWith({bool? captureBodies}) => SdkConfig(
+    captureBodies: captureBodies ?? this.captureBodies,
+    maxBodyBytes: maxBodyBytes,
+    metricsIntervalMs: metricsIntervalMs,
+    deviceLogsAvailable: deviceLogsAvailable,
+    captureStreams: captureStreams,
+    maxStreamMessageBytes: maxStreamMessageBytes,
+  );
+
   /// Tolerant parser: missing/invalid fields fall back to [fallback].
   static SdkConfig fromJson(Object? json, {SdkConfig fallback = defaults}) {
     if (json is! Map) return fallback;
     final maxBody = json['maxBodyBytes'];
     final interval = json['metricsIntervalMs'];
+    final streamCap = json['maxStreamMessageBytes'];
     return SdkConfig(
       captureBodies: json['captureBodies'] is bool
           ? json['captureBodies'] as bool
@@ -134,6 +167,11 @@ class SdkConfig {
       deviceLogsAvailable: json['deviceLogsAvailable'] is bool
           ? json['deviceLogsAvailable'] as bool
           : fallback.deviceLogsAvailable,
+      // Never inherited: absent (an older desktop) means no stream messages.
+      captureStreams: json['captureStreams'] == true,
+      maxStreamMessageBytes: streamCap is num && !streamCap.isNaN && streamCap >= 0
+          ? (streamCap > kMaxStreamMessageBytesCeiling ? kMaxStreamMessageBytesCeiling : streamCap.toInt())
+          : fallback.maxStreamMessageBytes,
     );
   }
 
@@ -143,6 +181,8 @@ class SdkConfig {
     'maxBodyBytes': maxBodyBytes,
     'metricsIntervalMs': metricsIntervalMs,
     'deviceLogsAvailable': deviceLogsAvailable,
+    'captureStreams': captureStreams,
+    'maxStreamMessageBytes': maxStreamMessageBytes,
   };
 
   @override
@@ -348,6 +388,7 @@ Map<String, Object?> buildNetResponse({
   Map<String, Object?>? timings,
   bool mocked = false,
   String? mockRuleId,
+  bool noStream = false,
 }) {
   return <String, Object?>{
     'type': 'net.response',
@@ -362,6 +403,9 @@ Map<String, Object?> buildNetResponse({
     if (timings != null && timings.isNotEmpty) 'timings': timings,
     if (mocked) 'mocked': true,
     if (mockRuleId != null) 'mockRuleId': mockRuleId,
+    // A 101 whose messages the SDK has no hook on: the desktop keeps it a
+    // plain response instead of an open stream with no messages.
+    if (noStream) 'noStream': true,
   };
 }
 
@@ -382,6 +426,80 @@ Map<String, Object?> buildNetError({
     if (mocked) 'mocked': true,
     if (mockRuleId != null) 'mockRuleId': mockRuleId,
   };
+}
+
+/// `SdkNetWs`: one WebSocket message of the connection whose handshake was
+/// request [id]. [body] is omitted when payloads are not captured.
+Map<String, Object?> buildNetWs({
+  required String id,
+  required double ts,
+  required String dir,
+  required String opcode,
+  required int size,
+  PendingBody? body,
+  int? closeCode,
+  String? closeReason,
+}) {
+  return <String, Object?>{
+    'type': 'net.ws',
+    'id': id,
+    'ts': ts,
+    'dir': dir,
+    'opcode': opcode,
+    'size': size,
+    if (body != null) 'body': body.toMessageValue(),
+    if (closeCode != null) 'closeCode': closeCode,
+    if (closeReason != null && closeReason.isNotEmpty) 'closeReason': closeReason,
+  };
+}
+
+/// `SdkNetSse`: one Server-Sent Events event of the response to request
+/// [id], or the normal end of the stream ([end]).
+Map<String, Object?> buildNetSse({
+  required String id,
+  required double ts,
+  String? event,
+  String? eventId,
+  int? retry,
+  int? size,
+  PendingBody? body,
+  bool end = false,
+}) {
+  if (end) return <String, Object?>{'type': 'net.sse', 'id': id, 'ts': ts, 'end': true};
+  return <String, Object?>{
+    'type': 'net.sse',
+    'id': id,
+    'ts': ts,
+    if (event != null && event.isNotEmpty && event != 'message') 'event': event,
+    if (eventId != null) 'eventId': eventId,
+    if (retry != null) 'retry': retry,
+    if (size != null) 'size': size,
+    if (body != null) 'body': body.toMessageValue(),
+  };
+}
+
+/// Whether [message] is a stream message (`net.ws` / `net.sse`): only sent
+/// while `config.captureStreams` is true, dropped first under pressure.
+bool isStreamMessage(Map<Object?, Object?> message) {
+  final type = message['type'];
+  if (type == 'net.ws' || type == 'net.sse') return true;
+  final line = message[kEncodedLineKey];
+  // A line of the plugin's native core (OkHttp / URLSession streams).
+  return line is String && (line.contains('"type":"net.ws"') || line.contains('"type":"net.sse"'));
+}
+
+/// Whether [message] finishes a stream (a close frame, the SSE end): it goes
+/// to every desktop that knows streams, also after `captureStreams` turned
+/// off, so a stream that started is never left open.
+bool isFinalStreamMessage(Map<Object?, Object?> message) {
+  final type = message['type'];
+  if (type != null) {
+    return (type == 'net.ws' && message['opcode'] == 'close') || (type == 'net.sse' && message['end'] == true);
+  }
+  final line = message[kEncodedLineKey];
+  if (line is! String) return false;
+  return (line.contains('"type":"net.ws"') && line.contains('"opcode":"close"')) ||
+      (line.contains('"type":"net.sse"') && line.contains('"end":true'));
 }
 
 Map<String, Object?> buildEvent({

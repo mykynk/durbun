@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 /// OkHttpClient, …) to Dürbün. The response still streams to your code
 /// chunk by chunk; only its first DurbunNetwork.maxBodyBytes bytes are copied
 /// for the report, which is sent when the body ends, fails or is cancelled.
+/// Server-Sent Events are reported one event at a time while the Mac app
+/// asks for them.
 class DurbunReportingClient extends http.BaseClient {
   DurbunReportingClient(this._inner, {this.source = 'cronet'});
 
@@ -32,6 +34,12 @@ class DurbunReportingClient extends http.BaseClient {
       call.error(e);
       rethrow;
     }
+    final headers = [for (final h in response.headers.entries) [h.key, h.value]];
+    final events = (response.headers['content-type'] ?? '').startsWith('text/event-stream')
+        ? call.eventStream(status: response.statusCode, statusText: response.reasonPhrase, headers: headers)
+        : null;
+    if (events != null) return _withBody(response, events.tap(response.stream));
+
     final limit = DurbunNetwork.captureBodies ? DurbunNetwork.maxBodyBytes : 0;
     final copy = BytesBuilder(copy: false);
     var size = 0;
@@ -46,7 +54,7 @@ class DurbunReportingClient extends http.BaseClient {
       call.response(
         status: response.statusCode,
         statusText: response.reasonPhrase,
-        headers: [for (final h in response.headers.entries) [h.key, h.value]],
+        headers: headers,
         body: copy.takeBytes(),
         bodySize: size,
         contentType: response.headers['content-type'],
@@ -80,8 +88,12 @@ class DurbunReportingClient extends http.BaseClient {
           return sub.cancel();
         };
     };
+    return _withBody(response, body.stream);
+  }
+
+  http.StreamedResponse _withBody(http.StreamedResponse response, Stream<List<int>> body) {
     return http.StreamedResponse(
-      body.stream,
+      body,
       response.statusCode,
       contentLength: response.contentLength,
       request: response.request,

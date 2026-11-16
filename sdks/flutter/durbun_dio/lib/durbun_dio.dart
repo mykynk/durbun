@@ -13,6 +13,10 @@
 /// final dio = Dio()..httpClientAdapter = DurbunDioAdapter(NativeAdapter());
 /// ```
 ///
+/// Server-Sent Events (`text/event-stream` with `ResponseType.stream`) are
+/// reported as a stream: the response as soon as its headers arrive, then
+/// one message per event while Dio's stream is read.
+///
 /// The older interceptor still works; add it last:
 ///
 /// ```dart
@@ -147,6 +151,13 @@ void _watchBody(ResponseBody body, RequestOptions options, _Report report) {
           : null;
   final willRead = options.validateStatus(body.statusCode) ||
       options.receiveDataWhenStatusError == true;
+  if (willRead && _isEventStream(body.headers)) {
+    final events = report.eventStream(body);
+    if (events != null) {
+      body.stream = events.tap(body.stream);
+      return;
+    }
+  }
   if (!willRead) {
     // Dio drops the body of this error status without reading it.
     report.done(
@@ -237,6 +248,29 @@ class _Report {
   final DurbunHttpCall call;
   bool _ended = false;
 
+  /// Set once an event stream's headers were reported.
+  DurbunEventStreamCall? _events;
+
+  /// Reports [body]'s headers as an event stream; null when the desktop
+  /// does not take stream messages (report the body as usual then).
+  DurbunEventStreamCall? eventStream(ResponseBody body) {
+    if (_ended) return null;
+    try {
+      final events = call.eventStream(
+        status: body.statusCode,
+        statusText: body.statusMessage,
+        headers: _pairs(body.headers),
+      );
+      if (events != null) {
+        _ended = true;
+        _events = events;
+      }
+      return events;
+    } catch (_) {
+      return null;
+    }
+  }
+
   void done({
     required int status,
     String? statusText,
@@ -250,10 +284,7 @@ class _Report {
       call.response(
         status: status,
         statusText: statusText,
-        headers: <List<String>>[
-          for (final e in headers.entries)
-            for (final v in e.value) <String>[e.key, v],
-        ],
+        headers: _pairs(headers),
         body: body,
         bodySize: size,
         contentType: _header(headers, 'content-type'),
@@ -262,6 +293,15 @@ class _Report {
   }
 
   void error(Object error, {bool cancelled = false}) {
+    final events = _events;
+    if (events != null) {
+      // A cancel token fired while the event stream was read.
+      _events = null;
+      try {
+        events.error(error, cancelled: cancelled);
+      } catch (_) {}
+      return;
+    }
     if (_ended) return;
     _ended = true;
     try {
@@ -293,6 +333,18 @@ class _HandledElsewhere {
   String toString() =>
       'Another interceptor handled this response before Dürbün saw it and '
       'sent the request again. Use DurbunDioAdapter to see every response.';
+}
+
+List<List<String>> _pairs(Map<String, List<String>> headers) => <List<String>>[
+  for (final e in headers.entries)
+    for (final v in e.value) <String>[e.key, v],
+];
+
+/// Whether the response is `text/event-stream`.
+bool _isEventStream(Map<String, List<String>> headers) {
+  final type = _header(headers, 'content-type');
+  if (type == null) return false;
+  return type.split(';').first.trim().toLowerCase() == 'text/event-stream';
 }
 
 /// Value of header [name] (any case), first one.
@@ -415,7 +467,18 @@ class DurbunDioInterceptor extends Interceptor {
     ResponseInterceptorHandler handler,
   ) {
     final call = response.requestOptions.extra.remove(_callKey);
-    if (call is DurbunHttpCall) _reportResponse(call, response);
+    if (call is DurbunHttpCall) {
+      final data = response.data;
+      final events = data is ResponseBody && _isEventStream(data.headers)
+          ? _eventStream(call, data)
+          : null;
+      if (events != null) {
+        data as ResponseBody;
+        data.stream = events.tap(data.stream);
+      } else {
+        _reportResponse(call, response);
+      }
+    }
     handler.next(response);
   }
 
@@ -431,6 +494,18 @@ class DurbunDioInterceptor extends Interceptor {
       }
     }
     handler.next(err);
+  }
+
+  static DurbunEventStreamCall? _eventStream(DurbunHttpCall call, ResponseBody body) {
+    try {
+      return call.eventStream(
+        status: body.statusCode,
+        statusText: body.statusMessage,
+        headers: _pairs(body.headers),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   static void _reportResponse(DurbunHttpCall call, Response<dynamic> response) {

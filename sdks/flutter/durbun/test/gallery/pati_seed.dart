@@ -146,6 +146,48 @@ DurbunInspectorStore patiStore({double? now, bool withMetrics = true}) {
       resBody: <String, Object?>{'access_token': 'eyJhbGciOiJIUzI1NiJ9.e30.x', 'expires_in': 3600, 'token_type': 'Bearer'});
   s.ingest(buildLog(level: 'info', message: 'Kullanıcı girişi tamam (id 8812)', tag: 'auth', ts: next(30)));
   call('2', 'GET', '$api/v2/pets?owner=8812&page=1', status: 200, start: 120, took: 340, resBody: petsPage(1));
+  // Long-lived connections: a chat WebSocket (101) and a live feed of
+  // Server-Sent Events (headers only); their messages are on the desktop.
+  final wsAt = next(80);
+  s.ingest(buildNetRequest(id: '20', ts: wsAt, method: 'GET', url: 'wss://api.pati.app/v2/chat?room=8812', headers: <List<String>>[
+    ...auth,
+    <String>['Upgrade', 'websocket'],
+    <String>['Connection', 'Upgrade'],
+    <String>['Sec-WebSocket-Version', '13'],
+    <String>['Sec-WebSocket-Extensions', 'permessage-deflate; client_max_window_bits'],
+  ]));
+  s.ingest(buildNetResponse(
+    id: '20',
+    ts: wsAt + 96,
+    status: 101,
+    statusText: 'Switching Protocols',
+    headers: <List<String>>[
+      <String>['Upgrade', 'websocket'],
+      <String>['Connection', 'Upgrade'],
+      <String>['Sec-WebSocket-Accept', 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='],
+      <String>['Sec-WebSocket-Extensions', 'permessage-deflate'],
+    ],
+    protocol: 'HTTP/1.1',
+    remoteAddress: '104.21.48.17:443',
+    timings: <String, Object?>{'connect': 41, 'send': 1, 'wait': 52, 'receive': 0},
+  ));
+  final sseAt = next(40);
+  s.ingest(buildNetRequest(id: '21', ts: sseAt, method: 'GET', url: '$api/v2/live/adoptions', headers: <List<String>>[
+    ...auth,
+    <String>['Accept', 'text/event-stream'],
+  ]));
+  s.ingest(buildNetResponse(
+    id: '21',
+    ts: sseAt + 74,
+    status: 200,
+    headers: <List<String>>[
+      <String>['Content-Type', 'text/event-stream; charset=utf-8'],
+      <String>['Cache-Control', 'no-cache'],
+    ],
+    protocol: 'HTTP/1.1',
+    remoteAddress: '104.21.48.17:443',
+    timings: <String, Object?>{'connect': 0, 'send': 1, 'wait': 70, 'receive': 0},
+  ));
   for (var i = 0; i < 3; i++) {
     s.ingest(buildLog(level: 'verbose', message: 'Konum izni zaten verilmiş', tag: 'location', ts: next(15)));
   }

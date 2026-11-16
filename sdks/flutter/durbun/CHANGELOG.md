@@ -59,6 +59,27 @@
 - Landscape and tablets: the panel stops at 720 pt wide, centred, and the
   floating button stays inside the safe area on every side.
 - The first-launch hint is shorter and closes with *Got it*.
+- In-app panel, a look of its own in light and dark: a switch in the header
+  keeps your choice; Network, Logs, Performance and Tools are tabs at the
+  bottom (in the header on a short screen); requests and log lines are cards,
+  with tiles for the total, the errors and the average time above the list.
+- WebSocket messages and Server-Sent Events. While the Mac app asks for them,
+  a WebSocket opened with dart:io (`WebSocket.connect`, `IOWebSocketChannel`)
+  and every `text/event-stream` response read through dart:io show their
+  messages under the connection's entry, in order: direction, size, text or
+  binary content up to the Mac app's limit (decoded when compressed), close
+  code and reason, event type, `id` and `retry`. A connection that breaks shows
+  the error; an event stream your app stops reading shows as cancelled.
+  Otherwise both are reported exactly as before.
+- New `DurbunNetwork.webSocket(...)` and `DurbunHttpCall.eventStream(...)`
+  report WebSockets and event streams that dart:io does not carry
+  (CupertinoWebSocket, Cronet, ok_http); `DurbunNetwork.capturesStreams` says
+  whether the Mac app takes them. A class that implements `DurbunHttpCall`
+  needs the new method.
+- On Android and iOS the native cores inside the plugin report OkHttp and
+  URLSession streams too (`DurbunWebSocketFactory`, `URLSessionWebSocketTask`).
+- In-app panel: a WebSocket or event-stream response says that its messages
+  show on the Mac; in Statistics the timeouts note sits under the number.
 
 ## 0.2.0
 

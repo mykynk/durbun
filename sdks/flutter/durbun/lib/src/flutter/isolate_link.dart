@@ -13,6 +13,7 @@ import '../core/http/http_client.dart';
 import '../core/json_safe.dart';
 import '../core/mocks.dart';
 import '../core/protocol.dart';
+import '../core/streams/stream_host.dart';
 import '../core/types.dart';
 
 /// The name the main isolate's port is published under.
@@ -22,6 +23,7 @@ const String kDurbunIsolatePortName = 'dev.durbun.isolates';
 /// send into [client]. One per running SDK.
 class IsolateHub {
   IsolateHub(this.client) {
+    client.addConfigListener(_onConfig);
     try {
       final port = RawReceivePort(_onMessage, 'durbun.isolates');
       _port = port;
@@ -36,6 +38,30 @@ class IsolateHub {
   final DurbunClient client;
   RawReceivePort? _port;
   int _attached = 0;
+
+  /// Ports of attached isolates that take settings updates (the newest
+  /// [_maxSettingsPorts]; one goes stale when its isolate ends).
+  final List<SendPort> _settingsPorts = <SendPort>[];
+  static const int _maxSettingsPorts = 32;
+
+  /// What an attached isolate's capture needs to know, live.
+  Map<String, Object?> _settings() => <String, Object?>{
+    'captureBodies': client.captureBodies,
+    'maxBodyBytes': client.maxBodyBytes,
+    'captureStreams': client.captureStreams,
+    'streamsWanted': client.streamsWanted,
+    'streamMessageCap': client.streamMessageCap,
+  };
+
+  void _onConfig(SdkConfig _) {
+    if (_settingsPorts.isEmpty) return;
+    final settings = _settings();
+    for (final port in _settingsPorts) {
+      try {
+        port.send(settings);
+      } catch (_) {}
+    }
+  }
 
   void _onMessage(Object? message) {
     if (client.isDisposed || message is! List || message.isEmpty) return;
@@ -55,21 +81,30 @@ class IsolateHub {
             client.event(message[1]! as String, _deep(message[2]) as Map<String, Object?>?);
           case 'attach':
             final reply = message[1]! as SendPort;
+            if (message.length > 2 && message[2] is SendPort) {
+              _settingsPorts.add(message[2]! as SendPort);
+              if (_settingsPorts.length > _maxSettingsPorts) _settingsPorts.removeAt(0);
+            }
             reply.send(<String, Object?>{
               'network': client.networkEnabled,
-              'captureBodies': client.captureBodies,
-              'maxBodyBytes': client.maxBodyBytes,
+              ..._settings(),
               'redact': client.options.redactHeaders.map((h) => h.toLowerCase()).toList(),
               'prefix': 'isolate${++_attached}-',
             });
           case 'net':
-            if (client.networkEnabled) client.sendNetMessage(_deep(message[1])! as Map<String, Object?>);
+            if (!client.networkEnabled) return;
+            final net = _deep(message[1])! as Map<String, Object?>;
+            // The isolate may not have heard of a config change yet.
+            if (isStreamMessage(net) && !isFinalStreamMessage(net) && !client.captureStreams) return;
+            client.sendNetMessage(net);
         }
       });
     } catch (_) {}
   }
 
   void dispose() {
+    client.removeConfigListener(_onConfig);
+    _settingsPorts.clear();
     final port = _port;
     _port = null;
     if (port == null) return;
@@ -134,34 +169,41 @@ Future<bool> attachThisIsolate() async {
   final hub = _hub();
   if (hub == null) return false;
   final reply = ReceivePort('durbun.attach');
+  _RemoteHost? host;
+  // Settings changes from the main isolate (body and stream capture); it
+  // does not keep this isolate alive.
+  final settings = RawReceivePort((Object? message) {
+    if (message is Map) host?.apply(message);
+  }, 'durbun.settings')
+    ..keepIsolateAlive = false;
   try {
-    hub.send(<Object?>['attach', reply.sendPort]);
+    hub.send(<Object?>['attach', reply.sendPort, settings.sendPort]);
     final answer = await reply.first.timeout(const Duration(seconds: 2));
-    if (answer is! Map || answer['network'] != true) return false;
-    final host = _RemoteHost(
+    if (answer is! Map || answer['network'] != true) {
+      settings.close();
+      return false;
+    }
+    host = _RemoteHost(
       hub,
       prefix: answer['prefix'] as String? ?? 'isolate-',
-      captureBodies: answer['captureBodies'] == true,
-      maxBodyBytes: (answer['maxBodyBytes'] as num?)?.toInt() ?? 0,
       redacted: <String>{for (final h in (answer['redact'] as List?) ?? const <Object?>[]) '$h'},
-    );
+    )..apply(answer);
     HttpOverrides.global = DurbunHttpOverrides(host, previous: HttpOverrides.current);
     _attached = true;
     return true;
   } catch (_) {
+    settings.close();
     return false;
   } finally {
     reply.close();
   }
 }
 
-/// The capture host of an attached isolate: the main isolate's settings at
-/// attach time, no mock rules (they live in the main isolate), messages sent
-/// to the main isolate.
-class _RemoteHost implements HttpCaptureHost {
-  _RemoteHost(this._hub,
-      {required this.prefix, required this.captureBodies, required this.maxBodyBytes, required Set<String> redacted})
-      : _redacted = redacted;
+/// The capture host of an attached isolate: the main isolate's settings
+/// (kept up to date by it), no mock rules (they live in the main isolate),
+/// messages sent to the main isolate.
+class _RemoteHost implements HttpCaptureHost, StreamCaptureHost {
+  _RemoteHost(this._hub, {required this.prefix, required Set<String> redacted}) : _redacted = redacted;
 
   final SendPort _hub;
   final String prefix;
@@ -169,10 +211,28 @@ class _RemoteHost implements HttpCaptureHost {
   int _seq = 0;
 
   @override
-  final bool captureBodies;
+  bool captureBodies = false;
 
   @override
-  final int maxBodyBytes;
+  int maxBodyBytes = 0;
+
+  @override
+  bool captureStreams = false;
+
+  @override
+  bool streamsWanted = false;
+
+  @override
+  int streamMessageCap = 0;
+
+  /// Takes the main isolate's settings.
+  void apply(Map<Object?, Object?> settings) {
+    captureBodies = settings['captureBodies'] == true;
+    maxBodyBytes = (settings['maxBodyBytes'] as num?)?.toInt() ?? 0;
+    captureStreams = settings['captureStreams'] == true;
+    streamsWanted = settings['streamsWanted'] == true;
+    streamMessageCap = (settings['streamMessageCap'] as num?)?.toInt() ?? 0;
+  }
 
   @override
   bool get networkEnabled => true;

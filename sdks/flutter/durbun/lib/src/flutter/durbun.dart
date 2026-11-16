@@ -271,6 +271,43 @@ abstract final class DurbunNetwork {
   /// Whether the desktop wants body contents (otherwise sizes only).
   static bool get captureBodies => Durbun._backend.captureBodies;
 
+  /// Whether the desktop takes WebSocket messages and Server-Sent Events
+  /// right now. `DurbunHttpCall.eventStream` returns null otherwise, and a
+  /// [webSocket] connection is reported only from then on.
+  static bool get capturesStreams => Durbun._backend.capturesStreams;
+
+  /// Reports a WebSocket connection that dart:io does not carry (e.g.
+  /// `CupertinoWebSocket`, `package:ok_http`, a browser-like adapter):
+  /// the handshake and what the returned handle is told. Nothing is sent
+  /// while the desktop does not take stream messages ([capturesStreams]);
+  /// the entry appears with the first message after it does. Null when the
+  /// SDK is off.
+  ///
+  /// WebSockets opened with dart:io (`WebSocket.connect`,
+  /// `IOWebSocketChannel`, `WebSocketChannel.connect` on Android / iOS)
+  /// are captured without this; wrapping one of them reports it twice.
+  ///
+  /// ```dart
+  /// final ws = DurbunNetwork.webSocket(uri);
+  /// final stream = ws?.incoming(channel.stream,
+  ///         closeInfo: () => (channel.closeCode, channel.closeReason)) ??
+  ///     channel.stream;
+  /// final sink = ws?.outgoing(channel.sink) ?? channel.sink;
+  /// ```
+  static DurbunWebSocketCall? webSocket(
+    Uri url, {
+    List<List<String>> headers = const <List<String>>[],
+    Iterable<String>? protocols,
+    String source = 'websocket',
+  }) => Durbun._backend.beginWebSocket(
+    url: url,
+    headers: <List<String>>[
+      ...headers,
+      if (protocols != null && protocols.isNotEmpty) <String>['sec-websocket-protocol', protocols.join(', ')],
+    ],
+    source: source,
+  );
+
   /// The mock rule from the desktop that applies to [method] [url], if any.
   static DurbunMockDecision? findMock(String method, Uri url) =>
       Durbun._backend.findMock(method, url);

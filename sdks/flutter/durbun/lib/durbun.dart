@@ -20,10 +20,13 @@ export 'src/core/types.dart'
         DurbunActionKind,
         DurbunActionOption,
         DurbunConnection,
+        DurbunEventStreamCall,
         DurbunHttpCall,
         DurbunLogLevel,
         DurbunMockDecision,
-        DurbunPrintCapture;
+        DurbunPrintCapture,
+        DurbunWebSocketCall,
+        DurbunWebSocketSink;
 export 'src/flutter/durbun.dart' show Durbun, DurbunNetwork;
 export 'src/flutter/navigation.dart' show DurbunNavigatorObserver;
 export 'src/inspector/inspector.dart' show DurbunInspector;

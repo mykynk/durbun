@@ -373,6 +373,12 @@ All notable changes to Dürbün are listed here. The format follows
   handlers and `async` calls both work, with no code change.
 - iOS SDK: Server-Sent Events over URLSession show one row per event (`event`, `id`, `retry` and the data) as
   they arrive; the stream is no longer held as a response body.
+- Flutter SDK: WebSocket messages and Server-Sent Events from dart:io (`WebSocket.connect`,
+  `IOWebSocketChannel`, `package:http`, Dio) with no code change, compressed messages decoded; background
+  isolates included. `DurbunNetwork.webSocket(...)` and `DurbunHttpCall.eventStream(...)` report sockets and
+  streams that dart:io does not carry. `durbun_dio` shows event streams read with `ResponseType.stream`. On
+  Android and iOS the native cores in the plugin report OkHttp and URLSession streams too.
+- Flutter in-app panel: a WebSocket or event-stream response says that its messages show on the Mac.
 - Logs and Performance: the cold start time the Android and iOS SDKs measure (`durbun.launch`) reads as a line
   in Logs ("Cold start 1.24 s"; a prewarmed iOS launch is named and carries no time) and as a Launch tile in
   Performance that opens the line.

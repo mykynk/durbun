@@ -220,12 +220,19 @@ class TransportConfig {
 }
 
 class _Queued {
-  _Queued(this.message, this.cost);
+  _Queued(this.message, this.cost, {this.stream = false});
 
   /// Replaced (never mutated) when its body is shed: on a local engine the
   /// map is shared with the sender, e.g. the in-app panel's copy.
   Map<String, Object?> message;
   int cost;
+
+  /// A `net.ws` / `net.sse` message: dropped first under pressure.
+  final bool stream;
+
+  /// Dropped while queued (removing from the middle of the queue would cost
+  /// O(n)); the pump skips it.
+  bool dead = false;
 }
 
 class TransportCore {
@@ -239,6 +246,22 @@ class TransportCore {
   int _generation = 0;
 
   final ListQueue<_Queued> _queue = ListQueue<_Queued>();
+
+  /// The queued stream messages, oldest first (a subset of [_queue]).
+  final ListQueue<_Queued> _streamQueue = ListQueue<_Queued>();
+
+  /// Queued messages that are not [_Queued.dead].
+  int _live = 0;
+
+  /// The latest config from a desktop asked for stream messages; until then
+  /// (and after a config without `captureStreams: true`) they are dropped
+  /// here, whatever the sender still believed.
+  bool _streamsAllowed = false;
+
+  /// The desktop of this connection knows stream messages (a config of it
+  /// had the `captureStreams` field): the messages that finish a started
+  /// stream still go to it when the setting is off or left out.
+  bool _streamsKnown = false;
   int _queuedCost = 0;
   int _dropped = 0;
   bool _droppedWhileOffline = false;
@@ -277,7 +300,7 @@ class TransportCore {
   final List<_FlushWaiter> _flushWaiters = <_FlushWaiter>[];
 
   bool get isConnected => _active != null;
-  int get queueLength => _queue.length;
+  int get queueLength => _live;
 
   /// Approximate memory held by the queue (see [estimateMessageCost]).
   int get queuedBytes => _queuedCost;
@@ -314,10 +337,17 @@ class TransportCore {
   void send(Map<String, Object?> message, {bool volatile = false}) {
     if (_stopped) return;
     if (volatile && _active == null) return;
+    final stream = isStreamMessage(message);
+    final finalStream = stream && isFinalStreamMessage(message);
+    if (finalStream ? !_streamsKnown : (stream && !_streamsAllowed)) return;
     final cost = estimateMessageCost(message);
-    _queue.add(_Queued(message, cost));
+    // The messages that finish a stream are not dropped before others.
+    final queued = _Queued(message, cost, stream: stream && !finalStream);
+    _queue.add(queued);
+    if (queued.stream) _streamQueue.add(queued);
+    _live++;
     _queuedCost += cost;
-    while (_queue.length > config.maxBufferedMessages) {
+    while (_live > config.maxBufferedMessages) {
       _dropOldest();
     }
     final budget = byteBudget;
@@ -390,7 +420,7 @@ class TransportCore {
   /// Emits `['flushed', token, ok]` once everything queued so far was written
   /// to an active connection (ok=true) or after [timeoutMs] (ok=false).
   void requestFlush(int token, int timeoutMs) {
-    if (_queue.isEmpty && !_pumping) {
+    if (_live == 0 && !_pumping) {
       _emit(<Object?>[TransportEvents.flushed, token, true]);
       return;
     }
@@ -433,6 +463,8 @@ class TransportCore {
     }
     _flushWaiters.clear();
     _queue.clear();
+    _streamQueue.clear();
+    _live = 0;
     _queuedCost = 0;
   }
 
@@ -626,6 +658,8 @@ class TransportCore {
     _offlineTimer?.cancel();
     _offlineTimer = null;
     _activeLost = Completer<void>();
+    final welcome = conn.welcome;
+    _applyStreamConfig(welcome == null ? null : welcome['config'], newConnection: true);
     _emit(<Object?>[
       TransportEvents.connected,
       conn.welcome ?? const <String, Object?>{},
@@ -661,6 +695,7 @@ class TransportCore {
     switch (message['type']) {
       case 'welcome':
         if (conn.active) {
+          _applyStreamConfig(message['config']);
           _emit(<Object?>[TransportEvents.message, message]);
         } else if (conn.handshaking) {
           if (_stopped || _active != null || conn.closed) {
@@ -677,6 +712,11 @@ class TransportCore {
           send(buildPong(), volatile: true);
         } else {
           conn.writeDirect(buildPong());
+        }
+      case 'config':
+        if (conn.active) {
+          _applyStreamConfig(message['config']);
+          _emit(<Object?>[TransportEvents.message, message]);
         }
       default:
         if (conn.active) _emit(<Object?>[TransportEvents.message, message]);
@@ -696,11 +736,54 @@ class TransportCore {
 
   /* ───────────────────────────────── queue ───────────────────────────────── */
 
+  /// Drops the oldest stream message, or the oldest message when none is
+  /// queued: WebSocket messages and SSE events give way to logs and requests.
   void _dropOldest() {
-    final dropped = _queue.removeFirst();
+    _Queued? dropped;
+    if (_streamQueue.isNotEmpty) {
+      dropped = _streamQueue.removeFirst()..dead = true;
+    } else {
+      while (_queue.isNotEmpty) {
+        final q = _queue.removeFirst();
+        if (q.dead) continue;
+        dropped = q;
+        break;
+      }
+    }
+    if (dropped == null) return;
+    _live--;
     _queuedCost -= dropped.cost;
     _dropped++;
     if (_active == null) _droppedWhileOffline = true;
+  }
+
+  /// Forgets the queued stream messages: the desktop does not want them
+  /// (its config says so), so they are not sent late either.
+  void _discardStreamMessages() {
+    while (_streamQueue.isNotEmpty) {
+      final q = _streamQueue.removeFirst()..dead = true;
+      _live--;
+      _queuedCost -= q.cost;
+    }
+  }
+
+  /// A welcome / config arrived: stream messages are allowed from now on
+  /// only when it asks for them (absent = an older desktop = no).
+  void _applyStreamConfig(Object? config, {bool newConnection = false}) {
+    _streamsAllowed = config is Map && config['captureStreams'] == true;
+    final knows = config is Map && config.containsKey('captureStreams');
+    _streamsKnown = newConnection ? knows : (_streamsKnown || knows);
+    if (!_streamsAllowed) _discardStreamMessages();
+    if (!_streamsKnown) {
+      // An older desktop: not even the end of a stream.
+      for (final q in _queue) {
+        if (!q.dead && isStreamMessage(q.message)) {
+          q.dead = true;
+          _live--;
+          _queuedCost -= q.cost;
+        }
+      }
+    }
   }
 
   /// Over [bodyBudget]: strip body data from the oldest messages first (the
@@ -709,6 +792,7 @@ class TransportCore {
   void _shedBytes(int bodyBudget) {
     for (final q in _queue) {
       if (_queuedCost <= bodyBudget) break;
+      if (q.dead) continue;
       final body = q.message['body'];
       if (body is Map && body[kPendingBodyMarker] == true) {
         final bytes = body['bytes'];
@@ -726,7 +810,7 @@ class TransportCore {
         }
       }
     }
-    while (_queuedCost > config.maxBufferedBytes && _queue.length > 1) {
+    while (_queuedCost > config.maxBufferedBytes && _live > 1) {
       _dropOldest();
     }
   }
@@ -749,6 +833,7 @@ class TransportCore {
     );
     final cost = estimateMessageCost(message);
     _queue.add(_Queued(message, cost));
+    _live++;
     _queuedCost += cost;
   }
 
@@ -768,7 +853,8 @@ class TransportCore {
       while (!_stopped) {
         final conn = _active;
         if (conn == null || conn.closed) break;
-        if (_queue.isEmpty) {
+        if (_live == 0) {
+          _queue.clear();
           if (_dropped > 0) {
             _enqueueDroppedWarning();
             continue;
@@ -780,6 +866,11 @@ class TransportCore {
         var count = 0;
         while (_queue.isNotEmpty && count < 256 && batch.length < 256 * 1024) {
           final q = _queue.removeFirst();
+          if (q.dead) continue;
+          if (q.stream && _streamQueue.isNotEmpty && identical(_streamQueue.first, q)) {
+            _streamQueue.removeFirst();
+          }
+          _live--;
           _queuedCost -= q.cost;
           final line = encodeMessageLine(q.message);
           if (line != null) batch.add(line);
@@ -797,7 +888,7 @@ class TransportCore {
     } finally {
       _pumping = false;
     }
-    if (!_stopped && _active != null && _queue.isNotEmpty) _schedulePump();
+    if (!_stopped && _active != null && _live > 0) _schedulePump();
   }
 
   void _resolveFlushWaiters() {

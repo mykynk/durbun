@@ -211,7 +211,7 @@ What the Dart side captures:
 | `print` / `debugPrint` | The zone (`run`) or a `debugPrint` hook (`init`) | An info log with the `flutter` tag, **only** when the Mac app cannot see device logs (`capturePrint: auto`), so lines are not shown twice |
 | `FlutterError.onError` | Chained, preserving the previous handler | `flutter-error`: the whole error box (`══╡ EXCEPTION CAUGHT BY …`) |
 | Uncaught errors | Zone and `PlatformDispatcher.onError` | `crash` (fatal), with a stack trace; the error is also forwarded to the previous handler |
-| HTTP (dart:io) | An `HttpOverrides.global` wrapper (a previous override is chained) | Request and response, headers, bodies (gzip decoded), timings, redirects (one entry per hop, as with URLSession), cancellations and errors. Includes `package:http`, Dio's default adapter, `NetworkImage` and WebSocket handshakes |
+| HTTP (dart:io) | An `HttpOverrides.global` wrapper (a previous override is chained) | Request and response, headers, bodies (gzip decoded), timings, redirects (one entry per hop, as with URLSession), cancellations and errors. Includes `package:http`, Dio's default adapter and `NetworkImage`. WebSocket messages and Server-Sent Events too (see [WebSockets and Server-Sent Events](#websockets-and-server-sent-events)) |
 | Events | `Durbun.event` | An event line in the log stream |
 | Metrics | `SchedulerBinding.addTimingsCallback`, `ProcessInfo.currentRss`, `getrusage` | FPS (while rendering), janky frames, average build/raster ms, memory MB, CPU %, threads (Android) |
 
@@ -234,9 +234,59 @@ What the Dart side captures:
   `location` header of the intermediate hops are known; mock rules do not apply
   to intermediate hops.
 - `HttpClient`s created **before** `Durbun.run/init` are not wrapped.
-- WebSocket: only the handshake (101) is visible, not the messages.
 - `redactHeaders` masks header values as `••••` in every layer (Dart, OkHttp,
   URLSession).
+
+#### WebSockets and Server-Sent Events
+
+A WebSocket connection or a Server-Sent Events response is one network entry:
+the handshake (`101`) or the response headers, then its messages in order
+under the same entry. Messages are sent only while the Mac app asks for them;
+otherwise the entry looks as it always did (a `101`, or an event stream with
+its body when it ends).
+
+- **Automatic (dart:io):** `WebSocket.connect`, `IOWebSocketChannel` and
+  `WebSocketChannel.connect` on Android and iOS, and every `text/event-stream`
+  response read through `HttpClient`, `package:http` or Dio's default adapter.
+  Dürbün reads a copy of the bytes; your app's connection is not changed.
+- **WebSocket messages:** direction, text or binary, size, close code and
+  reason, ping and pong. Content is kept up to the Mac app's message limit
+  (64 KB at most) and only while bodies are captured; otherwise sizes only.
+  Compressed messages (`permessage-deflate`) are shown decoded. A compressed
+  message that refers to one Dürbün did not follow (the Mac app started
+  asking in the middle of a connection) shows its compressed size and no
+  content.
+- **Events:** the event type (when it is not `message`), `id`, `retry`, size
+  and data. A stream the server ends is closed in the list; one your app stops
+  reading shows as cancelled.
+- A connection that breaks shows the error. A connection that started sending
+  messages always gets its end, even if the Mac app stops asking in the
+  meantime.
+- Event streams sent compressed (`content-encoding: gzip`) are reported the
+  classic way, with the body when it ends.
+- dart:io opens every `WebSocket.connect` with one shared `HttpClient`, created
+  at the first connection. If your app's first WebSocket opens **before**
+  `Durbun.run/init`, later ones are not captured either; pass
+  `customClient: HttpClient()` to `WebSocket.connect` to fix that.
+- Other stacks (`CupertinoWebSocket`, WebSockets on `package:ok_http`, event
+  streams read through `DurbunNetwork.begin`) report through a handle. Do not
+  wrap a dart:io WebSocket: it is already captured and would show twice.
+
+```dart
+final ws = DurbunNetwork.webSocket(uri, protocols: ['chat.v2']);
+final stream = ws?.incoming(channel.stream,
+        closeInfo: () => (channel.closeCode, channel.closeReason)) ??
+    channel.stream;
+final sink = ws?.outgoing(channel.sink) ?? channel.sink;
+await channel.ready;
+ws?.opened(protocol: channel.protocol);
+```
+
+For an event stream, call `call.eventStream(status: ..., headers: ...)` on the
+handle `DurbunNetwork.begin` returned. It reports the headers at once and
+returns a handle whose `tap(stream)` reports each event as your app reads it;
+it returns null while the Mac app does not ask for messages, so report the
+response with `call.response(...)` as usual then. The wrapper below does both.
 
 #### Reporting other clients yourself
 
@@ -262,6 +312,8 @@ import 'package:http/http.dart' as http;
 /// OkHttpClient, …) to Dürbün. The response still streams to your code
 /// chunk by chunk; only its first DurbunNetwork.maxBodyBytes bytes are copied
 /// for the report, which is sent when the body ends, fails or is cancelled.
+/// Server-Sent Events are reported one event at a time while the Mac app
+/// asks for them.
 class DurbunReportingClient extends http.BaseClient {
   DurbunReportingClient(this._inner, {this.source = 'cronet'});
 
@@ -286,6 +338,12 @@ class DurbunReportingClient extends http.BaseClient {
       call.error(e);
       rethrow;
     }
+    final headers = [for (final h in response.headers.entries) [h.key, h.value]];
+    final events = (response.headers['content-type'] ?? '').startsWith('text/event-stream')
+        ? call.eventStream(status: response.statusCode, statusText: response.reasonPhrase, headers: headers)
+        : null;
+    if (events != null) return _withBody(response, events.tap(response.stream));
+
     final limit = DurbunNetwork.captureBodies ? DurbunNetwork.maxBodyBytes : 0;
     final copy = BytesBuilder(copy: false);
     var size = 0;
@@ -300,7 +358,7 @@ class DurbunReportingClient extends http.BaseClient {
       call.response(
         status: response.statusCode,
         statusText: response.reasonPhrase,
-        headers: [for (final h in response.headers.entries) [h.key, h.value]],
+        headers: headers,
         body: copy.takeBytes(),
         bodySize: size,
         contentType: response.headers['content-type'],
@@ -334,8 +392,12 @@ class DurbunReportingClient extends http.BaseClient {
           return sub.cancel();
         };
     };
+    return _withBody(response, body.stream);
+  }
+
+  http.StreamedResponse _withBody(http.StreamedResponse response, Stream<List<int>> body) {
     return http.StreamedResponse(
-      body.stream,
+      body,
       response.statusCode,
       contentLength: response.contentLength,
       request: response.request,
@@ -407,8 +469,9 @@ final feed = await Isolate.run(() async {
 });
 ```
 
-The isolate takes the main isolate's body limit and `redactHeaders`; mock
-rules apply only to the main isolate's requests. When no SDK runs in the main
+The isolate takes the main isolate's body limit, `redactHeaders` and whether
+the Mac app asks for WebSocket and event stream messages; mock rules apply
+only to the main isolate's requests. When no SDK runs in the main
 isolate (Dürbün off in this build, or nothing started it), these calls do
 nothing and `attachIsolate()` completes with `false`.
 
@@ -624,7 +687,7 @@ session, Previous run and Clear:
   "What is captured?" (whether each data source is on and, if not, why) and
   "What is not captured?" (`print` and HTTP of background isolates that are not attached, `dart:developer` `log()`,
   clients with their own network stack, other native libraries on Android,
-  WebView, WebSocket messages, clients created before the SDK).
+  WebView, WebSocket and event stream messages (they show on the Mac), clients created before the SDK).
 - **Statistics** (under Tools), in scrollable tabs: *Summary* (request count;
   successful, 4xx, 5xx, connection errors (timeouts included) and pending
   requests; methods), *Duration* (average, median (p50), p95, longest), *Data*

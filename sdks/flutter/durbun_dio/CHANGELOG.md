@@ -7,6 +7,9 @@
 - `DurbunDioInterceptor`: a request that another interceptor answers and sends again (a token refresh) no longer
   stays "pending"; its row ends with a note when the retry starts. It also stays out of the way of a
   `DurbunDioAdapter` on the same Dio.
+- Server-Sent Events read with `ResponseType.stream` through `DurbunDioAdapter` or `DurbunDioInterceptor` show
+  each event under the request while the Mac app asks for them; a stream your code stops reading shows as
+  cancelled. Needs the `durbun` release that ships with this one.
 
 ## 0.2.0
 

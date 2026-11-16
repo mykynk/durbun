@@ -319,6 +319,240 @@ abstract class DurbunHttpCall {
 
   /// Reports a failure (once).
   void error(Object error, {bool cancelled = false});
+
+  /// For a Server-Sent Events response (`content-type: text/event-stream`):
+  /// reports the response headers now, without a body, and returns the
+  /// handle that turns the bytes the app reads into events. Null when the
+  /// desktop does not take stream messages: then report the response with
+  /// [response] as usual.
+  ///
+  /// ```dart
+  /// final events = call.eventStream(status: res.statusCode, headers: headers);
+  /// final body = events == null ? res.stream : events.tap(res.stream);
+  /// ```
+  DurbunEventStreamCall? eventStream({
+    required int status,
+    String? statusText,
+    List<List<String>> headers = const <List<String>>[],
+  }) => null;
+}
+
+/// Reporting handle for the body of a Server-Sent Events response read
+/// outside dart:io (see [DurbunHttpCall.eventStream]). Each dispatched event
+/// is sent as it is parsed; nothing is accumulated.
+abstract class DurbunEventStreamCall {
+  /// The next bytes of the body, as the app reads them.
+  void add(List<int> chunk);
+
+  /// The server ended the stream.
+  void done();
+
+  /// The stream failed ([cancelled]: the app stopped reading it).
+  void error(Object error, {bool cancelled = false});
+
+  /// [stream] unchanged (same chunks, pauses and cancel), with every chunk
+  /// passed to [add] and its end, failure or cancel reported.
+  Stream<T> tap<T extends List<int>>(Stream<T> stream) {
+    // Cancelled in the controller's onCancel.
+    // ignore: cancel_subscriptions
+    StreamSubscription<T>? source;
+    var finished = false;
+    void guard(void Function() body) {
+      try {
+        body();
+      } catch (_) {}
+    }
+
+    late final StreamController<T> out;
+    out = StreamController<T>(
+      sync: true,
+      onListen: () {
+        source = stream.listen(
+          (chunk) {
+            guard(() => add(chunk));
+            out.add(chunk);
+          },
+          onError: (Object e, StackTrace st) {
+            guard(() => error(e));
+            out.addError(e, st);
+          },
+          onDone: () {
+            finished = true;
+            guard(done);
+            out.close();
+          },
+        );
+      },
+      onPause: () => source?.pause(),
+      onResume: () => source?.resume(),
+      onCancel: () {
+        final s = source;
+        source = null;
+        if (!finished) guard(() => error('The app stopped reading the event stream', cancelled: true));
+        return s?.cancel();
+      },
+    );
+    return out.stream;
+  }
+}
+
+/// Reporting handle for one WebSocket connection Dürbün cannot see by
+/// itself (see `DurbunNetwork.webSocket`): its handshake is one network
+/// entry, its messages are listed under it on the desktop.
+///
+/// ```dart
+/// final ws = DurbunNetwork.webSocket(uri);
+/// final channel = WebSocketChannel.connect(uri);
+/// final stream = ws?.incoming(channel.stream,
+///         closeInfo: () => (channel.closeCode, channel.closeReason)) ??
+///     channel.stream;
+/// final sink = ws?.outgoing(channel.sink) ?? channel.sink;
+/// await channel.ready;
+/// ws?.opened(protocol: channel.protocol);
+/// ```
+abstract class DurbunWebSocketCall {
+  /// Request id of the handshake within this app session.
+  String get id;
+
+  /// The connection is open (reports the 101 response). Called by
+  /// [received] for the first message when the app did not call it.
+  void opened({
+    int status = 101,
+    String? statusText,
+    List<List<String>> headers = const <List<String>>[],
+    String? protocol,
+  });
+
+  /// The app sent [message]: a `String` (text) or a list of bytes (binary).
+  void sent(Object? message);
+
+  /// The app received [message]: a `String` (text) or a list of bytes.
+  void received(Object? message);
+
+  /// The app closed the connection (its close frame).
+  void closeSent({int? code, String? reason});
+
+  /// The server closed the connection (its close frame).
+  void closeReceived({int? code, String? reason});
+
+  /// The connection broke, or could not be opened.
+  void failed(Object error);
+
+  /// [stream] unchanged, with every message reported as [received], a
+  /// failure as [failed] and its end as [closeReceived]. [closeInfo] gives
+  /// the close code and reason after the end (e.g. `channel.closeCode`);
+  /// with it, an end without a code after no close from the app is reported
+  /// as a broken connection.
+  Stream<T> incoming<T>(Stream<T> stream, {(int?, String?) Function()? closeInfo}) {
+    // Cancelled in the controller's onCancel.
+    // ignore: cancel_subscriptions
+    StreamSubscription<T>? source;
+    late final StreamController<T> out;
+    void guard(void Function() body) {
+      try {
+        body();
+      } catch (_) {}
+    }
+
+    out = StreamController<T>(
+      sync: true,
+      onListen: () {
+        source = stream.listen(
+          (message) {
+            guard(() => received(message));
+            out.add(message);
+          },
+          onError: (Object e, StackTrace st) {
+            guard(() => failed(e));
+            out.addError(e, st);
+          },
+          onDone: () {
+            guard(() {
+              if (closeInfo == null) {
+                closeReceived();
+                return;
+              }
+              final (code, reason) = closeInfo();
+              if (code != null) {
+                closeReceived(code: code, reason: reason);
+              } else if (!_appClosed) {
+                failed('The connection closed without a close frame');
+              }
+            });
+            out.close();
+          },
+        );
+      },
+      onPause: () => source?.pause(),
+      onResume: () => source?.resume(),
+      onCancel: () {
+        final s = source;
+        source = null;
+        return s?.cancel();
+      },
+    );
+    return out.stream;
+  }
+
+  /// [sink] unchanged, with every message reported as [sent] and its
+  /// close as [closeSent]. `close(code, reason)` passes both on to a sink
+  /// that takes them (`WebSocketSink`).
+  DurbunWebSocketSink<T> outgoing<T>(StreamSink<T> sink) => DurbunWebSocketSink<T>._(sink, this);
+
+  bool _appClosed = false;
+}
+
+/// The sink [DurbunWebSocketCall.outgoing] returns.
+class DurbunWebSocketSink<T> implements StreamSink<T> {
+  DurbunWebSocketSink._(this._inner, this._call);
+
+  final StreamSink<T> _inner;
+  final DurbunWebSocketCall _call;
+
+  void _guard(void Function() body) {
+    try {
+      body();
+    } catch (_) {}
+  }
+
+  @override
+  void add(T event) {
+    _inner.add(event);
+    _guard(() => _call.sent(event));
+  }
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) => _inner.addError(error, stackTrace);
+
+  @override
+  Future<void> addStream(Stream<T> stream) => _inner.addStream(
+    stream.map((event) {
+      _guard(() => _call.sent(event));
+      return event;
+    }),
+  );
+
+  /// Closes the sink; [code] and [reason] reach a WebSocket sink that takes
+  /// them.
+  @override
+  Future<void> close([int? code, String? reason]) {
+    _guard(() {
+      _call._appClosed = true;
+      _call.closeSent(code: code, reason: reason);
+    });
+    if (code == null) return _inner.close();
+    Object? result;
+    try {
+      // ignore: avoid_dynamic_calls
+      result = (_inner as dynamic).close(code, reason);
+    } on NoSuchMethodError {
+      return _inner.close();
+    }
+    return result is Future ? result.then((_) {}) : Future<void>.value();
+  }
+
+  @override
+  Future<void> get done => _inner.done;
 }
 
 /// Parses a loosely typed boolean command parameter.

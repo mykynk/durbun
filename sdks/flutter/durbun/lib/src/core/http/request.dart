@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../streams/stream_host.dart';
 import 'http_client.dart';
 import 'response.dart';
 import 'tracker.dart';
@@ -20,6 +21,7 @@ class DurbunHttpClientRequest implements HttpClientRequest {
   final RequestTracker _tracker;
   final DurbunHttpClient _client;
   Future<HttpClientResponse>? _done;
+  DurbunHttpClientResponse? _response;
 
   /// The wrapped request (for diagnostics and tests).
   HttpClientRequest get inner => _inner;
@@ -98,7 +100,7 @@ class DurbunHttpClientRequest implements HttpClientRequest {
       if (redirects.isNotEmpty) {
         (tracker, method, uri) = reportRedirectHops(_tracker, uri, redirects);
       }
-      return DurbunHttpClientResponse(
+      return _response = DurbunHttpClientResponse(
         response,
         tracker,
         _client,
@@ -114,12 +116,28 @@ class DurbunHttpClientRequest implements HttpClientRequest {
   Future<HttpClientResponse> close() {
     // Throws synchronously (like dart:io) when e.g. a stream is still bound.
     _inner.close().ignore();
+    _guard(_markWebSocket);
     _guard(_tracker.sendRequest);
     return done;
   }
 
+  /// While the desktop takes stream messages, a WebSocket handshake is
+  /// reported with its `ws(s)://` URL (dart:io's `WebSocket.connect` opens it
+  /// as http(s)); otherwise exactly as before.
+  void _markWebSocket() {
+    final recorder = _tracker.recorder;
+    if (recorder is! StreamCaptureHost || !(recorder as StreamCaptureHost).captureStreams) return;
+    final upgrade = _inner.headers.value(HttpHeaders.upgradeHeader);
+    if (upgrade == null || upgrade.trim().toLowerCase() != 'websocket') return;
+    final uri = Uri.parse(_tracker.url);
+    if (uri.scheme == 'http' || uri.scheme == 'https') {
+      _tracker.reportedUrl = uri.replace(scheme: uri.scheme == 'https' ? 'wss' : 'ws').toString();
+    }
+  }
+
   @override
   void abort([Object? exception, StackTrace? stackTrace]) {
+    _guard(() => _response?.appCancelled());
     if (!_tracker.responseArrived && !_tracker.finished) {
       _tracker.markAborted();
       _guard(

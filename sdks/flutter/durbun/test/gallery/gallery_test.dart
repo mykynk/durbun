@@ -555,6 +555,21 @@ void main() {
       await shot(tester, '26-detail-pending');
       await back(tester);
     });
+    await step(tester, 'websocket', () async {
+      await openRow(tester, '/v2/chat');
+      await shot(tester, '26a-detail-websocket');
+      await tapLabel(tester, tr.response);
+      expect(find.text(tr.webSocketBody), findsOneWidget);
+      await shot(tester, '26b-detail-websocket-response');
+      await back(tester);
+    });
+    await step(tester, 'event stream', () async {
+      await openRow(tester, '/v2/live/adoptions');
+      await tapLabel(tester, tr.response);
+      expect(find.text(tr.eventStreamBody), findsOneWidget);
+      await shot(tester, '26c-detail-event-stream-response');
+      await back(tester);
+    });
   });
 
   gallery('share', (tester) async {

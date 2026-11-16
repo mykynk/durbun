@@ -2,6 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import '../body.dart';
+import '../streams/sse_parser.dart';
+import '../streams/stream_host.dart';
+import '../streams/stream_reporter.dart';
+import '../streams/ws_socket.dart';
 import 'http_client.dart';
 import 'tracker.dart';
 
@@ -17,6 +21,18 @@ abstract final class DurbunHttpTuning {
 /// capture buffer while the app consumes it untouched (same chunk objects,
 /// same pause/resume/cancel semantics). Reported when the body ends, fails,
 /// is cancelled, detached, redirected or never listened to.
+///
+/// Two long-lived kinds are reported as streams instead, while the desktop
+/// takes stream messages (`config.captureStreams`):
+/// - `text/event-stream`: the response is reported as soon as its headers
+///   arrive, without a body; the bytes the app reads are parsed into
+///   `net.sse` events, its end is `net.sse {end}`, a failure `net.error`, the
+///   app stopping to read `net.error {cancelled}` (decided when the headers
+///   arrive: a stream reported the usual way stays so);
+/// - a 101 WebSocket upgrade: the socket [detachSocket] returns is teed and
+///   its frames become `net.ws` messages from the moment the desktop takes
+///   them (the tee is always there, so a setting turned on later applies to
+///   open connections too).
 class DurbunHttpClientResponse extends Stream<List<int>>
     implements HttpClientResponse {
   DurbunHttpClientResponse(
@@ -29,6 +45,7 @@ class DurbunHttpClientResponse extends Stream<List<int>>
          limit: _tracker.recorder.maxBodyBytes,
          enabled: _tracker.recorder.captureBodies,
        ) {
+    if (_startEventStream()) return;
     // A body nobody reads is still reported; bodyless responses (HEAD, 204,
     // 304, content-length: 0) are often never listened to, so report them
     // almost immediately.
@@ -56,6 +73,119 @@ class DurbunHttpClientResponse extends Stream<List<int>>
   Timer? _unconsumedTimer;
   bool _listened = false;
   bool _finished = false;
+
+  /// [detachSocket] tees this 101's socket: its frames are reported.
+  bool _framesFollowed = false;
+
+  /// Set while this is a `text/event-stream` reported as a stream.
+  StreamReporter? _sse;
+  SseParser? _sseParser;
+
+  /// Reports an event stream's headers now; false when this response is
+  /// reported the usual way.
+  bool _startEventStream() {
+    try {
+      final contentType = _inner.headers[HttpHeaders.contentTypeHeader]?.first;
+      if (!isEventStreamContentType(contentType) || _compressedEncoding() != null) return false;
+      final reporter = StreamReporter(_tracker.recorder, _tracker.id, mockRuleId: _tracker.mockRule?.id);
+      // Only while the desktop takes stream messages; otherwise the response
+      // is reported as it always was (with its body, at its end).
+      if (!reporter.sending) return false;
+      reporter.markStarted();
+      _finished = true;
+      _sse = reporter;
+      _sseParser = SseParser(reporter.sseEvent);
+      _tracker.complete(
+        status: _inner.statusCode,
+        statusText: _inner.reasonPhrase,
+        headers: headerPairs(_inner.headers, _tracker.recorder),
+        remoteAddress: remoteAddressOf(_inner.connectionInfo),
+        protocol: 'HTTP/1.1',
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The app aborted the request while reading the event stream.
+  void appCancelled() {
+    final sse = _sse;
+    if (sse == null) return;
+    try {
+      _sseParser?.close();
+      sse.fail(const HttpException('The app stopped reading the event stream'), cancelled: true);
+    } catch (_) {}
+  }
+
+  void _sseChunk(List<int> chunk) {
+    final parser = _sseParser;
+    final sse = _sse;
+    if (parser == null || sse == null || sse.ended) return;
+    parser
+      ..keepBytes = sse.wanted ? sse.cap : 0
+      ..add(chunk);
+  }
+
+  StreamSubscription<List<int>> _listenEventStream(
+    void Function(List<int> event)? onData,
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  ) {
+    final sse = _sse!;
+    // Cancelled in the controller's onCancel.
+    // ignore: cancel_subscriptions
+    StreamSubscription<List<int>>? source;
+    var done = false;
+    void guard(void Function() body) {
+      try {
+        body();
+      } catch (_) {}
+    }
+
+    late final StreamController<List<int>> out;
+    out = StreamController<List<int>>(
+      sync: true,
+      onListen: () {
+        source = _inner.listen(
+          (chunk) {
+            guard(() => _sseChunk(chunk));
+            out.add(chunk);
+          },
+          onError: (Object error, StackTrace stack) {
+            guard(() {
+              _sseParser?.close();
+              sse.fail(error);
+            });
+            out.addError(error, stack);
+          },
+          onDone: () {
+            done = true;
+            guard(() {
+              _sseParser?.close();
+              sse.sseEnd();
+            });
+            out.close();
+          },
+        );
+      },
+      onPause: () => source?.pause(),
+      onResume: () => source?.resume(),
+      onCancel: () {
+        final s = source;
+        source = null;
+        if (!done) {
+          guard(() {
+            _sseParser?.close();
+            sse.fail(const HttpException('The app stopped reading the event stream'), cancelled: true);
+          });
+        }
+        return s?.cancel();
+      },
+    );
+    return out.stream.listen(onData, onError: onError, onDone: onDone, cancelOnError: cancelOnError);
+  }
 
   /// The wrapped response (for diagnostics and tests).
   HttpClientResponse get inner => _inner;
@@ -87,8 +217,23 @@ class DurbunHttpClientResponse extends Stream<List<int>>
         protocol: 'HTTP/1.1',
         thenError: error,
         bodyUnread: bodyUnread,
+        noStream: _noStream(),
       );
     } catch (_) {}
+  }
+
+  /// A 101 whose frames are not followed (another protocol than WebSocket,
+  /// or a capture host without stream support), while the desktop takes
+  /// stream messages: it keeps the entry a plain response.
+  bool _noStream() {
+    if (_inner.statusCode != HttpStatus.switchingProtocols || _framesFollowed) return false;
+    final r = _tracker.recorder;
+    if (r is! StreamCaptureHost) return _tracker.recorder.networkEnabled;
+    try {
+      return (r as StreamCaptureHost).captureStreams;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Non-null when the bytes the app receives are still compressed.
@@ -113,6 +258,10 @@ class DurbunHttpClientResponse extends Stream<List<int>>
     void Function()? onDone,
     bool? cancelOnError,
   }) {
+    if (!_listened && _sse != null) {
+      _listened = true;
+      return _listenEventStream(onData, onError, onDone, cancelOnError);
+    }
     if (_listened || _finished) {
       return _inner.listen(
         onData,
@@ -172,8 +321,32 @@ class DurbunHttpClientResponse extends Stream<List<int>>
   @override
   Future<Socket> detachSocket() {
     // e.g. WebSocket upgrade (101): report the handshake response now.
+    final capture = _webSocketCapture();
+    _framesFollowed = capture != null && _tracker.recorder is StreamCaptureHost;
     _finish();
-    return _inner.detachSocket();
+    final socket = _inner.detachSocket();
+    if (capture == null) return socket;
+    return socket.then<Socket>((s) {
+      try {
+        return WsSocketTee(s, capture);
+      } catch (_) {
+        return s;
+      }
+    });
+  }
+
+  /// A capture for the socket of a successful WebSocket upgrade, or null.
+  WsCapture? _webSocketCapture() {
+    try {
+      if (_inner.statusCode != HttpStatus.switchingProtocols) return null;
+      final upgrade = _inner.headers.value(HttpHeaders.upgradeHeader);
+      if (upgrade == null || upgrade.trim().toLowerCase() != 'websocket') return null;
+      final reporter = StreamReporter(_tracker.recorder, _tracker.id, mockRuleId: _tracker.mockRule?.id);
+      if (!_tracker.recorder.networkEnabled) return null;
+      return WsCapture(reporter, extensions: _inner.headers.value('sec-websocket-extensions'));
+    } catch (_) {
+      return null;
+    }
   }
 
   @override

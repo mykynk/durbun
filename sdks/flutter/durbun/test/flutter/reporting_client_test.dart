@@ -25,8 +25,12 @@ void main() {
     late FakeDesktop desktop;
     late FakeSdkConnection conn;
 
-    Future<void> start({int maxBodyBytes = 1048576}) async {
-      desktop = await FakeDesktop.start(config: FakeDesktop.defaultConfig(maxBodyBytes: maxBodyBytes));
+    Future<void> start({int maxBodyBytes = 1048576, bool streams = false}) async {
+      desktop = await FakeDesktop.start(config: <String, Object?>{
+        ...FakeDesktop.defaultConfig(maxBodyBytes: maxBodyBytes),
+        if (streams) 'captureStreams': true,
+        if (streams) 'maxStreamMessageBytes': 1024,
+      });
       await Durbun.init(DurbunOptions(
           enabled: true, port: desktop.port, listenForUsb: false, useBackgroundIsolate: false, metrics: false));
       conn = await desktop.nextConnection();
@@ -43,11 +47,11 @@ void main() {
     });
 
     /// An inner client whose body the test feeds by hand.
-    (http.Client, StreamController<List<int>>) streaming({int status = 200}) {
+    (http.Client, StreamController<List<int>>) streaming({int status = 200, String contentType = 'application/json'}) {
       final body = StreamController<List<int>>();
       addTearDown(() => unawaited(body.close()));
       final client = MockClient.streaming((request, _) async => http.StreamedResponse(body.stream, status,
-          headers: <String, String>{'content-type': 'application/json'}, reasonPhrase: 'OK', request: request));
+          headers: <String, String>{'content-type': contentType}, reasonPhrase: 'OK', request: request));
       return (client, body);
     }
 
@@ -113,6 +117,28 @@ void main() {
       final errors = await conn.waitForCount((m) => m['type'] == 'net.error', 2);
       expect(errors.last['error'], contains('Connection reset by peer'));
       expect(errors.last['cancelled'], isNull);
+    });
+
+    test('Server-Sent Events: one message per event while the Mac app asks for them', () async {
+      await start(streams: true);
+      while (!DurbunNetwork.capturesStreams) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      final (inner, body) = streaming(contentType: 'text/event-stream');
+      final response = await DurbunReportingClient(inner).send(http.Request('GET', Uri.parse('https://api.example.com/live')));
+      final read = response.stream.toBytes();
+      body
+        ..add(utf8.encode('event: score\ndata: 1-0\n\n'))
+        ..add(utf8.encode('data: 2-0\n\n'));
+      await body.close();
+      expect(utf8.decode(await read), 'event: score\ndata: 1-0\n\ndata: 2-0\n\n', reason: 'the app reads the same bytes');
+      final request = await conn.waitFor((m) => m['type'] == 'net.request');
+      final messages = await conn.waitForCount((m) => m['id'] == request['id'], 5);
+      expect(messages.map((m) => m['type']), <String>['net.request', 'net.response', 'net.sse', 'net.sse', 'net.sse']);
+      expect(messages[1].containsKey('body'), isFalse);
+      expect(messages[2]['event'], 'score');
+      expect((messages[3]['body']! as Map)['data'], '2-0');
+      expect(messages[4]['end'], isTrue);
     });
 
     test('a request that fails before any response is reported as an error', () async {

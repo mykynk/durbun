@@ -113,6 +113,17 @@ abstract class DurbunBackend {
     int? bodySize,
   });
 
+  /// Whether the desktop takes WebSocket messages and SSE events right now.
+  bool get capturesStreams;
+
+  /// Starts reporting a WebSocket connection made outside dart:io (null when
+  /// off).
+  DurbunWebSocketCall? beginWebSocket({
+    required Uri url,
+    required List<List<String>> headers,
+    required String source,
+  });
+
   /// Desktop state for the in-app inspector: `{connected, via, appId, config,
   /// mocks, hello}`; null when the SDK is off.
   Map<String, Object?>? inspectorState();
