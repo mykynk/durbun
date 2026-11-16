@@ -61,6 +61,9 @@ import { StatTile } from './StatTiles';
 import { PickerButton, TargetPicker, buildOptions } from './TargetPicker';
 import { PerfTable, type FrameTimeLabels } from './PerfTable';
 import { launchText } from '../logs/components/LogRow';
+// The launch texts live with the Logs feature: register them here too, or the tile's tooltip shows a raw key
+// until the Logs tab has been opened once.
+import '../logs/i18n';
 import { annotationText, usePerfData } from './usePerfData';
 import { acquireWatch, watchKey, type WatchSpec } from './watch';
 import type { AnnotationType } from './traffic';
