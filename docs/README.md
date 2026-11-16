@@ -19,7 +19,7 @@ app, what each SDK captures, privacy and uninstalling.
 
 | Guide | What you find there |
 |---|---|
-| [Flutter: `durbun`](../sdks/flutter/durbun/README.md) | Setup, the in-app inspector, release, Firebase and store builds, what is captured, options |
+| [Flutter: `durbun`](../sdks/flutter/durbun/README.md) | Setup, the in-app panel, release, Firebase and store builds, what is captured, options |
 | [Flutter: `durbun_dio`](../sdks/flutter/durbun_dio/README.md) | Capturing Dio requests that bypass `dart:io` (`NativeAdapter`, cronet_http) |
 | [Android](../sdks/android/README.md) | Gradle setup, `DurbunInterceptor` for OkHttp, the no-op artifact for release builds, test builds |
 | [iOS](../sdks/ios/README.md) | Swift Package Manager and CocoaPods setup, URLSession capture, test builds |

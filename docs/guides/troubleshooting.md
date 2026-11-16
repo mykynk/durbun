@@ -77,8 +77,9 @@ With the SDK connected, a request is still missing when:
 | Android: the `OkHttpClient` has no `DurbunInterceptor` | Add `.addInterceptor(DurbunInterceptor())` to every client, including the ones Retrofit, Coil or Ktor build |
 | Android: the library does not use OkHttp (`HttpURLConnection`, Volley, Cronet, WebView, native code) | Not captured; see the SDK guide for reporting such requests yourself |
 | iOS: background `URLSession`s, WKWebView, AVPlayer | Not captured |
-| Flutter: Dio's `NativeAdapter`, `cronet_http` | Add `DurbunDioInterceptor` from [`durbun_dio`](https://pub.dev/packages/durbun_dio) |
-| Flutter: requests in background isolates (`compute`, `Isolate.run`), gRPC, raw sockets | Not captured; report them with `DurbunNetwork.begin` |
+| Flutter: Dio's `NativeAdapter`, `cronet_http` | Wrap the adapter with `DurbunDioAdapter` from [`durbun_dio`](https://pub.dev/packages/durbun_dio) |
+| Flutter: requests in background isolates (`compute`, `Isolate.run`) | Call `Durbun.attachIsolate()` in that isolate |
+| Flutter: gRPC, raw sockets | Not captured; report them with `DurbunNetwork.begin` |
 | React Native: `<Image>` downloads, requests made by native modules | Not captured |
 | The request started before the SDK started | Start the SDK as early as possible (first line of `main`, `Application.onCreate`, `index.js`) |
 | The app's own `redactHeaders` or `ignoredHosts` / `ignoreUrls` options | These hide values or whole hosts on purpose |
