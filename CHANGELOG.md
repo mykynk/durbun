@@ -158,6 +158,8 @@ All notable changes to Dürbün are listed here. The format follows
 - Package import messages for flows and mocks are in the interface language.
 - The "oldest lines dropped" notes say where the list starts, the limit and that raising it keeps more.
 - Primary and danger buttons pass AA contrast in both themes; a test checks them.
+- Android SDK: FPS counts the frames the app actually drew (Android 7+), so an idle screen no longer reads
+  as the display's refresh rate; janky frames use the frame's own deadline on Android 12+.
 
 ### Added
 
@@ -327,6 +329,10 @@ All notable changes to Dürbün are listed here. The format follows
   network interceptor links to its rule and its request.
 - The sidebar folds by itself on windows narrower than 1000 px and comes back when there is room; your own
   choice wins.
+- Android SDK and iOS SDK: the cold start time is sent once as the `durbun.launch` event: process start
+  (the launch request on Android 13+) to the first drawn frame. Prewarmed iOS launches say so and carry no
+  duration.
+- Android SDK: UI-thread and RenderThread time per frame (Android 7+).
 
 ## [0.2.0] - 2026-11-12
 

@@ -23,7 +23,7 @@ crashes, URLSession network traffic and performance metrics live to the Dürbün
 | Earlier launches (MetricKit) | What iOS reports later: watchdog kills (0x8badf00d), main-thread hangs, CPU and disk-write exceptions, slow launches (see [Earlier launches](#earlier-launches-metrickit)) |
 | Network | `URLSession.shared` **and** your own sessions (Alamofire included): headers, bodies, redirects, timings (DNS/TCP/TLS/wait/receive), protocol (h2/h3), errors and cancellations |
 | Mocks | Rules defined in the Mac app: synthesized responses, latency, natural failures (timeout, connection, DNS, TLS) |
-| Performance | CPU (%), memory (phys_footprint, the number Xcode shows), thread count, FPS and janky frames (CADisplayLink) |
+| Performance | CPU (%), memory (phys_footprint, the number Xcode shows), thread count, FPS and janky frames (CADisplayLink), launch time |
 | Events | `Durbun.event("purchase", ["amount": 49.9])` |
 | App tools | From the Mac app's Device tab: light/dark appearance, slow animations, view hierarchy dump, UserDefaults dump, plus your own tools via `registerAction` |
 
@@ -216,8 +216,26 @@ the SDK subscribes to MetricKit's diagnostics and sends them once the Mac app is
 ### Performance
 
 CPU (%), memory (phys_footprint, the number Xcode shows), thread count, FPS and janky frames, sampled only while
-connected. FPS / janky frames are iOS-only (there is no CADisplayLink on macOS). `collectMetrics: false` turns
-them off.
+connected, and the launch time. FPS / janky frames and the launch time are iOS-only (there is no CADisplayLink on
+macOS). `collectMetrics: false` turns them off.
+
+| Number | What it means |
+|---|---|
+| `cpu` / `threads` | CPU of all the app's threads, in percent of one core (can pass 100) / thread count |
+| `memoryMB` | phys_footprint, the number Xcode's memory gauge shows |
+| `fps` / `jankyFrames` | Display refreshes the main run loop kept up with (a `CADisplayLink`), and refreshes that came more than 1.5 intervals late. They show a blocked main thread, not what was drawn: an idle screen reads near the display's rate |
+| Event `durbun.launch` | Cold start, once per process: `ms` from the process start (the kernel's start time) to the first display refresh after the app became active, with `kind: "cold"` and `screen` (the key window's root view controller) |
+
+Limits of the launch time:
+
+- iOS 15+ may prewarm an app: start its process ahead of the tap and finish the launch later. Then the process
+  start says nothing about the wait, so the event has `kind: "prewarmed"` and no `ms` (iOS sets `ActivePrewarm=1`
+  in such a process).
+- Nothing is sent when the app was launched in the background (a push, a background fetch) or went to the
+  background before its first frame, when Dürbün started more than 10 s after the process, or when the first frame
+  took more than 30 s. Warm starts (back from the background) are not reported.
+- The time includes the dynamic loader and static initializers before `main`. Debug builds launch slower than
+  release builds and a debugger slows them more: compare launches of the same build with each other.
 
 ## Mocks
 
@@ -343,7 +361,7 @@ The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, Android 
 | `captureOSLog` | `nil` (same as `captureStdout`) | Forward the app's own `os_log` / `Logger` / `NSLog` lines when the Mac app cannot read device logs (Wi-Fi) |
 | `captureNetwork` | `true` | Capture URLSession traffic and apply mocks |
 | `captureCrashes` | `true` | Exception and signal (crash) reports, and MetricKit diagnostics of earlier launches |
-| `collectMetrics` | `true` | CPU / memory / FPS samples (only while connected) |
+| `collectMetrics` | `true` | CPU / memory / FPS samples (only while connected) and the launch time |
 | `interceptUploadTasks` | `true` | Intercept upload tasks; with `false`, `didSendBodyData` progress callbacks are preserved |
 | `ignoredHosts` | `[]` | Domains that are never captured (subdomains included) |
 | `redactHeaders` | `[]` | Header names (case-insensitive) masked as `••••`, e.g. `["Authorization", "Cookie"]`; the real request is unchanged |

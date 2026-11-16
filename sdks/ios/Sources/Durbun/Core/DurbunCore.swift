@@ -84,6 +84,8 @@ final class DurbunCore {
     private var environment: AppEnvironment?
     private var stdio: StdioCapture?
     private var metrics: MetricsReporter?
+    /// Stops the launch-time watcher (and keeps it alive until then).
+    private var stopLaunchTimer: (() -> Void)?
     private var crashCapture = false
     private var requestCounter = 0
     private var foregroundObserver: NSObjectProtocol?
@@ -307,6 +309,10 @@ final class DurbunCore {
         if options.collectMetrics {
             let reporter = MetricsReporter { [weak self] message in self?.send(message) }
             lock.withLock { metrics = reporter }
+            #if canImport(UIKit) && !os(watchOS)
+            let launch = LaunchTimer { [weak self] props in self?.event(LaunchTiming.event, props: props) }
+            lock.withLock { stopLaunchTimer = { launch.stop() } }
+            #endif
         }
     }
 
@@ -449,6 +455,7 @@ final class DurbunCore {
     func stop() {
         lifecycle.lock()
         defer { lifecycle.unlock() }
+        var stopLaunch: (() -> Void)?
         let (transport, stdio, metrics, crash, observer, relay, osLog) = lock.withLock {
             () -> (Transport?, StdioCapture?, MetricsReporter?, Bool, NSObjectProtocol?, HostRelay?, OSLogCapture?) in
             let result = (self.transport, self.stdio, self.metrics, crashCapture, foregroundObserver, self.relay, self.osLog)
@@ -462,6 +469,8 @@ final class DurbunCore {
             self.stdio = nil
             self.metrics = nil
             self.osLog = nil
+            stopLaunch = stopLaunchTimer
+            stopLaunchTimer = nil
             crashCapture = false
             foregroundObserver = nil
             policy.active = false
@@ -472,6 +481,7 @@ final class DurbunCore {
         stopSystemDiagnostics()
         notifyStatus()
         metrics?.stop()
+        stopLaunch?()
         stdio?.stop()
         osLog?.stop()
         if crash { CrashCapture.uninstall() }
