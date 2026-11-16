@@ -168,10 +168,11 @@ describe('the report text', () => {
     expect(bare).toMatch(/^# Bug report\n/);
   });
 
-  it('logs.txt: logcat-like lines; only network rows have their URLs masked', () => {
+  it('logs.txt: logcat-like lines with secret-looking values masked', () => {
     const text = logsText([line(T, { message: 'token=abc123 in a message' }), lines[1]!], (e) => e.message, true, ['Shop']);
     expect(text.startsWith('# Shop\n\n')).toBe(true);
-    expect(text).toContain('token=abc123 in a message');
+    expect(text).toContain('token=•••• in a message');
+    expect(logsText([line(T, { message: 'token=abc123' })], (e) => e.message, false)).toContain('token=abc123');
     expect(text).toContain('https://api.example.com/me?token=••••');
   });
 

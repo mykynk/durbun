@@ -84,6 +84,11 @@ All notable changes to Dürbün are listed here. The format follows
   explained on the desktop, not only in logcat.
 - Flutter SDK: the README's wrapper for `CronetClient` / `OkHttpClient` keeps responses streaming instead of
   reading them into memory.
+- Closing a request comparison also ends the "pick the second request" bar.
+- A refused app install shows its reason in the interface language; the tool's error code stays as a short
+  detail instead of a raw English line.
+- The footer of paused automations was cut off and the last-run pill covered the minimap.
+- A selected warning or error log row keeps its colour.
 
 ### Changed
 
@@ -144,6 +149,15 @@ All notable changes to Dürbün are listed here. The format follows
 - Docs: the SDK READMEs share one outline and one vocabulary (the Mac app, device logs, tools, masking) and
   a common option-name table; the React Native Wi-Fi restart step and the Android 8 MB body cap are
   documented.
+- Mock rule hit counts are kept by the server: the same in every window, counted since Dürbün started.
+- An app whose SDK connected earlier and is not connected right now says so (outlined SDK badge) instead of
+  "no SDK". The empty network list says whether you cleared it, the app has not sent anything yet, or its
+  SDK is not connected right now.
+- Shared reports and bug reports mask secret values in log text, stacks and data, including numbers and
+  true/false values under secret keys; HAR and session exports mask true/false values too.
+- Package import messages for flows and mocks are in the interface language.
+- The "oldest lines dropped" notes say where the list starts, the limit and that raising it keeps more.
+- Primary and danger buttons pass AA contrast in both themes; a test checks them.
 
 ### Added
 
@@ -303,6 +317,16 @@ All notable changes to Dürbün are listed here. The format follows
   Slack, Export and the previous-run file.
 - Flutter SDK: stacks from `--split-debug-info` / `--obfuscate` builds are marked in the panel and in shared
   reports, with the `flutter symbolize` command; the crash carries the command to the desktop as `symbolize`.
+- Flows: pin a run to keep it through automatic clean-up and "Clear history" (up to 50 pinned runs). The
+  history lists the runs with a pin toggle and says how many pinned runs were kept.
+- Flows: a flow made from requests shows where the requests came from and the filter that was on, and can
+  pick all visible requests.
+- Logs: a crash or Flutter error from a `--split-debug-info` build explains the address-only stack and offers
+  the `flutter symbolize` command, with copy and "Save as stack.txt".
+- Network: when an Android app has no `DurbunInterceptor`, the empty list says so; a mock skipped by a
+  network interceptor links to its rule and its request.
+- The sidebar folds by itself on windows narrower than 1000 px and comes back when there is room; your own
+  choice wins.
 
 ## [0.2.0] - 2026-11-12
 

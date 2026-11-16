@@ -7,6 +7,7 @@ import type { CompiledScope, HubState, Scope } from '../../data';
 import { isNetworkError } from '../../data/networkStore';
 import { deviceAppForEntry, sessionForEntry } from '../logs/model/appOf';
 import { exportTimestamp, formatTxtEntry } from '../logs/model/export';
+import { LogMasker } from '../logs/model/maskLog';
 import { fenced, shareDuration } from '../network/model/shareReport';
 
 /** Where the report starts: a log line, a request, or "now" (the top bar, the palette). */
@@ -131,17 +132,14 @@ export function windowCrashReport<T>(lines: readonly LogEntry[], reportOf: (e: L
   return undefined;
 }
 
-/** Network rows and request lines name URLs: masked, their query secrets read ••••. */
-export function maskUrlsIn(text: string): string {
-  return text.replace(/\S+:\/\/\S+/g, (u) => maskUrl(u));
-}
-
-/** The lines as `logs.txt` holds them (logcat-like, one per line, continuation lines indented). */
+/** The lines as `logs.txt` holds them (logcat-like, one per line, continuation lines indented); `mask` hides secret values. */
 export function logsText(lines: readonly LogEntry[], text: (e: LogEntry) => string, mask: boolean, header: readonly string[] = []): string {
-  const show = mask ? (e: LogEntry) => (e.kind === 'network' ? maskUrlsIn(text(e)) : text(e)) : text;
+  // Masked the way a shared line is: secret-looking values in the message, its stack and the display text.
+  const masker = mask ? new LogMasker() : undefined;
+  const show = masker ? (e: LogEntry) => masker.text(text(e)) : text;
   const out = header.map((h) => `# ${h}`);
   if (out.length) out.push('');
-  for (const e of lines) out.push(formatTxtEntry(e, { text: show }));
+  for (const e of lines) out.push(formatTxtEntry(masker ? { ...e, message: masker.text(e.message), error: masker.error(e.error) } : e, { text: show }));
   return `${out.join('\n')}\n`;
 }
 

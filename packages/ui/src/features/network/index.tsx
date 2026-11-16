@@ -12,7 +12,9 @@ import {
   setScope,
   ui,
   useCompiledScope,
+  logStore,
   useHub,
+  useLogVersion,
   useNetworkVersion,
   usePrefs,
   useMocks,
@@ -25,7 +27,6 @@ import {
   EmptyState,
   confirm,
   SplitPane,
-  formatClock,
   formatDuration,
   formatNumber,
   isMac,
@@ -40,6 +41,8 @@ import {
 } from '../../components';
 import { deviceDisplayName, errorText, useLanguage, useT } from '../../i18n';
 import { deviceMarks } from '../logs/model/devices';
+import { sdkNoteOf } from '../logs/model/sdkNotes';
+import { sinceText } from '../logs/components/Banners';
 import { NetRowIndex } from './model/rows';
 import { DEFAULT_FILTERS, compileFilter, parseQuery, sanitizeFilters, type NetFilters } from './model/filters';
 import {
@@ -68,7 +71,6 @@ import { ReplayDialog } from './components/ReplayDialog';
 import { CompareDialog } from './components/CompareDialog';
 import { ShareDialog } from './components/ShareDialog';
 import { PartialCaptureNote } from './components/PartialCaptureNote';
-import { useNetworkMockHits, networkNav } from './nav';
 import { ruleLabel } from '../mocks/model/rules';
 import { startHitLedger } from '../mocks/model/hitLedger';
 import { bugReport } from '../report/store';
@@ -240,6 +242,16 @@ export default function NetworkView() {
   }, [ids, sort, names, sort.key === 'seq' ? 0 : v]);
 
   const scopeTotal = useMemo(() => scopeNetworkCounts(compiled, networkStore).total, [scopeKey, v]); // eslint-disable-line react-hooks/exhaustive-deps
+  // An app whose SDK said that no HTTP client carries its interceptor: say so instead of the generic empty list.
+  const noInterceptorWatch = scopeTotal === 0 && !!compiled.appIds?.size;
+  const logV = useLogVersion({ enabled: noInterceptorWatch, throttleMs: 1000 });
+  const noInterceptorLine = useMemo(() => {
+    const appIds = compiled.appIds;
+    if (!noInterceptorWatch || !appIds) return undefined;
+    // A request row of the app after that line means a client got the interceptor later (or the list was cleared).
+    const last = logStore.findLast((e) => !!e.appId && appIds.has(e.appId) && (e.kind === 'network' || sdkNoteOf(e)?.kind === 'noInterceptor'));
+    return last && last.kind !== 'network' ? last : undefined;
+  }, [noInterceptorWatch, scopeKey, logV]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const followEdge: 'bottom' | 'top' | null = chronological ? (sort.dir === 'asc' ? 'bottom' : 'top') : null;
   const followMark = useRef(0);
@@ -290,6 +302,8 @@ export default function NetworkView() {
         return;
       }
       setComparePair([a, b]);
+      // The "pick the second request" bar ends with the comparison, however the second one was picked.
+      setCompareBase(null);
     },
     [t],
   );
@@ -333,7 +347,7 @@ export default function NetworkView() {
       { label: t('network.menu.replay'), icon: RotateCw, disabled: e.method === '?', onSelect: () => void doReplay(e) },
       { label: t('network.menu.editReplayEllipsis'), icon: PencilLine, disabled: e.method === '?', onSelect: () => setReplayEntry(e) },
       { label: t('network.menu.createMock'), icon: Drama, onSelect: () => void createMockFrom(e) },
-      { label: t('network.menu.createFlow'), icon: Workflow, disabled: e.method === '?', onSelect: () => ui.newFlowFromRequests([e.id]) },
+      { label: t('network.menu.createFlow'), icon: Workflow, disabled: e.method === '?', onSelect: () => flowFrom([e.id]) },
       { type: 'separator' },
       { label: t('network.menu.showInLogs'), icon: ScrollText, onSelect: () => showInLogs(e) },
       { label: t('network.menu.har'), icon: FileDown, onSelect: () => exportHarFor([e.id], harLabel(e), harFileName(e)) },
@@ -513,18 +527,34 @@ export default function NetworkView() {
     return tabs.size === 1 ? [...tabs][0]! : 'flutter';
   }, [scopeExplain]);
 
+  /* ── "new flow" from requests: the dialog can offer the list as shown, with its filter in words ── */
+  const flowFrom = (ids: string[]) => {
+    const parts: string[] = [];
+    if (query.trim()) parts.push(query.trim());
+    if (filters.methods.length) parts.push(filters.methods.join(', '));
+    if (filters.statuses.length) parts.push(filters.statuses.join(', '));
+    if (filters.types.length) parts.push(filters.types.map((x) => t(`network.filters.typeNames.${x}`)).join(', '));
+    if (filters.host) parts.push(filters.host);
+    if (filters.errorsOnly) parts.push(t('network.filters.errorsOnly'));
+    if (filters.mockedOnly) parts.push(t('network.filters.mocked'));
+    if (mockRuleName) parts.push(t('network.filters.mockRule', { rule: mockRuleName }));
+    const opts: { visibleIds: string[]; from: 'network'; filterLabel?: string } = { visibleIds: [...rowIds], from: 'network' };
+    if (parts.length) opts.filterLabel = parts.join(' · ');
+    ui.newFlowFromRequests(ids, opts);
+  };
+
   /* ── "12 hits" on a mock rule: the requests it answered ── */
   const mockRules = useMocks((s) => s.rules);
   const mockRule = filters.mockRule ? mockRules.find((r) => r.id === filters.mockRule) : undefined;
   const mockRuleName = filters.mockRule ? (mockRule ? ruleLabel(mockRule) : t('network.filters.mockRuleGone')) : undefined;
   // Counting starts with the first view that shows rules or requests, so clearing the list later keeps the counts.
   useEffect(() => startHitLedger(), []);
-  const hitsRequest = useNetworkMockHits();
+  const hitsRequest = focus?.kind === 'networkMockHits' ? focus : null;
   const hitsHandled = useRef(0);
   useEffect(() => {
     if (!hitsRequest || hitsHandled.current === hitsRequest.seq) return;
     hitsHandled.current = hitsRequest.seq;
-    networkNav.consume(hitsRequest.seq);
+    ui.consumeFocus(hitsRequest.seq);
     const ruleId = hitsRequest.ruleId;
     const answered = networkStore.list().filter((e) => e.mocked && e.mockRuleId === ruleId);
     const before = { query, filters: rawFilters };
@@ -575,7 +605,7 @@ export default function NetworkView() {
           { id: 'network.sel.replay', title: t('network.menu.replay'), group, icon: RotateCw, keywords: ['replay', 'tekrar', 'gönder'], run: () => void doReplay(sel) },
           { id: 'network.sel.edit', title: t('network.menu.editReplayEllipsis'), group, icon: PencilLine, keywords: ['edit', 'düzenle', 'replay'], run: () => setReplayEntry(sel) },
           { id: 'network.sel.mock', title: t('network.menu.createMock'), group, icon: Drama, keywords: ['mock', 'oluştur'], run: () => void createMockFrom(sel) },
-          { id: 'network.sel.flow', title: t('network.menu.createFlow'), group, icon: Workflow, keywords: ['flow', 'akış', 'test', 'senaryo', 'scenario'], run: () => ui.newFlowFromRequests([sel.id]), disabled: sel.method === '?' },
+          { id: 'network.sel.flow', title: t('network.menu.createFlow'), group, icon: Workflow, keywords: ['flow', 'akış', 'test', 'senaryo', 'scenario'], run: () => flowFrom([sel.id]), disabled: sel.method === '?' },
           { id: 'network.sel.logs', title: t('network.menu.showInLogs'), group, icon: ScrollText, keywords: ['logs', 'loglar'], run: () => showInLogs(sel) },
           { id: 'network.sel.compare', title: t('network.menu.compareEllipsis'), group, icon: ArrowLeftRight, keywords: ['compare', 'karşılaştır', 'diff'], run: () => setCompareBase(sel.id) },
         ]
@@ -599,6 +629,23 @@ export default function NetworkView() {
     />
   ) : scopeTotal === 0 && compiled.scope.kind === 'device' && compiled.scope.deviceId === 'desktop' ? (
     <EmptyState size="lg" icon={RotateCw} title={t('network.empty.desktopTitle')} description={t('network.empty.desktopDescription')} />
+  ) : scopeTotal === 0 && noInterceptorLine ? (
+    <EmptyState
+      size="lg"
+      icon={ArrowLeftRight}
+      title={t('network.empty.noInterceptorTitle')}
+      description={t('network.empty.noInterceptorDescription')}
+      actions={
+        <>
+          <Button variant="primary" icon={BookOpen} onClick={() => ui.openSdkGuide('android')}>
+            {t('network.empty.sdkGuide')}
+          </Button>
+          <Button variant="ghost" icon={ScrollText} onClick={() => ui.focusLog(noInterceptorLine.id)}>
+            {t('network.empty.noInterceptorLine')}
+          </Button>
+        </>
+      }
+    />
   ) : scopeTotal === 0 ? (
       <ExplainEmpty
         capability="network"
@@ -650,7 +697,7 @@ export default function NetworkView() {
           ) : null
         }
       />
-    ), [paused, waiting, scopeTotal, scopeKey, noNetworkCapability, hasFilters, t, resetFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+    ), [paused, waiting, scopeTotal, scopeKey, noNetworkCapability, noInterceptorLine, hasFilters, t, resetFilters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onHeaderContextMenu = useEvent((ev: MouseEvent) => openContextMenu(ev, columnItems()));
 
@@ -693,8 +740,9 @@ export default function NetworkView() {
         <div className="net-banner net-banner--dropped" role="note">
           <Archive size={13} aria-hidden />
           <span>
-            <strong>{evictions.requests > 0 ? t('network.dropped.title', { count: evictions.requests }) : t('network.dropped.titleFull')}</strong> {t('network.dropped.body', { limit: requestLimit })}
-            {oldestTs !== undefined ? ` ${t('network.dropped.since', { time: formatClock(oldestTs, { ms: false }) })}` : ''}
+            <strong>{evictions.requests > 0 ? t('network.dropped.title', { count: evictions.requests }) : t('network.dropped.titleFull')}</strong>{' '}
+            {oldestTs !== undefined ? `${t('network.dropped.since', { time: sinceText(oldestTs) })} ` : ''}
+            {t('network.dropped.body', { limit: requestLimit })} {t('network.dropped.hint')}
           </span>
           <Button size="sm" variant="ghost" icon={Settings2} onClick={() => ui.openSettings('network')}>
             {t('network.dropped.settings')}
@@ -761,6 +809,7 @@ export default function NetworkView() {
             onShare={() => setShareEntry(selected)}
             onReport={() => bugReport.open({ kind: 'request', netId: selected.id })}
             find={serverText || undefined}
+            onCreateFlow={() => flowFrom([selected.id])}
           />
         ) : (
           <span />

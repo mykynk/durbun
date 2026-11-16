@@ -68,7 +68,7 @@ const COOKIE_LINE_RE = /\b(cookie|set-cookie)\s*:\s*(?!••••)[^\n]+/gi;
 const JWT_RE = /\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*/g;
 /** `Bearer <token>` / `Basic <credentials>` (a value of at least 8 characters). */
 const AUTH_RE = /\b(Bearer|Basic)\s+([A-Za-z0-9\-._~+/]{8,}=*|••••)/gi;
-/** `"key": "value"` / `"key": 123` pairs (JSON printed in a message). */
-const JSON_PAIR_RE = /"((?:[^"\\]|\\.){1,64})"(\s*:\s*)("(?:[^"\\]|\\.)*"|-?\d[\d.eE+-]*)/g;
+/** `"key": "value"` / `"key": 123` / `"key": true` pairs (JSON printed in a message). */
+const JSON_PAIR_RE = /"((?:[^"\\]|\\.){1,64})"(\s*:\s*)("(?:[^"\\]|\\.)*"|-?\d[\d.eE+-]*|(?:true|false)\b)/g;
 /** `key=value`, `key: value`, `key = "value"` in prose. */
 const PAIR_RE = /\b([A-Za-z_][\w.-]{0,47})(\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;&"'}\])]+)/g;

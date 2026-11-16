@@ -268,6 +268,9 @@ export interface ErrorDescription {
  * the server message is folded in and the raw message is kept as `detail` when the text does not contain it.
  * Codes the UI does not know show the server's English message.
  */
+/** A tool's own error name in a server message: `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, `ERROR_NOT_FOUND`. */
+const TOOL_ERROR_RE = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){1,}\b/;
+
 export function describeError(err: unknown): ErrorDescription {
   const e = (err && typeof err === 'object' ? err : {}) as { code?: unknown; message?: unknown; params?: unknown };
   const code = typeof e.code === 'string' ? e.code : undefined;
@@ -283,8 +286,11 @@ export function describeError(err: unknown): ErrorDescription {
   if (code && hasCode(code)) {
     const text = errorText({ code, message });
     if (text) {
+      // The localized text says it all; the server's English sentence is only the fallback. Keep just a tool's own
+      // error name from it (INSTALL_FAILED_…), which helps a search and reads the same in every language.
       const specific = errorDetail(message);
-      const detail = message && text !== message && !(specific && text.includes(specific)) ? message : undefined;
+      const token = TOOL_ERROR_RE.exec(message)?.[0];
+      const detail = token && !text.includes(token) && !(specific && text.includes(specific)) ? token : undefined;
       return { text, detail, code };
     }
   }

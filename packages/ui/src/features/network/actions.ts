@@ -7,7 +7,6 @@ import { safeFileStem } from './model/http';
 import { cachedDetail, loadDetail } from './detailCache';
 import { draftFromRequest, type DraftNote } from '../mocks/model/draft';
 import { transfer } from '../transfer/store';
-import { logsNav } from '../logs/nav';
 import './i18n';
 
 /** Actions on a captured request, shared by the table's context menu, the detail panel and the palette. */
@@ -116,7 +115,7 @@ export function showInLogs(e: NetworkEntry): void {
       return;
     }
   }
-  logsNav.showMoment(e.startTs, { deviceId: e.deviceId, appId: e.appId, reason: 'requestLineGone' });
+  ui.focusLogTime(e.startTs, { deviceId: e.deviceId, appId: e.appId, reason: 'requestLineGone' });
 }
 
 function draftNoteText(n: DraftNote): string | null {

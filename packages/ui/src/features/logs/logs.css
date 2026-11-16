@@ -575,10 +575,20 @@
   outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   outline-offset: -1px;
 }
+/* Level rows keep their tint under one selection layer (not the selection colour twice). */
 .lg-row--warn.is-selected,
 .lg-row--error.is-selected,
 .lg-row--fatal.is-selected {
   background-image: linear-gradient(var(--bg-selected), var(--bg-selected));
+}
+.lg-row--warn.is-selected {
+  background-color: var(--lv-warn-bg);
+}
+.lg-row--error.is-selected {
+  background-color: var(--lv-error-bg);
+}
+.lg-row--fatal.is-selected {
+  background-color: var(--lv-fatal-bg);
 }
 .is-flash {
   animation: lg-flash 1.6s var(--ease);
@@ -1473,6 +1483,32 @@
 }
 .lg-detail__net + .lg-detail__net-meta + .btn {
   align-self: flex-start;
+}
+.lg-detail__cmd {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+.lg-detail__cmd-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.lg-detail__cmd + .btn {
+  align-self: flex-start;
+}
+.lg-detail__links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 .lg-detail__foot {
   display: flex;

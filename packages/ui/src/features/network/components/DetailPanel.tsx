@@ -63,11 +63,13 @@ export interface DetailPanelProps {
   onShare: () => void;
   /** "Report a bug" anchored to this request. */
   onReport?: () => void;
+  /** "New flow" from this request (the view passes the list it shows). */
+  onCreateFlow?: () => void;
   /** The body search's text: the panel opens where it occurs and marks it. */
   find?: string;
 }
 
-export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCompare, onShare, onReport, find }: DetailPanelProps) {
+export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCompare, onShare, onReport, onCreateFlow, find }: DetailPanelProps) {
   const t = useT();
   const [savedTab, setSavedTab] = usePersistentState<DetailTab>('network.detailTab', 'response');
   const { detail, loading, error, reload } = useNetworkDetail(gone ? null : entry);
@@ -100,7 +102,7 @@ export function DetailPanel({ entry, gone, onClose, onReplay, onEditReplay, onCo
   const moreItems: MenuItem[] = [
     { label: t('network.menu.showInLogs'), icon: ScrollText, onSelect: () => showInLogs(entry) },
     { label: t('network.menu.compare'), icon: ArrowLeftRight, onSelect: onCompare },
-    { label: t('network.menu.createFlow'), icon: Workflow, disabled: gone || entry.method === '?', onSelect: () => ui.newFlowFromRequests([entry.id]) },
+    { label: t('network.menu.createFlow'), icon: Workflow, disabled: gone || entry.method === '?', onSelect: () => (onCreateFlow ? onCreateFlow() : ui.newFlowFromRequests([entry.id], { from: 'network' })) },
     { type: 'separator' },
     { label: t('network.menu.har'), icon: FileDown, disabled: gone, onSelect: () => exportHarFor([entry.id], harLabel(entry), harFileName(entry)) },
     { label: t('network.menu.downloadResponse'), icon: FileDown, disabled: gone || !entry.hasResponseBody, onSelect: () => downloadBody(entry, 'response') },

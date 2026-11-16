@@ -20,6 +20,13 @@ describe('LogMasker', () => {
     expect(m.text('GET https://h/a?api_key=XYZ&page=2')).not.toContain('XYZ');
     expect(m.text('nothing secret here: 42 items')).toBe('nothing secret here: 42 items');
   });
+  it('masks numbers and booleans under secret keys, in text and in data', () => {
+    const m = new LogMasker();
+    expect(m.text('verify {"otp": 123456, "pin":-1.5, "token":true, "count":3, "ok":false}')).toBe(
+      `verify {"otp": "${SECRET_MASK}", "pin":"${SECRET_MASK}", "token":"${SECRET_MASK}", "count":3, "ok":false}`,
+    );
+    expect(m.data({ otp: 123456, pin: 0, session: false, retries: 2, enabled: true })).toEqual({ otp: SECRET_MASK, pin: SECRET_MASK, session: SECRET_MASK, retries: 2, enabled: true });
+  });
   it('masks values under secret names in structured data', () => {
     const m = new LogMasker();
     expect(m.data({ user: 'can', auth: { token: 't-1' }, list: ['password=p'] })).toEqual({ user: 'can', auth: { token: SECRET_MASK }, list: [`password=${SECRET_MASK}`] });

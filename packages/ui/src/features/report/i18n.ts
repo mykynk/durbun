@@ -68,7 +68,7 @@ registerMessages('report', {
       label: 'Ne oldu?',
       placeholder: 'Ne yaptınız, ne bekliyordunuz, ne oldu?',
     },
-    maskLogs: 'Log satırlarının metni olduğu gibi girer; yalnızca URL’lerdeki gizli değerler maskelenir.',
+    maskLogs: 'Log satırlarında da gizli görünen değerler (URL’lerdeki gizli değerler, Bearer token’lar, JWT’ler, parola ve anahtar çiftleri, çerezler) maskelenir.',
     preview: {
       show: 'Raporu göster',
       hide: 'Raporu gizle',
@@ -188,7 +188,7 @@ registerMessages('report', {
       label: 'What happened?',
       placeholder: 'What did you do, what did you expect, what happened?',
     },
-    maskLogs: 'Log text goes in as it is; only secret values in URLs are masked.',
+    maskLogs: 'Secret-looking values in log lines are masked too (secret URL values, Bearer tokens, JWTs, password and key pairs, cookies).',
     preview: {
       show: 'Show the report',
       hide: 'Hide the report',

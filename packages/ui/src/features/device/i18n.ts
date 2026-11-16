@@ -379,7 +379,13 @@ registerMessages('device', {
           dumpWidgetTree: 'Widget ağacı dökümü',
           dumpRenderTree: 'Render ağacı dökümü',
         },
-        android: { dumpThreads: 'Thread dökümü', gc: 'Çöp toplayıcıyı çalıştır (GC)' },
+        android: {
+          dumpThreads: 'Thread dökümü',
+          gc: 'Çöp toplayıcıyı çalıştır (GC)',
+          appearance: 'Görünüm',
+          dumpViewHierarchy: 'Görünüm hiyerarşisi dökümü',
+          dumpPrefs: 'SharedPreferences dökümü',
+        },
         ios: {
           appearance: 'Görünüm',
           slowAnimations: 'Yavaş animasyonlar',
@@ -828,7 +834,13 @@ registerMessages('device', {
           dumpWidgetTree: 'Dump widget tree',
           dumpRenderTree: 'Dump render tree',
         },
-        android: { dumpThreads: 'Dump threads', gc: 'Run garbage collection' },
+        android: {
+          dumpThreads: 'Dump threads',
+          gc: 'Run garbage collection',
+          appearance: 'Appearance',
+          dumpViewHierarchy: 'Dump view hierarchy',
+          dumpPrefs: 'Dump SharedPreferences',
+        },
         ios: {
           appearance: 'Appearance',
           slowAnimations: 'Slow animations',

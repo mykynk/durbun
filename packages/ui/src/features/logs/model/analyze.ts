@@ -127,8 +127,9 @@ function compute(e: LogEntry): EntryAnalysis {
   }
 
   let json: JsonPayload | null = null;
-  if (isContainerValue(e.data) && e.kind !== 'event' && e.source !== 'system') {
-    json = { value: e.data, before: '', after: '', fromData: true };
+  const data = e.source === 'app' ? dataWithoutHints(e.data) : e.data;
+  if (isContainerValue(data) && e.kind !== 'event' && e.source !== 'system') {
+    json = { value: data, before: '', after: '', fromData: true };
   } else if (!dump && !crash && (message.includes('{') || message.includes('['))) {
     const p = findJsonPayload(message);
     if (p && isContainerValue(p.value)) json = { value: p.value, before: message.slice(0, p.start), after: message.slice(p.end), fromData: false };
@@ -283,4 +284,14 @@ export function jsonPreview(value: unknown, max = 72): string {
   }
   if (parts.length === 0) return '{}';
   return `{ ${parts.join(', ')}${more ? ', …' : ''} }`;
+}
+
+/**
+ * An app line's data without the keys the views word themselves (`symbolize`: the command for a stack without
+ * symbols, shown as its own note); undefined when nothing else is left.
+ */
+export function dataWithoutHints(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !('symbolize' in value)) return value;
+  const { symbolize: _hint, ...rest } = value as Record<string, unknown>;
+  return Object.keys(rest).length ? rest : undefined;
 }

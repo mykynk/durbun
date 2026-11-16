@@ -1,7 +1,7 @@
 import { memo, type CSSProperties } from 'react';
 import { ArrowDown, Archive, Bug, Hourglass, Info, LocateFixed, OctagonX, Pause, Play, Settings2, TriangleAlert, Undo2, X } from 'lucide-react';
 import type { LogEntry } from '@durbun/protocol';
-import { Button, IconButton, formatBytes, formatClock } from '../../../components';
+import { Button, IconButton, formatBytes, formatClock, formatDateTime } from '../../../components';
 import { t, useT } from '../../../i18n';
 import { analyzeEntry } from '../model/analyze';
 import { isVisibleMemoryKill } from '../model/records';
@@ -156,6 +156,11 @@ export const ContextBar = memo(function ContextBar({ parts, scopeName, queryName
  * The oldest lines were dropped by the memory limit (or are about to be): said where the user looks for them, at
  * the top of the list, with how many, since when the list starts, and the setting that moves the limit.
  */
+/** Where a trimmed list starts: the clock today, the date too when it started on an earlier day. */
+export function sinceText(ts: number): string {
+  return new Date(ts).toDateString() === new Date().toDateString() ? formatClock(ts, { ms: false }) : formatDateTime(ts, { seconds: true });
+}
+
 export const DroppedNote = memo(function DroppedNote({
   dropped,
   limit,
@@ -180,8 +185,8 @@ export const DroppedNote = memo(function DroppedNote({
       <Archive size={13} aria-hidden />
       <p className="lg-note__text">
         <strong>{dropped > 0 ? t('logs.dropped.title', { count: dropped }) : t('logs.dropped.titleFull')}</strong>{' '}
-        {byMemory && memoryLimit ? t('logs.dropped.bodyMemory', { limit, size: formatBytes(memoryLimit) }) : t('logs.dropped.body', { limit })}
-        {since !== undefined ? ` ${t('logs.dropped.since', { time: formatClock(since, { ms: false }) })}` : ''}
+        {since !== undefined ? `${t('logs.dropped.since', { time: sinceText(since) })} ` : ''}
+        {byMemory && memoryLimit ? t('logs.dropped.bodyMemory', { limit, size: formatBytes(memoryLimit) }) : t('logs.dropped.body', { limit })} {t('logs.dropped.hint')}
       </p>
       <Button size="sm" variant="ghost" icon={Settings2} onClick={onOpenSettings}>
         {t('logs.dropped.settings')}

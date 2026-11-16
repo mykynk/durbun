@@ -178,6 +178,16 @@ const tr: MessageTree = {
       pink: 'Pembe',
     },
   },
+  sdkNote: {
+    noInterceptor:
+      'Uygulama başlayalı {time} geçti ama hiçbir OkHttp istemcisinde DurbunInterceptor yok; bu yüzden HTTP istekleri Dürbün’de görünmüyor. Retrofit, Coil, Glide ya da Ktor’un kullandıkları dahil her OkHttpClient.Builder’a .addInterceptor(DurbunInterceptor()) ekleyin. HttpURLConnection, Cronet ve WebView trafiği yakalanmaz.',
+    networkInterceptor:
+      '“{rule}” sahte yanıtı {request} isteğine uygulanmadı: bu istemcide DurbunInterceptor bir ağ interceptor’ı olarak eklenmiş ve ağa çıkmadan yanıt veremez. Sahte yanıtlar için addInterceptor(…) kullanın; gecikme ve hata kuralları iki yerde de çalışır.',
+    networkInterceptorAny:
+      '“{rule}” sahte yanıtı bir isteğe uygulanmadı: bu istemcide DurbunInterceptor bir ağ interceptor’ı olarak eklenmiş ve ağa çıkmadan yanıt veremez. Sahte yanıtlar için addInterceptor(…) kullanın; gecikme ve hata kuralları iki yerde de çalışır.',
+    openRule: 'Kuralı aç',
+    ruleGone: 'Bu kural artık yok.',
+  },
   exit: {
     android: {
       anr: 'Önceki açılış ANR ile kapandı: ana iş parçacığı takıldı, Android uygulamayı kapattı.',
@@ -302,6 +312,12 @@ const tr: MessageTree = {
     copyJson: 'JSON kopyala',
     copyLine: 'Satırı kopyala',
     copyStack: 'Yığın izini kopyala',
+    noSymbols: {
+      title: 'Sembolsüz Dart yığını',
+      body: 'Bu derleme --split-debug-info ile alınmış; yığındaki satırlarda dosya ve satır yerine yalnızca adresler var. Yığını stack.txt olarak kaydedin ve bu derlemenin sembol klasörüyle şu komutu çalıştırın:',
+      copy: 'Komutu kopyala',
+      save: 'stack.txt olarak kaydet',
+    },
     showInContext: 'Bağlamda göster',
     showInContextTip: 'Filtrelerinizi geçici olarak kapatır (kayıtlı filtreleriniz değişmez), kapsamı korur ve satıra gider',
     around: '±30 sn',
@@ -426,7 +442,8 @@ const tr: MessageTree = {
     title: { one: 'En eski {count, number} satır silindi.', other: 'En eski {count, number} satır silindi.' },
     titleFull: 'Log belleği dolu.',
     body: 'Dürbün bellekte en fazla {limit, number} log satırı tutar; yenileri geldikçe en eskileri silinir (çökme kayıtları korunur).',
-    bodyMemory: 'Satırlar uzun olduğu için log belleği ({size}) {limit, number} satır sınırından önce doldu; yenileri geldikçe en eskileri silinir (çökme kayıtları korunur).',
+    hint: 'Daha fazlasını tutmak için sınırı yükseltin; silinen satırlar geri gelmez.',
+    bodyMemory: 'Satırlar uzun olduğu için log belleği ({size}) {limit, number} satıra varmadan doldu; yenileri geldikçe en eskileri silinir (çökme kayıtları korunur).',
     since: 'Liste {time} itibarıyla başlıyor.',
     settings: 'Sınırı değiştir',
   },
@@ -683,6 +700,16 @@ const en: MessageTree = {
       pink: 'Pink',
     },
   },
+  sdkNote: {
+    noInterceptor:
+      '{time} after the app started, still no OkHttp client has DurbunInterceptor, so its HTTP calls do not show up in Dürbün. Add .addInterceptor(DurbunInterceptor()) to every OkHttpClient.Builder, including the ones Retrofit, Coil, Glide or Ktor use. HttpURLConnection, Cronet and WebView traffic is not captured.',
+    networkInterceptor:
+      'Mock “{rule}” was not applied to {request}: this client has DurbunInterceptor as a network interceptor, which cannot answer without the network. Use addInterceptor(…) for respond mocks; delay and fail rules work in both places.',
+    networkInterceptorAny:
+      'Mock “{rule}” was not applied to a request: this client has DurbunInterceptor as a network interceptor, which cannot answer without the network. Use addInterceptor(…) for respond mocks; delay and fail rules work in both places.',
+    openRule: 'Open rule',
+    ruleGone: 'This rule no longer exists.',
+  },
   exit: {
     android: {
       anr: 'Earlier launch ended in an ANR: the main thread was blocked and Android closed the app.',
@@ -807,6 +834,12 @@ const en: MessageTree = {
     copyJson: 'Copy JSON',
     copyLine: 'Copy line',
     copyStack: 'Copy stack trace',
+    noSymbols: {
+      title: 'Dart stack without symbols',
+      body: 'This build was made with --split-debug-info, so the stack frames show addresses instead of files and lines. Save the stack as stack.txt and run this command with the symbols folder of this exact build:',
+      copy: 'Copy command',
+      save: 'Save as stack.txt',
+    },
     showInContext: 'Show in context',
     showInContextTip: 'Turns your filters off for now (your saved filters stay), keeps the scope and scrolls to the line',
     around: '±30 s',
@@ -931,7 +964,8 @@ const en: MessageTree = {
     title: { one: 'The oldest {count, number} line was dropped.', other: 'The oldest {count, number} lines were dropped.' },
     titleFull: 'The log memory is full.',
     body: 'Dürbün keeps at most {limit, number} log lines in memory; as new ones arrive the oldest are dropped (crash records are kept).',
-    bodyMemory: 'The lines are long, so the log memory ({size}) filled before the {limit, number}-line limit; as new ones arrive the oldest are dropped (crash records are kept).',
+    hint: 'Raise the limit to keep more; dropped lines do not come back.',
+    bodyMemory: 'The lines are long, so the log memory ({size}) filled before reaching {limit, number} lines; as new ones arrive the oldest are dropped (crash records are kept).',
     since: 'The list starts at {time}.',
     settings: 'Change the limit',
   },

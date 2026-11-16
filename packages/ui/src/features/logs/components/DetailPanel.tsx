@@ -3,20 +3,21 @@ import { clsx } from 'clsx';
 import { Bug, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Funnel, FunnelX, History, LocateFixed, Share2, Timer, X } from 'lucide-react';
 import type { DeviceInfo, LogEntry, NetworkEntry } from '@durbun/protocol';
 import { Button, CodeView, CopyButton, IconButton, JsonTree, LevelBadge, MethodBadge, StatusBadge, copyText, formatBytes, formatClock, formatDateTime, formatDuration, sdkLabel, toast } from '../../../components';
-import { networkStore, useHub, useNetworkVersion } from '../../../data';
+import { networkStore, ui, useHub, useMocks, useNetworkVersion } from '../../../data';
 import { deviceDisplayName, t } from '../../../i18n';
 import { analyzeEntry } from '../model/analyze';
 import { formatTxtEntry, formatTxtRow } from '../model/export';
 import { parseStack } from '../model/frames';
 import type { QueryField } from '../model/queryEdit';
 import { flapSummary, systemText } from '../model/systemText';
+import { sdkNoteOf, sdkNoteText, symbolizeCommandOf } from '../model/sdkNotes';
 import { isPreviousLaunch, type LogRow } from '../model/types';
 import { crashForeground, crashedBuildOf, entryClock, isNativeTombstone, isWholeSecond, recordUnsymbolicated } from '../model/records';
 import type { ExplainSource } from '../../../data';
 import { entryOrigin, entrySourceText, isDeviceCrashRecord, sourceHint } from '../../../sources/text';
 import { clockSkewOf, clockSkewText, protocolMismatchText, protocolText } from '../../../sources/session';
 import { StackLines, errorHeadParts, type RowDisplay } from './LogRow';
-import { downloadUrl } from '../../../lib/download';
+import { downloadText, downloadUrl } from '../../../lib/download';
 
 export interface DetailPanelProps {
   entry: LogEntry;
@@ -42,6 +43,8 @@ export interface DetailPanelProps {
 /** Text used for copies/exports of any row kind (system lines localized, network rows summarized). */
 export function displayText(e: LogEntry): string {
   if (e.source === 'system' && (e.kind === 'lifecycle' || e.kind === 'marker' || e.code)) return systemText(e);
+  const note = sdkNoteText(e);
+  if (note) return note;
   if (e.kind === 'network' && e.netId) {
     const n = networkStore.get(e.netId);
     if (n) {
@@ -135,7 +138,10 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
 
   const kindLabel = e.kind === 'crash' ? t('logs.kind.crash') : e.kind === 'anr' ? t('logs.kind.anr') : e.kind === 'flutter-error' ? t('logs.kind.flutterError') : e.kind ? t(`logs.kind.${e.kind}`) : t('logs.kind.text');
   const isSystem = e.source === 'system';
-  const message = isSystem ? systemText(e) : e.message;
+  const note = isSystem ? undefined : sdkNoteOf(e);
+  const rules = useMocks((s) => s.rules);
+  useNetworkVersion({ enabled: note?.kind === 'networkInterceptor' });
+  const message = isSystem ? systemText(e) : (sdkNoteText(e) ?? e.message);
 
   const messageStack = useMemo(() => {
     if (isSystem || e.kind === 'network') return null;
@@ -250,6 +256,11 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
   const errHead = e.error ? errorHeadParts(e.error) : undefined;
   const crashedText = built && a.crash ? t(a.crash.kind === 'anr' ? 'logs.row.anrInBuild' : 'logs.row.crashedInBuild', { build: built }) : undefined;
   const flap = row?.id === e.id ? row.flap : undefined;
+  // A --split-debug-info build: the stack has addresses only; the SDK sent the command that reads it.
+  const symbolize = symbolizeCommandOf(e);
+  const skipped = note?.kind === 'networkInterceptor' ? note : undefined;
+  const skippedRule = skipped ? rules.find((r) => r.id === skipped.ruleId) : undefined;
+  const skippedNet = skipped?.netId ? networkStore.get(skipped.netId) : undefined;
 
   return (
     <aside className="lg-detail" aria-label={t('logs.detail.title')}>
@@ -352,7 +363,39 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
           ) : (
             <pre className="lg-detail__msg selectable">{message}</pre>
           )}
+          {/* A respond mock the SDK skipped: the rule and the request it names. */}
+          {skipped ? (
+            <div className="lg-detail__links">
+              {skippedRule ? (
+                <Button size="sm" icon={ExternalLink} onClick={() => ui.focusMock(skipped.ruleId)}>
+                  {t('logs.sdkNote.openRule')}
+                </Button>
+              ) : (
+                <span className="lg-detail__symb">{t('logs.sdkNote.ruleGone')}</span>
+              )}
+              {skippedNet && !net ? (
+                <Button size="sm" icon={ExternalLink} onClick={() => onOpenNetwork(skippedNet.id)}>
+                  {t('logs.net.open')}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </section>
+
+        {/* Before the stack it explains (addresses only), as the in-app panel does. */}
+        {symbolize ? (
+          <section className="lg-detail__sec">
+            <h3 className="lg-detail__h">{t('logs.detail.noSymbols.title')}</h3>
+            <p className="lg-detail__symb">{t('logs.detail.noSymbols.body')}</p>
+            <div className="lg-detail__cmd">
+              <code className="lg-detail__cmd-text selectable">{symbolize}</code>
+              <CopyButton size="xs" value={symbolize} label={t('logs.detail.noSymbols.copy')} />
+            </div>
+            <Button size="sm" icon={Download} onClick={() => downloadText(e.error?.stack || e.message, 'stack.txt')}>
+              {t('logs.detail.noSymbols.save')}
+            </Button>
+          </section>
+        ) : null}
 
         {e.error && (e.error.message || e.error.stack) ? (
           <section className="lg-detail__sec">

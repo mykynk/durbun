@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SHARE_OPTIONS, MASK, MAX_SHARED_BODY_CHARS, buildShareReport, isSecretName, reindentJson, shareTime, type ShareInput } from './shareReport';
+import { isSecretName } from '@durbun/protocol';
+import { DEFAULT_SHARE_OPTIONS, MASK, MAX_SHARED_BODY_CHARS, buildShareReport, reindentJson, shareTime, type ShareInput } from './shareReport';
 import { shareLabels } from '../share';
 
 const utf8 = (data: string) => ({ encoding: 'utf8' as const, data, size: new TextEncoder().encode(data).length });
@@ -147,9 +148,19 @@ describe('share report', () => {
     expect(r).toContain('grant_type=password&username=bob&password=••••&client_secret=••••');
   });
 
+  it('masks numbers and booleans under secret JSON keys, as the Flutter panel does', () => {
+    const r = buildShareReport({ ...login, requestBody: utf8('{"otp": 123456,"pin":-12.5,"mfa_token":true,"count":3,"enabled":false}') }, { ...DEFAULT_SHARE_OPTIONS, curl: false }, en);
+    expect(r).toContain('"otp": "••••"');
+    expect(r).toContain('"pin": "••••"');
+    expect(r).toContain('"mfa_token": "••••"');
+    expect(r).toContain('"count": 3');
+    expect(r).toContain('"enabled": false');
+    expect(r).not.toContain('"otp": 123456');
+  });
+
   it('secret names', () => {
     for (const n of ['Authorization', 'x-api-key', 'X-CSRF-Token', 'refresh_token', 'client_secret', 'sessionId', 'Cookie']) expect(isSecretName(n)).toBe(true);
-    for (const n of ['Content-Type', 'x-request-id', 'user', 'code', 'key', 'author']) expect(isSecretName(n)).toBe(false);
+    for (const n of ['Content-Type', 'x-request-id', 'user', 'code', 'idempotency-key', 'author']) expect(isSecretName(n)).toBe(false);
   });
 
   it('indents JSON without parsing it', () => {

@@ -88,7 +88,6 @@ import { DetailPanel, displayText, rowAsLines } from './components/DetailPanel';
 import { ShareDialog, type LinesShareContext } from './components/ShareDialog';
 import { RangeBar, SelectionBar } from './components/RangeBars';
 import { DEFAULT_AROUND, inRange, rangeAround, rangeBetween, rowsAsText, type LogTimeRange } from './model/timeRange';
-import { useLogsMoment, logsNav } from './nav';
 import { bugReport } from '../report/store';
 import { Histogram } from './components/Histogram';
 import { ContextBar, CrashBanner, DroppedNote, IosScopeNote, NewLinesPill, PausedBar } from './components/Banners';
@@ -942,12 +941,12 @@ export default function LogsView() {
   const storeLimits = useStoreLimits((s) => s.limits);
   const logLimit = storeLimits?.maxLogEntries ?? logStore.maxEntries;
 
-  const moment = useLogsMoment();
+  const moment = focus?.kind === 'logTime' ? focus : null;
   const momentHandled = useRef(0);
   useEffect(() => {
     if (!moment || momentHandled.current === moment.seq) return;
     momentHandled.current = moment.seq;
-    logsNav.consume(moment.seq);
+    ui.consumeFocus(moment.seq);
     // The line closest in time, preferring the request's app / device (the ring is in arrival order, close to time order).
     let best: LogEntry | undefined;
     let bestScore = Infinity;

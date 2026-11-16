@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { ArrowLeftRight, Drama, FileDown, FileUp, Plus, Power, Save } from 'lucide-react';
 import type { MockRule } from '@durbun/protocol';
-import { isEditConflict, networkStore, resolveMocksConflict, saveMocks, ui, useCompiledScope, useHub, useMocks, useNetworkVersion, useUi, type MockRuleDraft } from '../../data';
+import { isEditConflict, networkStore, resolveMocksConflict, saveMocks, ui, useCompiledScope, useHub, useMocks, useNetworkVersion, useScopeMockHits, useUi, type MockRuleDraft } from '../../data';
 import {
   Button,
   EmptyState,
@@ -45,7 +45,6 @@ import {
 import { RuleList } from './components/RuleList';
 import { ConflictNotice } from './components/ConflictNotice';
 import { sessionHits, useHitLedgerVersion } from './model/hitLedger';
-import { networkNav } from '../network/nav';
 import { RuleEditor, type KnownApp } from './components/RuleEditor';
 import { CapabilityHints, ImportDialog, type PendingImport } from './components/Extras';
 import { ExplainCallout, ExplainEmpty, pickEmptyReason, useScopeExplain } from '../../sources';
@@ -110,20 +109,24 @@ export default function MocksView() {
         toast.info(t('mocks.list.hitsGoneTitle'), { description: t('mocks.list.hitsGone') });
         return;
       }
-      networkNav.showMockHits(id);
+      ui.focusNetworkMockHits(id);
     },
     [t],
   );
+  // The server's counts for this scope (kept when the list is cleared, same in every window); without them (older
+  // servers) this window's own count since it opened.
+  const serverHits = useScopeMockHits();
   const hits = useMemo(() => {
-    const inMemory = hitCounts(networkStore.list());
+    const inMemory = hitCounts(networkStore.list().filter((e) => compiled.network(e)));
     const out = new Map<string, { session: number; inMemory: number }>();
     for (const r of rules) {
       const mem = inMemory.get(r.id) ?? 0;
-      const session = Math.max(sessionHits(r.id), mem);
+      const kept = serverHits ? (serverHits[r.id]?.count ?? 0) : sessionHits(r.id);
+      const session = Math.max(kept, mem);
       if (session > 0) out.set(r.id, { session, inMemory: mem });
     }
     return out;
-  }, [v, ledger, rules]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [v, ledger, rules, serverHits, compiled]); // eslint-disable-line react-hooks/exhaustive-deps
   const knownApps: KnownApp[] = useMemo(() => {
     const map = new Map<string, string>();
     for (const a of allApps) if (!map.has(a.app.id)) map.set(a.app.id, a.app.name);
@@ -186,7 +189,7 @@ export default function MocksView() {
 
   const confirmDiscard = useCallback(async (): Promise<boolean> => {
     if (!dirtyRef.current) return true;
-    return confirm({ title: t('mocks.editor.unsavedTitle'), message: t('mocks.editor.unsavedMessage'), confirmLabel: t('mocks.editor.discard'), danger: true });
+    return confirm({ title: t('mocks.editor.unsavedTitle'), message: t('mocks.editor.unsavedMessage'), confirmLabel: t('mocks.editor.discard'), cancelLabel: t('common.keepEditing'), danger: true });
   }, [t]);
 
   const openRule = useCallback(

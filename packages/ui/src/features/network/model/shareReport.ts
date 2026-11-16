@@ -1,4 +1,4 @@
-import type { Header, WireBody } from '@durbun/protocol';
+import { SECRET_MASK, isSecretHeader, isSecretName, maskHeaderValue, type Header, type WireBody } from '@durbun/protocol';
 import { copyAs } from './copyAs';
 import { reasonPhrase } from './http';
 
@@ -13,7 +13,7 @@ import { reasonPhrase } from './http';
  * query keys and JSON/form fields). Numbers and units are formatted without a locale.
  */
 
-export const MASK = '••••';
+export const MASK = SECRET_MASK;
 /** Longer bodies are cut for sharing (a chat message stays readable). */
 export const MAX_SHARED_BODY_CHARS = 20_000;
 
@@ -86,37 +86,7 @@ export interface ShareLabels {
 
 /* ───────────── secrets ───────────── */
 
-const SECRET_NAMES = new Set(['authorization', 'proxy-authorization', 'cookie', 'set-cookie', 'pwd', 'pass', 'otp', 'auth', 'session', 'sid']);
-const SECRET_PARTS = ['token', 'secret', 'password', 'passwd', 'apikey', 'api_key', 'api-key', 'credential', 'signature', 'sessionid', 'session_id', 'session-id'];
-
-/** Header, query, form or JSON key whose value is a secret. */
-export function isSecretName(name: string): boolean {
-  const n = name.toLowerCase();
-  return SECRET_NAMES.has(n) || SECRET_PARTS.some((p) => n.includes(p));
-}
-
-function maskHeaderValue(name: string, value: string): string {
-  const n = name.toLowerCase();
-  if (n === 'cookie') {
-    return value
-      .split(';')
-      .map((p) => p.trim())
-      .filter((p) => p !== '')
-      .map((p) => (p.indexOf('=') > 0 ? `${p.slice(0, p.indexOf('='))}=${MASK}` : p))
-      .join('; ');
-  }
-  if (n === 'set-cookie') {
-    const parts = value.split(';').map((p) => p.trim());
-    const first = parts[0] ?? '';
-    const eq = first.indexOf('=');
-    return [eq > 0 ? `${first.slice(0, eq)}=${MASK}` : MASK, ...parts.slice(1).filter((p) => p !== '')].join('; ');
-  }
-  if (n === 'authorization' || n === 'proxy-authorization') {
-    const m = /^(\S+)\s+\S/.exec(value);
-    return m ? `${m[1]} ${MASK}` : MASK;
-  }
-  return MASK;
-}
+// Which names hold secrets and how a secret header reads masked: one heuristic for the whole product.
 
 function decodeKey(key: string): string {
   try {
@@ -126,7 +96,8 @@ function decodeKey(key: string): string {
   }
 }
 
-const JSON_PAIR = /"((?:[^"\\]|\\.)*)"(\s*:\s*)"((?:[^"\\]|\\.)*)"/g;
+/** `"key": value` in JSON text: a string, a number or a boolean value (secret keys hold all three: `"otp": 123456`). */
+const JSON_PAIR = /"((?:[^"\\]|\\.)*)"(\s*:\s*)("(?:[^"\\]|\\.)*"|-?\d[\d.eE+-]*|(?:true|false)\b)/g;
 
 class Masker {
   count = 0;
@@ -139,7 +110,7 @@ class Masker {
   }
 
   header(name: string, value: string): string {
-    if (!this.on || !isSecretName(name) || value === MASK) return value;
+    if (!this.on || !isSecretHeader(name) || value === MASK) return value;
     const masked = maskHeaderValue(name, value);
     return masked === value ? value : this.hit(masked);
   }
@@ -175,7 +146,7 @@ class Masker {
     if (!this.on) return text;
     if (json) {
       return text.replace(JSON_PAIR, (m, key: string, sep: string, value: string) =>
-        isSecretName(key) && value !== MASK ? this.hit(`"${key}"${sep}"${MASK}"`) : m,
+        isSecretName(key) && value !== `"${MASK}"` ? this.hit(`"${key}"${sep}"${MASK}"`) : m,
       );
     }
     if (contentType.toLowerCase().includes('x-www-form-urlencoded')) return this.query(text);

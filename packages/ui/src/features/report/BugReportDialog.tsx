@@ -17,6 +17,7 @@ import { requestDeviceSection } from '../device/request';
 import '../device/i18n';
 import { crashReportDownload, displayText } from '../logs/components/DetailPanel';
 import { logShareReport } from '../logs/components/ShareDialog';
+import { LogMasker } from '../logs/model/maskLog';
 import { buildShareReport } from '../network/model/shareReport';
 import { shareAppLabel, shareDeviceLabel, shareInputFor, shareInstallLabel, shareLabels } from '../network/share';
 import { scopeExportParams } from '../transfer/dataExport';
@@ -33,7 +34,6 @@ import {
   collectLogs,
   collectRequests,
   logsText,
-  maskUrlsIn,
   reportableDevices,
   scopeDevice,
   windowCrashReport,
@@ -170,8 +170,7 @@ export function BugReportDialog({ anchor, onClose }: BugReportDialogProps) {
   const momentText = useMemo(() => {
     if (!parts.moment) return undefined;
     if (start.entry) {
-      const text = mask ? (x: LogEntry) => (x.kind === 'network' ? maskUrlsIn(displayText(x)) : displayText(x)) : displayText;
-      return logShareReport(start.entry, {}, lang, text);
+      return logShareReport(start.entry, {}, lang, displayText, mask ? new LogMasker() : undefined);
     }
     if (start.request) {
       const n: NetworkEntry = networkStore.get(start.request.id) ?? start.request;

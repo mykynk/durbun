@@ -454,6 +454,9 @@ export const BUILTIN_APP_ACTIONS: ReadonlySet<string> = new Set([
   'flutter.dumpRenderTree',
   'android.dumpThreads',
   'android.gc',
+  'android.appearance',
+  'android.dumpViewHierarchy',
+  'android.dumpPrefs',
   'ios.appearance',
   'ios.slowAnimations',
   'ios.dumpViewHierarchy',
@@ -500,6 +503,8 @@ export const DUMP_TITLES: Record<string, readonly string[]> = {
   'flutter.dumpWidgetTree': ['Widget tree', '[root]'],
   'flutter.dumpRenderTree': ['Render tree', 'RenderView'],
   'android.dumpThreads': ['Thread dump'],
+  'android.dumpViewHierarchy': ['View hierarchy'],
+  'android.dumpPrefs': ['SharedPreferences'],
   'ios.dumpViewHierarchy': ['View hierarchy', '<UIWindow'],
   'ios.dumpUserDefaults': ['UserDefaults'],
 };

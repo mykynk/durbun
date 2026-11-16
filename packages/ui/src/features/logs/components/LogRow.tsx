@@ -40,6 +40,7 @@ import { flapSummary, flapTimeRange, systemText } from '../model/systemText';
 import { isPreviousLaunch, type LogRow } from '../model/types';
 import { appStartupOf, crashWhen, crashedBuildOf, isLayoutError, memoryKill, recordUnsymbolicated } from '../model/records';
 import { appLifecycleOf, exitReportMessage, exitReportOf, isExitAnr, navigationOf } from '../model/appEvents';
+import { sdkNoteText } from '../model/sdkNotes';
 import { entrySourceText, isDeviceCrashRecord } from '../../../sources/text';
 import type { TimeFormat } from '../../../data';
 
@@ -343,7 +344,7 @@ function TextRow({ row, time, selected, expanded, flash, d }: LogRowProps) {
   const a = analyzeEntry(e);
   // How an earlier launch ended, or a Dürbün system line with a code, worded in the UI language (the English text
   // stays in the tooltip and the detail panel).
-  const exit = exitText(e) ?? (e.source === 'system' && e.code ? systemText(e) : undefined);
+  const exit = exitText(e) ?? sdkNoteText(e) ?? (e.source === 'system' && e.code ? systemText(e) : undefined);
   const earlier = exitReportOf(e) !== undefined;
   return (
     <div

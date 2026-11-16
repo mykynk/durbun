@@ -279,12 +279,40 @@ let mocks = [
   { id: 'm1', enabled: true, name: 'Payment error', method: 'POST', url: '/v1/payments', match: 'contains', action: { type: 'respond', status: 502, headers: [['Content-Type', 'application/json']], body: '{"error":"gateway"}' }, createdAt: startedAt - 90_000 },
   { id: 'm2', enabled: false, name: 'Slow feed', method: 'GET', url: 'https://api.pati.app/v1/feed*', match: 'glob', action: { type: 'delay', delayMs: 2500 }, createdAt: startedAt - 60_000 },
 ];
+/** Revision of the mock list (server config.ts `mocksRevision`): a save from an older list is refused. */
+let mocksRevision = 1;
+/**
+ * Requests each rule answered since this server started (server hub/mockHits.ts): counted once per request when it
+ * ends mocked; a rule deleted from the list loses its count; clearing requests keeps them.
+ */
+const mockHits = new Map(); // ruleId → { count, lastTs, byApp: Map<appId, n> }
+const mockHitIds = new Set();
+let mockHitsChanged = false;
+function countMockHit(e) {
+  if (!e.mocked || !e.mockRuleId || e.state === 'pending' || mockHitIds.has(e.id)) return;
+  mockHitIds.add(e.id);
+  const c = mockHits.get(e.mockRuleId) ?? { count: 0, lastTs: 0, byApp: new Map() };
+  mockHits.set(e.mockRuleId, c);
+  c.count++;
+  c.lastTs = Math.max(c.lastTs, e.endTs ?? e.startTs);
+  if (e.appId) c.byApp.set(e.appId, (c.byApp.get(e.appId) ?? 0) + 1);
+  mockHitsChanged = true;
+}
+function mockHitsWire() {
+  const out = {};
+  for (const [id, c] of mockHits) out[id] = { count: c.count, lastTs: c.lastTs, ...(c.byApp.size ? { byApp: Object.fromEntries(c.byApp) } : {}) };
+  return out;
+}
+
+// As the real drivers report themselves: an English detail plus code + params the UI words.
 const drivers = () => [
-  { id: 'android', available: true, active: true, detail: 'adb 1.0.41 (35.0.2)' },
-  { id: 'ios-sim', available: true, active: true, detail: 'Xcode 26.1' },
-  { id: 'ios-device', available: false, active: false, detail: 'idevicesyslog not found', code: 'logs.idevicesyslogMissing' },
-  { id: 'flutter-vm', available: true, active: true },
-  { id: 'demo', available: true, active: !empty },
+  { id: 'android', available: true, active: true, detail: 'adb 1.0.41 · 2 devices online', code: 'driver.android.online', params: { adb: 'adb 1.0.41', count: 2 } },
+  { id: 'ios-sim', available: true, active: true, detail: '1 booted simulator', code: 'driver.iosSim.booted', params: { count: 1 } },
+  { id: 'ios-device', available: true, active: true, detail: '1 device · idevicesyslog was not found — install libimobiledevice (brew install libimobiledevice) or Flutter', code: 'logs.idevicesyslogMissing', params: { count: 1 } },
+  { id: 'flutter-vm', available: true, active: true, detail: '1 app attached through the Dart VM service', code: 'driver.vm.attached', params: { count: 1 } },
+  empty
+    ? { id: 'demo', available: true, active: false, detail: 'Demo mode is off', code: 'demo.inactive' }
+    : { id: 'demo', available: true, active: true, detail: 'Generating demo data for 3 virtual devices', code: 'demo.active' },
 ];
 
 let nextLogId = 1;
@@ -356,6 +384,16 @@ java.lang.IllegalStateException: Fragment CheckoutFragment{8f1a2b} not attached 
 	at android.os.Handler.handleCallback(Handler.java:959)
 	at android.os.Looper.loop(Looper.java:232)
 	at android.app.ActivityThread.main(ActivityThread.java:8592)`;
+
+const ADDRESS_ONLY_STACK = `*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+pid: 12345, tid: 12371, name 1.ui
+os: android arch: arm64 comp: yes sim: no
+build_id: '6c3e1a9f0b2d4e8c7a1f3b5d9e0c2a4f'
+isolate_dso_base: 7a5e1c8000, vm_dso_base: 7a5e1c8000
+isolate_instructions: 7a5e2a1000, vm_instructions: 7a5e1f6000
+    #00 abs 0000007a5e3d33f3 virt 00000000002793f3 _kDartIsolateSnapshotInstructions+0x1c13f3
+    #01 abs 0000007a5e3d2b18 virt 0000000000278b18 _kDartIsolateSnapshotInstructions+0x1c0b18
+    #02 abs 0000007a5e41c07c virt 00000000002c207c _kDartIsolateSnapshotInstructions+0x20a07c`;
 
 /** Exact origin of a line (SPEC §10.2) when the generator did not set one. */
 function originOf(e) {
@@ -722,6 +760,15 @@ function showcaseLines(ts) {
     logEntry({ ts: at(12), deviceId: SIM, appId: 'app:4', source: 'system', level: 'warn', tag: 'durbun', code: 'app.clockAhead',
       params: { ...pati, device: 'iPhone 16 Pro', seconds: 8, offsetMs: -8_120, accuracyMs: 40 },
       message: 'The clock of iPhone 16 Pro is about 8 s ahead of the Mac (measured while Pati was connected, ±0.1 s). Times of its log lines are shown as the device reports them.' }),
+    // Flutter SDK, a --split-debug-info build: the Dart stack has addresses only; data.symbolize is the command (error_hooks.dart).
+    logEntry({ ts: at(15), deviceId: PIXEL, appId: 'app:2', source: 'app', level: 'fatal', tag: 'flutter', kind: 'crash',
+      message: 'Unhandled exception: Bad state: No element',
+      error: { type: 'StateError', message: 'Bad state: No element', stack: ADDRESS_ONLY_STACK },
+      data: { source: 'zone', symbolize: 'flutter symbolize -i stack.txt -d <split-debug-info folder>/app.android-arm64.symbols' } }),
+    // Android SDK: no OkHttp client had DurbunInterceptor 30 s after start (DurbunCore.kt), worded by the desktop from data.reason.
+    logEntry({ ts: at(14), deviceId: PIXEL, appId: 'app:3', source: 'app', level: 'info', tag: 'durbun', kind: 'text',
+      message: 'No OkHttp client in this app has DurbunInterceptor yet, so its HTTP calls do not show up in Dürbün. Add .addInterceptor(DurbunInterceptor()) to every OkHttpClient.Builder, including the ones Retrofit, Coil, Glide or Ktor use. HttpURLConnection, Cronet and WebView traffic is not captured.',
+      data: { reason: 'noInterceptor', afterMs: 30_000 } }),
     logEntry({ ts: at(13), deviceId: PIXEL, appId: 'app:3', source: 'system', level: 'info', tag: 'durbun', kind: 'lifecycle', code: 'app.deviceFound',
       params: { app: 'Kasa', bundleId: 'com.mykynk.kasa', device: 'Pixel 8', deviceId: PIXEL, from: 'net:192.168.1.24' },
       message: 'Kasa (connected over the network) runs on Pixel 8: its session now shows under this device' }),
@@ -748,6 +795,15 @@ function showcaseRequests() {
     requestHeaders: [], state: 'complete', status: 201, statusText: 'Created', endTs: now + 6_100, duration: 6_100,
     tooLarge: { part: 'request', bytes: 41_943_040, limit: 16_777_216 },
   });
+  // A respond mock the Android SDK could not apply (DurbunInterceptor added as a network interceptor, OkHttpCapture.kt):
+  // the real response is kept and one line per rule says why, with the request's id.
+  const skippedSeq = netSeq++;
+  base(`app:3:${skippedSeq}`, 'app:3', 'POST', 'https://api.pati.app/v1/payments', {
+    state: 'complete', status: 200, statusText: 'OK', endTs: now + 310, duration: 310, responseContentType: 'application/json', responseBodySize: 16,
+  });
+  logs.push(logEntry({ ts: now + 312, deviceId: PIXEL, appId: 'app:3', source: 'app', level: 'warn', tag: 'durbun', kind: 'text',
+    message: 'Mock "Payment error" was not applied to POST https://api.pati.app/v1/payments: this client has DurbunInterceptor as a network interceptor, which cannot answer a call without the network. Add it with addInterceptor(...) for respond mocks (delay and fail mocks work in both places).',
+    data: { mockRuleId: 'm1', requestId: String(skippedSeq), reason: 'networkInterceptor' } }));
   base(`app:3:${netSeq++}`, 'app:3', 'GET', 'https://qa.internal.example/v2/health', {
     state: 'failed', endTs: now + 140, duration: 140, error: 'Trust anchor for certification path not found (self-signed certificate)',
   });
@@ -778,6 +834,8 @@ function snapshot() {
     apps,
     network: [...network.values()].map(strip),
     mocks,
+    mocksRevision,
+    mockHits: mockHitsWire(),
     drivers: drivers(),
     processes: [...processes.values()],
     metrics: [],
@@ -791,6 +849,13 @@ function snapshot() {
 function flush() {
   const msg = { type: 'batch' };
   let any = false;
+  for (const e of queue.network) countMockHit(e);
+  if (mockHitsChanged) {
+    // The whole map, only when a count changed (it replaces the previous one).
+    msg.mockHits = mockHitsWire();
+    mockHitsChanged = false;
+    any = true;
+  }
   for (const k of Object.keys(queue)) {
     if (queue[k].length) {
       msg[k] = queue[k];
@@ -1023,8 +1088,8 @@ function changeSetting(d, command, reply) {
   const { action } = command;
   const p = command.params ?? {};
   const scope = action === 'app-permission' ? { appId: p.appId, key: p.permission } : action === 'app-locale' ? { appId: p.appId } : {};
-  if ((action === 'app-permission' || action === 'app-locale') && (typeof p.appId !== 'string' || !p.appId)) return reply(undefined, false, 'A valid package name (appId) is required', 'action.invalidParams');
-  if (action === 'app-permission' && !/^[A-Za-z][\w.]*\.[A-Z_0-9]+$/.test(p.permission ?? '')) return reply(undefined, false, 'permission must be a permission name such as android.permission.CAMERA', 'action.invalidParams');
+  if ((action === 'app-permission' || action === 'app-locale') && (typeof p.appId !== 'string' || !p.appId)) return reply(undefined, false, 'A valid package name (appId) is required', 'action.invalidParams', { param: 'appId', expected: 'appId' });
+  if (action === 'app-permission' && !/^[A-Za-z][\w.]*\.[A-Z_0-9]+$/.test(p.permission ?? '')) return reply(undefined, false, 'permission must be a permission name such as android.permission.CAMERA', 'action.invalidParams', { param: 'permission', expected: 'permission' });
   const overrides = (d.settingOverrides ??= []);
   const same = (o) => o.action === action && (o.appId ?? '') === (scope.appId ?? '') && (o.key ?? '') === (scope.key ?? '');
   const kept = overrides.find(same);
@@ -1036,19 +1101,19 @@ function changeSetting(d, command, reply) {
   }
   let value;
   if (action === 'rotation') {
-    if (!ROTATION_VALUES.includes(p.orientation)) return reply(undefined, false, 'orientation must be auto, portrait, landscape, reverse-portrait or reverse-landscape', 'action.invalidParams');
+    if (!ROTATION_VALUES.includes(p.orientation)) return reply(undefined, false, 'orientation must be auto, portrait, landscape, reverse-portrait or reverse-landscape', 'action.invalidParams', { param: 'orientation', expected: 'oneOf', options: 'auto, portrait, landscape, reverse-portrait, reverse-landscape' });
     value = p.orientation;
   } else if (action === 'app-permission') {
-    if (typeof p.grant !== 'boolean') return reply(undefined, false, 'grant (boolean) is required', 'action.invalidParams');
+    if (typeof p.grant !== 'boolean') return reply(undefined, false, 'grant (boolean) is required', 'action.invalidParams', { param: 'grant', expected: 'boolean' });
     // Two of the refusals adb gives, so their texts can be seen.
     if (p.permission === 'android.permission.BODY_SENSORS') return reply(undefined, false, `${p.appId} does not ask for ${p.permission}`, 'action.permissionNotRequested');
     if (!p.permission.startsWith('android.permission.')) return reply(undefined, false, `Android does not know the permission ${p.permission}`, 'action.permissionUnknown');
     value = p.grant ? 'granted' : 'revoked';
   } else if (action === 'app-locale') {
-    if (typeof p.locale !== 'string' || !p.locale) return reply(undefined, false, 'locale must be a language tag such as tr-TR, or "system"', 'action.invalidParams');
+    if (typeof p.locale !== 'string' || !p.locale) return reply(undefined, false, 'locale must be a language tag such as tr-TR, or "system"', 'action.invalidParams', { param: 'locale', expected: 'locale' });
     value = p.locale;
   } else {
-    if (typeof p.enabled !== 'boolean') return reply(undefined, false, 'enabled (boolean) is required', 'action.invalidParams');
+    if (typeof p.enabled !== 'boolean') return reply(undefined, false, 'enabled (boolean) is required', 'action.invalidParams', { param: 'enabled', expected: 'boolean' });
     value = action === 'dont-keep-activities' ? (p.enabled ? '1' : '0') : p.enabled ? 'on' : 'off';
   }
   const before = kept?.previous ?? DEVICE_DEFAULTS[action];
@@ -1104,31 +1169,32 @@ function installApp(command, reply) {
   const p = command.params ?? {};
   const file = typeof p.file === 'string' ? p.file : '';
   const packageId = 'com.mykynk.pati';
-  if (!file) return reply(undefined, false, 'file is required', 'action.invalidParams');
+  if (!file) return reply(undefined, false, 'file is required', 'action.invalidParams', { param: 'file', expected: 'absolutePath', kinds: '.apk, .aab, .apks, .app, .ipa' });
   if (/other-sig/i.test(file)) {
     if (p.replace === true) return reply({ packageId }, true, undefined, 'action.install.replaced');
-    return reply({ packageId, replaceable: true }, false, `${packageId} is installed with another signature`, 'action.install.signatureMismatch');
+    return reply({ packageId, replaceable: true }, false, `Install failed: INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package ${packageId} signatures do not match newer version; ignoring!. Uninstalling ${packageId} first lets it install; that deletes its data.`, 'action.install.signatureMismatch');
   }
   if (/older/i.test(file)) {
     if (p.replace === true) return reply({ packageId }, true, undefined, 'action.install.replaced');
-    return reply({ packageId, replaceable: true }, false, `A newer ${packageId} is installed`, 'action.install.downgrade');
+    return reply({ packageId, replaceable: true }, false, `Install failed: INSTALL_FAILED_VERSION_DOWNGRADE: Downgrade detected: Update version code 41 is older than current 42. Uninstalling ${packageId} first lets it install; that deletes its data.`, 'action.install.downgrade');
   }
   return reply(null);
 }
 
 function testerAction(command, reply) {
   const d = devices.find((x) => x.id === command.deviceId);
-  if (!d) return reply(undefined, false, 'Unknown device', 'action.deviceOffline');
+  if (!d) return reply(undefined, false, `${command.deviceId} is not online`, 'action.deviceOffline');
   const blocked = d.unavailableActions?.find((u) => u.action === command.action);
-  if (blocked) return reply(undefined, false, `${command.action} is not available on this device`, blocked.code);
+  // As the drivers do: the reason's params go both as data and as params.
+  if (blocked) return reply(blocked.params, false, `"${command.action}" is not available for ${d.name}`, blocked.code, blocked.params);
   const p = command.params ?? {};
-  if (d.users && p.userId !== undefined && !d.users.some((u) => u.id === p.userId)) return reply(undefined, false, 'userId is not a user of this phone', 'action.invalidParams');
+  if (d.users && p.userId !== undefined && !d.users.some((u) => u.id === p.userId)) return reply(undefined, false, 'userId is not a user of this phone', 'action.invalidParams', { param: 'userId', expected: 'user' });
   if (command.action === 'app-install') return installApp(command, reply);
   if (command.action === 'bug-report' || command.action === 'bug-report-cancel') return bugReport(d, command, reply);
   if (d.platform === 'ios' && command.action === 'app-permission') {
-    if (typeof p.appId !== 'string' || !p.appId) return reply(undefined, false, 'A bundle id (appId) is required', 'action.invalidParams');
+    if (typeof p.appId !== 'string' || !p.appId) return reply(undefined, false, 'A bundle id (appId) is required', 'action.invalidParams', { param: 'appId', expected: 'appId' });
     if (p.restore === true) return reply(null, true, undefined, 'action.permissionReset');
-    if (typeof p.grant !== 'boolean') return reply(undefined, false, 'grant (boolean) is required', 'action.invalidParams');
+    if (typeof p.grant !== 'boolean') return reply(undefined, false, 'grant (boolean) is required', 'action.invalidParams', { param: 'grant', expected: 'boolean' });
     return reply(null);
   }
   if (SETTING_ACTIONS.has(command.action)) return changeSetting(d, command, reply);
@@ -1138,7 +1204,7 @@ function testerAction(command, reply) {
 
 /* ───────────── commands ───────────── */
 function handleCommand(ws, { requestId, command }) {
-  const reply = (data, ok = true, error, code) => send(ws, { type: 'reply', requestId, ok, data, error, code });
+  const reply = (data, ok = true, error, code, params) => send(ws, { type: 'reply', requestId, ok, data, error, code, ...(params ? { params } : {}) });
   const now = Date.now();
   switch (command?.name) {
     case 'clear': {
@@ -1155,10 +1221,23 @@ function handleCommand(ws, { requestId, command }) {
       pushLogs([entry]);
       return reply(entry);
     }
-    case 'mocks.set':
-      mocks = Array.isArray(command.rules) ? command.rules : mocks;
-      broadcast({ type: 'mocks', rules: mocks });
+    case 'mocks.set': {
+      // Another window saved since this list was loaded: refused with the current list (server http/commands.ts).
+      if (typeof command.baseRevision === 'number' && command.baseRevision !== mocksRevision) {
+        return reply({ rules: mocks, revision: mocksRevision }, false, 'The mock rules were changed elsewhere; reload them or save again to overwrite', 'mocks.conflict');
+      }
+      const next = Array.isArray(command.rules) ? command.rules : mocks;
+      if (JSON.stringify(next) !== JSON.stringify(mocks)) mocksRevision++;
+      mocks = next;
+      const ids = new Set(mocks.map((r) => r.id));
+      for (const id of [...mockHits.keys()]) {
+        if (ids.has(id)) continue;
+        mockHits.delete(id);
+        mockHitsChanged = true;
+      }
+      broadcast({ type: 'mocks', rules: mocks, revision: mocksRevision });
       return reply(mocks);
+    }
     case 'settings.update':
       settings = { ...settings, ...(command.patch ?? {}) };
       broadcast({ type: 'settings', settings });
@@ -1176,7 +1255,8 @@ function handleCommand(ws, { requestId, command }) {
     case 'app.action':
       return reply(null);
     case 'vm.attach':
-      if (!/ws:|http:|listening/.test(command.input ?? '')) return reply(undefined, false, 'No VM service URL found in the input', 'vm.attachFailed');
+      // The real attach throws a plain error here, so the reply carries `command.failed` and the English message.
+      if (!/ws:|http:|listening/.test(command.input ?? '')) return reply(undefined, false, 'No Dart VM service URL found. Paste the URL printed by `flutter run` ("A Dart VM Service … is available at: http://127.0.0.1:…/…=/"), a DevTools link, or the whole output.', 'command.failed');
       return reply({ appId: 'app:2' });
     case 'vm.detach':
     case 'metrics.watch':
@@ -1214,18 +1294,18 @@ function doctorChecks() {
   return [
     // As inside Dürbün.app (the server runs in Electron): worded from the code.
     { id: 'node', label: 'Node.js', status: 'ok', version: process.version, detail: `Embedded in Dürbün.app (Electron 45.1.0, Node ${process.versions.node})`, code: 'doctor.node.embedded', params: { electron: '45.1.0', node: process.versions.node } },
-    { id: 'adb', label: 'Android Debug Bridge (adb)', status: 'ok', version: '1.0.41', path: '/Users/dev/Library/Android/sdk/platform-tools/adb', detail: 'from ~/Library/Android/sdk' },
-    { id: 'simctl', label: 'Xcode simctl (iOS simulators)', status: 'ok', version: 'Xcode 26.1', path: '/Applications/Xcode.app/Contents/Developer', detail: '1 booted simulator(s)' },
-    { id: 'usbmuxd', label: 'usbmuxd (iOS USB connection)', status: 'ok', path: '/var/run/usbmuxd', detail: '1 device(s) attached' },
+    { id: 'adb', label: 'Android Debug Bridge (adb)', status: 'ok', version: '1.0.41', path: '/Users/dev/Library/Android/sdk/platform-tools/adb', detail: 'from ~/Library/Android/sdk', code: 'doctor.tool.from', params: { source: 'sdk' } },
+    { id: 'simctl', label: 'Xcode simctl (iOS simulators)', status: 'ok', version: 'Xcode 26.1', path: '/Applications/Xcode.app/Contents/Developer', detail: '1 booted simulator(s)', code: 'doctor.simctl.booted', params: { count: 1 } },
+    { id: 'usbmuxd', label: 'usbmuxd (iOS USB connection)', status: 'ok', path: '/var/run/usbmuxd', detail: '1 device(s) attached', code: 'doctor.usbmuxd.attached', params: { count: 1 } },
     // Same ids, labels and English details as the real checks (server doctor.ts + platform/ios/deviceDriver.ts):
     // the UI words them from these patterns and codes.
-    { id: 'idevicesyslog', label: 'idevicesyslog (iOS device logs)', status: 'missing', detail: 'idevicesyslog was not found — install libimobiledevice (brew install libimobiledevice) or Flutter', fix: 'brew install libimobiledevice', docsUrl: 'https://libimobiledevice.org' },
-    { id: 'devicectl', label: 'Xcode devicectl (iOS device actions)', status: 'ok', version: '477.29', detail: 'screenshot: yes · screen recording: no' },
-    { id: 'idevicescreenshot', label: 'idevicescreenshot (iOS screenshots, fallback)', status: 'ok', detail: 'not needed (devicectl captures screenshots)' },
-    { id: 'idevicecrashreport', label: 'idevicecrashreport (iOS crash reports, fallback)', status: 'ok', detail: 'not found (optional: used for iPhones devicectl cannot read, such as iOS 16 or Developer Mode off)', fix: 'brew install libimobiledevice' },
-    { id: 'ideviceinstaller', label: 'ideviceinstaller (installed iOS apps, fallback)', status: 'ok', detail: 'not found (optional: used for iPhones devicectl cannot read, such as iOS 16 or Developer Mode off)', fix: 'brew install ideviceinstaller' },
-    { id: 'port-http', label: `HTTP port ${PORT}`, status: 'ok', path: `127.0.0.1:${PORT}`, detail: `Listening on 127.0.0.1:${PORT}` },
-    { id: 'port-sdk', label: 'SDK port 9751', status: 'warn', path: '0.0.0.0:9751', detail: 'Port 9751 is used by another program', fix: 'lsof -nP -iTCP:9751 -sTCP:LISTEN' },
+    { id: 'idevicesyslog', label: 'idevicesyslog (iOS device logs)', status: 'missing', detail: 'idevicesyslog was not found — install libimobiledevice (brew install libimobiledevice) or Flutter', code: 'doctor.idevicesyslog.missing', fix: 'brew install libimobiledevice', docsUrl: 'https://libimobiledevice.org' },
+    { id: 'devicectl', label: 'Xcode devicectl (iOS device actions)', status: 'ok', version: '477.29', detail: 'screenshot: yes · screen recording: no', code: 'doctor.devicectl.caps', params: { screenshot: 'yes', screenRecord: 'no' } },
+    { id: 'idevicescreenshot', label: 'idevicescreenshot (iOS screenshots, fallback)', status: 'ok', detail: 'not needed (devicectl captures screenshots)', code: 'doctor.idevicescreenshot.notNeeded' },
+    { id: 'idevicecrashreport', label: 'idevicecrashreport (iOS crash reports, fallback)', status: 'ok', detail: 'not found (optional: used for iPhones devicectl cannot read, such as iOS 16 or Developer Mode off)', code: 'doctor.tool.optionalNotFound', fix: 'brew install libimobiledevice' },
+    { id: 'ideviceinstaller', label: 'ideviceinstaller (installed iOS apps, fallback)', status: 'ok', detail: 'not found (optional: used for iPhones devicectl cannot read, such as iOS 16 or Developer Mode off)', code: 'doctor.tool.optionalNotFound', fix: 'brew install ideviceinstaller' },
+    { id: 'port-http', label: `HTTP port ${PORT}`, status: 'ok', path: `127.0.0.1:${PORT}`, detail: `Listening on 127.0.0.1:${PORT}`, code: 'doctor.port.listening', params: { addr: `127.0.0.1:${PORT}` } },
+    { id: 'port-sdk', label: 'SDK port 9751', status: 'warn', path: '0.0.0.0:9751', detail: 'Port 9751 is used by another program', code: 'doctor.port.inUse', params: { port: 9751 }, fix: 'lsof -nP -iTCP:9751 -sTCP:LISTEN' },
   ];
 }
 

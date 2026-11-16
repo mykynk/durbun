@@ -136,13 +136,20 @@ describe('code localization helpers', () => {
     expect(logStreamText({ logs: { status: 'streaming' } })).toBe('Loglar akıyor');
   });
 
-  it('describes errors: localized text + server detail; generic codes keep the specific server message', () => {
+  it('describes errors: localized text, no English sentence under it; generic codes keep the specific server message', () => {
     setLanguage('tr');
     expect(describeError({ code: 'app.notInstalled', message: 'com.x is not installed on this device' })).toEqual({
       text: codeText('app.notInstalled'),
-      detail: 'com.x is not installed on this device',
+      detail: undefined,
       code: 'app.notInstalled',
     });
+    // A refused install keeps only the package manager's own error name.
+    const refused = describeError({
+      code: 'action.install.signatureMismatch',
+      message: 'Install failed: INSTALL_FAILED_UPDATE_INCOMPATIBLE: Package com.x signatures do not match. Uninstalling com.x first lets it install; that deletes its data.',
+    });
+    expect(refused.text).toBe(codeText('action.install.signatureMismatch'));
+    expect(refused.detail).toBe('INSTALL_FAILED_UPDATE_INCOMPATIBLE');
     expect(codeText('app.notInstalled')).toMatch(/yüklü değil/);
     // Generic codes keep the specific part of the server message in the localized text.
     const generic = describeError({ code: 'action.failed', message: 'Could not stop com.x: adb: device offline' });
@@ -155,7 +162,7 @@ describe('code localization helpers', () => {
     const d = describeError({ code: 'metrics.unsupported', message: 'raw server text' });
     expect(d.text).toBe(codeText('metrics.unsupported'));
     expect(d.text).toMatch(/not available/);
-    expect(d.detail).toBe('raw server text');
+    expect(d.detail).toBeUndefined();
   });
 
   it('words refusals from the server params: no English sentence inside the Turkish text', () => {
