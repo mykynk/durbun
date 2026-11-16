@@ -200,6 +200,13 @@ const REGEX_PARAMS: Readonly<Record<string, readonly { param: string; when: (p: 
   'mock.add': [{ param: 'url', when: (p) => p.match === 'regex' }],
 };
 
+/** BCP 47 language tag as Android's per-app languages take it ("tr", "tr-TR", "zh-Hant-TW"). */
+const LOCALE_TAG_RE = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8}){0,3}$/;
+/** An Android permission name ("android.permission.CAMERA", "com.example.permission.X"). */
+const ANDROID_PERMISSION_RE = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/;
+/** An iOS simulator privacy service ("camera", "location-always"). */
+const IOS_PRIVACY_SERVICE_RE = /^[a-z][a-z-]{1,40}$/;
+
 /** Checks of a node's params that look at more than one param, after they are normalized. */
 function checkNodeParams(c: Ctx, type: string, params: Record<string, unknown>, path: string, nodeId: string) {
   for (const name of FLOW_STATUS_PARAMS[type] ?? []) {
@@ -211,6 +218,20 @@ function checkNodeParams(c: Ctx, type: string, params: Record<string, unknown>, 
   for (const { param, when } of REGEX_PARAMS[type] ?? []) {
     const v = params[param];
     if (typeof v === 'string' && v && !v.includes('{{') && when(params)) regexCheck(c, v, `${path}.params.${param}`, nodeId, param);
+  }
+  // Device settings: the driver refuses other values; say so while editing instead of when the step runs.
+  const literal = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && !v.includes('{{');
+  if (type === 'device.appLanguage' && literal(params.locale) && params.locale !== 'system' && !LOCALE_TAG_RE.test(params.locale)) {
+    c.err('flow.param.locale', `"${params.locale}" is not a language tag (use tr-TR, en-US… or "system")`, `${path}.params.locale`, nodeId, { value: params.locale });
+  }
+  if (type === 'device.permission' && literal(params.permission) && !ANDROID_PERMISSION_RE.test(params.permission) && !IOS_PRIVACY_SERVICE_RE.test(params.permission)) {
+    c.err(
+      'flow.param.permission',
+      `"${params.permission}" is not a permission (Android: android.permission.CAMERA; iOS simulator: camera, photos, location…)`,
+      `${path}.params.permission`,
+      nodeId,
+      { value: params.permission },
+    );
   }
   if (type === 'mock.add' && params.action === 'delay') {
     const d = params.delayMs;

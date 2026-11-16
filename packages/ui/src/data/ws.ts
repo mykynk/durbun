@@ -2,10 +2,12 @@ import type { ServerToUi, UiToServer } from '@durbun/protocol';
 import { useConnection } from './stores/connection';
 import { failInFlightCommands, setCommandTransport } from './commands';
 import { handleServerMessage } from './dispatch';
+import { withResumeQuery } from './resume';
 
 /**
- * The single WebSocket to the server (`/ui`). Reconnects forever with backoff; every new connection
- * re-syncs from scratch (the snapshot clears the stores, then history refills them).
+ * The single WebSocket to the server (`/ui`). Reconnects forever with backoff. A reconnect asks to continue what
+ * the stores hold (`resume.ts`); a server that cannot (restarted, cleared meanwhile, the dev mock) re-syncs from
+ * scratch (the snapshot clears the stores, then history refills them).
  */
 
 const BACKOFF_MS = [300, 1000, 2000, 3000, 5000];
@@ -75,7 +77,7 @@ function open(): void {
   else useConnection.setState({ nextRetryAt: null });
   let ws: WebSocket;
   try {
-    ws = new WebSocket(url);
+    ws = new WebSocket(withResumeQuery(url));
   } catch (err) {
     scheduleRetry(err instanceof Error ? err.message : String(err));
     return;

@@ -57,8 +57,10 @@ export {
 export type { HubState, AppGroup, DeviceGroup } from './stores/hub';
 export { useScope, useScopeStore, getScope, setScope, scopeEquals, deviceAppScope, ALL_SCOPE } from './stores/scope';
 export type { Scope, ScopeHint } from './stores/scope';
-export { useMocks, saveMocks, useServerSettings, updateServerSettings } from './stores/server';
-export type { MocksState, ServerSettingsState } from './stores/server';
+export { useMocks, saveMocks, resolveMocksConflict, isEditConflict, useServerSettings, updateServerSettings } from './stores/server';
+export type { MocksState, MocksConflict, ServerSettingsState } from './stores/server';
+export { useStoreLimits } from './stores/limits';
+export type { StoreLimitsState } from './stores/limits';
 export { useSlack, useSlackStatus, loadSlack, updateSlack } from './stores/slack';
 export { useFlows, rememberFlowRun, latestRunOf, setFlowSummaries } from './stores/flows';
 export type { FlowsState } from './stores/flows';
@@ -81,8 +83,10 @@ export {
   scopeSignature,
   scopeAppRef,
   scopeDeviceId,
+  scopeEvictions,
+  useScopeEvictions,
 } from './scope';
-export type { CompiledScope, ScopeTarget } from './scope';
+export type { CompiledScope, ScopeTarget, ScopeEvictions } from './scope';
 export { compileNoiseRules } from './noise';
 
 /* wire */

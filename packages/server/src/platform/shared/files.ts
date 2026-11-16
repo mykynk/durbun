@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { DeviceActionResult } from '@durbun/protocol';
+import type { DeviceActionResult, I18nParams } from '@durbun/protocol';
 import type { DriverContext } from '../../types';
 import { fileSafe } from './text';
 
@@ -56,9 +56,15 @@ export function screenshotResult(ctx: DriverContext, name: string, file: string,
   };
 }
 
-/** Result for an action that failed (English message + i18n code; `data` for what the UI can offer next). */
-export function fail(message: string, code = 'action.failed', data?: unknown): DeviceActionResult {
-  return data === undefined ? { ok: false, message, code, error: message } : { ok: false, message, code, error: message, data };
+/**
+ * Result for an action that failed: English message + i18n code, `data` for what the UI can offer next, `params`
+ * for the UI's own wording (tool, versions, app id; a tool's raw output as `detail`).
+ */
+export function fail(message: string, code = 'action.failed', data?: unknown, params?: I18nParams): DeviceActionResult {
+  const out: DeviceActionResult = { ok: false, message, code, error: message };
+  if (data !== undefined) out.data = data;
+  if (params && Object.keys(params).length > 0) out.params = params;
+  return out;
 }
 
 export function done(message: string, code = 'action.done', data?: unknown): DeviceActionResult {

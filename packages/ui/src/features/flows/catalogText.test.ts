@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FLOW_NODE_GROUPS, FLOW_NODE_SPECS } from '@durbun/protocol';
 import { GROUP_TEXT, NODE_TEXT_TR, PARAM_LABELS_EN } from './catalogText';
+import { nodeDescription } from './model/text';
 
 /** `{{template}}` and `backticked` tokens: they must survive translation unchanged. */
 function tokens(text: string): string[] {
@@ -92,5 +93,18 @@ describe('flow catalog texts', () => {
       for (const o of spec.outputs) pairs.push([`${type}.outputs.${o.name}`, o.description, tr.outputs[o.name] ?? '']);
       for (const [path, english, turkish] of pairs) expect(tokens(turkish), path).toEqual(tokens(english));
     });
+  });
+});
+
+describe('step descriptions on screen', () => {
+  it('name no raw parameter or port in either language (the labels on screen instead)', () => {
+    const bad: string[] = [];
+    for (const spec of FLOW_NODE_SPECS) {
+      for (const lang of ['tr', 'en'] as const) {
+        const text = nodeDescription(spec.type, lang);
+        for (const m of text.matchAll(/`([^`]+)`/g)) if (spec.params.some((p) => p.name === m[1]) || spec.ports.includes(m[1] as never)) bad.push(`${spec.type} (${lang}): ${m[1]}`);
+      }
+    }
+    expect(bad).toEqual([]);
   });
 });

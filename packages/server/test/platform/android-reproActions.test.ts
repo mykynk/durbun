@@ -113,7 +113,7 @@ describe('why an Android action is missing', () => {
   it('runAction refuses an unavailable action with its reason code', async () => {
     const { adb } = fakeAdb({});
     // The session checks availability; the target alone runs what it is asked (the emulator check stays).
-    expect(await runAndroidAction(target(adb), 'location', { lat: 1, lon: 2 })).toMatchObject({ ok: false, code: 'action.unsupported' });
+    expect(await runAndroidAction(target(adb), 'location', { lat: 1, lon: 2 })).toMatchObject({ ok: false, code: 'action.emulatorOnly' });
   });
 });
 

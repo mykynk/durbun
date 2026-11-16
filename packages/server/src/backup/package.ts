@@ -290,6 +290,7 @@ export async function buildPackage(deps: PackageDeps, req: PackageExportRequest)
   }
   if (inc.environments) {
     const envs = deps.envs.get();
+    delete envs.revision; // a save counter of this server, meaningless elsewhere
     if (envs.environments.length) {
       for (const env of envs.environments) {
         for (const v of env.vars) {
@@ -436,11 +437,24 @@ export class PackageService {
     for (const f of Array.isArray(c.flows) ? c.flows : []) {
       const { flow, issues } = validateFlow(f, { knownFlowIds: known });
       if (!flow) {
-        warnings.push({ code: 'package.flow.invalid', message: `A flow could not be read: ${issues[0]?.message ?? ''}`, params: { problem: issues[0]?.message ?? '' } });
+        // `issue` + its params let the UI word the problem itself (`problem` is the English text).
+        const first = issues[0];
+        warnings.push({
+          code: 'package.flow.invalid',
+          message: `A flow could not be read: ${first?.message ?? ''}`,
+          params: { ...(first?.params ?? {}), problem: first?.message ?? '', ...(first ? { issue: first.code } : {}) },
+        });
         continue;
       }
       const errors = issues.filter((i) => i.level === 'error');
-      if (errors.length) warnings.push({ code: 'package.flow.problems', message: `${flow.name}: ${errors.length} problem(s), e.g. ${errors[0]!.message}`, params: { flow: flow.name, count: errors.length } });
+      if (errors.length) {
+        const first = errors[0]!;
+        warnings.push({
+          code: 'package.flow.problems',
+          message: `${flow.name}: ${errors.length} problem(s), e.g. ${first.message}`,
+          params: { ...(first.params ?? {}), problem: first.message, issue: first.code, flow: flow.name, count: errors.length },
+        });
+      }
       const cur = this.deps.flows.get(flow.id);
       flows.push({
         id: flow.id,

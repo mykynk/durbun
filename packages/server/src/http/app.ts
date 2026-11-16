@@ -35,7 +35,7 @@ import { createFlowsModule } from '../flows/module';
 import { CommandError, createCommandRouter, withTimeout } from './commands';
 import { checkLocalAccess, checkSdkUpgrade } from './security';
 import { createStaticHandler } from './static';
-import { UiChannel } from './uiSocket';
+import { parseResumeQuery, UiChannel, type UiResumeRequest } from './uiSocket';
 import { errorMessage, sendError, sendJson } from './util';
 
 export const DRIVER_STATUS_INTERVAL_MS = 5_000;
@@ -259,22 +259,46 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     hub,
     logger: logger.child('ui'),
     router,
-    hello: () => ({ type: 'hello', server: info(), settings: config.settings }),
-    snapshot: () => ({
-      type: 'snapshot',
-      devices: hub.getDevices(),
-      apps: hub.getApps(),
-      network: hub.getNetwork(),
-      mocks: config.mocks,
-      drivers: driverStatuses(),
-      processes: hub.getProcesses(),
-      metrics: hub.getMetrics(),
-      logCount: hub.getLogCount(),
-      deviceApps: hub.getDeviceApps(),
-      flows: flowsModule.summaries(),
-      flowRuns: flowsModule.runningRuns(),
-    }),
+    hello: () => withLimits({ type: 'hello', server: info(), settings: config.settings }),
+    snapshot: (resume) => {
+      const resumed = canResume(resume);
+      const msg: Extract<ServerToUi, { type: 'snapshot' }> = {
+        type: 'snapshot',
+        devices: hub.getDevices(),
+        apps: hub.getApps(),
+        network: resumed && hub.getNetworkSince ? hub.getNetworkSince(resume!.netSeq) : hub.getNetwork(),
+        mocks: config.mocks,
+        drivers: driverStatuses(),
+        processes: hub.getProcesses(),
+        metrics: hub.getMetrics(),
+        logCount: hub.getLogCount(),
+        deviceApps: hub.getDeviceApps(),
+        flows: flowsModule.summaries(),
+        flowRuns: flowsModule.runningRuns(),
+      };
+      if (config.mocksRevision !== undefined) msg.mocksRevision = config.mocksRevision;
+      const epoch = hub.getEpoch?.();
+      if (epoch !== undefined) msg.epoch = epoch;
+      const netSeq = hub.getNetworkSeq?.();
+      if (netSeq !== undefined) msg.netSeq = netSeq;
+      const evictions = hub.getEvictions?.();
+      if (evictions) msg.evictions = evictions;
+      if (resumed) msg.resumed = { afterLogId: resume!.afterLogId, networkIds: hub.getNetworkIds!() };
+      return msg;
+    },
   });
+
+  /** A reconnecting UI can continue its copy: same data generation and nothing it claims is ahead of the hub. */
+  function canResume(resume: UiResumeRequest | undefined): boolean {
+    if (!resume || !hub.getEpoch || !hub.getLastLogId || !hub.getNetworkSeq || !hub.getNetworkSince || !hub.getNetworkIds) return false;
+    return resume.epoch === hub.getEpoch() && resume.afterLogId <= hub.getLastLogId() && resume.netSeq <= hub.getNetworkSeq();
+  }
+
+  function withLimits<M extends Extract<ServerToUi, { type: 'hello' | 'settings' }>>(msg: M): M {
+    const limits = hub.getLimits?.();
+    if (limits) msg.limits = limits;
+    return msg;
+  }
 
   const broadcast = (message: ServerToUi) => ui.broadcast(message);
   const notice = (n: UiNotice) => ui.broadcast({ type: 'notice', ...n });
@@ -307,7 +331,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
             logger.error(`sdk.setConfig failed: ${errorMessage(err)}`);
           }
         }
-        broadcast({ type: 'settings', settings });
+        broadcast(withLimits({ type: 'settings', settings }));
       }),
     ),
     config.onMocks(
@@ -317,7 +341,8 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
         } catch (err) {
           logger.error(`sdk.setMocks failed: ${errorMessage(err)}`);
         }
-        broadcast({ type: 'mocks', rules });
+        const revision = config.mocksRevision;
+        broadcast(revision !== undefined ? { type: 'mocks', rules, revision } : { type: 'mocks', rules });
       }),
     ),
     config.onWriteError(
@@ -515,7 +540,8 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
         rejectUpgrade(socket, 403, 'Forbidden');
         return;
       }
-      uiWss.handleUpgrade(req, socket, head, (ws) => ui.attach(ws));
+      const resume = parseResumeQuery(splitTarget(req.url).query);
+      uiWss.handleUpgrade(req, socket, head, (ws) => ui.attach(ws, resume));
       return;
     }
     if (pathname === '/sdk' || pathname === '/sdk/') {

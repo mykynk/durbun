@@ -10,7 +10,7 @@
  *   POST   /api/flows/import                  { flows, conflict } → { saved, skipped, problems }
  *   POST   /api/flows/from-requests           { ids, name, saveEnv?, environmentId? } → { flow, issues, envVars, links }
  *   GET    /api/flows/:id                     { flow, issues }
- *   PUT    /api/flows/:id                     { flow } → { flow, issues }
+ *   PUT    /api/flows/:id                     { flow, baseUpdatedAt? } → { flow, issues } (409 flow.conflict: changed since)
  *   DELETE /api/flows/:id
  *   POST   /api/flows/:id/duplicate           { name? } → { flow, issues }
  *   GET    /api/flows/:id/export              the flow file (download)
@@ -22,7 +22,7 @@
  *   DELETE /api/flow-runs/:id
  *   POST   /api/flow-runs/:id/cancel
  *   GET    /api/flow-runs/:id/files/:name     evidence file
- *   GET|PUT /api/flow-environments            FlowEnvironments
+ *   GET|PUT /api/flow-environments            FlowEnvironments (PUT with an old `revision`: 409 env.conflict)
  *   POST   /api/packages/export               PackageExportRequest → .durbun download
  *   POST   /api/packages/inspect              { package | token, passphrase? } → PackageManifest (a token reads the kept package again)
  *   POST   /api/packages/import               PackageImportRequest → PackageImportResult
@@ -332,6 +332,7 @@ export function createFlowsModule(deps: FlowsModuleDeps): FlowsModule {
         const b = await body(req);
         const r = await flows.save(b.flow ?? b, {
           id,
+          baseUpdatedAt: b.flow !== undefined && typeof b.baseUpdatedAt === 'number' ? b.baseUpdatedAt : undefined,
           // A run in progress writes its result under the old id: rename once it has ended.
           beforeRename: (from) => {
             if (engine.runningCount(from) > 0) throw new HttpError(409, 'The flow is running; stop it first', 'flow.running');

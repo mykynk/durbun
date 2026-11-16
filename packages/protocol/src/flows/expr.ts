@@ -28,6 +28,26 @@ export const FLOW_CONDITION_OPS: readonly { op: FlowConditionOp; label: string; 
 
 export const UNARY_OPS: ReadonlySet<FlowConditionOp> = new Set(FLOW_CONDITION_OPS.filter((o) => o.unary).map((o) => o.op));
 
+/**
+ * Runs a user's regular expression on a text: true on a match, false otherwise (also for an invalid pattern).
+ * The server passes one that cannot block it on a pattern that backtracks exponentially; without it the pattern
+ * runs as written.
+ */
+export type RegexTest = (pattern: string, text: string) => boolean;
+
+const plainRegexTest: RegexTest = (pattern, value) => {
+  try {
+    return new RegExp(pattern).test(value);
+  } catch {
+    return false;
+  }
+};
+
+export interface RuleOptions extends ResolveOptions {
+  /** How `matches` runs its pattern (default: as written). */
+  regexTest?: RegexTest;
+}
+
 function text(v: unknown): string {
   if (v === undefined || v === null) return '';
   if (typeof v === 'string') return v;
@@ -108,7 +128,7 @@ export interface RuleResult {
 }
 
 /** Compare already-resolved values. */
-export function compareValues(left: unknown, op: FlowConditionOp, right: unknown): boolean {
+export function compareValues(left: unknown, op: FlowConditionOp, right: unknown, regexTest: RegexTest = plainRegexTest): boolean {
   switch (op) {
     case 'equals':
       return looseEquals(left, right);
@@ -123,11 +143,7 @@ export function compareValues(left: unknown, op: FlowConditionOp, right: unknown
     case 'endsWith':
       return text(left).endsWith(text(right));
     case 'matches':
-      try {
-        return new RegExp(text(right)).test(text(left));
-      } catch {
-        return false;
-      }
+      return regexTest(text(right), text(left));
     case 'gt':
     case 'gte':
     case 'lt':
@@ -167,17 +183,17 @@ function short(v: unknown): string {
 }
 
 /** Resolve both sides and evaluate one rule. Template errors throw (TemplateError). */
-export function evaluateRule(rule: FlowConditionRule, scope: TemplateScope, opts: ResolveOptions = {}): RuleResult {
+export function evaluateRule(rule: FlowConditionRule, scope: TemplateScope, opts: RuleOptions = {}): RuleResult {
   const left = typeof rule.left === 'string' ? resolveTemplate(rule.left, scope, opts) : rule.left;
   const unary = UNARY_OPS.has(rule.op);
   const right = unary ? undefined : typeof rule.right === 'string' ? resolveTemplate(rule.right, scope, opts) : rule.right;
-  const ok = compareValues(left, rule.op, right);
+  const ok = compareValues(left, rule.op, right, opts.regexTest);
   const label = FLOW_CONDITION_OPS.find((o) => o.op === rule.op)?.label ?? rule.op;
   const explain = ok ? '' : unary ? `${short(left)} — expected it to ${label.replace(/^is /, 'be ').replace(/^does not /, 'not ')}` : `${short(left)} — expected ${label} ${short(right)}`;
   return unary ? { ok, left, explain } : { ok, left, right, explain };
 }
 
-export function evaluateRules(rules: readonly FlowConditionRule[], mode: 'all' | 'any', scope: TemplateScope, opts: ResolveOptions = {}): { ok: boolean; results: RuleResult[] } {
+export function evaluateRules(rules: readonly FlowConditionRule[], mode: 'all' | 'any', scope: TemplateScope, opts: RuleOptions = {}): { ok: boolean; results: RuleResult[] } {
   const results = rules.map((r) => evaluateRule(r, scope, opts));
   if (results.length === 0) return { ok: mode === 'all', results };
   const ok = mode === 'any' ? results.some((r) => r.ok) : results.every((r) => r.ok);
@@ -206,8 +222,11 @@ export function isStatusSpec(spec: string): boolean {
   return s.split(',').every((part) => /^\s*(\dxx|\d{3}|\d{3}\s*-\s*\d{3})\s*$/i.test(part));
 }
 
-/** URL matching with the mock-rule semantics (contains / exact / glob case-insensitive; regex as written). */
-export function urlMatches(url: string, pattern: string, match: string): boolean {
+/**
+ * URL matching with the mock-rule semantics (contains / exact / glob case-insensitive; regex as written, run by
+ * `regexTest` when given).
+ */
+export function urlMatches(url: string, pattern: string, match: string, regexTest: RegexTest = plainRegexTest): boolean {
   const u = url.toLowerCase();
   const p = pattern.toLowerCase();
   switch (match) {
@@ -218,11 +237,7 @@ export function urlMatches(url: string, pattern: string, match: string): boolean
       return new RegExp(re).test(u);
     }
     case 'regex':
-      try {
-        return new RegExp(pattern).test(url);
-      } catch {
-        return false;
-      }
+      return regexTest(pattern, url);
     case 'contains':
     default:
       return p.length > 0 && u.includes(p);

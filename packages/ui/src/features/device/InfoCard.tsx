@@ -4,7 +4,7 @@ import type { DeviceInfo, LogStreamStatus } from '@durbun/protocol';
 import { useNow } from '../../data';
 import { Callout, CopyButton, StatusDot, formatDateTime, formatPercent, formatRelative, type IconType, type Tone } from '../../components';
 import { useT } from '../../i18n';
-import { fixHint, logStreamText, stateText } from './codes';
+import { codeText, fixHint, logStreamText, stateText } from './codes';
 import { batteryBucket, densityScale, formatScale, logicalSize, osLine } from './model';
 import { DeviceCard } from './useAction';
 
@@ -43,6 +43,10 @@ export function InfoCard({ device }: { device: DeviceInfo }) {
   const ConnIcon = CONNECTION_ICON[device.connection] ?? Smartphone;
   const stateHint = fixHint(device.stateCode);
   const logHint = device.logs.status === 'streaming' ? undefined : fixHint(device.logs.code);
+  // The server's English detail: shown only when the UI has no words for the code (then it is the only text);
+  // otherwise it stays on hover as technical detail.
+  const logsDetail = device.logs.status === 'streaming' ? undefined : device.logs.detail;
+  const logsWorded = codeText(device.logs.code, undefined, true) !== undefined;
   const battery = device.battery;
   const BatteryIcon = battery
     ? battery.charging
@@ -133,10 +137,10 @@ export function InfoCard({ device }: { device: DeviceInfo }) {
           <span className="dv-info__stack">
             <span className="dv-info__inline">
               <StatusDot tone={LOG_TONE[device.logs.status]} pulse={device.logs.status === 'starting'} size={7} />
-              <span>{logStreamText(device)}</span>
+              <span title={logsDetail && logsWorded ? logsDetail : undefined}>{logStreamText(device)}</span>
               {device.logs.via ? <span className="muted">· {t('device.info.via', { via: device.logs.via })}</span> : null}
             </span>
-            {device.logs.detail && device.logs.status !== 'streaming' ? <span className="dv-info__detail">{device.logs.detail}</span> : null}
+            {logsDetail && !logsWorded ? <span className="dv-info__detail">{logsDetail}</span> : null}
             {logHint ? <span className="dv-info__detail">{logHint}</span> : null}
           </span>
         </Row>

@@ -3,8 +3,8 @@
  * (a stuck pattern counts as no match instead of freezing every capture and the UI).
  */
 import { describe, expect, it } from 'vitest';
-import { unsafeRegexReason, validateFlow } from '@durbun/protocol';
-import { compileUserRegex, UNSAFE_REGEX_TIMEOUT_MS } from '../../src/flows/regex';
+import { evaluateRule, unsafeRegexReason, urlMatches, validateFlow } from '@durbun/protocol';
+import { compileUserRegex, UNSAFE_REGEX_TIMEOUT_MS, userRegexTest } from '../../src/flows/regex';
 
 describe('unsafeRegexReason', () => {
   it('finds a repeat inside a repeat', () => {
@@ -37,6 +37,29 @@ describe('compileUserRegex', () => {
     expect(re.test(`${'a'.repeat(40)}!`)).toBe(false);
     expect(performance.now() - started).toBeLessThan(UNSAFE_REGEX_TIMEOUT_MS * 20);
     expect(re.timeouts).toBe(1);
+  });
+});
+
+describe('conditions and URL rules on the server', () => {
+  const unlucky = `${'a'.repeat(40)}!`;
+  const quick = (fn: () => boolean) => {
+    const started = performance.now();
+    const result = fn();
+    expect(performance.now() - started).toBeLessThan(UNSAFE_REGEX_TIMEOUT_MS * 20);
+    return result;
+  };
+
+  it('a `matches` rule with an exponential pattern ends in time and does not hold', () => {
+    const rule = { left: '{{vars.text}}', op: 'matches' as const, right: '(a+)+$' };
+    const scope = { vars: { text: unlucky } };
+    expect(quick(() => evaluateRule(rule, scope as never, { regexTest: userRegexTest }).ok)).toBe(false);
+    expect(evaluateRule({ ...rule, right: '^a+!$' }, scope as never, { regexTest: userRegexTest }).ok).toBe(true);
+  });
+
+  it('a regex URL rule runs the same way; an invalid pattern never matches', () => {
+    expect(quick(() => urlMatches(`https://x.test/${unlucky}`, '(a+)+$', 'regex', userRegexTest))).toBe(false);
+    expect(urlMatches('https://x.test/v1/users', '/v1/users$', 'regex', userRegexTest)).toBe(true);
+    expect(urlMatches('https://x.test/', '(', 'regex', userRegexTest)).toBe(false);
   });
 });
 

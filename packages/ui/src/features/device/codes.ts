@@ -4,7 +4,7 @@
  * when it knows a code (`tCode`); this file fills the gaps under `device.codes.*`.
  */
 import type { DeviceInfo, I18nParams } from '@durbun/protocol';
-import { errorDetail, errorText, hasCode, hasMessage, registerMessages, t, tCode, tOr } from '../../i18n';
+import { errorDetail, errorParams, errorText, hasCode, hasMessage, registerMessages, t, tCode, tOr } from '../../i18n';
 
 registerMessages('device', {
   tr: {
@@ -263,13 +263,23 @@ export interface ErrorDescription {
 
 /**
  * Localized description of a caught `CommandError` / `ApiError` / Error. Codes the foundation knows go through
- * `errorText` (app-wide wording, with the specific part of the server message folded in); the raw server
- * message is kept as `detail` only when the text does not already contain it.
+ * `errorText` (app-wide wording). With the server's `params` the text comes from them alone and `detail` is only
+ * the tool's own output (`params.detail`) — the English sentence stays out; without params the specific part of
+ * the server message is folded in and the raw message is kept as `detail` when the text does not contain it.
+ * Codes the UI does not know show the server's English message.
  */
 export function describeError(err: unknown): ErrorDescription {
-  const e = (err && typeof err === 'object' ? err : {}) as { code?: unknown; message?: unknown };
+  const e = (err && typeof err === 'object' ? err : {}) as { code?: unknown; message?: unknown; params?: unknown };
   const code = typeof e.code === 'string' ? e.code : undefined;
   const message = typeof e.message === 'string' ? e.message.trim() : err === undefined || err === null ? '' : String(err);
+  const params = errorParams(e.params);
+  if (code && params && hasCode(code)) {
+    const text = errorText({ code, message, params });
+    if (text) {
+      const raw = typeof params.detail === 'string' ? params.detail.trim() : '';
+      return { text, detail: raw && !text.includes(raw) ? raw : undefined, code };
+    }
+  }
   if (code && hasCode(code)) {
     const text = errorText({ code, message });
     if (text) {
@@ -278,8 +288,8 @@ export function describeError(err: unknown): ErrorDescription {
       return { text, detail, code };
     }
   }
-  const localized = code && !GENERIC.has(code) ? codeText(code) : undefined;
-  if (localized) return { text: localized, detail: message && message !== localized ? message : undefined, code };
+  const localized = code && !GENERIC.has(code) ? codeText(code, params) : undefined;
+  if (localized) return { text: localized, detail: !params && message && message !== localized ? message : undefined, code };
   if (message) return { text: message, code };
   return { text: (code && codeText(code)) || t('device.common.unknownError'), code };
 }

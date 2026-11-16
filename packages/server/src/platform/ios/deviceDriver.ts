@@ -960,7 +960,7 @@ class IosDeviceSession {
     if (!actions.includes(action)) {
       const why = unavailable.find((u) => u.action === action);
       if (why?.code === 'action.developerModeOff') return fail(DEVELOPER_MODE_OFF.detail, why.code);
-      return fail(`"${action}" is not available for ${this.info.name}`, why?.code ?? 'action.unsupported', why?.params);
+      return fail(`"${action}" is not available for ${this.info.name}`, why?.code ?? 'action.unsupported', why?.params, why?.params);
     }
     const result = await runIosDeviceAction(
       {
@@ -992,6 +992,8 @@ class IosDeviceSession {
       return fail(
         `This action uses Xcode's devicectl, which works with iOS ${DEVICECTL_MIN_IOS} and later; ${this.info.name} runs iOS ${this.info.osVersion}${raw ? ` (${raw})` : ''}`,
         'action.osTooOld',
+        undefined,
+        { osVersion: this.info.osVersion ?? '', minVersion: String(DEVICECTL_MIN_IOS) },
       );
     }
     return result;

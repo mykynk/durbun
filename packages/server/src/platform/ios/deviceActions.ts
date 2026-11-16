@@ -61,7 +61,17 @@ export const DEVELOPER_MODE_ACTIONS: ReadonlySet<DeviceActionId> = new Set<Devic
   'screen-record-stop',
 ]);
 
-const DEVICECTL_TOOL = { tool: 'devicectl', detail: 'Xcode 15 or newer (xcrun devicectl)' };
+/** devicectl comes with Xcode 15; `detail` is the English text older UIs show, the rest is for the UI's own words. */
+const MIN_XCODE = '15';
+const DEVICECTL_TOOL = { tool: 'devicectl', detail: `Xcode ${MIN_XCODE} or newer (xcrun devicectl)`, minXcode: MIN_XCODE };
+const LIBIMOBILEDEVICE_INSTALL = 'brew install libimobiledevice';
+const SCREENSHOT_TOOL = {
+  tool: 'idevicescreenshot',
+  detail: `idevicescreenshot (${LIBIMOBILEDEVICE_INSTALL}) or Xcode ${MIN_XCODE} or newer`,
+  minXcode: MIN_XCODE,
+  install: LIBIMOBILEDEVICE_INSTALL,
+};
+const RECORDER_TOO_OLD = { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)', from: 'Xcode' };
 
 /**
  * Actions that work for a trusted physical device with the given tooling, and those that do not with why
@@ -90,13 +100,13 @@ export function iosDeviceActionAvailability(o: IosDeviceActionState): { actions:
     !o.screenshotTool && {
       action: 'screenshot',
       code: 'action.toolMissing',
-      params: { tool: 'idevicescreenshot', detail: 'idevicescreenshot (brew install libimobiledevice) or Xcode 15 or newer' },
+      params: SCREENSHOT_TOOL,
     };
   add('screenshot', shotMissing, !o.screenshotTool);
   for (const action of ['screen-record', 'screen-record-stop'] as const) {
     const missing: DeviceUnavailableAction | false = !o.caps.available
       ? { action, code: 'action.toolMissing', params: DEVICECTL_TOOL }
-      : !o.caps.screenRecord && { action, code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)' } };
+      : !o.caps.screenRecord && { action, code: 'action.toolTooOld', params: RECORDER_TOO_OLD };
     add(action, missing);
   }
   if (o.syslog) actions.push('logs-restart');
@@ -124,7 +134,7 @@ export async function runIosDeviceAction(
     return appId;
   };
   const needDevicectl = (): DeviceActionResult | undefined =>
-    t.caps.available ? undefined : fail('This action needs Xcode 15+ (xcrun devicectl)', 'action.toolMissing');
+    t.caps.available ? undefined : fail(`This action needs Xcode ${MIN_XCODE}+ (xcrun devicectl)`, 'action.toolMissing', undefined, DEVICECTL_TOOL);
 
   switch (action) {
     case 'list-apps': {
@@ -198,14 +208,15 @@ export async function runIosDeviceAction(
       return screenshot(t);
 
     case 'screen-record':
-      if (!t.caps.screenRecord) return fail('Screen recording needs a newer Xcode (devicectl capture)', 'action.toolMissing');
+      if (!t.caps.available) return fail(`Screen recording needs Xcode ${MIN_XCODE}+ (xcrun devicectl)`, 'action.toolMissing', undefined, DEVICECTL_TOOL);
+      if (!t.caps.screenRecord) return fail('Screen recording needs a newer Xcode (devicectl capture)', 'action.toolTooOld', undefined, RECORDER_TOO_OLD);
       return t.recorder.record(params, DEVICE_RECORD_MAX_SEC, () => startRecording(t));
 
     case 'screen-record-stop':
       return t.recorder.stop();
 
     case 'logs-restart':
-      if (!t.syslogAvailable) return fail('idevicesyslog is not available', 'logs.idevicesyslogMissing');
+      if (!t.syslogAvailable) return fail('idevicesyslog is not available', 'logs.idevicesyslogMissing', undefined, { tool: 'idevicesyslog' });
       await t.restartLogs();
       return done('Log stream restarted');
 
@@ -227,7 +238,7 @@ async function stopApp(t: IosDeviceActionTarget, appId: string): Promise<DeviceA
     if (!procR.ok) return fail(`Could not list processes: ${procR.error}`);
     const processes = parseDevicectlProcesses(procR.json);
     if (!processes.some((p) => p.executable)) {
-      if (known.length === 0) return fail(`Could not find the process of ${appId}: devicectl did not report executable paths`);
+      if (known.length === 0) return fail(`Could not find the process of ${appId}: devicectl did not report executable paths`, 'action.processUnknown', undefined, { app: appId, tool: 'devicectl' });
       pids = known;
     } else pids = pidsForApp(processes, app.url);
   } else if (known.length > 0) {
@@ -328,10 +339,12 @@ async function screenshot(t: IosDeviceActionTarget): Promise<DeviceActionResult>
     errors.push(`idevicescreenshot: ${failureText(r)}`);
   }
   await fs.promises.rm(file, { force: true });
-  if (errors.length === 0) return fail('No screenshot tool is available (needs Xcode devicectl or idevicescreenshot)', 'action.toolMissing');
+  if (errors.length === 0) return fail('No screenshot tool is available (needs Xcode devicectl or idevicescreenshot)', 'action.toolMissing', undefined, SCREENSHOT_TOOL);
   return fail(
     `The device refused the screenshot (Developer Mode / developer disk image may be required): ${errors.join(' · ')}`,
     'action.screenshotRefused',
+    undefined,
+    { detail: errors.join(' · ') },
   );
 }
 
@@ -358,7 +371,8 @@ async function startRecording(t: IosDeviceActionTarget): Promise<RecordingProces
     if (st && st.size > 0 && (exit.stopped || exit.code === 0)) {
       return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file });
     }
-    const why = exit.stopped && !json && !exit.stderr.trim() ? 'no video was written' : devicectlError(json, exit.stderr);
-    return fail(`Screen recording failed: ${why}`);
+    if (exit.stopped && !json && !exit.stderr.trim()) return fail('Screen recording failed: no video was written', 'action.recording.noVideo');
+    const why = devicectlError(json, exit.stderr);
+    return fail(`Screen recording failed: ${why}`, 'action.recording.failed', undefined, { detail: why });
   });
 }

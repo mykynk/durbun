@@ -53,7 +53,7 @@ export class BugReporter {
     const name = tempFileName('bugreport', this.deps.label, 'zip');
     const file = path.join(this.deps.ctx.tempDir, name);
     const child = this.deps.spawn(file);
-    if (!child) return fail('adb is not available', 'action.toolMissing', undefined);
+    if (!child) return fail('adb is not available', 'action.toolMissing', undefined, { tool: 'adb' });
     const startedAt = Date.now();
     const run = { child, cancelled: false, state: { startedAt } as DeviceBugReport };
     this.running = run;

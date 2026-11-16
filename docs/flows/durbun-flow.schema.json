@@ -2044,6 +2044,431 @@
             "additionalProperties": false
           },
           {
+            "title": "App permission",
+            "description": "Grants or revokes one permission of the app. Android 6+: a runtime permission such as android.permission.CAMERA (revoking ends the app). iOS simulator: a privacy service (camera, photos, location, contacts, microphone…). Put back when the run ends unless turned off; on the iOS simulator that means the app asks again.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.permission"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string",
+                    "description": "Bundle id / package name of the app. Defaults to the run's app ({{target.appId}}).",
+                    "default": "{{target.appId}}"
+                  },
+                  "permission": {
+                    "type": "string",
+                    "description": "Android permission name, or the iOS simulator privacy service.",
+                    "examples": [
+                      "android.permission.POST_NOTIFICATIONS"
+                    ]
+                  },
+                  "grant": {
+                    "type": "boolean",
+                    "description": "Grant (on) or revoke (off).",
+                    "default": true
+                  },
+                  "restoreAfter": {
+                    "type": "boolean",
+                    "description": "Put the setting back as it was before the run when the run ends.",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "permission"
+                ]
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "App language",
+            "description": "Sets the app's own language without changing the phone's (Android 13+). \"system\" makes it follow the phone again.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.appLanguage"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string",
+                    "description": "Bundle id / package name of the app. Defaults to the run's app ({{target.appId}}).",
+                    "default": "{{target.appId}}"
+                  },
+                  "locale": {
+                    "type": "string",
+                    "description": "Language tag such as tr-TR or en-US, or \"system\".",
+                    "default": "en-US"
+                  },
+                  "restoreAfter": {
+                    "type": "boolean",
+                    "description": "Put the setting back as it was before the run when the run ends.",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Airplane mode",
+            "description": "Turns airplane mode on or off (Android 11+). Not over a Wi-Fi connection to this Mac: it would cut it.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.airplaneMode"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Airplane mode on.",
+                    "default": true
+                  },
+                  "restoreAfter": {
+                    "type": "boolean",
+                    "description": "Put the setting back as it was before the run when the run ends.",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Wi-Fi",
+            "description": "Turns Wi-Fi on or off (Android). Not over a Wi-Fi connection to this Mac: it would cut it.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.wifi"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Wi-Fi on.",
+                    "default": false
+                  },
+                  "restoreAfter": {
+                    "type": "boolean",
+                    "description": "Put the setting back as it was before the run when the run ends.",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Mobile data",
+            "description": "Turns mobile data on or off (Android).",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.mobileData"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Mobile data on.",
+                    "default": false
+                  },
+                  "restoreAfter": {
+                    "type": "boolean",
+                    "description": "Put the setting back as it was before the run when the run ends.",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Screen rotation",
+            "description": "Turns the screen or brings back auto-rotate (Android). Apps that fix their orientation keep it.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.rotation"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "orientation": {
+                    "enum": [
+                      "auto",
+                      "portrait",
+                      "landscape",
+                      "reverse-portrait",
+                      "reverse-landscape"
+                    ],
+                    "description": "Orientation.",
+                    "default": "landscape"
+                  },
+                  "restoreAfter": {
+                    "type": "boolean",
+                    "description": "Put the setting back as it was before the run when the run ends.",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "title": "Don't keep activities",
+            "description": "Android developer option: every screen of an app ends as soon as it is left, so returning to it tests how the app restores its state.",
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "type": {
+                "const": "device.dontKeepActivities"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Option on.",
+                    "default": true
+                  },
+                  "restoreAfter": {
+                    "type": "boolean",
+                    "description": "Put the setting back as it was before the run when the run ends.",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "$ref": "#/$defs/position"
+              },
+              "disabled": {
+                "type": "boolean"
+              },
+              "continueOnError": {
+                "type": "boolean"
+              },
+              "retry": {
+                "$ref": "#/$defs/retry"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
             "title": "Wait for an app request",
             "description": "Waits until the app under test makes a matching request and it finishes, then outputs it like an HTTP request step (status, headers, body…). Needs the app's network capture (Dürbün SDK).",
             "type": "object",

@@ -39,6 +39,7 @@ import type { Logger } from '../types';
 import { EXECUTORS, StepError, TEMP_MOCK_PREFIX, type FlowServices, type StepApi, type StepResult } from './nodes';
 import { MAX_CALL_DEPTH, prepareRun, resolveInputDefault, startNodes, type PrepareDeps, type PreparedRun } from './preflight';
 import { runHeader, type RunStore } from './runs';
+import { userRegexTest } from './regex';
 import { sdkSession, unsupportedReason, type ResolvedTarget } from './target';
 import { AbortedError, expandSecrets, isAbortError, jsonSize, maskSecrets, raceSignal, safeFileName, shortText, sleep, storedOutput, timeId, trimOutput } from './util';
 
@@ -882,7 +883,7 @@ export class FlowEngine {
         if (until.length > 0) {
           let ok = false;
           try {
-            ok = evaluateRules(until, 'all', frame.scope, { strict: false }).ok;
+            ok = evaluateRules(until, 'all', frame.scope, { strict: false, regexTest: userRegexTest }).ok;
           } catch {
             ok = false;
           }

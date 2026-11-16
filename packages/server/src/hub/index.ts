@@ -20,8 +20,11 @@ import type {
   ProcessUpdate,
   ServerSettings,
   SessionExport,
+  StoreEvictions,
+  StoreLimits,
   UiNotice,
 } from '@durbun/protocol';
+import { randomBytes } from 'node:crypto';
 import { levelRank, networkLogLevel } from '@durbun/protocol';
 import type { ClearEvent, CreateHubOptions, DeviceLogInput, Hub, HubChange, SystemLogInput } from '../types';
 import { SERVER_VERSION } from '../version';
@@ -38,6 +41,7 @@ import {
   processLine,
 } from './lifecycle';
 import { ConsoleEchoFilter } from './consoleEcho';
+import { EvictionCounter } from './evictions';
 import { capLogEntry, logEntryBytes } from './logSize';
 import { MetricsStore, sanitizeSample, type MetricSeriesInfo } from './metrics';
 import { cleanUndefined, DISCONNECTED_ERROR, NetworkStore, type NetworkLimits } from './network';
@@ -150,8 +154,25 @@ export function createHub(opts: CreateHubOptions): Hub {
   /** deviceId → app ids and process names of every SDK app ever seen there. */
   const seenAppNames = new Map<string, Set<string>>();
 
-  const batcher = new ChangeBatcher(HUB_BATCH_INTERVAL_MS, HUB_MAX_QUEUED_LOGS, logger);
-  const network = new NetworkStore(limitsFrom(settings), (entry) => batcher.networkChanged(entry));
+  /** Data generation for UI resume: new per hub, the suffix counts clears. */
+  const bootId = randomBytes(6).toString('hex');
+  let clearSeq = 0;
+  const epoch = () => `${bootId}.${clearSeq}`;
+  const evictions = new EvictionCounter();
+  const oldestLogId = () => logs.first()?.id ?? 0;
+  const evictionSnapshot = (): StoreEvictions => evictions.snapshot(oldestLogId());
+
+  const batcher = new ChangeBatcher(HUB_BATCH_INTERVAL_MS, HUB_MAX_QUEUED_LOGS, logger, () =>
+    evictions.takeIfChanged() ? { netSeq: network.seq, evictions: evictionSnapshot() } : { netSeq: network.seq },
+  );
+  const network = new NetworkStore(
+    limitsFrom(settings),
+    (entry) => batcher.networkChanged(entry),
+    (eviction) => {
+      if (eviction.kind === 'entry') evictions.request(eviction.entry);
+      else evictions.body();
+    },
+  );
   const metrics = new MetricsStore({ keep: () => keepMetricSeries() });
   const deviceApps = new DeviceAppStore({
     onChange: (app) => batcher.deviceAppChanged(app),
@@ -174,12 +195,24 @@ export function createHub(opts: CreateHubOptions): Hub {
     }
   }
 
-  function keepIfCrash(evicted: LogEntry | undefined): void {
-    if (!evicted || !isKeptCrashLog(evicted)) return;
+  /** A row left the ring: a crash / ANR row moves to the kept crashes, any other row is counted as deleted. */
+  function keepIfCrash(evicted: LogEntry | undefined, byBytes = false): void {
+    if (!evicted) return;
+    if (!isKeptCrashLog(evicted)) {
+      evictions.log(evicted, byBytes);
+      return;
+    }
     keptBytes += sizeOf(evicted);
     const dropped = keptCrashes.push(evicted);
-    if (dropped) keptBytes -= sizeOf(dropped);
-    while (keptBytes > maxKeptBytes && keptCrashes.size > 1) keptBytes -= sizeOf(keptCrashes.shift()!);
+    if (dropped) {
+      keptBytes -= sizeOf(dropped);
+      evictions.log(dropped, false);
+    }
+    while (keptBytes > maxKeptBytes && keptCrashes.size > 1) {
+      const gone = keptCrashes.shift()!;
+      keptBytes -= sizeOf(gone);
+      evictions.log(gone, true);
+    }
   }
 
   const sizeOf = (e: LogEntry): number => logSizes.get(e) ?? logEntryBytes(e);
@@ -245,7 +278,7 @@ export function createHub(opts: CreateHubOptions): Hub {
     while (logBytes > maxLogBytes && logs.size > 1) {
       const evicted = logs.shift()!;
       logBytes -= sizeOf(evicted);
-      keepIfCrash(evicted);
+      keepIfCrash(evicted, true);
     }
     batcher.addLogs(entries);
     if (tap && logTaps.size > 0) callAll(logTaps, entries, 'onLogs');
@@ -901,6 +934,19 @@ export function createHub(opts: CreateHubOptions): Hub {
       return end > kept ? head.concat(logs.slice(0, end - kept)) : head;
     },
     getLogCount: () => keptCrashes.size + logs.size,
+    getLimits: (): StoreLimits => ({
+      maxLogEntries: logs.capacity,
+      maxLogBytes,
+      maxKeptCrashes: MAX_KEPT_CRASH_LOGS,
+      maxNetworkEntries: Math.max(1, Math.floor(settings.maxNetworkEntries)),
+      maxBodyStoreBytes: limitsFrom(settings).maxBodyBytes,
+    }),
+    getEvictions: evictionSnapshot,
+    getEpoch: epoch,
+    getLastLogId: () => nextLogId - 1,
+    getNetworkSeq: () => network.seq,
+    getNetworkSince: (seq: number) => network.changedSince(seq).map((e) => ({ ...e })),
+    getNetworkIds: () => network.ids(),
     getNetwork: () => network.list().map((e) => ({ ...e })),
     getNetworkDetail: (id) => network.detail(id),
     searchNetwork: (text, opts) => network.search(typeof text === 'string' ? text : '', opts ?? {}),
@@ -935,6 +981,14 @@ export function createHub(opts: CreateHubOptions): Hub {
             ? ownedBy(session.deviceId, session.app.id, session.id)
             : undefined;
       const logInScope = owned ? owned.logs : inScope;
+      // The eviction counts of what is cleared go too (a new start for that scope).
+      if (target !== 'metrics') {
+        if (unscoped) evictions.reset(target !== 'network', target !== 'logs');
+        else if (owned) evictions.forgetApp(deviceId ?? session!.deviceId, owned.sessionIds, owned.ownsProcess);
+        else if (deviceId) evictions.forgetDevice(deviceId, [...apps.values()].filter((a) => a.deviceId === deviceId).map((a) => a.id));
+        else if (appId) evictions.forgetApp('', [appId]);
+      }
+      clearSeq++;
       const appInScope = (a: AppSession) =>
         owned ? owned.sessionIds.has(a.id) : (!deviceId || a.deviceId === deviceId) && (!appId || a.id === appId);
 
@@ -992,7 +1046,8 @@ export function createHub(opts: CreateHubOptions): Hub {
           if (removable && !hasLiveApp) removeDevice(device.id);
         }
       }
-      const event: ClearEvent = { target };
+      const event: ClearEvent = { target, epoch: epoch(), evictions: evictionSnapshot() };
+      evictions.takeIfChanged();
       if (deviceId) event.deviceId = deviceId;
       if (appId) event.appId = appId;
       if (bundleId) event.bundleId = bundleId;
@@ -1214,6 +1269,8 @@ export function createHub(opts: CreateHubOptions): Hub {
       for (const evicted of shrunk) keepIfCrash(evicted);
       if (shrunk.length > 0) recountLogBytes();
       network.setLimits(limitsFrom(settings));
+      // The UI follows the oldest line still held; a batch tells it.
+      if (shrunk.length > 0) batcher.touch();
       watched = new Set(Array.isArray(settings.watchedApps) ? settings.watchedApps : []);
     },
 

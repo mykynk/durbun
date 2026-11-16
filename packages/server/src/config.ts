@@ -508,6 +508,11 @@ export interface ConfigStore {
   /** Settings as persisted (merged over the defaults). */
   readonly storedSettings: ServerSettings;
   readonly mocks: MockRule[];
+  /**
+   * Revision of the user's mock rules: bumped when a save changes them. Temporary rules a flow run adds and
+   * removes (ids starting with `flow-`) do not count, so an edit in progress is not refused because a run ended.
+   */
+  readonly mocksRevision?: number;
   /** Problems found while loading (corrupt files, invalid values). */
   readonly warnings: string[];
   /** The same problems with codes and parameters (ServerNotice), in the same order. */
@@ -532,12 +537,18 @@ export interface LoadConfigOptions {
   now?: () => number;
 }
 
+/** Rules a flow run adds for itself (flows/nodes.ts TEMP_MOCK_PREFIX). */
+const FLOW_RULE_PREFIX = 'flow-';
+/** The user's part of a rule list, comparable (mocksRevision). */
+const userRulesKey = (rules: readonly MockRule[]): string => JSON.stringify(rules.filter((r) => !r.id.startsWith(FLOW_RULE_PREFIX)));
+
 class FileConfigStore implements ConfigStore {
   readonly settingsPath: string;
   readonly mocksPath: string;
   private stored: ServerSettings;
   private effective: ServerSettings;
   private rules: MockRule[];
+  private mocksRev = 1;
   private readonly explicitKeys: Set<SettingsKey>;
   private lanOverride: boolean | undefined;
   private readonly settingsListeners = new Set<(s: ServerSettings, prev: ServerSettings) => void>();
@@ -574,6 +585,10 @@ class FileConfigStore implements ConfigStore {
 
   get mocks(): MockRule[] {
     return this.rules;
+  }
+
+  get mocksRevision(): number {
+    return this.mocksRev;
   }
 
   private computeEffective(): ServerSettings {
@@ -618,6 +633,7 @@ class FileConfigStore implements ConfigStore {
     if (problems.length > 0) {
       throw new ConfigValidationError(`Invalid mock rules: ${problems.join('; ')}`, problems);
     }
+    if (userRulesKey(this.rules) !== userRulesKey(rules)) this.mocksRev++;
     this.rules = rules;
     this.scheduleWrite('mocks');
     for (const l of this.mocksListeners) {

@@ -654,9 +654,13 @@ export class UiTestClient {
   }
 }
 
-export function connectUi(port: number, headers: Record<string, string> = { Origin: `http://localhost:${port}` }): Promise<UiTestClient> {
+export function connectUi(
+  port: number,
+  headers: Record<string, string> = { Origin: `http://localhost:${port}` },
+  query = '',
+): Promise<UiTestClient> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ui`, { headers });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ui${query}`, { headers });
     const client = new UiTestClient(ws); // attach listeners before the first message can arrive
     ws.once('open', () => resolve(client));
     ws.once('unexpected-response', (_req, res) => reject(Object.assign(new Error(`HTTP ${res.statusCode}`), { status: res.statusCode })));

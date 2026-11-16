@@ -26,7 +26,7 @@ import type { Hub, Logger } from '../types';
 import { FlowRunError, MAX_AUTOMATIC_RUNS, type FlowEngine } from './engine';
 import type { FlowStore } from './store';
 import { shortText } from './util';
-import { compileUserRegex, type UserRegex } from './regex';
+import { compileUserRegex, userRegexTest, type UserRegex } from './regex';
 
 export const DEFAULT_THROTTLE_MS = 30_000;
 /** Automatic runs in a row, each right after the previous one, that switch the flow's automation off. */
@@ -98,7 +98,7 @@ export function triggerMatches(node: FlowNode, ev: TriggerEvent, flowAppId?: str
     case 'networkMatch': {
       const r = ev.request;
       const url = typeof p.url === 'string' ? p.url : '';
-      if (url && !urlMatches(r.url, url, typeof p.match === 'string' ? p.match : 'contains')) return false;
+      if (url && !urlMatches(r.url, url, typeof p.match === 'string' ? p.match : 'contains', userRegexTest)) return false;
       if (ev.event === 'networkMatch') {
         const method = typeof p.method === 'string' ? p.method : '*';
         if (method !== '*' && r.method.toUpperCase() !== method.toUpperCase()) return false;

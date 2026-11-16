@@ -3,7 +3,7 @@
  * an SDK would (headers, bodies, timings), honoring the mock rules the session received.
  */
 import type { Header, MockRule, SdkNetError, SdkNetRequest, SdkNetResponse, SdkToServer, Timings, WireBody } from '@durbun/protocol';
-import { findMockRule, isTextContentType } from '@durbun/protocol';
+import { findMockRule, isTextContentType, unsafeRegexReason } from '@durbun/protocol';
 import type { Rng } from './rng';
 
 export interface SimBody {
@@ -137,7 +137,9 @@ export class HttpSim {
     this.host.send(msg);
     this.host.onStart?.({ id, method: plan.method, url: plan.url });
 
-    const rule = findMockRule(this.host.mocks(), plan.method, plan.url, this.host.bundleId);
+    // A regex rule that can backtrack exponentially would block the server: the simulated app skips it.
+    const rules = this.host.mocks().filter((r) => r.match !== 'regex' || !unsafeRegexReason(r.url));
+    const rule = findMockRule(rules, plan.method, plan.url, this.host.bundleId);
     if (rule) {
       this.applyMock(id, start, plan, rule);
       return id;

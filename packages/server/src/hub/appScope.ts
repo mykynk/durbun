@@ -31,6 +31,8 @@ export interface AppScope {
   /** Session ids of the app on the device (SDK and VM service, live and ended). */
   sessionIds: Set<string>;
   pids: Set<number>;
+  /** A device process name of the app (its own names and `"<bundle id>:…"` sub-processes). */
+  ownsProcess(name: string): boolean;
   logs(e: LogEntry): boolean;
   network(e: Pick<NetworkEntry, 'deviceId' | 'appId'>): boolean;
   metrics(s: Pick<MetricSample, 'deviceId' | 'appId' | 'pid'>): boolean;
@@ -140,6 +142,7 @@ export function appScope(input: AppScopeInput): AppScope {
   return {
     sessionIds,
     pids,
+    ownsProcess: processMatches,
     logs,
     network: (e) => e.appId !== undefined && sessionIds.has(e.appId),
     metrics: (s) => (s.appId !== undefined ? sessionIds.has(s.appId) : s.deviceId === deviceId && s.pid !== undefined && pids.has(s.pid)),

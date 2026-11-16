@@ -396,6 +396,127 @@ describe('preflight and devices', () => {
     await h.save({ id: 'url', nodes: [{ id: 'start', type: 'trigger.manual' }, { id: 'open', type: 'device.openUrl', params: { url: 'myapp://x' } }], edges: chain('start', 'open') });
     const run = await h.run('url');
     expect(step(run.steps, 'open')).toMatchObject({ status: 'failed', errorCode: 'action.openUrl.noHandler', error: 'No activity' });
+
+    // The refusal's params reach the step, so the run view words it (code + params, English `error` kept).
+    h.onAction(() => ({ ok: false, error: 'adb is not available', code: 'action.toolMissing', params: { tool: 'adb' } }));
+    const again = await h.run('url');
+    expect(step(again.steps, 'open')).toMatchObject({ status: 'failed', errorCode: 'action.toolMissing', code: 'action.toolMissing', params: { tool: 'adb', action: 'open-url' } });
+  });
+});
+
+describe('device settings', () => {
+  const SETTING_ACTIONS = ['wifi', 'airplane-mode', 'mobile-data', 'rotation', 'dont-keep-activities', 'app-permission', 'app-locale'] as const;
+  const calls = () => h.actions.map((a) => [a.action, a.params]);
+
+  it('changes the settings and puts each one back once when the run ends', async () => {
+    h.hub.upsertDevice(device('android:A1', { actions: [...SETTING_ACTIONS] }));
+    h.onAction(() => ({ ok: true, data: null }));
+    await h.save({
+      id: 'settings',
+      target: { appId: 'com.example.app' },
+      nodes: [
+        { id: 'start', type: 'trigger.manual' },
+        { id: 'off', type: 'device.wifi', params: { enabled: false } },
+        { id: 'on', type: 'device.wifi', params: { enabled: true } },
+        { id: 'perm', type: 'device.permission', params: { permission: 'android.permission.CAMERA', grant: false } },
+        { id: 'lang', type: 'device.appLanguage', params: { locale: 'tr-TR' } },
+        { id: 'turn', type: 'device.rotation', params: { orientation: 'landscape' } },
+        { id: 'keep', type: 'device.dontKeepActivities', params: { enabled: true, restoreAfter: false } },
+      ],
+      edges: chain('start', 'off', 'on', 'perm', 'lang', 'turn', 'keep'),
+    });
+    const run = await h.run('settings');
+    expect(run.status).toBe('passed');
+    expect(step(run.steps, 'off')).toMatchObject({ status: 'passed', code: 'flow.step.wifiOff' });
+    expect(step(run.steps, 'perm')).toMatchObject({ code: 'flow.step.permissionRevoked', params: { permission: 'android.permission.CAMERA', app: 'com.example.app' } });
+    expect(step(run.steps, 'lang')).toMatchObject({ code: 'flow.step.appLanguage', params: { app: 'com.example.app', locale: 'tr-TR' } });
+    const done = calls();
+    expect(done.slice(0, 6)).toEqual([
+      ['wifi', { enabled: false }],
+      ['wifi', { enabled: true }],
+      ['app-permission', { appId: 'com.example.app', permission: 'android.permission.CAMERA', grant: false }],
+      ['app-locale', { appId: 'com.example.app', locale: 'tr-TR' }],
+      ['rotation', { orientation: 'landscape' }],
+      ['dont-keep-activities', { enabled: true }],
+    ]);
+    // Put back once per setting (two Wi-Fi steps, one restore); the step with restoreAfter off stays.
+    expect(done.slice(6)).toEqual(
+      expect.arrayContaining([
+        ['wifi', { restore: true }],
+        ['app-permission', { restore: true, appId: 'com.example.app', permission: 'android.permission.CAMERA' }],
+        ['app-locale', { restore: true, appId: 'com.example.app' }],
+        ['rotation', { restore: true }],
+      ]),
+    );
+    expect(done.slice(6)).toHaveLength(4);
+  });
+
+  it('puts back the value Dürbün had already set before the run, and accepts "nothing to restore"', async () => {
+    h.hub.upsertDevice(
+      device('android:A1', {
+        actions: [...SETTING_ACTIONS],
+        settingOverrides: [{ action: 'mobile-data', previous: 'on', current: 'off', since: 1 }],
+      }),
+    );
+    h.onAction((_action, params) => (params.restore ? { ok: false, error: 'Nothing changed', code: 'action.nothingToRestore' } : { ok: true, data: null }));
+    await h.save({
+      id: 'prior',
+      nodes: [{ id: 'start', type: 'trigger.manual' }, { id: 'data', type: 'device.mobileData', params: { enabled: true } }, { id: 'air', type: 'device.airplaneMode' }],
+      edges: chain('start', 'data', 'air'),
+    });
+    const run = await h.run('prior');
+    expect(run.status).toBe('passed');
+    expect(calls()).toEqual(
+      expect.arrayContaining([
+        ['mobile-data', { enabled: true }],
+        ['airplane-mode', { enabled: true }],
+        ['mobile-data', { enabled: false }],
+        ['airplane-mode', { restore: true }],
+      ]),
+    );
+    expect(h.actions).toHaveLength(4);
+  });
+
+  it('refuses a change that would cut a Wi-Fi connection; preflight skips it with the driver’s reason', async () => {
+    const wifiLink = [
+      { action: 'wifi' as const, code: 'action.wouldDisconnect', params: { connection: 'wifi' } },
+      { action: 'airplane-mode' as const, code: 'action.wouldDisconnect', params: { connection: 'wifi' } },
+    ];
+    h.hub.upsertDevice(device('android:A1', { connection: 'wifi', actions: ['rotation'], unavailableActions: wifiLink }));
+    h.onAction(() => ({ ok: true, data: null }));
+    await h.save({
+      id: 'cut',
+      nodes: [{ id: 'start', type: 'trigger.manual' }, { id: 'air', type: 'device.airplaneMode' }, { id: 'turn', type: 'device.rotation' }],
+      edges: chain('start', 'air', 'turn'),
+    });
+    const pre = await h.engine.preflight('cut', {});
+    expect(pre).toMatchObject({ ok: true, skipped: ['air'] });
+    expect(pre.issues.find((i) => i.nodeId === 'air')).toMatchObject({ code: 'action.wouldDisconnect', params: { connection: 'wifi', action: 'airplane-mode' } });
+    const run = await h.run('cut');
+    expect(step(run.steps, 'air')).toMatchObject({ status: 'skipped', unsupported: 'action.wouldDisconnect' });
+    expect(calls()).toEqual([
+      ['rotation', { orientation: 'landscape' }],
+      ['rotation', { restore: true }],
+    ]);
+
+    // A driver that still lists the action: the step itself refuses the cutting direction.
+    h.hub.upsertDevice(device('android:A1', { connection: 'wifi', actions: ['wifi'], unavailableActions: wifiLink }));
+    await h.save({ id: 'cut2', nodes: [{ id: 'start', type: 'trigger.manual' }, { id: 'w', type: 'device.wifi', params: { enabled: false } }], edges: chain('start', 'w') });
+    const refused = await h.run('cut2');
+    expect(step(refused.steps, 'w')).toMatchObject({ status: 'failed', errorCode: 'action.wouldDisconnect' });
+    expect(h.actions).toHaveLength(2);
+  });
+
+  it('names a malformed locale or permission by code', async () => {
+    h.hub.upsertDevice(device('android:A1', { actions: [...SETTING_ACTIONS] }));
+    for (const [id, node, issue] of [
+      ['bad-locale', { id: 'n', type: 'device.appLanguage', params: { appId: 'com.example.app', locale: 'not a locale!' } }, 'flow.param.locale'],
+      ['bad-perm', { id: 'n', type: 'device.permission', params: { appId: 'com.example.app', permission: 'camera please' } }, 'flow.param.permission'],
+    ] as const) {
+      await h.save({ id, nodes: [{ id: 'start', type: 'trigger.manual' }, node], edges: chain('start', 'n') }).catch(() => undefined);
+      const invalid = (await h.engine.preflight(id, {})).issues.find((i) => i.code === 'preflight.flow.invalid');
+      expect(invalid).toMatchObject({ nodeId: 'n', params: { issue } });
+    }
   });
 });
 

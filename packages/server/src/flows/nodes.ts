@@ -15,6 +15,7 @@ import {
   urlMatches,
   type AppSession,
   type DeviceActionId,
+  type DeviceInfo,
   type FlowAssertion,
   type FlowConditionRule,
   type FlowEnvironmentTls,
@@ -39,7 +40,7 @@ import {
 import { appScope } from '../hub/appScope';
 import { sendDesktopRequest } from '../http/replay';
 import { isTlsCertError } from '../http/tlsFetch';
-import { compileUserRegex, type UserRegex } from './regex';
+import { compileUserRegex, userRegexTest, type UserRegex } from './regex';
 import { OwnServerRequestError } from '../http/ownTargets';
 import type { CommandReply } from '../http/commands';
 import type { Hub } from '../types';
@@ -324,7 +325,7 @@ const triggerStep: Executor = async (api) => {
 const condition: Executor = async (api) => {
   const rules = (api.param('rules') ?? []) as FlowConditionRule[];
   const mode = api.text('mode') === 'any' ? 'any' : 'all';
-  const { ok, results } = evaluateRules(rules, mode, api.scope);
+  const { ok, results } = evaluateRules(rules, mode, api.scope, { regexTest: userRegexTest });
   // Only the rules that did not hold explain themselves; a true condition needs no explanation.
   const explain = ok ? '' : results.map((r) => r.explain).filter(Boolean).join(mode === 'all' ? ' and ' : ' or ');
   return { port: ok ? 'true' : 'false', output: { result: ok }, summary: ok ? 'true' : `false: ${explain}`, code: ok ? 'flow.step.conditionTrue' : 'flow.step.conditionFalse', params: { explain } };
@@ -354,7 +355,7 @@ const assert: Executor = async (api) => {
   const lines: string[] = [];
   let passed = 0;
   for (const a of list) {
-    const r = evaluateRule(a, api.scope);
+    const r = evaluateRule(a, api.scope, { regexTest: userRegexTest });
     if (r.ok) passed++;
     else failed.push(a.message ? `${a.message} (${r.explain})` : r.explain);
     lines.push(`${r.ok ? '✓' : '✗'} ${a.message ?? r.explain}`);
@@ -566,7 +567,7 @@ const httpRequest: Executor = async (api) => {
 async function action(api: StepApi, id: DeviceActionId, params: Record<string, unknown>): Promise<unknown> {
   const reply = await api.services.deviceAction(api.deviceId(), id, params);
   if (api.signal.aborted) throw new AbortedError();
-  if (!reply.ok) throw new StepError(reply.error || `${id} failed`, reply.code || 'action.failed', { action: id });
+  if (!reply.ok) throw new StepError(reply.error || `${id} failed`, reply.code || 'action.failed', { ...(reply.params ?? {}), action: id });
   return reply.data;
 }
 
@@ -591,6 +592,92 @@ function simple(
 }
 
 const str = (v: unknown): string => (v === undefined || v === null ? '' : String(v));
+
+/* ── settings a step changes and the run puts back ── */
+
+/** Which per-app setting an override is about (DeviceSettingOverride appId / key). */
+interface SettingScope {
+  appId?: string;
+  key?: string;
+}
+
+/** Params that set `action` back to `value` (an override's `current`), or undefined when unknown. */
+export function paramsForSettingValue(action: DeviceActionId, value: string, scope: SettingScope): Record<string, unknown> | undefined {
+  switch (action) {
+    case 'airplane-mode':
+    case 'wifi':
+    case 'mobile-data':
+      return value === 'on' || value === 'off' ? { enabled: value === 'on' } : undefined;
+    case 'dont-keep-activities':
+      return value === '1' || value === '0' ? { enabled: value === '1' } : undefined;
+    case 'rotation':
+      return { orientation: value };
+    case 'app-locale':
+      return scope.appId ? { appId: scope.appId, locale: value } : undefined;
+    case 'app-permission':
+      return scope.appId && scope.key && (value === 'granted' || value === 'denied') ? { appId: scope.appId, permission: scope.key, grant: value === 'granted' } : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Does this change cut the device's connection to this Mac? The driver marks Wi-Fi and airplane mode unavailable
+ * with `action.wouldDisconnect` while adb reaches the phone over Wi-Fi; turning Wi-Fi off or airplane mode on then
+ * would end the session (a restore, or the harmless direction, still runs).
+ */
+export function wouldDisconnect(device: Pick<DeviceInfo, 'unavailableActions'> | undefined, action: string, p: Record<string, unknown>): boolean {
+  if (p.restore === true) return false;
+  const refused = device?.unavailableActions?.some((u) => u.action === action && u.code === 'action.wouldDisconnect');
+  if (!refused) return false;
+  return (action === 'wifi' && p.enabled === false) || (action === 'airplane-mode' && p.enabled === true);
+}
+
+/**
+ * A device setting step: refuses a change that would disconnect the device, runs the action, and (unless
+ * `restoreAfter` is off) registers putting the setting back when the run ends — once per setting and run, so
+ * the first step's state wins. Back means: the value Dürbün had already set before the run (another run, the
+ * Device tab), else the device's own value from before Dürbün's first change (`restore: true`).
+ */
+function settingStep(
+  id: DeviceActionId,
+  build: (api: StepApi) => Record<string, unknown>,
+  describe: (p: Record<string, unknown>) => { summary: string; code: string; params?: I18nParams },
+  scopeOf: (p: Record<string, unknown>) => SettingScope = () => ({}),
+): Executor {
+  return async (api) => {
+    const p = build(api);
+    const deviceId = api.deviceId();
+    const device = api.services.hub.getDevice(deviceId);
+    if (wouldDisconnect(device, id, p)) {
+      throw new StepError(`${device?.name ?? deviceId} is connected to this Mac over Wi-Fi; this change would cut the connection`, 'action.wouldDisconnect', {
+        connection: 'wifi',
+      });
+    }
+    const scope = scopeOf(p);
+    const restore = api.bool('restoreAfter', true);
+    const before = device?.settingOverrides?.find((o) => o.action === id && (o.appId ?? '') === (scope.appId ?? '') && (o.key ?? '') === (scope.key ?? ''));
+    await action(api, id, p);
+    if (restore) {
+      const back = before ? paramsForSettingValue(id, before.current, scope) : { restore: true, ...(scope.appId ? { appId: scope.appId } : {}), ...(scope.key ? { permission: scope.key } : {}) };
+      if (back) {
+        api.addCleanup(`setting:${deviceId}:${id}:${scope.appId ?? ''}:${scope.key ?? ''}`, async () => {
+          const reply = await api.services.deviceAction(deviceId, id, back);
+          if (!reply.ok && reply.code !== 'action.nothingToRestore') throw new Error(reply.error || `${id} could not be put back`);
+        });
+      }
+    }
+    const d = describe(p);
+    return { output: p, summary: d.summary, code: d.code, ...(d.params ? { params: d.params } : {}) };
+  };
+}
+
+const onOffStep = (id: DeviceActionId, label: string, fallback: boolean, codeOn: string, codeOff: string): Executor =>
+  settingStep(
+    id,
+    (api) => ({ enabled: api.bool('enabled', fallback) }),
+    (p) => ({ summary: `${label} ${p.enabled ? 'on' : 'off'}`, code: p.enabled ? codeOn : codeOff }),
+  );
 
 function expandHome(file: string): string {
   return file.startsWith('~/') ? path.join(os.homedir(), file.slice(2)) : file;
@@ -625,7 +712,7 @@ const startRecording: Executor = async (api) => {
   const early = await Promise.race([pending, sleep(2_500, api.signal).then(() => undefined)]);
   if (early && !early.ok) {
     if (api.recordings.get(deviceId) === pending) api.recordings.delete(deviceId);
-    throw new StepError(early.error || 'The recording could not start', early.code || 'action.failed');
+    throw new StepError(early.error || 'The recording could not start', early.code || 'action.failed', { ...(early.params ?? {}), action: 'screen-record' });
   }
   return { output: { maxSeconds: seconds }, summary: `Recording (up to ${seconds} s)`, code: 'flow.step.recording', params: { seconds } };
 };
@@ -670,7 +757,7 @@ const waitNetwork: Executor = async (api) => {
     e.state !== 'pending' &&
     api.netSeenAt(e.id) >= since.at &&
     (method === '*' || e.method.toUpperCase() === method) &&
-    urlMatches(e.url, pattern, match) &&
+    urlMatches(e.url, pattern, match, userRegexTest) &&
     (!status || statusMatches(e.status, status)) &&
     (!scope || scope.network(e));
   const found = await waitFor<NetworkEntry>(
@@ -932,6 +1019,31 @@ export const EXECUTORS: Readonly<Record<string, Executor>> = {
   'device.keyEvent': simple('key-event', (api) => ({ key: api.text('key') || 'back' }), (p) => ({ summary: `Pressed ${str(p.key)}`, code: 'flow.step.keyPressed', params: { key: str(p.key) } })),
   'device.statusBar': simple('status-bar', (api) => ({ mode: api.text('mode') || 'clean' }), (p) => ({ summary: `Status bar: ${str(p.mode)}`, code: 'flow.step.statusBar', params: { mode: str(p.mode) } })),
   'device.animations': simple('animations', (api) => ({ enabled: api.bool('enabled', false) }), (p) => ({ summary: `Animations ${p.enabled ? 'on' : 'off'}`, code: p.enabled ? 'flow.step.animationsOn' : 'flow.step.animationsOff' })),
+  'device.permission': settingStep(
+    'app-permission',
+    (api) => ({ appId: appIdParam(api), permission: api.text('permission').trim(), grant: api.bool('grant', true) }),
+    (p) => ({
+      summary: `${str(p.permission)} ${p.grant ? 'granted to' : 'revoked from'} ${str(p.appId)}`,
+      code: p.grant ? 'flow.step.permissionGranted' : 'flow.step.permissionRevoked',
+      params: { permission: str(p.permission), app: str(p.appId) },
+    }),
+    (p) => ({ appId: str(p.appId), key: str(p.permission) }),
+  ),
+  'device.appLanguage': settingStep(
+    'app-locale',
+    (api) => ({ appId: appIdParam(api), locale: api.text('locale').trim() }),
+    (p) => ({ summary: `Language of ${str(p.appId)}: ${str(p.locale)}`, code: 'flow.step.appLanguage', params: { app: str(p.appId), locale: str(p.locale) } }),
+    (p) => ({ appId: str(p.appId) }),
+  ),
+  'device.airplaneMode': onOffStep('airplane-mode', 'Airplane mode', true, 'flow.step.airplaneModeOn', 'flow.step.airplaneModeOff'),
+  'device.wifi': onOffStep('wifi', 'Wi-Fi', false, 'flow.step.wifiOn', 'flow.step.wifiOff'),
+  'device.mobileData': onOffStep('mobile-data', 'Mobile data', false, 'flow.step.mobileDataOn', 'flow.step.mobileDataOff'),
+  'device.rotation': settingStep(
+    'rotation',
+    (api) => ({ orientation: api.text('orientation') || 'landscape' }),
+    (p) => ({ summary: `Rotation: ${str(p.orientation)}`, code: 'flow.step.rotation', params: { orientation: str(p.orientation) } }),
+  ),
+  'device.dontKeepActivities': onOffStep('dont-keep-activities', "Don't keep activities", true, 'flow.step.dontKeepActivitiesOn', 'flow.step.dontKeepActivitiesOff'),
   'wait.network': waitNetwork,
   'wait.log': waitLog,
   'wait.event': waitEvent,

@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, networkLogLevel, type ServerSettings, type ServerToUi } from '@durbun/protocol';
+import { PROTOCOL_VERSION, networkLogLevel, type ServerSettings, type ServerToUi, type StoreEvictions, type StoreLimits } from '@durbun/protocol';
 import { logStore } from './logStore';
 import { compileScope } from './scope';
 import { networkStore } from './networkStore';
@@ -10,10 +10,22 @@ import { applyFlowRunDelta, setFlowSummaries, setFlowsFromServer } from './store
 import { ALL_SCOPE, setScope, useScopeStore } from './stores/scope';
 import { flushPendingCommands, handleReply } from './commands';
 import { emitNotice, emitResync, emitServerMessage } from './events';
+import { forgetResume, noteEpoch, noteNetSeq, resumeEpoch } from './resume';
+import { setStoreEvictions, setStoreLimits } from './stores/limits';
 
-function applyLimits(settings: ServerSettings): void {
-  logStore.setMaxEntries(settings.maxLogEntries);
-  networkStore.setMaxEntries(settings.maxNetworkEntries);
+/** The server's limits (its `limits` when it sends them, else the settings): the window holds no more than it. */
+function applyLimits(settings: ServerSettings, limits?: StoreLimits): void {
+  setStoreLimits(limits);
+  logStore.setMaxEntries(limits?.maxLogEntries ?? settings.maxLogEntries);
+  networkStore.setMaxEntries(limits?.maxNetworkEntries ?? settings.maxNetworkEntries);
+}
+
+/** The server's eviction counts: the stores drop what it no longer holds and show its counts. */
+function applyEvictions(evictions: StoreEvictions | undefined): void {
+  if (!evictions || typeof evictions !== 'object') return;
+  logStore.followServer(evictions);
+  networkStore.followServer(evictions);
+  setStoreEvictions(evictions);
 }
 
 /** Make sure the scope still points at something that exists (after resync / device removal). */
@@ -118,14 +130,22 @@ export function handleServerMessage(msg: ServerToUi): void {
       });
       if (msg.settings) {
         setServerSettingsFromServer(msg.settings);
-        applyLimits(msg.settings);
+        applyLimits(msg.settings, msg.limits);
       }
       flushPendingCommands();
       break;
     }
     case 'snapshot': {
-      logStore.reset();
-      networkStore.reset();
+      // A resumed snapshot continues what this window holds (only when it answers the epoch we asked with);
+      // anything else replaces everything.
+      const resumed = !!msg.resumed && typeof msg.epoch === 'string' && msg.epoch === resumeEpoch();
+      if (resumed) {
+        networkStore.retainIds(new Set(msg.resumed!.networkIds ?? []));
+      } else {
+        logStore.reset();
+        networkStore.reset();
+        setStoreEvictions(null);
+      }
       metricsStore.reset();
       hubActions.replaceAll({
         devices: msg.devices ?? [],
@@ -135,10 +155,16 @@ export function handleServerMessage(msg: ServerToUi): void {
         deviceApps: msg.deviceApps ?? [],
       });
       networkStore.upsert(msg.network ?? [], { history: true });
+      // Requests that ended while this window was away: their log rows take the outcome's level.
+      if (resumed) for (const n of msg.network ?? []) if (n.state !== 'pending') logStore.setNetworkLevel(n.id, networkLogLevel(n));
       metricsStore.push(msg.metrics ?? []);
-      setMocksFromServer(msg.mocks ?? []);
+      setMocksFromServer(msg.mocks ?? [], msg.mocksRevision);
       setFlowsFromServer(msg.flows, msg.flowRuns);
-      useConnection.setState({ expectedLogCount: msg.logCount ?? 0, historyReceived: 0 });
+      applyEvictions(msg.evictions);
+      if (typeof msg.epoch !== 'string' || typeof msg.netSeq !== 'number') forgetResume();
+      noteEpoch(msg.epoch);
+      noteNetSeq(msg.netSeq);
+      useConnection.setState({ expectedLogCount: msg.logCount ?? 0, historyReceived: 0, resumed });
       validateScope();
       emitResync();
       if (!msg.logCount) markLive();
@@ -167,15 +193,19 @@ export function handleServerMessage(msg: ServerToUi): void {
       }
       if (msg.metrics?.length) metricsStore.push(msg.metrics);
       if (msg.removedDevices?.length) removeDevices(msg.removedDevices);
+      applyEvictions(msg.evictions);
+      noteNetSeq(msg.netSeq);
       break;
     }
     case 'cleared':
       // Hub semantics: `cleared` comes first; with target 'all' (no appId) the server also drops devices that
       // are gone / imported / desktop — those arrive afterwards as `batch.removedDevices`.
       clearStores(msg);
+      applyEvictions(msg.evictions);
+      noteEpoch(msg.epoch);
       break;
     case 'mocks':
-      setMocksFromServer(msg.rules ?? []);
+      setMocksFromServer(msg.rules ?? [], msg.revision);
       break;
     case 'flows':
       setFlowSummaries(msg.flows ?? []);
@@ -185,7 +215,7 @@ export function handleServerMessage(msg: ServerToUi): void {
       break;
     case 'settings':
       setServerSettingsFromServer(msg.settings);
-      applyLimits(msg.settings);
+      applyLimits(msg.settings, msg.limits);
       break;
     case 'drivers':
       hubActions.setDrivers(msg.drivers ?? []);

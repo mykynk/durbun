@@ -20,6 +20,8 @@ export class ChangeBatcher {
   private processes = new Map<string, ProcessUpdate>();
   private deviceApps = new Map<string, DeviceApp>();
   private removedDeviceApps = new Set<string>();
+  /** Something only `extras` reports changed (evictions after a new limit). */
+  private touched = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private flushing = false;
   private disposed = false;
@@ -29,7 +31,18 @@ export class ChangeBatcher {
     private readonly intervalMs: number,
     private readonly maxQueuedLogs: number,
     private readonly logger: Logger,
+    /**
+     * Read once per flush, before anything is emitted: members added to the first change of the flush (the
+     * network change counter as of this batch, eviction counts when they changed).
+     */
+    private readonly extras?: () => Pick<HubChange, 'netSeq' | 'evictions'>,
   ) {}
+
+  /** Flush soon even when nothing else is queued (only `extras` changed). */
+  touch(): void {
+    this.touched = true;
+    this.schedule();
+  }
 
   get queuedLogs(): number {
     return this.logs.length;
@@ -103,7 +116,14 @@ export class ChangeBatcher {
     }
     if (this.flushing || this.disposed || this.isEmpty()) return;
     this.flushing = true;
+    this.touched = false;
     try {
+      let extra: Pick<HubChange, 'netSeq' | 'evictions'> = {};
+      try {
+        extra = this.extras?.() ?? {};
+      } catch (err) {
+        this.logger.warn('hub batch extras failed', err);
+      }
       const logs = this.logs;
       const change: HubChange = {
         logs: [],
@@ -116,6 +136,8 @@ export class ChangeBatcher {
         deviceApps: [...this.deviceApps.values()].map(copyDeviceApp),
         removedDeviceApps: [...this.removedDeviceApps],
       };
+      if (extra.netSeq !== undefined) change.netSeq = extra.netSeq;
+      if (extra.evictions) change.evictions = extra.evictions;
       this.logs = [];
       this.network = new Map();
       this.devices = new Map();
@@ -155,6 +177,7 @@ export class ChangeBatcher {
 
   /** Drops everything queued (used before a clear, after flushing). */
   discard(): void {
+    this.touched = false;
     this.logs = [];
     this.network.clear();
     this.devices.clear();
@@ -176,6 +199,7 @@ export class ChangeBatcher {
 
   private isEmpty(): boolean {
     return (
+      !this.touched &&
       this.logs.length === 0 &&
       this.network.size === 0 &&
       this.devices.size === 0 &&

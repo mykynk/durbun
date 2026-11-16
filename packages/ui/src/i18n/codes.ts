@@ -247,6 +247,11 @@ export const SERVER_CODES = {
     'action.bugReport.busy',
     'action.bugReport.notRunning',
     'action.bugReport.failed',
+    'action.recording.failed',
+    'action.recording.noVideo',
+    'action.processUnknown',
+    'action.clearData.unexpectedPath',
+    'action.launch.noLauncher',
   ],
   /** `DeviceInfo.readers.<id>.code`: why an SDK-less reader (crash records, frame stats) does not work. */
   readers: [
@@ -300,6 +305,28 @@ export const SERVER_CODES = {
   flowTls: ['flow.http.tls', 'preflight.env.insecureTls', 'preflight.env.customCa', 'env.tls.invalidCa'],
   /** Flow validation warning for a regular expression that can backtrack exponentially (params { pattern, param }). */
   flowRegex: ['flow.regex.unsafe'],
+  /** A save refused because another window changed the same thing since it was loaded (reload or overwrite). */
+  editConflicts: ['mocks.conflict', 'flow.conflict', 'env.conflict'],
+  /**
+   * Flow steps that change a device setting (put back when the run ends): { permission, app } / { app, locale } /
+   * { orientation } / —.
+   */
+  flowDeviceSettings: [
+    'flow.step.permissionGranted',
+    'flow.step.permissionRevoked',
+    'flow.step.appLanguage',
+    'flow.step.airplaneModeOn',
+    'flow.step.airplaneModeOff',
+    'flow.step.wifiOn',
+    'flow.step.wifiOff',
+    'flow.step.mobileDataOn',
+    'flow.step.mobileDataOff',
+    'flow.step.rotation',
+    'flow.step.dontKeepActivitiesOn',
+    'flow.step.dontKeepActivitiesOff',
+    'flow.param.locale',
+    'flow.param.permission',
+  ],
   /** Flows, packages and backups (flowCodes.ts). */
   ...FLOW_CODES,
 } as const satisfies Record<string, readonly string[]>;
@@ -528,6 +555,26 @@ registerMessages('code', {
     ],
     'preflight.env.customCa': ['{env} ortamı HTTPS adımlarında kendi sertifikalarına da güveniyor', 'Seçilen ortam HTTPS adımlarında kendi sertifikalarına da güveniyor'],
     'env.tls.invalidCa': 'Güvenilen sertifika metninde PEM sertifikası yok (-----BEGIN CERTIFICATE----- ile başlamalı)',
+    'mocks.conflict': 'Mock kuralları başka bir pencerede değiştirildi; değişikliğiniz kaydedilmedi. Yeniden yükleyin ya da kendi listenizi yine de kaydedin',
+    'flow.conflict': 'Bu akış başka bir pencerede değiştirildi; değişikliğiniz kaydedilmedi. Yeniden yükleyin ya da kendi sürümünüzü yine de kaydedin',
+    'env.conflict': 'Ortamlar başka bir pencerede değiştirildi; değişikliğiniz kaydedilmedi. Yeniden yükleyin ya da kendi sürümünüzü yine de kaydedin',
+    'flow.step.permissionGranted': ['{permission} izni {app} uygulamasına verildi', 'İzin verildi'],
+    'flow.step.permissionRevoked': ['{permission} izni {app} uygulamasından geri alındı', 'İzin geri alındı'],
+    'flow.step.appLanguage': ['{app} dili: {locale}', 'Uygulamanın dili değiştirildi'],
+    'flow.step.airplaneModeOn': 'Uçak modu açıldı',
+    'flow.step.airplaneModeOff': 'Uçak modu kapatıldı',
+    'flow.step.wifiOn': 'Wi-Fi açıldı',
+    'flow.step.wifiOff': 'Wi-Fi kapatıldı',
+    'flow.step.mobileDataOn': 'Mobil veri açıldı',
+    'flow.step.mobileDataOff': 'Mobil veri kapatıldı',
+    'flow.step.rotation': ['Ekran yönü: {orientation}', 'Ekran yönü değiştirildi'],
+    'flow.step.dontKeepActivitiesOn': '“Etkinlikleri saklama” açıldı',
+    'flow.step.dontKeepActivitiesOff': '“Etkinlikleri saklama” kapatıldı',
+    'flow.param.locale': ['“{value}” bir dil kodu değil; tr-TR, en-US gibi bir kod ya da “system” yazın', 'Bu bir dil kodu değil; tr-TR, en-US gibi bir kod ya da “system” yazın'],
+    'flow.param.permission': [
+      '“{value}” bir izin adı değil; Android’de android.permission.CAMERA gibi, iOS simülatöründe camera, photos, location gibi yazın',
+      'Bu bir izin adı değil; Android’de android.permission.CAMERA gibi, iOS simülatöründe camera, photos, location gibi yazın',
+    ],
     'flow.regex.unsafe': [
       '"{pattern}" düzenli ifadesi bazı metinlerde çok uzun sürebilir; tekrar içinde tekrar kullanmadan yazın',
       'Bu düzenli ifade bazı metinlerde çok uzun sürebilir; tekrar içinde tekrar kullanmadan yazın',
@@ -557,6 +604,7 @@ registerMessages('code', {
     'action.stopNotAllowed':
       'iOS bu uygulamanın bu Mac’ten durdurulmasına izin vermiyor; yalnızca Xcode’dan kurulan uygulamalar durdurulabilir. Uygulamayı telefondaki uygulama değiştiriciden kapatın.',
     'action.osTooOld': [
+      'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS {minVersion} ve sonrasıyla çalışır, bu cihaz iOS {osVersion} kullanıyor.',
       'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor ({detail})',
       'Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz daha eski bir iOS kullanıyor.',
     ],
@@ -583,7 +631,12 @@ registerMessages('code', {
       'Bu işlem bu cihazın Android sürümünde çalışmaz',
     ],
     'action.emulatorOnly': 'Bu işlem yalnızca emülatörde çalışır',
-    'action.toolTooOld': ['Bu işlem için {detail} gerekir', 'Bu işlem için aracın daha yeni bir sürümü gerekir'],
+    'action.toolTooOld': [
+      'Bu Mac’teki {tool} bu işlem için eski; {from} uygulamasını güncelleyin.',
+      'Bu Mac’teki {tool} bu işlem için eski; daha yeni bir sürümünü kurun.',
+      'Bu işlem için {detail} gerekir',
+      'Bu işlem için aracın daha yeni bir sürümü gerekir',
+    ],
     'action.wouldDisconnect': 'Cihaz bu Mac’e Wi-Fi üzerinden bağlı; bu işlem bağlantıyı keser. Önce cihazı USB ile bağlayın.',
     'action.permissionUnknown': 'Android bu izin adını tanımıyor. Tam adını yazın (örneğin android.permission.CAMERA).',
     'action.permissionNotRequested': 'Uygulama bu izni istemiyor; izin yalnızca uygulamanın istediği izinler arasından verilebilir.',
@@ -608,7 +661,32 @@ registerMessages('code', {
     'action.unsupported': 'Bu cihaz bu işlemi desteklemiyor',
     'action.deviceOffline': 'Cihaz çevrimdışı ya da kapalı',
     'action.deviceNotFound': 'Cihaz bulunamadı',
-    'action.toolMissing': ['Gerekli araç eksik: {detail}', 'Gerekli araç eksik'],
+    'action.toolMissing': [
+      'Bu işlem için Xcode {minXcode} ya da daha yenisi veya {tool} gerekir; {tool} şu komutla kurulur: {install}',
+      'Bu işlem için Xcode {minXcode} ya da daha yenisi gerekir ({tool} onunla gelir).',
+      '{tool} bu Mac’te bulunamadı; şu komutla kurun: {install}',
+      '{tool} bu Mac’te bulunamadı; Sistem kontrolü nasıl kurulacağını gösterir.',
+      'Gerekli araç eksik: {detail}',
+      'Gerekli araç eksik',
+    ],
+    'action.recording.failed': [
+      'Ekran kaydı başarısız oldu: {detail}',
+      'Ekran kaydı başarısız oldu: {tool} {exitCode} koduyla kapandı',
+      'Ekran kaydı başarısız oldu',
+    ],
+    'action.recording.noVideo': 'Ekran kaydı bitti ama video dosyası yazılmadı. Tekrar deneyin.',
+    'action.processUnknown': [
+      '{app} uygulamasının çalışan işlemi bulunamadı; {tool} işlemlerin yerini bildirmedi. Uygulamayı cihazdaki uygulama değiştiriciden kapatın.',
+      'Uygulamanın çalışan işlemi bulunamadı. Uygulamayı cihazdaki uygulama değiştiriciden kapatın.',
+    ],
+    'action.clearData.unexpectedPath': [
+      'Veriler silinmedi: simülatör beklenmeyen bir klasör bildirdi ({path}). Dürbün yalnızca uygulamanın kendi veri klasörünü siler.',
+      'Veriler silinmedi: simülatör beklenmeyen bir klasör bildirdi. Dürbün yalnızca uygulamanın kendi veri klasörünü siler.',
+    ],
+    'action.launch.noLauncher': [
+      '{app} başlatılamadı: başlatıcı ekranı yok ya da {user} numaralı kullanıcıda kurulu değil.',
+      'Uygulama başlatılamadı: başlatıcı ekranı yok ya da bu kullanıcıda kurulu değil.',
+    ],
     'action.screenshotRefused': 'Cihaz ekran görüntüsünü reddetti; Geliştirici Modu ya da geliştirici disk görüntüsü gerekebilir',
     'action.appNotFound': 'Uygulama bu cihazda yüklü değil',
     'action.fileNotFound': 'Dosya bulunamadı',
@@ -973,6 +1051,26 @@ registerMessages('code', {
     ],
     'preflight.env.customCa': ['{env} also trusts its own certificates for HTTPS steps', 'The chosen environment also trusts its own certificates for HTTPS steps'],
     'env.tls.invalidCa': 'The trusted certificate text holds no PEM certificate (it starts with -----BEGIN CERTIFICATE-----)',
+    'mocks.conflict': 'The mock rules were changed in another window; your change was not saved. Reload them or save your list anyway',
+    'flow.conflict': 'This flow was changed in another window; your change was not saved. Reload it or save your version anyway',
+    'env.conflict': 'The environments were changed in another window; your change was not saved. Reload them or save your version anyway',
+    'flow.step.permissionGranted': ['{permission} granted to {app}', 'Permission granted'],
+    'flow.step.permissionRevoked': ['{permission} revoked from {app}', 'Permission revoked'],
+    'flow.step.appLanguage': ['Language of {app}: {locale}', 'App language changed'],
+    'flow.step.airplaneModeOn': 'Airplane mode on',
+    'flow.step.airplaneModeOff': 'Airplane mode off',
+    'flow.step.wifiOn': 'Wi-Fi on',
+    'flow.step.wifiOff': 'Wi-Fi off',
+    'flow.step.mobileDataOn': 'Mobile data on',
+    'flow.step.mobileDataOff': 'Mobile data off',
+    'flow.step.rotation': ['Rotation: {orientation}', 'Rotation changed'],
+    'flow.step.dontKeepActivitiesOn': '“Don’t keep activities” on',
+    'flow.step.dontKeepActivitiesOff': '“Don’t keep activities” off',
+    'flow.param.locale': ['“{value}” is not a language tag; write one such as tr-TR or en-US, or “system”', 'This is not a language tag; write one such as tr-TR or en-US, or “system”'],
+    'flow.param.permission': [
+      '“{value}” is not a permission; on Android write one such as android.permission.CAMERA, on the iOS simulator camera, photos, location…',
+      'This is not a permission; on Android write one such as android.permission.CAMERA, on the iOS simulator camera, photos, location…',
+    ],
     'flow.regex.unsafe': [
       'The regular expression "{pattern}" can take very long on some texts; write it without a repeat inside a repeat',
       'This regular expression can take very long on some texts; write it without a repeat inside a repeat',
@@ -1002,6 +1100,7 @@ registerMessages('code', {
     'action.stopNotAllowed':
       'iOS does not let this Mac stop this app; only apps installed from Xcode can be stopped. Close it from the app switcher on the phone.',
     'action.osTooOld': [
+      'This action uses Xcode’s devicectl, which works with iOS {minVersion} and later; this device runs iOS {osVersion}.',
       'This action uses Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS ({detail})',
       'This action uses Xcode’s devicectl, which works with iOS 17 and later; this device runs an older iOS.',
     ],
@@ -1027,7 +1126,12 @@ registerMessages('code', {
       'This action does not work on this device’s Android version',
     ],
     'action.emulatorOnly': 'This action works on emulators only',
-    'action.toolTooOld': ['This action needs {detail}', 'This action needs a newer version of the tool'],
+    'action.toolTooOld': [
+      '{tool} on this Mac is too old for this action; update {from}.',
+      '{tool} on this Mac is too old for this action; install a newer version.',
+      'This action needs {detail}',
+      'This action needs a newer version of the tool',
+    ],
     'action.wouldDisconnect': 'The device is connected to this Mac over Wi-Fi; this action would cut the connection. Connect it with USB first.',
     'action.permissionUnknown': 'Android does not know this permission name. Write the full name (android.permission.CAMERA, for example).',
     'action.permissionNotRequested': 'The app does not ask for this permission; only permissions the app asks for can be granted.',
@@ -1052,7 +1156,28 @@ registerMessages('code', {
     'action.unsupported': 'This device does not support this action',
     'action.deviceOffline': 'The device is offline or not booted',
     'action.deviceNotFound': 'Device not found',
-    'action.toolMissing': ['A required tool is missing: {detail}', 'A required tool is missing'],
+    'action.toolMissing': [
+      'This action needs Xcode {minXcode} or newer, or {tool}; install {tool} with: {install}',
+      'This action needs Xcode {minXcode} or newer ({tool} comes with it).',
+      '{tool} was not found on this Mac; install it with: {install}',
+      '{tool} was not found on this Mac; the System check shows how to install it.',
+      'A required tool is missing: {detail}',
+      'A required tool is missing',
+    ],
+    'action.recording.failed': ['Screen recording failed: {detail}', 'Screen recording failed: {tool} exited with code {exitCode}', 'Screen recording failed'],
+    'action.recording.noVideo': 'The recording ended, but no video file was written. Try again.',
+    'action.processUnknown': [
+      'Could not find the running process of {app}; {tool} did not report where processes live. Close the app from the app switcher on the device.',
+      'Could not find the running process of the app. Close it from the app switcher on the device.',
+    ],
+    'action.clearData.unexpectedPath': [
+      'The data was not cleared: the simulator reported an unexpected folder ({path}). Dürbün only clears the app’s own data folder.',
+      'The data was not cleared: the simulator reported an unexpected folder. Dürbün only clears the app’s own data folder.',
+    ],
+    'action.launch.noLauncher': [
+      'Could not launch {app}: it has no launcher activity or is not installed for user {user}.',
+      'Could not launch the app: it has no launcher activity or is not installed for this user.',
+    ],
     'action.screenshotRefused': 'The device refused the screenshot; Developer Mode or the developer disk image may be required',
     'action.appNotFound': 'The app is not installed on this device',
     'action.fileNotFound': 'File not found',
@@ -1469,6 +1594,20 @@ export function errorDetail(message: string): string {
   return msg;
 }
 
+/** The server's params of an error code (string / finite number values), or undefined when it sent none. */
+export function errorParams(raw: unknown): I18nParams | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: I18nParams = {};
+  let any = false;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))) {
+      out[k] = v;
+      any = true;
+    }
+  }
+  return any ? out : undefined;
+}
+
 /** Codes whose English message identifies a more specific, localizable case. */
 function refineErrorCode(code: string, message: string): string {
   if ((code === 'command.failed' || code === 'vm.attachFailed') && /^No Dart VM service URL found/i.test(message)) return 'vm.noServiceUrl';
@@ -1477,15 +1616,18 @@ function refineErrorCode(code: string, message: string): string {
 
 /**
  * Human message for a caught error: localized when it carries a known i18n `code` (CommandError,
- * ApiError) — keeping the specific part of the server's message (`{detail}`) where the template has
- * room for it — otherwise its message.
+ * ApiError). With the server's `params` (newer servers) the text is worded from them alone, so no English
+ * sentence lands inside a translated one; without them the specific part of the server's message (`{detail}`)
+ * fills the template where it has room for it. Unknown codes: the message.
  */
 export function errorText(err: unknown): string {
   if (err && typeof err === 'object') {
-    const e = err as { code?: unknown; message?: unknown };
+    const e = err as { code?: unknown; message?: unknown; params?: unknown };
     const message = typeof e.message === 'string' ? e.message : String(err);
     if (typeof e.code === 'string' && e.code) {
       const code = refineErrorCode(e.code, message);
+      const params = errorParams(e.params);
+      if (params) return tCode(code, params, message);
       const limit = /\(limit ([^)]+)\)/.exec(message)?.[1] ?? '';
       return tCode(code, { detail: errorDetail(message), limit }, message);
     }

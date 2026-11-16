@@ -420,6 +420,41 @@ describe('WS /ui commands', () => {
     });
   });
 
+  it('refuses a device change that would cut the Wi-Fi link the device is reached through', async () => {
+    t = await startTestApp();
+    const wifiLink = [{ action: 'wifi' as const, code: 'action.wouldDisconnect', params: { connection: 'wifi' } }];
+    t.hub.upsertDevice(sampleDevice('android:R5CT1234', { connection: 'wifi', unavailableActions: wifiLink }));
+    const c = await open();
+    await c.synced();
+    expect(await c.command({ name: 'device.action', deviceId: 'android:R5CT1234', action: 'wifi', params: { enabled: false } })).toMatchObject({
+      ok: false,
+      code: 'action.wouldDisconnect',
+      params: { connection: 'wifi' },
+    });
+    expect(t.android.actions).toHaveLength(0);
+    // The harmless direction and a restore still reach the driver.
+    expect(await c.command({ name: 'device.action', deviceId: 'android:R5CT1234', action: 'wifi', params: { enabled: true } })).toMatchObject({ ok: true });
+    expect(await c.command({ name: 'device.action', deviceId: 'android:R5CT1234', action: 'wifi', params: { restore: true } })).toMatchObject({ ok: true });
+    expect(t.android.actions.map((a) => a.params)).toEqual([{ enabled: true }, { restore: true }]);
+  });
+
+  it('passes the params of a refusal on, so the UI words it (strings and numbers only, kept short)', async () => {
+    t = await startTestApp();
+    const c = await open();
+    await c.synced();
+    t.android.result = {
+      ok: false,
+      error: 'adb is not available',
+      code: 'action.toolMissing',
+      params: { tool: 'adb', exitCode: 3, nested: { no: 1 } as unknown as string, long: 'x'.repeat(900) },
+    } satisfies DeviceActionResult;
+    const reply = (await c.command({ name: 'device.action', deviceId: 'android:R5CT1234', action: 'screenshot' })) as { params?: Record<string, unknown> };
+    expect(reply).toMatchObject({ ok: false, code: 'action.toolMissing', error: 'adb is not available' });
+    expect(reply.params).toMatchObject({ tool: 'adb', exitCode: 3 });
+    expect(reply.params).not.toHaveProperty('nested');
+    expect(String(reply.params!.long).length).toBe(500);
+  });
+
   it('routes app actions through the SDK layer', async () => {
     t = await startTestApp();
     t.hub.apps.set('app:1', sampleApp());

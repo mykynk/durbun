@@ -26,6 +26,11 @@ export interface ConnectionState {
   historyReceived: number;
   /** Server speaks a different protocol version. */
   protocolMismatch: boolean;
+  /**
+   * The latest sync continued this window's data (only newer lines and changed requests were loaded) instead of
+   * replacing it. `onResync` fires either way.
+   */
+  resumed: boolean;
 }
 
 export const useConnection = create<ConnectionState>()(() => ({
@@ -39,6 +44,7 @@ export const useConnection = create<ConnectionState>()(() => ({
   expectedLogCount: 0,
   historyReceived: 0,
   protocolMismatch: false,
+  resumed: false,
 }));
 
 export function isConnected(status: ConnectionStatus): boolean {

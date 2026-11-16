@@ -858,12 +858,12 @@ export class AndroidDeviceSession {
 
   async runAction(action: DeviceActionId, params: Record<string, unknown>): Promise<DeviceActionResult> {
     const adb = this.deps.adb();
-    if (!adb) return fail('adb is not available', 'action.toolMissing');
+    if (!adb) return fail('adb is not available', 'action.toolMissing', undefined, { tool: 'adb' });
     if (!this.online) return fail(`${this.info.name} is not online`, 'action.deviceOffline');
     const { actions, unavailable } = this.availability();
     if (!actions.includes(action)) {
       const why = unavailable.find((u) => u.action === action);
-      return fail(`"${action}" is not available for ${this.info.name}`, why?.code ?? 'action.unsupported', why?.params);
+      return fail(`"${action}" is not available for ${this.info.name}`, why?.code ?? 'action.unsupported', why?.params, why?.params);
     }
     return runAndroidAction(
       {

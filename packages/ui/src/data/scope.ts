@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
-import type { AppSession, DeviceApp, DeviceInfo, LogEntry, NetworkEntry } from '@durbun/protocol';
+import type { AppSession, DeviceApp, DeviceInfo, LogEntry, NetworkEntry, StoreEvictions } from '@durbun/protocol';
 import { appGroupKey, deviceAppKey, useHub, type HubState } from './stores/hub';
 import { useScope, type Scope } from './stores/scope';
-import { emptyLogCounts, isCrashEntry, isProtectedEntry, type LogCounts, type LogStore } from './logStore';
-import { emptyNetworkCounts, type NetworkCounts, type NetworkStore } from './networkStore';
+import { useStoreLimits } from './stores/limits';
+import { emptyLogCounts, isCrashEntry, isProtectedEntry, logStore, type LogCounts, type LogStore } from './logStore';
+import { emptyNetworkCounts, networkStore, type NetworkCounts, type NetworkStore } from './networkStore';
 import { bundlePrefix } from './ownApps';
 import { fnv1a } from '../lib/hash';
 
@@ -496,4 +497,77 @@ export function scopeDeviceId(scope: Scope, hub: Pick<HubState, 'apps'>): string
   if (scope.kind === 'device' || scope.kind === 'deviceApp') return scope.deviceId;
   if (scope.kind === 'app') return hub.apps[scope.appId]?.deviceId;
   return undefined;
+}
+
+/* ───────────── What the limits deleted, per scope ───────────── */
+
+/** What the store limits deleted from what a scope shows (`scopeEvictions`). */
+export interface ScopeEvictions {
+  /** Lines of the scope the limits deleted (for an app: its sessions' lines and its processes' device lines). */
+  logs: number;
+  requests: number;
+  /** Why: the log memory budget filled before the line limit (any line deleted that way, not only this scope's). */
+  logsByMemory: boolean;
+  /** Time of the newest deleted line / request (any scope): older data may be incomplete. */
+  lastLogTs?: number;
+  lastRequestTs?: number;
+  /** The counts come from this window's own trims (a server that does not report evictions): every scope. */
+  approximate: boolean;
+}
+
+/**
+ * The scope's share of the server's eviction counts (`useStoreLimits(s => s.evictions)`), or this window's own trim
+ * counts without them. Show a quiet note at the oldest edge of a list when `logs` / `requests` is above 0.
+ */
+export function scopeEvictions(compiled: CompiledScope, evictions: StoreEvictions | null, local?: { logs: number; requests: number }): ScopeEvictions {
+  if (!evictions) return { logs: local?.logs ?? 0, requests: local?.requests ?? 0, logsByMemory: false, approximate: true };
+  const out: ScopeEvictions = { logs: 0, requests: 0, logsByMemory: evictions.logsByBytes > 0, approximate: false };
+  if (evictions.lastEvictedLogTs !== undefined) out.lastLogTs = evictions.lastEvictedLogTs;
+  if (evictions.lastEvictedRequestTs !== undefined) out.lastRequestTs = evictions.lastEvictedRequestTs;
+  const s = compiled.scope;
+  if (s.kind === 'all') {
+    out.logs = evictions.logs;
+    out.requests = evictions.requests;
+    return out;
+  }
+  if (s.kind === 'device') {
+    const c = evictions.byDevice[s.deviceId];
+    out.logs = c?.logs ?? 0;
+    out.requests = c?.requests ?? 0;
+    return out;
+  }
+  for (const id of compiled.appIds ?? []) {
+    const c = evictions.byApp[id];
+    if (!c) continue;
+    out.logs += c.logs;
+    out.requests += c.requests;
+  }
+  // Device lines of the app's processes that no session claimed (before the SDK connected, apps without one) and
+  // the device's own connection / log-stream lines.
+  const deviceId = compiled.deviceId;
+  const bundleId = compiled.bundleId;
+  if (deviceId && bundleId) {
+    const prefix = `${deviceId}|`;
+    // '' = Dürbün's own lines about the device (connection, log stream): every app scope of the device shows them.
+    const names = new Set<string>([bundleId, '']);
+    if (compiled.deviceApp?.processName) names.add(compiled.deviceApp.processName);
+    if (compiled.app?.app.processName) names.add(compiled.app.app.processName);
+    for (const [key, n] of Object.entries(evictions.byProcess)) {
+      if (!key.startsWith(prefix)) continue;
+      const name = key.slice(prefix.length);
+      if (names.has(name) || name.startsWith(`${bundleId}:`)) out.logs += n;
+    }
+  }
+  return out;
+}
+
+/**
+ * `scopeEvictions` for the current scope. Re-renders when the server's counts or the scope change; without server
+ * counts it reads the stores' own `dropped` at render (key the component on the store version to follow them).
+ */
+export function useScopeEvictions(): ScopeEvictions {
+  const compiled = useCompiledScope();
+  const evictions = useStoreLimits((s) => s.evictions);
+  const local = evictions ? undefined : { logs: logStore.dropped, requests: networkStore.dropped };
+  return useMemo(() => scopeEvictions(compiled, evictions, local), [compiled, evictions, local?.logs, local?.requests]);
 }

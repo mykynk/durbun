@@ -82,7 +82,8 @@ export class ScreenRecorder {
       if (a.stopRequested) a.proc.stop();
       result = await a.proc.result(() => a.stopRequested);
     } catch (err) {
-      result = fail(`Screen recording failed: ${(err as Error)?.message ?? String(err)}`);
+      const why = (err as Error)?.message ?? String(err);
+      result = fail(`Screen recording failed: ${why}`, 'action.recording.failed', undefined, { detail: why });
     } finally {
       clearTimeout(a.timer);
       this.active = undefined;

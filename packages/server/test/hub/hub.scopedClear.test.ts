@@ -78,7 +78,8 @@ describe('scoped log clears', () => {
     // Only the removed record comes off the count; Kumbara's record and count stay.
     expect(h.getDeviceApps().map((a) => [a.id, a.crashReports ?? 0])).toEqual([[PATI, 0], [KUMBARA, 1]]);
     expect(h.getApp(pati.id)!.stats.logs).toBe(0);
-    expect(events).toEqual([{ target: 'logs', deviceId: PIXEL, bundleId: PATI }]);
+    expect(events).toMatchObject([{ target: 'logs', deviceId: PIXEL, bundleId: PATI }]);
+    expect(events[0]).not.toHaveProperty('appId');
   });
 
   it('an app without an SDK session no longer wipes the whole device; clear("all") keeps the device', () => {
@@ -126,7 +127,8 @@ describe('scoped log clears', () => {
 
     expect(await a.command({ name: 'clear', target: 'logs', deviceId: PIXEL, bundleId: PATI })).toMatchObject({ ok: true });
     const cleared = await b.waitFor<Extract<ServerToUi, { type: 'cleared' }>>((m) => m.type === 'cleared', 3000, from);
-    expect(cleared).toEqual({ type: 'cleared', target: 'logs', deviceId: PIXEL, bundleId: PATI });
+    expect(cleared).toMatchObject({ type: 'cleared', target: 'logs', deviceId: PIXEL, bundleId: PATI });
+    expect(typeof cleared.epoch).toBe('string');
     expect(left(h, ['pati line', 'kumbara line'])).toEqual(['kumbara line']);
   });
 

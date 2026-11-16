@@ -7,6 +7,7 @@ import type {
   ClearTarget,
   DeviceActionId,
   DeviceActionResult,
+  I18nParams,
   ReplayOverrides,
   ToolCheck,
   UiNotice,
@@ -18,19 +19,22 @@ import { isUploadedFile } from './api';
 import { replayRequest, ReplayError } from './replay';
 import { OwnServerRequestError } from './ownTargets';
 import { errorMessage } from './util';
-import { TEMP_MOCK_PREFIX } from '../flows/nodes';
+import { TEMP_MOCK_PREFIX, wouldDisconnect } from '../flows/nodes';
 
 export interface CommandReply {
   ok: boolean;
   data?: unknown;
   error?: string;
   code?: string;
+  /** Params of `code`, for the UI's own wording. */
+  params?: I18nParams;
 }
 
 export class CommandError extends Error {
   constructor(
     message: string,
     readonly code: string,
+    readonly params?: I18nParams,
   ) {
     super(message);
     this.name = 'CommandError';
@@ -46,7 +50,7 @@ export interface CommandClient {
 export interface CommandDeps {
   hub: Hub;
   sdk: Pick<SdkLayer, 'sendCommand'>;
-  config: Pick<ConfigStore, 'updateSettings' | 'setMocks' | 'settings' | 'mocks'>;
+  config: Pick<ConfigStore, 'updateSettings' | 'setMocks' | 'settings' | 'mocks' | 'mocksRevision'>;
   logger: Logger;
   /** Every device driver that can own devices (platform drivers + demo). */
   drivers: () => DeviceDriver[];
@@ -123,19 +127,36 @@ export function actionTimeoutMs(action: string, params: Record<string, unknown>)
   return DEFAULT_ACTION_TIMEOUT_MS;
 }
 
-/** Map a driver/SDK result to a reply (reply.ok = result.ok, data = result.data). */
+/** String and finite number params only, at most 20, strings cut at 500 characters (driver output stays small). */
+function cleanParams(raw: Record<string, unknown>): I18nParams | undefined {
+  const out: I18nParams = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(raw)) {
+    if (n >= 20) break;
+    if (typeof v === 'string') out[k] = v.length > 500 ? `${v.slice(0, 499)}…` : v;
+    else if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+    else continue;
+    n++;
+  }
+  return n > 0 ? out : undefined;
+}
+
+/** Map a driver/SDK result to a reply (reply.ok = result.ok, data = result.data, params = result.params). */
 export function replyFromResult(result: unknown): CommandReply {
   if (!isPlainObject(result) || typeof result.ok !== 'boolean') {
     return fail('The device returned an invalid result', 'action.invalidResult');
   }
   const r = result as unknown as DeviceActionResult;
+  const params = isPlainObject(r.params) ? cleanParams(r.params) : undefined;
   if (r.ok) {
     const reply: CommandReply = { ok: true, data: r.data === undefined ? null : r.data };
     if (r.code) reply.code = r.code;
+    if (r.code && params) reply.params = params;
     return reply;
   }
   const reply: CommandReply = { ok: false, error: r.error || r.message || 'The action failed', code: r.code || 'action.failed' };
   if (r.data !== undefined) reply.data = r.data;
+  if (r.code && params) reply.params = params;
   return reply;
 }
 
@@ -194,6 +215,12 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
     const params = optParams(cmd.params);
     const driver = findDriver(deviceId);
     if (!driver) throw noDriverError(deviceId);
+    // Whoever asks (a window, a flow, the API): never cut the link this device is reached through.
+    if (wouldDisconnect(deps.hub.getDevice(deviceId), action, params)) {
+      throw new CommandError('The device is connected to this Mac over Wi-Fi; this change would cut the connection. Connect it with USB first', 'action.wouldDisconnect', {
+        connection: 'wifi',
+      });
+    }
     const running = Promise.resolve().then(() => driver.runAction(deviceId, action as DeviceActionId, params));
     // The UI uploads the file for each install: it is not needed once the install ends (even after our timeout).
     const upload = action === 'app-install' && deps.tempDir && typeof params.file === 'string' && isUploadedFile(deps.tempDir, params.file) ? params.file : undefined;
@@ -337,8 +364,20 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
           return await deviceAction(cmd);
         case 'app.action':
           return await appAction(cmd);
-        case 'mocks.set':
+        case 'mocks.set': {
+          // Another window saved since this list was loaded: refuse rather than overwrite its change.
+          const base = cmd.baseRevision;
+          const current = deps.config.mocksRevision;
+          if (typeof base === 'number' && current !== undefined && base !== current) {
+            return {
+              ok: false,
+              error: 'The mock rules were changed elsewhere; reload them or save again to overwrite',
+              code: 'mocks.conflict',
+              data: { rules: deps.config.mocks, revision: current },
+            };
+          }
           return ok(deps.config.setMocks(withoutEndedFlowRules(cmd.rules, deps.config.mocks)));
+        }
         case 'settings.update':
           return await settingsUpdate(cmd, client);
         case 'vm.attach': {
@@ -375,7 +414,9 @@ export function createCommandRouter(deps: CommandDeps): CommandRouter {
       }
     } catch (err) {
       if (err instanceof CommandError || err instanceof ReplayError || err instanceof ConfigValidationError || err instanceof OwnServerRequestError) {
-        return fail(err.message, err.code);
+        const reply = fail(err.message, err.code);
+        if (err instanceof CommandError && err.params) reply.params = err.params;
+        return reply;
       }
       deps.logger.error(`command ${name} failed: ${errorMessage(err)}`);
       // Modules may throw errors carrying an i18n code (e.g. 'vm.noServiceUrl'); keep it for the UI.

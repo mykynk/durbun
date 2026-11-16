@@ -143,6 +143,10 @@ describe('bigger log buffers (logs-restart with bufferSize)', () => {
     expect(calls).toEqual(['logcat -g', 'logcat -G 16M', 'logcat -g']);
     expect(restarted).toBe(1);
     expect(await runAndroidAction(t, 'logs-restart', { bufferSize: '1G' })).toMatchObject({ ok: false, code: 'action.invalidParams' });
-    expect(await runAndroidAction({ ...t, apiLevel: 19 }, 'logs-restart', { bufferSize: '16M' })).toMatchObject({ ok: false, code: 'action.unsupported' });
+    expect(await runAndroidAction({ ...t, apiLevel: 19 }, 'logs-restart', { bufferSize: '16M' })).toMatchObject({
+      ok: false,
+      code: 'action.apiTooLow',
+      params: { apiLevel: 19, minApi: 21, minVersion: '5' },
+    });
   });
 });

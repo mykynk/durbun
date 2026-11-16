@@ -108,7 +108,7 @@ describe('clear', () => {
     expect(hub.getLogs().some((l) => l.message === 'device line')).toBe(true);
     expect(hub.getNetwork()).toHaveLength(2);
     expect(hub.getApp(a.id)!.stats).toMatchObject({ logs: 0, errors: 0, requests: 1 });
-    expect(events).toEqual([{ target: 'logs', appId: a.id }]);
+    expect(events).toMatchObject([{ target: 'logs', appId: a.id }]);
   });
 
   it('clears network and metrics per device', () => {
@@ -143,7 +143,8 @@ describe('clear', () => {
       expect(hub.getApps().map((x) => x.deviceId)).toEqual(['android:A']);
       vi.advanceTimersByTime(100);
       expect(changes.flatMap((c) => c.removedDevices)).toEqual(['ios-sim:B']);
-      expect(events).toEqual([{ target: 'all' }]);
+      expect(events).toMatchObject([{ target: 'all' }]);
+      expect(events[0]).not.toHaveProperty('deviceId');
     } finally {
       vi.useRealTimers();
     }

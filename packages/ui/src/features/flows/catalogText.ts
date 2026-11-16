@@ -68,6 +68,9 @@ const appIdTr = (description = 'Uygulamanın bundle id’si / paket kimliği.'):
   hint: `${description} Varsayılan: çalıştırmanın uygulaması ({{target.appId}}).`,
 });
 
+/** Device settings a step changes go back when the run ends, unless this is off. */
+const restoreTr: ParamTextTr = { label: 'Sonra eski değerine döndür', hint: 'Akış bitince ayar, akıştan önceki değerine döner.' };
+
 const timeoutTr: ParamTextTr = { label: 'Zaman aşımı (ms)', hint: 'Bu kadar milisaniyeden sonra vazgeçilir.' };
 
 const sinceTr: ParamTextTr = {
@@ -423,6 +426,85 @@ export const NODE_TEXT_TR: Record<string, NodeTextTr> = {
     outputs: {},
   },
 
+  'device.permission': {
+    title: 'Uygulama izni',
+    description:
+      'Uygulamanın bir iznini verir ya da geri alır. Android 6 ve sonrası: kamera gibi bir çalışma zamanı izni (android.permission.CAMERA; geri almak uygulamayı kapatır). iOS simülatörü: kamera, fotoğraflar, konum, kişiler, mikrofon gibi bir gizlilik izni. Kapatılmadıkça çalıştırma bitince eski hâline döner; iOS simülatöründe bu, uygulamanın izni yeniden sorması demektir.',
+    params: {
+      appId: appIdTr(),
+      permission: { label: 'İzin', hint: 'Android izin adı ya da iOS simülatöründeki gizlilik izni.' },
+      grant: { label: 'İzni ver', hint: 'Açık: izni verir. Kapalı: geri alır.' },
+      restoreAfter: restoreTr,
+    },
+    outputs: {},
+  },
+  'device.appLanguage': {
+    title: 'Uygulama dili',
+    description: 'Telefonun dilini değiştirmeden yalnızca uygulamanın dilini ayarlar (Android 13 ve sonrası). “system” yazarsanız uygulama yeniden telefonun dilini izler.',
+    params: {
+      appId: appIdTr(),
+      locale: { label: 'Dil', hint: 'tr-TR ya da en-US gibi bir dil kodu, ya da “system”.' },
+      restoreAfter: restoreTr,
+    },
+    outputs: {},
+  },
+  'device.airplaneMode': {
+    title: 'Uçak modu',
+    description: 'Uçak modunu açar ya da kapatır (Android 11 ve sonrası). Cihaz bu Mac’e Wi-Fi ile bağlıysa çalışmaz: bağlantıyı keserdi.',
+    params: {
+      enabled: { label: 'Uçak modu açık', hint: 'Açık: uçak modunu açar. Kapalı: kapatır.' },
+      restoreAfter: restoreTr,
+    },
+    outputs: {},
+  },
+  'device.wifi': {
+    title: 'Wi-Fi',
+    description: 'Wi-Fi’ı açar ya da kapatır (Android). Cihaz bu Mac’e Wi-Fi ile bağlıysa çalışmaz: bağlantıyı keserdi.',
+    params: {
+      enabled: { label: 'Wi-Fi açık', hint: 'Açık: Wi-Fi’ı açar. Kapalı: kapatır.' },
+      restoreAfter: restoreTr,
+    },
+    outputs: {},
+  },
+  'device.mobileData': {
+    title: 'Mobil veri',
+    description: 'Mobil veriyi açar ya da kapatır (Android).',
+    params: {
+      enabled: { label: 'Mobil veri açık', hint: 'Açık: mobil veriyi açar. Kapalı: kapatır.' },
+      restoreAfter: restoreTr,
+    },
+    outputs: {},
+  },
+  'device.rotation': {
+    title: 'Ekran yönü',
+    description: 'Ekranı döndürür ya da otomatik döndürmeyi geri açar (Android). Yönünü sabitleyen uygulamalar kendi yönünde kalır.',
+    params: {
+      orientation: {
+        label: 'Yön',
+        hint: 'Ekran yönü.',
+        options: {
+          auto: 'Otomatik döndür',
+          portrait: 'Dikey',
+          landscape: 'Yatay',
+          'reverse-portrait': 'Dikey, ters',
+          'reverse-landscape': 'Yatay, ters',
+        },
+      },
+      restoreAfter: restoreTr,
+    },
+    outputs: {},
+  },
+  'device.dontKeepActivities': {
+    title: 'Etkinlikleri saklama',
+    description:
+      'Android geliştirici seçeneği: uygulamanın her ekranı, ekrandan çıkılır çıkılmaz kapanır. Ekrana geri dönmek, uygulamanın durumunu nasıl geri yüklediğini test eder.',
+    params: {
+      enabled: { label: 'Seçenek açık', hint: 'Açık: seçeneği açar. Kapalı: kapatır.' },
+      restoreAfter: restoreTr,
+    },
+    outputs: {},
+  },
+
   /* ── wait ── */
   'wait.network': {
     title: 'Uygulama isteğini bekle',
@@ -561,6 +643,7 @@ export const NODE_TEXT_TR: Record<string, NodeTextTr> = {
 const APP_ID_EN = { appId: 'App' };
 const TIMEOUT_EN = { timeoutMs: 'Timeout (ms)' };
 const SINCE_EN = { since: 'Time range' };
+const RESTORE_EN = { restoreAfter: 'Restore after the run' };
 const URL_RULE_EN = { method: 'Method', url: 'URL pattern', match: 'Match type' };
 
 /** Short English param labels: type → param name → label (sentence case, 1–3 words). */
@@ -614,6 +697,13 @@ export const PARAM_LABELS_EN: Record<string, Record<string, string>> = {
   'device.keyEvent': { key: 'Key' },
   'device.statusBar': { mode: 'Status bar' },
   'device.animations': { enabled: 'Animations on' },
+  'device.permission': { ...APP_ID_EN, permission: 'Permission', grant: 'Grant', ...RESTORE_EN },
+  'device.appLanguage': { ...APP_ID_EN, locale: 'Language', ...RESTORE_EN },
+  'device.airplaneMode': { enabled: 'Airplane mode on', ...RESTORE_EN },
+  'device.wifi': { enabled: 'Wi-Fi on', ...RESTORE_EN },
+  'device.mobileData': { enabled: 'Mobile data on', ...RESTORE_EN },
+  'device.rotation': { orientation: 'Orientation', ...RESTORE_EN },
+  'device.dontKeepActivities': { enabled: 'Option on', ...RESTORE_EN },
   'wait.network': { ...URL_RULE_EN, status: 'Status code', ...TIMEOUT_EN, ...SINCE_EN },
   'wait.log': {
     text: 'Log text',
@@ -642,6 +732,30 @@ export const PARAM_LABELS_EN: Record<string, Record<string, string>> = {
   'output.marker': { label: 'Marker text' },
   'output.slack': { text: 'Message', includeSummary: 'Include summary' },
   'output.note': { text: 'Text' },
+};
+
+/**
+ * Step descriptions as the picker and the inspector show them, where the catalog's own text names raw parameters or
+ * ports (`loop`, `count`, `keep`, `true`). The UI words them with the labels on screen ("Each round", "Times",
+ * "Keep rule", "Yes"); the catalog text stays as it is for the AI pack and the schema.
+ */
+export const DESCRIPTION_UI: Record<string, { tr: string; en: string }> = {
+  'logic.condition': {
+    tr: 'Kuralları kontrol eder: sağlanırsa “Evet”, sağlanmazsa “Hayır” bağlantısından devam eder.',
+    en: 'Checks the rules: continues through “Yes” when they hold, “No” when they do not.',
+  },
+  'logic.repeat': {
+    tr: '“Her turda” bağlantısındaki adımları en fazla “Kaç kez” alanındaki sayı kadar çalıştırır (bir tur, adımlar bitince ya da bu adıma geri dönünce biter), sonra “Bitince” bağlantısından devam eder. “Durma koşulu” kuralları varsa, kurallar sağlanır sağlanmaz durur: bir şey olana kadar tekrar tekrar kontrol etmek için kullanın (“sipariş hazır olana kadar”). Tur numarası {{<id>.index}} (0’dan başlar).',
+    en: 'Runs the steps on “Each round” up to the number in “Times” (a round ends when its steps end or come back to this step), then continues through “When done”. With “Stop when” rules it stops as soon as they hold: use it to check again and again until something happens (“until the order is ready”). The round number is {{<id>.index}} (0-based).',
+  },
+  'mock.add': {
+    tr: 'Uygulamanın SDK’sının eşleşen isteklere uyguladığı bir mock kuralı ekler: sahte yanıt döner, gecikme ekler ya da hata verir. “Kuralı koru” açık değilse çalıştırma bitince kaldırılır. Uygulamada Dürbün SDK’sı gerekir.',
+    en: 'Adds a mock rule the app’s SDK applies to matching requests: responds with a fake response, adds a delay or fails. Removed when the run ends unless “Keep rule” is on. Needs the Dürbün SDK in the app.',
+  },
+  'mock.toggle': {
+    tr: 'Var olan bir mock kuralını (kimliği ya da adıyla) açar veya kapatır. “Değişikliği koru” açık değilse çalıştırmadan sonra eski haline döner.',
+    en: 'Turns an existing mock rule (by id or name) on or off. Goes back to how it was after the run unless “Keep change” is on.',
+  },
 };
 
 export const GROUP_TEXT: Record<'tr' | 'en', Record<FlowNodeGroup, string>> = {

@@ -28,6 +28,7 @@ export {
   logStatusText,
   errorText,
   errorDetail,
+  errorParams,
   deviceDisplayName,
   driverStatusText,
   localizeAdjustedDetails,

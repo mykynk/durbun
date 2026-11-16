@@ -102,7 +102,9 @@ export function normalizeEnvironments(raw: unknown): { value: FlowEnvironments; 
 
 export class EnvironmentStore {
   readonly file: string;
-  private data: FlowEnvironments = emptyEnvironments();
+  private data: FlowEnvironments = { ...emptyEnvironments(), revision: 1 };
+  /** Bumped by every save (FlowEnvironments.revision; not written to the file). */
+  private revision = 1;
   private readonly queue = new Queue();
   private readonly listeners = new Set<() => void>();
 
@@ -118,7 +120,7 @@ export class EnvironmentStore {
       const raw = await readJsonFile(this.file);
       if (raw === undefined) return;
       const { value, problems } = normalizeEnvironments(raw);
-      this.data = value;
+      this.data = { ...value, revision: this.revision };
       for (const p of problems) this.logger.warn(`${ENVIRONMENTS_FILE}: ${p}`);
     } catch (err) {
       this.logger.warn(`could not read ${ENVIRONMENTS_FILE}: ${(err as Error).message}; starting without environments`);
@@ -141,14 +143,23 @@ export class EnvironmentStore {
     return this.data.environments.find((e) => e.id === wanted);
   }
 
+  /**
+   * Replace the environments. A document carrying `revision` (as GET returned it) is refused with 409
+   * `env.conflict` when they were saved since; without it the save overwrites.
+   */
   async put(raw: unknown): Promise<{ value: FlowEnvironments; problems: string[] }> {
     if (!isPlainObject(raw)) throw new FlowStoreError('Expected an environments object', 'env.invalid');
+    if (raw.revision !== undefined && raw.revision !== this.revision) {
+      throw new FlowStoreError('The environments were changed elsewhere; reload them or save again to overwrite', 'env.conflict', 409);
+    }
     const result = normalizeEnvironments(raw);
     // A certificate that does not parse would silently leave the HTTPS steps failing: refuse the save instead.
     const badCa = result.problems.find((p) => p.endsWith(CA_PROBLEM));
     if (badCa) throw new FlowStoreError(badCa, 'env.tls.invalidCa');
-    this.data = result.value;
-    await this.queue.run(() => writeJsonFile(this.file, this.data, 0o600));
+    this.revision++;
+    this.data = { ...result.value, revision: this.revision };
+    const { revision: _revision, ...file } = this.data;
+    await this.queue.run(() => writeJsonFile(this.file, file, 0o600));
     for (const l of this.listeners) l();
     return { value: this.get(), problems: result.problems };
   }

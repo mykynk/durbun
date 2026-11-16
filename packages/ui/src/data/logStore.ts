@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type LogEntry, type LogLevel } from '@durbun/protocol';
+import { DEFAULT_SETTINGS, type LogEntry, type LogLevel, type StoreEvictions } from '@durbun/protocol';
 import { VersionedStore } from './versioned';
 
 /** Incrementally maintained counters (cheap badges/status bar without scanning 200k entries). */
@@ -64,7 +64,9 @@ function lowerBoundIn(arr: readonly LogEntry[], id: number): number {
  *   is bumped whenever it changes. `counts`, `size`, `getById` and `findLast` include it.
  * - `headDropped`: entries trimmed from the head of `entries` since the last reset (absolute index = headDropped + i).
  * - `dropped`: entries the memory limit deleted since the last reset (head trims minus the crash records moved to
- *   `kept`, plus kept records evicted). The views tell the user about it.
+ *   `kept`, plus kept records evicted). The views tell the user about it. With a server that reports its
+ *   evictions (`followServer`) it is the server's count: the window drops what the server no longer holds, so
+ *   both delete the same lines for the same reason (line limit or memory budget).
  * - `generation`: bumped on reset / removeWhere / out-of-order inserts (arbitrary changes) — drop derived
  *   caches when it changes.
  */
@@ -79,6 +81,8 @@ export class LogStore extends VersionedStore {
   liveReceived = 0;
   headDropped = 0;
   dropped = 0;
+  /** The server's latest eviction counts (null when it does not report them). */
+  evictions: StoreEvictions | null = null;
   generation = 0;
   /**
    * Bumped when an entry's level changed in place (a network row took its request's outcome level). Row
@@ -216,10 +220,11 @@ export class LogStore extends VersionedStore {
   }
 
   /**
-   * Head trim of `entries` down to `maxEntries` (minus what `kept` holds). Protected entries on the way move to
-   * `kept` (oldest kept ones go when it is over `keptCap`); everything else is dropped.
+   * Head trim of `entries` down to `maxEntries` (minus what `kept` holds) and below `floorId` (the oldest line the
+   * server still holds). Protected entries on the way move to `kept` (oldest kept ones go when it is over
+   * `keptCap`); everything else is dropped.
    */
-  private trim(): void {
+  private trim(floorId = 0): void {
     const arr = this.entries;
     const kept = this.kept;
     const cap = this.keptCap;
@@ -227,7 +232,7 @@ export class LogStore extends VersionedStore {
     let total = arr.length + kept.length - evict;
     let n = 0;
     let moved: LogEntry[] | null = null;
-    while (total > this.maxEntries && n < arr.length) {
+    while (n < arr.length && (total > this.maxEntries || arr[n]!.id < floorId)) {
       const e = arr[n++]!;
       if (cap > 0 && isProtectedEntry(e)) {
         (moved ??= []).push(e);
@@ -261,6 +266,20 @@ export class LogStore extends VersionedStore {
     }
   }
 
+  /**
+   * The server's eviction counts arrived (snapshot, batch, cleared): drop the lines it no longer holds (ids below
+   * `oldestLogId`; crash records move to `kept` as with a local trim) and take its count as `dropped`.
+   */
+  followServer(evictions: StoreEvictions): void {
+    this.evictions = evictions;
+    const before = this.size;
+    const keptBefore = this.kept;
+    if (evictions.oldestLogId > 0 && this.entries.length > 0 && this.entries[0]!.id < evictions.oldestLogId) this.trim(evictions.oldestLogId);
+    const changed = this.dropped !== evictions.logs || this.size !== before || this.kept !== keptBefore;
+    this.dropped = evictions.logs;
+    if (changed) this.changed();
+  }
+
   setMaxEntries(max: number): void {
     if (!Number.isFinite(max) || max <= 0) return;
     this.maxEntries = Math.floor(max);
@@ -276,6 +295,7 @@ export class LogStore extends VersionedStore {
     this.keptRevision++;
     this.headDropped = 0;
     this.dropped = 0;
+    this.evictions = null;
     this.netRows = new Map();
     this.lastId = 0;
     this.counts = emptyLogCounts();

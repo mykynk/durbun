@@ -171,6 +171,15 @@ export function unsupportedReason(
   if (needs.deviceAction && device) {
     const action = needs.deviceAction;
     if (!device.actions.includes(action)) {
+      // The driver says why (Wi-Fi link, Android version, emulator only, a missing tool): word it with its code.
+      const known = device.unavailableActions?.find((u) => u.action === action);
+      if (known) {
+        const message =
+          known.code === 'action.wouldDisconnect'
+            ? `${spec!.title} would cut the Wi-Fi connection of ${device.name} to this Mac; connect it with USB`
+            : `${spec!.title} is not available on ${device.name} (${known.code})`;
+        return { level: 'warn', code: known.code, message, nodeId: node.id, params: { ...(known.params ?? {}), step: spec!.title, device: device.name, action } };
+      }
       const s = DEVICE_ACTION_SUPPORT[action];
       const where =
         device.platform === 'android' && s?.android === 'emulator'

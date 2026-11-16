@@ -320,9 +320,14 @@ export function createFlow(flow: unknown): Promise<FlowWithIssues> {
   return json('/api/flows', postJson({ flow }));
 }
 
-/** Saves a flow; drafts with errors are saved too and come back with their issues. */
-export function saveFlow(id: string, flow: unknown): Promise<FlowWithIssues> {
-  return json(`/api/flows/${enc(id)}`, { ...postJson({ flow }), method: 'PUT' });
+/**
+ * Saves a flow; drafts with errors are saved too and come back with their issues. `baseUpdatedAt`: the
+ * `updatedAt` of the copy the editor loaded — when the flow was saved elsewhere since, the server refuses with
+ * `ApiError` 409 `flow.conflict` (`isEditConflict(err)`); save again without it to overwrite.
+ */
+export function saveFlow(id: string, flow: unknown, opts: { baseUpdatedAt?: number } = {}): Promise<FlowWithIssues> {
+  const body = typeof opts.baseUpdatedAt === 'number' ? { flow, baseUpdatedAt: opts.baseUpdatedAt } : { flow };
+  return json(`/api/flows/${enc(id)}`, { ...postJson(body), method: 'PUT' });
 }
 
 export async function deleteFlow(id: string): Promise<void> {
@@ -431,8 +436,14 @@ export function getFlowEnvironments(signal?: AbortSignal): Promise<FlowEnvironme
   return json('/api/flow-environments', { signal });
 }
 
-export function saveFlowEnvironments(envs: FlowEnvironments): Promise<FlowEnvironments> {
-  return json('/api/flow-environments', { ...postJson(envs), method: 'PUT' });
+/**
+ * Saves the environments. A document with the `revision` GET returned is refused when another window saved
+ * meanwhile (`ApiError` 409 `env.conflict`); `overwrite: true` saves over it.
+ */
+export function saveFlowEnvironments(envs: FlowEnvironments, opts: { overwrite?: boolean } = {}): Promise<FlowEnvironments> {
+  const { revision, ...rest } = envs;
+  const body = opts.overwrite || revision === undefined ? rest : envs;
+  return json('/api/flow-environments', { ...postJson(body), method: 'PUT' });
 }
 
 /* ───────────── Dürbün packages, backups, UI preferences ───────────── */

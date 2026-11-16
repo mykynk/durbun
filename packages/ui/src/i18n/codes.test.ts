@@ -83,6 +83,23 @@ const SYSTEM_SAMPLES: [code: string, params: Record<string, string | number>][] 
   ['app.clockBehind', { app: 'Pati', bundleId: 'com.mykynk.pati', device: 'Galaxy A73', seconds: 64, offsetMs: 64_210, accuracyMs: 18 }],
   ['app.clockAhead', { app: 'Mahalle', bundleId: 'com.mykynk.mahalle', device: 'Yusuf’un iPhone’u', seconds: 9, offsetMs: -9_120, accuracyMs: 40 }],
   ['app.deviceFound', { app: 'Kasa', bundleId: 'com.example.kasa', device: 'Yusuf’un iPhone’u', deviceId: 'ios:00008120-001A', from: 'net:ios-unknown-iphone-at-192-168-1-42' }],
+  ['mocks.conflict', {}],
+  ['flow.conflict', {}],
+  ['env.conflict', {}],
+  ['flow.step.permissionGranted', { permission: 'android.permission.CAMERA', app: 'com.mykynk.pati' }],
+  ['flow.step.permissionRevoked', { permission: 'android.permission.CAMERA', app: 'com.mykynk.pati' }],
+  ['flow.step.appLanguage', { app: 'com.mykynk.pati', locale: 'tr-TR' }],
+  ['flow.step.airplaneModeOn', {}],
+  ['flow.step.airplaneModeOff', {}],
+  ['flow.step.wifiOn', {}],
+  ['flow.step.wifiOff', {}],
+  ['flow.step.mobileDataOn', {}],
+  ['flow.step.mobileDataOff', {}],
+  ['flow.step.rotation', { orientation: 'landscape' }],
+  ['flow.step.dontKeepActivitiesOn', {}],
+  ['flow.step.dontKeepActivitiesOff', {}],
+  ['flow.param.locale', { value: 'Turkish' }],
+  ['flow.param.permission', { value: 'CAMERA' }],
 ];
 
 const NOTICE_SAMPLES: [code: string, params: Record<string, string | number> | undefined][] = [
@@ -289,6 +306,19 @@ const FLOW_SAMPLES: [code: string, params: Record<string, string | number>][] = 
   ['package.flow.saveFailed', { flow: 'Giriş yap', error: 'At most 200 flows' }],
   ['package.mocks.saveFailed', { error: 'too many mock rules (1001); at most 1000' }],
   ['package.run.failed', { run: 'Giriş yap', error: 'ENOSPC: no space left on device' }],
+  // Device action refusals worded from their params (no English sentence inside the Turkish one)
+  ['action.toolMissing', { tool: 'devicectl', detail: 'Xcode 15 or newer (xcrun devicectl)', minXcode: '15' }],
+  ['action.toolMissing', { tool: 'idevicescreenshot', detail: 'x', minXcode: '15', install: 'brew install libimobiledevice' }],
+  ['action.toolMissing', { tool: 'adb' }],
+  ['action.toolTooOld', { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)', from: 'Xcode' }],
+  ['action.osTooOld', { osVersion: '16.7.10', minVersion: '17' }],
+  ['action.apiTooLow', { apiLevel: 19, minApi: 21, minVersion: '5' }],
+  ['action.recording.failed', { detail: 'Encoder error (err=-38)' }],
+  ['action.recording.failed', { tool: 'adb', exitCode: 137 }],
+  ['action.recording.noVideo', {}],
+  ['action.processUnknown', { app: 'com.example.shop', tool: 'devicectl' }],
+  ['action.clearData.unexpectedPath', { path: '/Users/me/Library/Developer/CoreSimulator/x' }],
+  ['action.launch.noLauncher', { app: 'com.example.shop', user: 10 }],
 ];
 
 /** English words that must not leak into Turkish system lines. */
@@ -475,6 +505,11 @@ describe('server codes → i18n', () => {
     expect(errorText(new Error('plain'))).toBe('plain');
     expect(errorText('text')).toBe('text');
     expect(errorDetail('Could not launch com.x: Error: Activity class does not exist')).toBe('Error: Activity class does not exist');
+    // Server params (newer servers): worded from them alone, the English message stays out.
+    expect(errorText({ code: 'action.launch.noLauncher', message: 'Could not launch com.x: it has no launcher activity', params: { app: 'com.x', user: 10 } })).toBe(
+      'com.x başlatılamadı: başlatıcı ekranı yok ya da 10 numaralı kullanıcıda kurulu değil.',
+    );
+    expect(errorText({ code: 'action.toolMissing', message: 'adb is not available', params: { tool: 'adb' } })).not.toMatch(/available/);
     setLanguage('en');
   });
 

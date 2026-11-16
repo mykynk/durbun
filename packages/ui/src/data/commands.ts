@@ -1,4 +1,4 @@
-import type { LogEntry, MockRule, NetworkEntry, ServerSettings, ServerToUi, ToolCheck, UiCommand, UiToServer } from '@durbun/protocol';
+import type { I18nParams, LogEntry, MockRule, NetworkEntry, ServerSettings, ServerToUi, ToolCheck, UiCommand, UiToServer } from '@durbun/protocol';
 
 /** Reply `data` per command (SPEC / protocol `UiCommand` docs). */
 export interface CommandReplyMap {
@@ -24,12 +24,15 @@ export class CommandError extends Error {
   readonly code?: string;
   readonly command: CommandName;
   readonly data?: unknown;
-  constructor(command: CommandName, message: string, code?: string, data?: unknown) {
+  /** Params of `code` (tool, versions, app; a tool's own output as `detail`), when the server sends them. */
+  readonly params?: I18nParams;
+  constructor(command: CommandName, message: string, code?: string, data?: unknown, params?: I18nParams) {
     super(message);
     this.name = 'CommandError';
     this.command = command;
     this.code = code;
     this.data = data;
+    if (params) this.params = params;
   }
 }
 
@@ -171,6 +174,20 @@ export function failInFlightCommands(): void {
   }
 }
 
+/** Only string / finite number params (a reply is data from the server, never trusted blindly). */
+function cleanParams(raw: unknown): I18nParams | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: I18nParams = {};
+  let any = false;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))) {
+      out[k] = v;
+      any = true;
+    }
+  }
+  return any ? out : undefined;
+}
+
 /** Route a `reply` message to its pending promise. Returns false when the request is unknown. */
 export function handleReply(msg: Extract<ServerToUi, { type: 'reply' }>): boolean {
   const p = pending.get(msg.requestId);
@@ -178,7 +195,7 @@ export function handleReply(msg: Extract<ServerToUi, { type: 'reply' }>): boolea
   pending.delete(msg.requestId);
   p.cleanup();
   if (msg.ok) p.resolve(msg.data ?? null, typeof msg.code === 'string' && msg.code ? msg.code : undefined);
-  else p.reject(new CommandError(p.command.name, msg.error || 'Command failed', msg.code, msg.data));
+  else p.reject(new CommandError(p.command.name, msg.error || 'Command failed', msg.code, msg.data, cleanParams(msg.params)));
   return true;
 }
 

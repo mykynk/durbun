@@ -6,6 +6,10 @@
  * history are filtered out of later batches by id, and `cleared` events that happened before the sync
  * point are dropped (their effect is already in the snapshot). History chunks are written with
  * backpressure; a client that falls more than 64 MB behind is closed with 1013 so it resyncs.
+ *
+ * Resume: a client that still holds data opens `/ui?epoch=…&afterLogId=…&netSeq=…` (UiResumeRequest). When the
+ * snapshot builder accepts it (same data generation, ids not ahead of the server), the snapshot carries
+ * `resumed` and the history only the lines after `afterLogId`; otherwise everything is sent as without it.
  */
 import { WebSocket } from 'ws';
 import type { LogEntry, ServerToUi, UiNotice } from '@durbun/protocol';
@@ -29,14 +33,36 @@ const HISTORY_WRITE_TIMEOUT_MS = 60_000;
 const PING_INTERVAL_MS = 30_000;
 
 type BatchMessage = Extract<ServerToUi, { type: 'batch' }>;
+type SnapshotMessage = Extract<ServerToUi, { type: 'snapshot' }>;
+
+/** Where a reconnecting client's copy stands (query of the WS /ui URL). */
+export interface UiResumeRequest {
+  epoch: string;
+  afterLogId: number;
+  netSeq: number;
+}
+
+/** `?epoch=…&afterLogId=…&netSeq=…` → UiResumeRequest (undefined when absent or malformed). */
+export function parseResumeQuery(query: URLSearchParams): UiResumeRequest | undefined {
+  const epoch = query.get('epoch');
+  const afterLogId = Number(query.get('afterLogId'));
+  const netSeq = Number(query.get('netSeq'));
+  if (!epoch || epoch.length > 100) return undefined;
+  if (!Number.isSafeInteger(afterLogId) || afterLogId < 0 || !Number.isSafeInteger(netSeq) || netSeq < 0) return undefined;
+  return { epoch, afterLogId, netSeq };
+}
 
 export interface UiChannelDeps {
   hub: Pick<Hub, 'getLogs'>;
   logger: Logger;
   /** Builds the hello message (server info + effective settings). */
   hello(): ServerToUi;
-  /** Builds the snapshot message (devices, apps, network, mocks, drivers, processes, metrics, logCount, deviceApps). */
-  snapshot(): ServerToUi;
+  /**
+   * Builds the snapshot message (devices, apps, network, mocks, drivers, processes, metrics, logCount, deviceApps).
+   * With a resume request it may continue the client's copy: then it sets `resumed` (and the history starts
+   * after `resumed.afterLogId`).
+   */
+  snapshot(resume?: UiResumeRequest): ServerToUi;
   router: {
     handle(command: unknown, client: CommandClient): Promise<CommandReply>;
     clientClosed(clientId: number): void;
@@ -72,6 +98,12 @@ export function batchFromChange(change: Partial<HubChange>): BatchMessage | null
       any = true;
     }
   }
+  // Eviction counts are news on their own (the UI trims to the oldest line still held); the change counter is not.
+  if (change.evictions) {
+    msg.evictions = change.evictions;
+    any = true;
+  }
+  if (any && typeof change.netSeq === 'number') msg.netSeq = change.netSeq;
   return any ? msg : null;
 }
 
@@ -126,7 +158,7 @@ export class UiChannel {
     return this.clients.size;
   }
 
-  attach(ws: WebSocket): void {
+  attach(ws: WebSocket, resume?: UiResumeRequest): void {
     const client = new UiClient(this.nextId++, ws);
     this.clients.set(client.id, client);
     ws.on('message', (data, isBinary) => this.onMessage(client, data, isBinary));
@@ -136,7 +168,7 @@ export class UiChannel {
       client.alive = true;
     });
     this.deps.logger.debug(`ui client #${client.id} connected (${this.clients.size} open)`);
-    void this.sync(client);
+    void this.sync(client, resume);
   }
 
   /** Send to every client (queued for clients still receiving their initial sync). */
@@ -216,16 +248,18 @@ export class UiChannel {
 
   /* ───────────── internals ───────────── */
 
-  private async sync(client: UiClient): Promise<void> {
+  private async sync(client: UiClient, resume?: UiResumeRequest): Promise<void> {
     try {
       // Sync point: everything below is computed synchronously, so no hub event can interleave.
       client.pending = client.pending.filter((m) => m.type !== 'cleared');
       const hello = this.deps.hello();
-      const snapshot = this.deps.snapshot();
-      const logs = this.deps.hub.getLogs();
-      let maxId = 0;
+      const snapshot = this.deps.snapshot(resume);
+      const afterId = snapshot.type === 'snapshot' ? snapshot.resumed?.afterLogId : undefined;
+      const logs = this.deps.hub.getLogs(afterId !== undefined ? { afterId } : {});
+      let maxId = afterId ?? 0;
       for (const l of logs) if (l.id > maxId) maxId = l.id;
       client.historyMaxId = maxId;
+      if (afterId !== undefined) (snapshot as SnapshotMessage).logCount = logs.length;
 
       this.sendMessage(client, hello);
       this.sendMessage(client, snapshot);
@@ -370,6 +404,7 @@ export class UiChannel {
         if (reply.data !== undefined) message.data = reply.data;
         if (reply.error !== undefined) message.error = reply.error;
         if (reply.code !== undefined) message.code = reply.code;
+        if (reply.params !== undefined) message.params = reply.params;
         this.sendTo(client.id, message);
       });
   }

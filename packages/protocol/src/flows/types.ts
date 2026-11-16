@@ -209,6 +209,11 @@ export interface FlowEnvironments {
   version: 1;
   activeId?: string;
   environments: FlowEnvironment[];
+  /**
+   * Save counter the server adds (never stored in the file). Send the document back with it and a save made
+   * meanwhile by another window is refused (409 `env.conflict`); leave it out to overwrite.
+   */
+  revision?: number;
 }
 
 /* ────────────────────────────── Validation ────────────────────────────── */

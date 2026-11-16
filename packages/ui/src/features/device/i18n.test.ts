@@ -157,4 +157,34 @@ describe('code localization helpers', () => {
     expect(d.text).toMatch(/not available/);
     expect(d.detail).toBe('raw server text');
   });
+
+  it('words refusals from the server params: no English sentence inside the Turkish text', () => {
+    setLanguage('tr');
+    expect(describeError({ code: 'action.toolMissing', message: 'adb is not available', params: { tool: 'adb' } })).toEqual({
+      text: 'adb bu Mac’te bulunamadı; Sistem kontrolü nasıl kurulacağını gösterir.',
+      detail: undefined,
+      code: 'action.toolMissing',
+    });
+    const old = describeError({
+      code: 'action.osTooOld',
+      message: 'This action uses Xcode’s devicectl, which works with iOS 17 and later; Phone runs iOS 16.7 (ERROR: x)',
+      params: { osVersion: '16.7', minVersion: '17' },
+    });
+    expect(old.text).toBe('Bu işlem Xcode’un devicectl aracıyla yapılır; devicectl iOS 17 ve sonrasıyla çalışır, bu cihaz iOS 16.7 kullanıyor.');
+    expect(old.detail).toBeUndefined();
+    // The tool's own output stays as the technical detail.
+    const rec = describeError({ code: 'action.recording.failed', message: 'Screen recording failed: Encoder error', params: { detail: 'Encoder error' } });
+    expect(rec).toMatchObject({ text: 'Ekran kaydı başarısız oldu: Encoder error', detail: undefined });
+    const shot = describeError({ code: 'action.screenshotRefused', message: 'The device refused the screenshot (…): devicectl: denied', params: { detail: 'devicectl: denied' } });
+    expect(shot.detail).toBe('devicectl: denied');
+    expect(shot.text).not.toMatch(/refused/);
+    // The hidden-actions card words the same reasons.
+    expect(codeText('action.toolMissing', { tool: 'idevicescreenshot', detail: 'x', minXcode: '15', install: 'brew install libimobiledevice' })).toBe(
+      'Bu işlem için Xcode 15 ya da daha yenisi veya idevicescreenshot gerekir; idevicescreenshot şu komutla kurulur: brew install libimobiledevice',
+    );
+    expect(codeText('action.toolTooOld', { tool: 'devicectl', detail: 'a newer Xcode', from: 'Xcode' })).toBe('Bu Mac’teki devicectl bu işlem için eski; Xcode uygulamasını güncelleyin.');
+    // Unknown code: the server's English text.
+    expect(describeError({ code: 'action.brandNew', message: 'Something new happened', params: { x: 1 } }).text).toBe('Something new happened');
+    setLanguage('en');
+  });
 });

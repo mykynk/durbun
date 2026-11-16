@@ -281,7 +281,9 @@ export async function runAndroidAction(
         return done('Log stream restarted');
       }
       // Bigger log buffers keep more of the past for the next time the phone is plugged in.
-      if (t.apiLevel !== undefined && t.apiLevel < 21) return fail('Log buffer sizes can be changed from Android 5 on', 'action.unsupported');
+      if (t.apiLevel !== undefined && t.apiLevel < 21) {
+        return fail('Log buffer sizes can be changed from Android 5 on', 'action.apiTooLow', undefined, { apiLevel: t.apiLevel, minApi: 21, minVersion: '5' });
+      }
       const size = (str(params, 'bufferSize') ?? DEFAULT_LOG_BUFFER).toUpperCase();
       const bytes = logBufferBytes(size);
       if (bytes === undefined || bytes < 64 * 1024 || bytes > 256 * 1024 * 1024) {
@@ -342,7 +344,7 @@ export async function runAndroidAction(
     }
 
     case 'location': {
-      if (!t.isEmulator) return fail('Setting the location only works on emulators', 'action.unsupported');
+      if (!t.isEmulator) return fail('Setting the location only works on emulators', 'action.emulatorOnly');
       const lat = num(params, 'lat');
       const lon = num(params, 'lon');
       if (lat === undefined || lon === undefined || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
@@ -543,7 +545,9 @@ async function launchForUser(t: AndroidActionTarget, appId: string, user: number
     { timeoutMs: 20_000 },
   );
   const component = parseResolvedComponent(resolved.stdout, appId);
-  if (!component) return fail(`Could not launch ${appId}: it has no launcher activity or is not installed for user ${user}`, 'action.launchFailed');
+  if (!component) {
+    return fail(`Could not launch ${appId}: it has no launcher activity or is not installed for user ${user}`, 'action.launch.noLauncher', undefined, { app: appId, user });
+  }
   const r = await t.adb.shell(t.serial, `am start --user ${user} -n ${shellQuote(component)}`, { timeoutMs: 30_000 });
   const out = textOf(r);
   if (!r.ok || /^Error/m.test(out)) return fail(`Could not launch ${appId}: ${/^Error.*$/m.exec(out)?.[0] ?? failureText(r)}`, 'action.launchFailed');
@@ -621,7 +625,10 @@ async function startRecording(t: AndroidActionTarget): Promise<RecordingProcess>
       // adb without the shell protocol (old devices) always exits 0; a missing file then fails the pull.
       if (!stopped() && code !== 0) {
         await adb.shell(serial, `rm -f ${remote}`);
-        return fail(`Screen recording failed: ${output() || `adb exited with code ${code ?? '?'}`}`);
+        const out = output();
+        return out
+          ? fail(`Screen recording failed: ${out}`, 'action.recording.failed', undefined, { detail: out })
+          : fail(`Screen recording failed: adb exited with code ${code ?? '?'}`, 'action.recording.failed', undefined, { tool: 'adb', exitCode: code ?? '?' });
       }
       await ensureDir(t.ctx.tempDir);
       const name = tempFileName('recording', t.label, 'mp4');
@@ -633,7 +640,10 @@ async function startRecording(t: AndroidActionTarget): Promise<RecordingProcess>
       const st = await fs.promises.stat(local).catch(() => undefined);
       if (!st || st.size === 0) {
         await fs.promises.rm(local, { force: true });
-        return fail(`Screen recording failed: ${output() || 'no video was written'}`);
+        const out = output();
+        return out
+          ? fail(`Screen recording failed: ${out}`, 'action.recording.failed', undefined, { detail: out })
+          : fail('Screen recording failed: no video was written', 'action.recording.noVideo');
       }
       return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file: local });
     },

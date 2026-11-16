@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type NetworkEntry } from '@durbun/protocol';
+import { DEFAULT_SETTINGS, type NetworkEntry, type StoreEvictions } from '@durbun/protocol';
 import { VersionedStore } from './versioned';
 
 export interface NetworkCounts {
@@ -41,8 +41,13 @@ export class NetworkStore extends VersionedStore {
   order: string[] = [];
   maxEntries: number = DEFAULT_SETTINGS.maxNetworkEntries;
   generation = 0;
-  /** Requests the memory limit deleted (oldest first) since the last reset: the Network tab says so. */
+  /**
+   * Requests the memory limit deleted (oldest first) since the last reset: the Network tab says so. With a server
+   * that reports its evictions it is the server's count (`followServer`).
+   */
   dropped = 0;
+  /** The server's latest eviction counts (null when it does not report them). */
+  evictions: StoreEvictions | null = null;
   /** Distinct requests seen since page load (snapshot included). */
   totalReceived = 0;
   /** Distinct live requests seen since page load (snapshot excluded; used for rates). */
@@ -110,10 +115,25 @@ export class NetworkStore extends VersionedStore {
     }
   }
 
+  /** The server's eviction counts arrived: take its count of deleted requests. */
+  followServer(evictions: StoreEvictions): void {
+    this.evictions = evictions;
+    if (this.dropped === evictions.requests) return;
+    this.dropped = evictions.requests;
+    this.mutations++;
+    this.changed();
+  }
+
+  /** Keep only these ids (a resumed sync: the server deleted the others while this window was away). */
+  retainIds(ids: ReadonlySet<string>): number {
+    return this.removeWhere((e) => !ids.has(e.id));
+  }
+
   reset(): void {
     this.byId = new Map();
     this.order = [];
     this.dropped = 0;
+    this.evictions = null;
     this.counts = emptyNetworkCounts();
     this.countsByDevice = new Map();
     this.countsByApp = new Map();

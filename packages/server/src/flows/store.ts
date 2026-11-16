@@ -55,6 +55,8 @@ export class FlowStore {
   private readonly listeners = new Set<() => void>();
   /** Ids of new flows (and renames) whose file is being written: taken before the first await. */
   private readonly reserved = new Set<string>();
+  /** Latest `updatedAt` handed out per flow id (saves still being written included). */
+  private readonly stamps = new Map<string, number>();
   /** Problems found while loading (file → message). */
   readonly loadProblems: { file: string; message: string }[] = [];
 
@@ -169,9 +171,24 @@ export class FlowStore {
    * the document's own id may differ (a rename: the old file goes, flow.call references follow).
    * Drafts with errors are saved too (the editor shows them; a run refuses them).
    */
-  async save(raw: unknown, opts: { create?: boolean; id?: string; beforeRename?: (from: string, to: string) => void } = {}): Promise<SaveResult> {
+  async save(
+    raw: unknown,
+    opts: {
+      create?: boolean;
+      id?: string;
+      beforeRename?: (from: string, to: string) => void;
+      /**
+       * The `updatedAt` the edited copy was loaded with: when the flow was saved since (another window, a rename
+       * of a flow it calls), the save is refused with 409 `flow.conflict` instead of overwriting that change.
+       */
+      baseUpdatedAt?: number;
+    } = {},
+  ): Promise<SaveResult> {
     const existing = opts.id ? this.entries.get(opts.id) : undefined;
     if (opts.id && !existing) throw new FlowStoreError(`Flow ${opts.id} does not exist`, 'flow.notFound', 404);
+    if (existing && opts.baseUpdatedAt !== undefined && opts.baseUpdatedAt !== this.latestStamp(opts.id!)) {
+      throw new FlowStoreError(`Flow ${opts.id} was changed elsewhere; reload it or save again to overwrite`, 'flow.conflict', 409);
+    }
     if (opts.create && this.entries.size + this.reserved.size >= MAX_FLOWS) throw new FlowStoreError(`At most ${MAX_FLOWS} flows`, 'flow.tooMany', 409);
     // An update without an id is the flow at that path (not a new id made from its name).
     if (opts.id && raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -196,7 +213,8 @@ export class FlowStore {
         opts.beforeRename?.(opts.id!, flow.id);
       }
     }
-    flow.updatedAt = now;
+    // Strictly increasing per flow, taken before the write: a second save in the same moment sees it.
+    flow.updatedAt = this.stamp(flow.id, now, opts.id);
     const oldId = existing && flow.id !== opts.id ? opts.id! : undefined;
     // Taken now, before the write: a second save in the same moment gets another id.
     const reservedId = opts.create || oldId ? flow.id : undefined;
@@ -219,6 +237,22 @@ export class FlowStore {
     return { flow, issues: this.entries.get(flow.id)!.issues, created: !!opts.create };
   }
 
+  /** The newest `updatedAt` given to a flow, also while its write is still queued. */
+  private latestStamp(id: string): number | undefined {
+    const pending = this.stamps.get(id);
+    const saved = this.entries.get(id)?.flow.updatedAt;
+    return pending === undefined ? saved : saved === undefined ? pending : Math.max(pending, saved);
+  }
+
+  /** A new `updatedAt` for `id` (after a rename from `previousId`): `now`, or one more than the last one. */
+  private stamp(id: string, now: number, previousId?: string): number {
+    const last = Math.max(this.latestStamp(id) ?? 0, previousId ? (this.latestStamp(previousId) ?? 0) : 0);
+    const next = Math.max(now, last + 1);
+    this.stamps.set(id, next);
+    if (this.stamps.size > 4 * MAX_FLOWS) this.stamps.delete(this.stamps.keys().next().value!);
+    return next;
+  }
+
   /** Flows calling `from` call `to` after a rename. */
   private async rewriteCalls(from: string, to: string): Promise<void> {
     for (const [id, e] of this.entries) {
@@ -226,6 +260,8 @@ export class FlowStore {
       const flow: FlowDoc = {
         ...e.flow,
         nodes: e.flow.nodes.map((n) => (n.type === 'flow.call' && n.params?.flowId === from ? { ...n, params: { ...n.params, flowId: to } } : n)),
+        // An editor open on this flow must not write the old reference back.
+        updatedAt: this.stamp(id, this.now()),
       };
       this.entries.set(id, { flow, issues: e.issues });
       await this.queue.run(() => writeJsonFile(path.join(this.dir, `${id}.json`), flow, 0o644));
@@ -236,6 +272,7 @@ export class FlowStore {
     if (!this.entries.has(id)) return false;
     await this.queue.run(() => fsp.rm(path.join(this.dir, `${id}.json`), { force: true }));
     this.entries.delete(id);
+    this.stamps.delete(id);
     this.revalidate();
     this.changed();
     return true;

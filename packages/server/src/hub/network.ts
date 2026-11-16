@@ -101,20 +101,50 @@ function abortError(): Error {
   return err;
 }
 
+/** What the limits deleted (NetworkStore `onEvict`). */
+export type NetworkEviction = { kind: 'entry'; entry: NetworkEntry } | { kind: 'body'; entry: NetworkEntry | undefined };
+
 export class NetworkStore {
   private readonly entries = new Map<string, NetworkEntry>();
   /** Insertion-ordered: the first record is the oldest body owner (eviction order). */
   private readonly bodies = new Map<string, StoredBodies>();
   private storedBytes = 0;
+  /** Change counter: bumped on every notified change; `revisions` holds each entry's latest (resume). */
+  private changeSeq = 0;
+  private readonly revisions = new Map<string, number>();
 
   constructor(
     private limits: NetworkLimits,
     /** Called for every entry state change that subscribers must see. */
-    private readonly onChange: (entry: NetworkEntry) => void,
+    private readonly notify: (entry: NetworkEntry) => void,
+    /** Called for every entry or body the limits delete (not for clears and removals). */
+    private readonly onEvict?: (eviction: NetworkEviction) => void,
   ) {}
 
   get size(): number {
     return this.entries.size;
+  }
+
+  /** Change counter after the latest notified change. */
+  get seq(): number {
+    return this.changeSeq;
+  }
+
+  /** Entries changed after `seq` (insertion order). */
+  changedSince(seq: number): NetworkEntry[] {
+    const out: NetworkEntry[] = [];
+    for (const entry of this.entries.values()) if ((this.revisions.get(entry.id) ?? 0) > seq) out.push(entry);
+    return out;
+  }
+
+  ids(): string[] {
+    return [...this.entries.keys()];
+  }
+
+  private onChange(entry: NetworkEntry): void {
+    this.changeSeq++;
+    if (this.entries.get(entry.id) === entry) this.revisions.set(entry.id, this.changeSeq);
+    this.notify(entry);
   }
 
   get bodyBytes(): number {
@@ -309,6 +339,7 @@ export class NetworkStore {
 
   clear(): void {
     this.entries.clear();
+    this.revisions.clear();
     this.bodies.clear();
     this.storedBytes = 0;
   }
@@ -387,6 +418,7 @@ export class NetworkStore {
 
   private remove(id: string): void {
     if (!this.entries.delete(id)) return;
+    this.revisions.delete(id);
     const stored = this.bodies.get(id);
     if (stored) {
       this.storedBytes -= stored.bytes;
@@ -397,9 +429,18 @@ export class NetworkStore {
   private enforceEntryLimit(): void {
     const max = Math.max(1, Math.floor(this.limits.maxEntries));
     while (this.entries.size > max) {
-      const oldest = this.entries.keys().next();
+      const oldest = this.entries.entries().next();
       if (oldest.done) break;
-      this.remove(oldest.value);
+      this.remove(oldest.value[0]);
+      this.evicted({ kind: 'entry', entry: oldest.value[1] });
+    }
+  }
+
+  private evicted(eviction: NetworkEviction): void {
+    try {
+      this.onEvict?.(eviction);
+    } catch {
+      /* counting must never break the store */
     }
   }
 
@@ -431,6 +472,7 @@ export class NetworkStore {
         entry.bodyEvicted = true;
         this.onChange(entry);
       }
+      this.evicted({ kind: 'body', entry });
     }
     if (this.bodies.size === 0) this.storedBytes = 0;
   }

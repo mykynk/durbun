@@ -67,3 +67,25 @@ export function compileUserRegex(pattern: string, flags = ''): UserRegex {
     test: (text) => run(text) !== null,
   };
 }
+
+/** Compiled patterns kept for `userRegexTest` (conditions and URL rules run the same few patterns again and again). */
+const TEST_CACHE_MAX = 256;
+const testCache = new Map<string, UserRegex | null>();
+
+/**
+ * RegexTest (protocol flows/expr.ts) for the server: a pattern that can backtrack exponentially runs with a time
+ * limit (compileUserRegex); an invalid one never matches. Compiled patterns are cached (bounded).
+ */
+export function userRegexTest(pattern: string, text: string): boolean {
+  let re = testCache.get(pattern);
+  if (re === undefined) {
+    try {
+      re = compileUserRegex(pattern);
+    } catch {
+      re = null;
+    }
+    testCache.set(pattern, re);
+    if (testCache.size > TEST_CACHE_MAX) testCache.delete(testCache.keys().next().value!);
+  }
+  return re ? re.test(text) : false;
+}

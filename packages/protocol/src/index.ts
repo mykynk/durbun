@@ -169,8 +169,9 @@ export interface DeviceInfo {
 /**
  * An action missing from `DeviceInfo.actions` and why. Codes: 'action.developerModeOff', 'action.osTooOld'
  * {osVersion, minVersion}, 'action.apiTooLow' {apiLevel, minApi, minVersion}, 'action.emulatorOnly',
- * 'action.toolMissing' {tool, detail}, 'action.toolTooOld' {tool, detail}, 'logs.idevicesyslogMissing',
- * 'action.wouldDisconnect' {connection}.
+ * 'action.toolMissing' {tool, detail, minXcode?, install?}, 'action.toolTooOld' {tool, detail, from?},
+ * 'logs.idevicesyslogMissing', 'action.wouldDisconnect' {connection}. `detail` is English (older UIs); the
+ * other params word it in the UI language.
  */
 export interface DeviceUnavailableAction {
   action: DeviceActionId;
@@ -752,6 +753,8 @@ export interface DeviceActionResult {
   message?: string;
   /** i18n code for the message. */
   code?: string;
+  /** Params of `code` (tool, versions, app id, the tool's own output as `detail`…), so the UI words it fully. */
+  params?: I18nParams;
   data?: unknown;
   error?: string;
 }
@@ -858,14 +861,90 @@ export interface UiNotice {
   appId?: string;
 }
 
+/**
+ * The store limits as the server applies them. The UI holds no more than the server does: it learns the limits
+ * here and follows the server's evictions (`StoreEvictions.oldestLogId`), so both always show the same data.
+ */
+export interface StoreLimits {
+  maxLogEntries: number;
+  /** Estimated memory of the log ring (bytes): the oldest lines go when it is full, even below maxLogEntries. */
+  maxLogBytes: number;
+  /** Crash / ANR records kept after the ring let them go (the newest this many). */
+  maxKeptCrashes: number;
+  maxNetworkEntries: number;
+  /** Memory for request / response bodies (bytes): the oldest bodies go first, their requests stay (`bodyEvicted`). */
+  maxBodyStoreBytes: number;
+}
+
+export interface EvictedCounts {
+  logs: number;
+  requests: number;
+}
+
+/**
+ * What the limits deleted since the server started or the last full clear (a scoped clear takes its device or
+ * sessions out). Lines with an id below `oldestLogId` are gone, except crash / ANR records kept apart.
+ */
+export interface StoreEvictions {
+  logs: number;
+  /** Of `logs`: deleted because the log memory (`StoreLimits.maxLogBytes`) was full before the line limit. */
+  logsByBytes: number;
+  requests: number;
+  /** Request bodies the body memory deleted (their requests stay). */
+  bodies: number;
+  /** Oldest line id still held in the ring; 0 when it is empty. */
+  oldestLogId: number;
+  /** Time of the newest deleted line: everything before it may be incomplete. */
+  lastEvictedLogTs?: number;
+  /** Time of the newest deleted request (`startTs`). */
+  lastEvictedRequestTs?: number;
+  byDevice: Record<string, EvictedCounts>;
+  /** Per app session (`AppSession.id`): lines that carried its `appId`, its requests. */
+  byApp: Record<string, EvictedCounts>;
+  /**
+   * Device lines without an app session, per `"<deviceId>|<process name>"` (apps without an SDK); Dürbün's own
+   * lines about the device (connection, log stream), which every app scope of the device shows, under
+   * `"<deviceId>|"`.
+   */
+  byProcess: Record<string, number>;
+}
+
+/**
+ * A snapshot that continues the copy a reconnecting UI still holds. The UI asks for it by opening
+ * `/ui?epoch=<snapshot.epoch>&afterLogId=<newest log id it holds>&netSeq=<newest netSeq it saw>`; a server
+ * that cannot continue (restarted, cleared meanwhile, unknown values) sends an ordinary full snapshot.
+ * When resumed: `network` holds only the requests changed after `netSeq`, `metrics` all series again, and the
+ * `history` that follows only lines newer than `afterLogId` (`logCount` is their number).
+ */
+export interface UiResumed {
+  afterLogId: number;
+  /** Every request id the server holds: the UI drops the others (deleted while it was away). */
+  networkIds: string[];
+}
+
 export type ServerToUi =
-  | { type: 'hello'; server: ServerInfo; settings: ServerSettings }
+  | {
+      type: 'hello';
+      server: ServerInfo;
+      settings: ServerSettings;
+      /** Optional for older servers. */
+      limits?: StoreLimits;
+    }
   | {
       type: 'snapshot';
+      /** The data generation: a new server run or a clear makes a new one. Echoed back to resume. */
+      epoch?: string;
+      /** Network change counter after this snapshot (echoed back to resume). */
+      netSeq?: number;
+      /** Present when the snapshot continues the UI's copy instead of replacing it. */
+      resumed?: UiResumed;
+      evictions?: StoreEvictions;
       devices: DeviceInfo[];
       apps: AppSession[];
       network: NetworkEntry[];
       mocks: MockRule[];
+      /** Revision of the mock rule list (see `mocks.set` `baseRevision`). */
+      mocksRevision?: number;
       drivers: DriverStatus[];
       processes: ProcessUpdate[];
       metrics: MetricSample[];
@@ -891,13 +970,33 @@ export type ServerToUi =
       deviceApps?: DeviceApp[];
       /** DeviceApp keys that are gone (device removed, app uninstalled). */
       removedDeviceApps?: string[];
+      /** Network change counter after this batch (see snapshot.netSeq). */
+      netSeq?: number;
+      /** Sent when the limits deleted something since the previous batch. */
+      evictions?: StoreEvictions;
     }
-  | { type: 'cleared'; target: ClearTarget; deviceId?: string; appId?: string; bundleId?: string }
-  | { type: 'mocks'; rules: MockRule[] }
-  | { type: 'settings'; settings: ServerSettings }
+  | {
+      type: 'cleared';
+      target: ClearTarget;
+      deviceId?: string;
+      appId?: string;
+      bundleId?: string;
+      /** The data generation after the clear (see snapshot.epoch). */
+      epoch?: string;
+      /** The eviction counts after the clear. */
+      evictions?: StoreEvictions;
+    }
+  | {
+      type: 'mocks';
+      rules: MockRule[];
+      /** Revision of the rule list; send it back as `mocks.set` `baseRevision`. */
+      revision?: number;
+    }
+  | { type: 'settings'; settings: ServerSettings; limits?: StoreLimits }
   | { type: 'drivers'; drivers: DriverStatus[] }
   | ({ type: 'notice' } & UiNotice)
-  | { type: 'reply'; requestId: string; ok: boolean; data?: unknown; error?: string; code?: string }
+  /** `params`: of `code` (a device refusal's tool, versions, app…); `error` stays the English text. */
+  | { type: 'reply'; requestId: string; ok: boolean; data?: unknown; error?: string; code?: string; params?: I18nParams }
   /** The flow list changed (saved, deleted, imported, a run ended). */
   | { type: 'flows'; flows: FlowSummary[] }
   /** A flow run changed: its header plus the steps that changed since the previous message. */
@@ -929,7 +1028,12 @@ export type UiCommand =
   | { name: 'marker.add'; label?: string; deviceId?: string }
   | { name: 'device.action'; deviceId: string; action: DeviceActionId; params?: Record<string, unknown> }
   | { name: 'app.action'; appId: string; action: string; params?: Record<string, unknown> }
-  | { name: 'mocks.set'; rules: MockRule[] }
+  /**
+   * `baseRevision`: the revision the edited list was based on (snapshot `mocksRevision` / `mocks` `revision`).
+   * When another window changed the rules since, the command fails with `mocks.conflict` (data: the current
+   * `{ rules, revision }`) instead of overwriting them; leave it out to overwrite.
+   */
+  | { name: 'mocks.set'; rules: MockRule[]; baseRevision?: number }
   | { name: 'settings.update'; patch: Partial<ServerSettings> }
   | { name: 'vm.attach'; input: string; deviceId?: string }
   | { name: 'vm.detach'; appId: string }

@@ -302,7 +302,7 @@ async function clearAppData(t: SimActionTarget, appId: string): Promise<DeviceAc
   }
   // Safety: only ever wipe inside a CoreSimulator data container of this simulator.
   if (!dir.includes(`/Devices/${t.udid}/data/Containers/Data/`)) {
-    return fail(`Refusing to clear an unexpected container path: ${dir}`);
+    return fail(`Refusing to clear an unexpected container path: ${dir}`, 'action.clearData.unexpectedPath', undefined, { path: dir });
   }
   await simOf(t)(['terminate', t.udid, appId]);
   const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
@@ -390,9 +390,19 @@ async function startRecording(t: SimActionTarget): Promise<RecordingProcess> {
   const name = tempFileName('recording', t.label, 'mov');
   const file = path.join(t.ctx.tempDir, name);
   return sigintRecording(XCRUN, ['simctl', 'io', t.udid, 'recordVideo', '--codec=h264', '--force', file], 20_000, async (exit) => {
-    if (!exit.stopped) return fail(`Screen recording failed: ${tailLines(exit.stderr) || `simctl exited with code ${exit.code ?? '?'}`}`);
+    if (!exit.stopped) {
+      const out = tailLines(exit.stderr);
+      return out
+        ? fail(`Screen recording failed: ${out}`, 'action.recording.failed', undefined, { detail: out })
+        : fail(`Screen recording failed: simctl exited with code ${exit.code ?? '?'}`, 'action.recording.failed', undefined, { tool: 'simctl', exitCode: exit.code ?? '?' });
+    }
     const st = await fs.promises.stat(file).catch(() => undefined);
-    if (!st || st.size === 0) return fail(`Screen recording failed: ${tailLines(exit.stderr) || 'no video was written'}`);
+    if (!st || st.size === 0) {
+      const out = tailLines(exit.stderr);
+      return out
+        ? fail(`Screen recording failed: ${out}`, 'action.recording.failed', undefined, { detail: out })
+        : fail('Screen recording failed: no video was written', 'action.recording.noVideo');
+    }
     return done('Recording saved', 'action.recording.saved', { url: t.ctx.fileUrl(name), file });
   });
 }

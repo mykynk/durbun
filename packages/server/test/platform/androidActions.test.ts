@@ -203,7 +203,7 @@ describe('runAndroidAction', () => {
   it('sets the location only on emulators (lon before lat for the console)', async () => {
     const { adb, calls } = fakeAdb({ run: () => ok('OK\n') });
     const phone = await runAndroidAction(target(adb), 'location', { lat: 41.0082, lon: 28.9784 });
-    expect(phone.code).toBe('action.unsupported');
+    expect(phone.code).toBe('action.emulatorOnly');
     const emu = await runAndroidAction(target(adb, { serial: 'emulator-5554', isEmulator: true }), 'location', {
       lat: 41.0082,
       lon: 28.9784,

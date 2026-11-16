@@ -40,6 +40,8 @@ import type {
   ServerSettings,
   ServerToSdk,
   SessionExport,
+  StoreEvictions,
+  StoreLimits,
   ToolCheck,
   Transport,
   UiNotice,
@@ -129,6 +131,10 @@ export interface HubChange {
   processes: ProcessUpdate[];
   deviceApps: DeviceApp[];
   removedDeviceApps: string[];
+  /** Network change counter as of this change (resume, see ServerToUi snapshot.netSeq). */
+  netSeq?: number;
+  /** Present when the limits deleted something since the previous change. */
+  evictions?: StoreEvictions;
 }
 
 export interface ClearEvent {
@@ -136,6 +142,10 @@ export interface ClearEvent {
   deviceId?: string;
   appId?: string;
   bundleId?: string;
+  /** Data generation after the clear. */
+  epoch?: string;
+  /** Eviction counts after the clear. */
+  evictions?: StoreEvictions;
 }
 
 export interface Hub extends HubSink {
@@ -181,6 +191,19 @@ export interface Hub extends HubSink {
   getMetrics(): MetricSample[];
   /** Latest known process info per (deviceId, pid). */
   getProcesses(): ProcessUpdate[];
+  /** The limits the stores apply (the UI follows them). */
+  getLimits?(): StoreLimits;
+  /** What the limits deleted so far. */
+  getEvictions?(): StoreEvictions;
+  /**
+   * Resume state for WS /ui: the data generation (new per hub, changes on every clear), the newest assigned log
+   * id, the network change counter, the requests changed after a counter value and every request id held.
+   */
+  getEpoch?(): string;
+  getLastLogId?(): number;
+  getNetworkSeq?(): number;
+  getNetworkSince?(seq: number): NetworkEntry[];
+  getNetworkIds?(): string[];
 
   /* mutations from the UI */
   /**

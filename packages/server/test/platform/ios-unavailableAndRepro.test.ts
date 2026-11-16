@@ -29,8 +29,18 @@ describe('why an iPhone action is missing', () => {
   it('no Xcode and no libimobiledevice tools: each action names the missing tool', () => {
     const { actions, unavailable } = iosDeviceActionAvailability({ trusted: true, caps: NONE, screenshotTool: false, syslog: false });
     expect(actions).toEqual([]);
-    expect(unavailable).toContainEqual({ action: 'app-launch', code: 'action.toolMissing', params: { tool: 'devicectl', detail: 'Xcode 15 or newer (xcrun devicectl)' } });
-    expect(unavailable).toContainEqual(expect.objectContaining({ action: 'screenshot', code: 'action.toolMissing', params: expect.objectContaining({ tool: 'idevicescreenshot' }) }));
+    expect(unavailable).toContainEqual({
+      action: 'app-launch',
+      code: 'action.toolMissing',
+      params: { tool: 'devicectl', detail: 'Xcode 15 or newer (xcrun devicectl)', minXcode: '15' },
+    });
+    expect(unavailable).toContainEqual(
+      expect.objectContaining({
+        action: 'screenshot',
+        code: 'action.toolMissing',
+        params: expect.objectContaining({ tool: 'idevicescreenshot', minXcode: '15', install: 'brew install libimobiledevice' }),
+      }),
+    );
     expect(unavailable).toContainEqual({ action: 'logs-restart', code: 'logs.idevicesyslogMissing', params: { tool: 'idevicesyslog' } });
   });
 
@@ -58,8 +68,8 @@ describe('why an iPhone action is missing', () => {
   it('an Xcode without devicectl screen recording', () => {
     const { unavailable } = iosDeviceActionAvailability({ trusted: true, caps: { ...ALL, screenRecord: false }, screenshotTool: false, syslog: true, osVersion: '18.1' });
     expect(unavailable).toEqual([
-      { action: 'screen-record', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)' } },
-      { action: 'screen-record-stop', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)' } },
+      { action: 'screen-record', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)', from: 'Xcode' } },
+      { action: 'screen-record-stop', code: 'action.toolTooOld', params: { tool: 'devicectl', detail: 'a newer Xcode (devicectl screen recording)', from: 'Xcode' } },
     ]);
   });
 });
