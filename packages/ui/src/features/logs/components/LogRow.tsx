@@ -20,6 +20,7 @@ import {
   OctagonX,
   Play,
   Plug,
+  Rocket,
   PlugZap,
   RefreshCw,
   RotateCcw,
@@ -39,7 +40,7 @@ import { highlightSegments, type Highlighter } from '../model/highlight';
 import { flapSummary, flapTimeRange, systemText } from '../model/systemText';
 import { isPreviousLaunch, type LogRow } from '../model/types';
 import { appStartupOf, crashWhen, crashedBuildOf, isLayoutError, memoryKill, recordUnsymbolicated } from '../model/records';
-import { appLifecycleOf, exitReportMessage, exitReportOf, isExitAnr, navigationOf } from '../model/appEvents';
+import { appLifecycleOf, exitReportMessage, exitReportOf, isExitAnr, launchOf, navigationOf, type LaunchInfo } from '../model/appEvents';
 import { sdkNoteText } from '../model/sdkNotes';
 import { entrySourceText, isDeviceCrashRecord } from '../../../sources/text';
 import type { TimeFormat } from '../../../data';
@@ -662,17 +663,31 @@ function SeparatorRow(props: LogRowProps) {
 
 const LIFECYCLE_ICON = { resumed: Eye, inactive: EyeOff, hidden: EyeOff, paused: EyeOff, detached: Unplug } as const;
 
+/** "Soğuk açılış 1,24 sn · MainActivity" and what the number measures (tooltip). */
+export function launchText(l: LaunchInfo, lang?: Lang): { label: string; tip: string } {
+  const screen = l.screen ? { screen: l.screen } : {};
+  if (l.kind === 'prewarmed') return { label: t(l.screen ? 'logs.moment.launch.prewarmedOn' : 'logs.moment.launch.prewarmed', screen), tip: t('logs.moment.launch.prewarmedTip') };
+  const time = formatDuration(l.ms, lang ? { lang } : undefined);
+  return {
+    label: t(l.screen ? 'logs.moment.launch.coldOn' : 'logs.moment.launch.cold', { time, ...screen }),
+    tip: t(l.from === 'launchRequest' ? 'logs.moment.launch.coldTipRequest' : 'logs.moment.launch.coldTip'),
+  };
+}
+
 /**
- * A quiet line for what the app did, not what it logged: a screen change (`navigation` event) or a Flutter lifecycle
- * change ("Arka plana geçti"). Shown like a separator so the lines around it stay easy to read.
+ * A quiet line for what the app did, not what it logged: a screen change (`navigation` event), a Flutter lifecycle
+ * change ("Arka plana geçti") or the cold-start time (`durbun.launch`). Shown like a separator so the lines around
+ * it stay easy to read.
  */
 function MomentRow({ row, selected, flash, d }: LogRowProps) {
   const e = row.e;
   const nav = navigationOf(e);
-  const life = nav ? undefined : appLifecycleOf(e);
-  const Icon = nav ? Compass : LIFECYCLE_ICON[life ?? 'inactive'];
-  const label = nav ? t('logs.moment.screen', { to: nav.to }) : t(`logs.moment.lifecycle.${life}`);
-  const tip = nav ? (nav.from ? t('logs.moment.screenFrom', { from: nav.from, to: nav.to }) : t('logs.moment.screen', { to: nav.to })) : e.message;
+  const launch = nav ? undefined : launchOf(e);
+  const life = nav || launch ? undefined : appLifecycleOf(e);
+  const launchWords = launch ? launchText(launch, d.lang) : undefined;
+  const Icon = nav ? Compass : launch ? Rocket : LIFECYCLE_ICON[life ?? 'inactive'];
+  const label = nav ? t('logs.moment.screen', { to: nav.to }) : launchWords ? launchWords.label : t(`logs.moment.lifecycle.${life}`);
+  const tip = nav ? (nav.from ? t('logs.moment.screenFrom', { from: nav.from, to: nav.to }) : t('logs.moment.screen', { to: nav.to })) : launchWords ? `${launchWords.label} — ${launchWords.tip}` : e.message;
   const app = d.appName(e);
   return (
     <div className={clsx('lg-sep lg-sep--moment', selected && 'is-selected', flash && 'is-flash')} data-row={row.id} title={tip}>
@@ -748,7 +763,7 @@ export const LogRowView = memo(function LogRowView(props: LogRowProps) {
   if (e.source === 'system' && e.kind === 'lifecycle') return <SeparatorRow {...props} />;
   if (e.kind === 'crash' || e.kind === 'anr' || e.kind === 'flutter-error') return <CrashRow {...props} />;
   if (e.kind === 'network') return <NetworkRow {...props} />;
-  if (navigationOf(e) || appLifecycleOf(e)) return <MomentRow {...props} />;
+  if (navigationOf(e) || launchOf(e) || appLifecycleOf(e)) return <MomentRow {...props} />;
   if (e.kind === 'event') return <EventRow {...props} />;
   return <TextRow {...props} />;
 });

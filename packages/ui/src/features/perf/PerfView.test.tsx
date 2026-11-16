@@ -37,7 +37,7 @@ vi.mock('uplot', () => {
   return { default: FakePlot };
 });
 
-const { hubActions, metricsStore, setScope } = await import('../../data');
+const { hubActions, logStore, metricsStore, setScope } = await import('../../data');
 const { FeatureContext } = await import('../../components');
 const { setLanguage } = await import('../../i18n');
 const { default: PerfView } = await import('./index');
@@ -86,6 +86,7 @@ afterEach(() => {
   cleanup();
   hubActions.reset();
   metricsStore.reset();
+  logStore.reset();
   setScope({ kind: 'all' });
   setLanguage('en');
 });
@@ -126,5 +127,76 @@ describe('PerfView', () => {
     // CPU, memory, frames, requests and logs charts.
     expect(created.length).toBe(5);
     expect(screen.getByRole('radio', { name: '5 dk' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  const native = (platform: 'android' | 'ios'): AppSession => ({
+    ...PATI,
+    id: 'app:9',
+    sessionKey: 's9',
+    sdk: { name: `durbun-${platform}`, version: '0.3.0', platform },
+    app: { name: 'Cüzdan', id: 'com.example.wallet', pid: 4242 },
+  });
+
+  function stream(appId: string, rows: (i: number) => Record<string, number | undefined>) {
+    const now = Date.now();
+    metricsStore.push(Array.from({ length: 30 }, (_, i) => ({ ts: now - (30 - i) * 1000, deviceId: 'demo:1', appId, source: 'sdk' as const, cpu: 12, memoryMB: 180, ...rows(i) })));
+    metricsStore.flush();
+  }
+
+  const launchLine = (appId: string, data: unknown) => ({ id: 1, ts: Date.now() - 40_000, deviceId: 'demo:1', source: 'app' as const, appId, level: 'info' as const, tag: 'event', kind: 'event' as const, message: 'durbun.launch', data });
+
+  const tile = (label: string) => screen.getByRole('group', { name: label });
+
+  it('native Android: frame times as UI thread / RenderThread, idle screens as idle, and the cold start time', () => {
+    hubActions.replaceAll({ devices: [PIXEL], apps: [native('android')], drivers: [], processes: [] });
+    act(() => setScope({ kind: 'app', appId: 'app:9' }));
+    logStore.append([launchLine('app:9', { kind: 'cold', ms: 1243, to: 'firstFrame', from: 'launchRequest', screen: 'MainActivity' })]);
+    // Frames drawn for 20 s, then an idle screen: FrameMetrics sends no fps and no frame times.
+    stream('app:9', (i) => (i < 20 ? { fps: 58, jankyFrames: 0, frameBuildMs: 4.2, frameRasterMs: 6.1 } : {}));
+    renderView();
+    expect(tile('FPS').textContent).toContain('boşta');
+    expect(tile('FPS').textContent).not.toMatch(/\b0\b/);
+    expect(screen.getByText('Kare süresi')).toBeTruthy();
+    expect(screen.getAllByText('UI thread').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('RenderThread').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Hazırlama')).toBeNull();
+    expect(tile('Açılış').textContent).toMatch(/1,24\s*sn/);
+    expect(tile('Açılış').textContent).toContain('MainActivity');
+    expect(screen.getByRole('button', { name: 'Loglarda göster' })).toBeTruthy();
+    // CPU, memory, frames, frame times, requests and logs charts.
+    expect(created.length).toBe(6);
+  });
+
+  it('native Android that has drawn nothing yet: idle and no frames, never 0 FPS or "does not report"', () => {
+    hubActions.replaceAll({ devices: [PIXEL], apps: [native('android')], drivers: [], processes: [] });
+    act(() => setScope({ kind: 'app', appId: 'app:9' }));
+    stream('app:9', () => ({}));
+    renderView();
+    expect(tile('FPS').textContent).toContain('boşta');
+    expect(tile('FPS').textContent).toContain('kare çizilmedi');
+    expect(tile('Açılış').textContent).toContain('bu açılışta gelmedi');
+    expect(screen.queryByText('Kare süresi')).toBeNull();
+  });
+
+  it('iOS prewarmed launch: said in words, without a time', () => {
+    hubActions.replaceAll({ devices: [PIXEL], apps: [native('ios')], drivers: [], processes: [] });
+    act(() => setScope({ kind: 'app', appId: 'app:9' }));
+    logStore.append([launchLine('app:9', { kind: 'prewarmed', to: 'firstFrame' })]);
+    stream('app:9', () => ({ fps: 60 }));
+    renderView();
+    expect(tile('Açılış').textContent).toContain('önceden başlatıldı');
+    expect(tile('Açılış').textContent).not.toMatch(/\d/);
+  });
+
+  it('Flutter: build / raster names and no launch tile', () => {
+    hubActions.replaceAll({ devices: [PIXEL], apps: [PATI], drivers: [], processes: [] });
+    act(() => setScope({ kind: 'app', appId: 'app:1' }));
+    stream('app:1', () => ({ fps: 60, frameBuildMs: 3, frameRasterMs: 5 }));
+    renderView();
+    // Flutter's own phase names (DevTools uses them too), in both languages.
+    expect(screen.getAllByText('Build').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Raster').length).toBeGreaterThan(0);
+    expect(screen.queryByText('UI thread')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Açılış' })).toBeNull();
   });
 });

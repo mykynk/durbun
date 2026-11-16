@@ -11,6 +11,8 @@ import {
   defaultTarget,
   downsample,
   fieldStats,
+  framePlatformOf,
+  framesIdleWhenAbsent,
   gapThresholdMs,
   jankPerSecond,
   jankStats,
@@ -22,6 +24,7 @@ import {
   rateSeries,
   rateStats,
   rateStepSec,
+  reportsLaunch,
   rowsToCsv,
   sliceByTime,
   slugify,
@@ -308,5 +311,30 @@ describe('axis helpers', () => {
     expect(yRange(130, 120, true)).toEqual([0, 200]);
     expect(yRange(null, 10)).toEqual([0, 10]);
     expect(yRange(200, 1)).toEqual([0, 250]);
+  });
+});
+
+describe('frame platform', () => {
+  const sdk = (platform: string) => ({ sdk: { name: 'x', version: '0.3.0', platform } }) as Pick<AppSession, 'sdk'>;
+
+  it('names the frame phases after the app: Flutter build/raster, Android UI thread/RenderThread', () => {
+    expect(framePlatformOf([sdk('flutter')])).toBe('flutter');
+    expect(framePlatformOf([sdk('dart-vm')])).toBe('flutter');
+    expect(framePlatformOf([sdk('android')])).toBe('android');
+    expect(framePlatformOf([sdk('ios'), sdk('android')])).toBe('android');
+    expect(framePlatformOf([sdk('ios')])).toBe('other');
+    expect(framePlatformOf([])).toBe('other');
+  });
+
+  it('reads a missing fps as an idle screen only where only drawn frames are counted', () => {
+    expect(framesIdleWhenAbsent('flutter')).toBe(true);
+    expect(framesIdleWhenAbsent('android')).toBe(true);
+    expect(framesIdleWhenAbsent('other')).toBe(false);
+  });
+
+  it('expects a launch time from the native Android and iOS SDKs only', () => {
+    expect(reportsLaunch([sdk('android')])).toBe(true);
+    expect(reportsLaunch([sdk('ios')])).toBe(true);
+    expect(reportsLaunch([sdk('flutter'), sdk('react-native')])).toBe(false);
   });
 });

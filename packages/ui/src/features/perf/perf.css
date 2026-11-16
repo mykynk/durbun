@@ -276,6 +276,15 @@
   color: var(--text-subtle);
   white-space: nowrap;
 }
+.pf-chart__hint {
+  display: inline-flex;
+  color: var(--text-subtle);
+  cursor: help;
+  border-radius: var(--radius-sm);
+}
+.pf-chart__hint:hover {
+  color: var(--text-muted);
+}
 .pf-legend {
   display: flex;
   align-items: center;

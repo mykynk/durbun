@@ -7,6 +7,16 @@
 import type { LogEntry, NetworkEntry } from '@durbun/protocol';
 import { MAX_HISTORY_MS, RateBuckets } from './model';
 import { keptAfter } from '../../data';
+import { launchOf, type LaunchInfo } from '../logs/model/appEvents';
+
+/** The cold-start report (`durbun.launch`) one app session sent. */
+export interface LaunchMark {
+  /** Log entry id (→ show in Logs). */
+  id: number;
+  ts: number;
+  appId: string;
+  info: LaunchInfo;
+}
 
 export type AnnotationType = 'crash' | 'anr' | 'marker' | 'connect' | 'reconnect';
 
@@ -47,7 +57,9 @@ export function isErrorLog(e: Pick<LogEntry, 'level'>): boolean {
 export class LogTraffic {
   readonly buckets = new RateBuckets();
   annotations: Annotation[] = [];
-  /** Bumped whenever buckets/annotations changed (memo dependency). */
+  /** Cold-start reports by app session id (the newest per session; an SDK sends one per process). */
+  launches = new Map<string, LaunchMark>();
+  /** Bumped whenever buckets/annotations/launches changed (memo dependency). */
   revision = 0;
   private key = '';
   private generation = -1;
@@ -65,6 +77,7 @@ export class LogTraffic {
       this.lastId = 0;
       this.buckets.clear();
       this.annotations = [];
+      this.launches = new Map();
       changed = true;
     }
     if (!key) return changed;
@@ -80,6 +93,11 @@ export class LogTraffic {
       if (isErrorLog(e)) this.buckets.add(e.ts, 'errorLogs', 1, now);
       const type = annotationType(e);
       if (type && e.ts >= floor) (added ??= []).push({ id: e.id, ts: e.ts, type, text: describe(e, type) });
+      if (e.kind === 'event' && e.appId) {
+        const info = launchOf(e);
+        const had = info ? this.launches.get(e.appId) : undefined;
+        if (info && (!had || had.ts <= e.ts)) this.launches.set(e.appId, { id: e.id, ts: e.ts, appId: e.appId, info });
+      }
       changed = true;
     }
     if (store.lastId > this.lastId) this.lastId = store.lastId;

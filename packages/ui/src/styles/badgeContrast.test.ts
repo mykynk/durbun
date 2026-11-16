@@ -51,11 +51,17 @@ function tintOf(rule: string, variable: string): number {
   return Number(m![1]) / 100;
 }
 
-/** The token a components.css rule paints `prop` with (`.btn--primary`, 'background' → '--accent-fill'). */
-function tokenOf(rule: string, prop: 'background' | 'color'): string {
-  const start = componentsCss.indexOf(`${rule} {`);
+/** Feature style sheets with filled controls of their own (text on an accent fill). */
+const featureCss: Record<string, string> = {
+  mocks: readFileSync(join(srcDir, 'features/mocks/mocks.css'), 'utf8'),
+  logs: readFileSync(join(srcDir, 'features/logs/logs.css'), 'utf8'),
+};
+
+/** The token a components.css (or feature) rule paints `prop` with (`.btn--primary`, 'background' → '--accent-fill'). */
+function tokenOf(rule: string, prop: 'background' | 'color', css = componentsCss): string {
+  const start = css.indexOf(`${rule} {`);
   expect(start, rule).toBeGreaterThanOrEqual(0);
-  const body = componentsCss.slice(start, componentsCss.indexOf('}', start));
+  const body = css.slice(start, css.indexOf('}', start));
   const m = new RegExp(`(?:^|\\n)\\s*${prop}:\\s*var\\((--[a-z0-9-]+)\\)`).exec(body);
   expect(m, `${rule} ${prop}`).not.toBeNull();
   return m![1]!;
@@ -180,6 +186,17 @@ for (const [name, selector] of Object.entries(THEMES)) {
         const fg = color(tokenOf(rule, 'color'));
         check(`${rule} text on its fill`, fg, color(tokenOf(rule, 'background')));
         if (hover) check(`${rule} text on its hover fill`, fg, color(tokenOf(hover, 'background')));
+      }
+      // Feature controls with text on the accent: the on-state of a mock status preset, the "↓ 57 new" pill.
+      const featureFilled: [sheet: keyof typeof featureCss, rule: string, hover: string][] = [
+        ['mocks', '.mk-preset.is-on', '.mk-preset.is-on:hover'],
+        ['logs', '.lg-pill', '.lg-pill:hover'],
+      ];
+      for (const [sheet, rule, hover] of featureFilled) {
+        const css = featureCss[sheet];
+        const fg = color(tokenOf(rule, 'color', css));
+        check(`${rule} text on its fill`, fg, color(tokenOf(rule, 'background', css)));
+        check(`${rule} text on its hover fill`, fg, color(tokenOf(hover, 'background', css)));
       }
       // The fill tokens are what any other filled control uses too.
       check('--text-on-accent on --accent-fill', color('--text-on-accent'), color('--accent-fill'));

@@ -800,8 +800,8 @@ registerMessages('code', {
     'search.invalid': 'Geçersiz arama isteği',
     'slack.invalid': 'Gönderilecek mesaj boş ya da çok uzun',
     'slack.invalidUrl': 'Webhook adresi https:// ile başlamalı',
-    'slack.notConfigured': 'Slack bağlı değil. Ayarlar’dan bir webhook adresi ekleyin',
-    'slack.rateLimited': ['Slack şu an mesajları sınırlıyor. {detail} sonra yeniden gönderin', 'Slack şu an mesajları sınırlıyor. Biraz sonra yeniden gönderin'],
+    'slack.notConfigured': 'Slack bağlı değil. Ayarlar’dan bir webhook adresi ekleyin.',
+    'slack.rateLimited': ['Slack şu an mesajları sınırlıyor. {detail} sonra yeniden gönderin.', 'Slack şu an mesajları sınırlıyor. Biraz sonra yeniden gönderin.'],
     'slack.rejected': ['Slack mesajı kabul etmedi: {detail}', 'Slack mesajı kabul etmedi'],
     'slack.saveFailed': ['Slack ayarları kaydedilemedi: {detail}', 'Slack ayarları kaydedilemedi'],
     'slack.unreachable': ['Slack’e ulaşılamadı: {detail}', 'Slack’e ulaşılamadı'],
@@ -810,8 +810,8 @@ registerMessages('code', {
     'upload.tooLarge': ['Dosya çok büyük (en fazla {limit})', 'Dosya çok büyük'],
     'url.invalid': 'Geçersiz adres',
     'flowRun.pinLimit': [
-      'En fazla {max, number} çalıştırma sabitlenebilir. Yenisini sabitlemek için önce birinin sabitlemesini kaldırın',
-      'Sabitlenebilecek çalıştırma sınırına ulaşıldı. Yenisini sabitlemek için önce birinin sabitlemesini kaldırın',
+      'En fazla {max, number} çalıştırma sabitlenebilir. Yenisini sabitlemek için önce birinin sabitlemesini kaldırın.',
+      'Sabitlenebilecek çalıştırma sınırına ulaşıldı. Yenisini sabitlemek için önce birinin sabitlemesini kaldırın.',
     ],
     network: 'Dürbün sunucusuna ulaşılamadı',
 
@@ -1378,8 +1378,8 @@ registerMessages('code', {
     'search.invalid': 'Invalid search request',
     'slack.invalid': 'The message to send is empty or too long',
     'slack.invalidUrl': 'The webhook URL must start with https://',
-    'slack.notConfigured': 'Slack is not connected. Add a webhook URL in Settings',
-    'slack.rateLimited': ['Slack is limiting messages for now. Send again in {detail}', 'Slack is limiting messages for now. Send again in a moment'],
+    'slack.notConfigured': 'Slack is not connected. Add a webhook URL in Settings.',
+    'slack.rateLimited': ['Slack is limiting messages for now. Send again in {detail}.', 'Slack is limiting messages for now. Send again in a moment.'],
     'slack.rejected': ['Slack refused the message: {detail}', 'Slack refused the message'],
     'slack.saveFailed': ['Could not save the Slack settings: {detail}', 'Could not save the Slack settings'],
     'slack.unreachable': ['Could not reach Slack: {detail}', 'Could not reach Slack'],
@@ -1387,7 +1387,7 @@ registerMessages('code', {
     'upload.failed': ['Could not save the upload: {detail}', 'Could not save the upload'],
     'upload.tooLarge': ['The file is too large (limit {limit})', 'The file is too large'],
     'url.invalid': 'Malformed URL',
-    'flowRun.pinLimit': ['At most {max, number} runs can be pinned. Unpin one to pin another', 'The pinned run limit is reached. Unpin one to pin another'],
+    'flowRun.pinLimit': ['At most {max, number} runs can be pinned. Unpin one to pin another.', 'The pinned run limit is reached. Unpin one to pin another.'],
     network: 'Could not reach the Dürbün server',
 
     'reader.crashReports.dropboxRefused':

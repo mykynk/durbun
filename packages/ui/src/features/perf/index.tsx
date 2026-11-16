@@ -16,6 +16,7 @@ import {
   downloadText,
   formatBytes,
   formatClock,
+  formatDuration,
   formatNumber,
   formatPercent,
   formatRelative,
@@ -38,12 +39,16 @@ import {
   canPoll,
   csvFileName,
   defaultTarget,
+  framePlatformOf,
+  framesIdleWhenAbsent,
   hasMetricsCapability,
   isPerfWindow,
   perSecondRows,
+  reportsLaunch,
   rowsToCsv,
   targetKey,
   targetSessions,
+  type FramePlatform,
   type MetricField,
   type PerfTarget,
   type PerfWindow,
@@ -54,7 +59,8 @@ import { TimeChart, type ChartSeriesSpec, type PlotRect } from './TimeChart';
 import { EventLane } from './EventLane';
 import { StatTile } from './StatTiles';
 import { PickerButton, TargetPicker, buildOptions } from './TargetPicker';
-import { PerfTable } from './PerfTable';
+import { PerfTable, type FrameTimeLabels } from './PerfTable';
+import { launchText } from '../logs/components/LogRow';
 import { annotationText, usePerfData } from './usePerfData';
 import { acquireWatch, watchKey, type WatchSpec } from './watch';
 import type { AnnotationType } from './traffic';
@@ -135,7 +141,9 @@ export default function PerfView() {
   const sessions = useMemo(() => targetSessions(target, apps), [target, apps]);
   const latest = sessions[0];
   const device = target ? devices[target.deviceId] : undefined;
-  const flutterLike = sessions.some((s) => s.sdk.platform === 'flutter' || s.sdk.platform === 'dart-vm');
+  // Frame names and the meaning of a missing FPS follow the app's platform (Flutter, native Android, others).
+  const framePlatform: FramePlatform = framePlatformOf(sessions);
+  const fpsIdleWhenAbsent = framesIdleWhenAbsent(framePlatform);
 
   const selectTarget = useCallback(
     (next: PerfTarget) => {
@@ -207,7 +215,7 @@ export default function PerfView() {
 
   /* ───────────── Data ───────────── */
   const describeAnnotation = useCallback((e: LogEntry, _type: AnnotationType) => annotationText(e), []);
-  const data = usePerfData({ target, sessions, apps, window: win, pausedAt, active, flutterLike, describeAnnotation });
+  const data = usePerfData({ target, sessions, apps, window: win, pausedAt, active, fpsIdleWhenAbsent, describeAnnotation });
 
   const togglePause = useCallback(() => setPausedAt((p) => (p === null ? Date.now() : null)), []);
   // A range dragged on a chart (ms): what happened then, with links to Logs and Network. Cleared with the target.
@@ -298,10 +306,22 @@ export default function PerfView() {
       int: (v: number) => dec(v, 0),
       rate: (v: number) => dec(v, v < 10 ? 1 : 0),
       perSec: (v: number) => t('perf.tiles.perSec', { value: dec(v, v < 10 ? 1 : 0) }),
+      ms: (v: number) => `${dec(v, v < 10 ? 1 : 0)} ms`,
     };
     // lang: number formats follow the language
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang, t]);
+
+  // Build / raster (Flutter), UI thread / RenderThread (native Android).
+  const frameNames = useMemo(() => {
+    const [build, raster] = framePlatform === 'flutter' ? ['build', 'raster'] : framePlatform === 'android' ? ['uiThread', 'renderThread'] : ['frameBuild', 'frameRaster'];
+    return {
+      build: t(`perf.charts.series.${build}`),
+      raster: t(`perf.charts.series.${raster}`),
+      table: { frameBuild: t(`perf.table.cols.${build}`), frameRaster: t(`perf.table.cols.${raster}`) } satisfies FrameTimeLabels,
+      hint: t(`perf.charts.frameTimesHint.${framePlatform}`),
+    };
+  }, [framePlatform, t]);
 
   // Chart inputs change only with the per-second data snapshot (stable identities → no needless redraws).
   const chartModel = useMemo(() => {
@@ -326,6 +346,10 @@ export default function PerfView() {
         { spec: { key: 'fps', label: t('perf.charts.series.fps'), color: colors.fps, kind: 'line', format: fmt.int }, ys: charts.frames.ys[0] ?? [], on: present.has('fps') },
         { spec: { key: 'jank', label: t('perf.charts.series.jank'), color: colors.jank, kind: 'bars', format: fmt.rate }, ys: charts.frames.ys[1] ?? [], on: present.has('jankyFrames') },
       ]),
+      frameTimesChart: pick([
+        { spec: { key: 'build', label: frameNames.build, color: colors.frameBuild, kind: 'line', format: fmt.ms }, ys: charts.frameTimes.ys[0] ?? [], on: present.has('frameBuildMs') },
+        { spec: { key: 'raster', label: frameNames.raster, color: colors.frameRaster, kind: 'line', format: fmt.ms }, ys: charts.frameTimes.ys[1] ?? [], on: present.has('frameRasterMs') },
+      ]),
       series: {
         requests: [
           { key: 'req', label: t('perf.charts.series.requests'), color: colors.requests, kind: 'area', format: fmt.rate },
@@ -337,7 +361,7 @@ export default function PerfView() {
         ] satisfies ChartSeriesSpec[],
       },
     };
-  }, [data, colors, t, fmt]);
+  }, [data, colors, t, fmt, frameNames]);
 
   const timeFormat = useCallback((sec: number, span: number) => formatClock(sec * 1000, span > 900 ? { seconds: false } : { ms: false }), []);
   const tooltipTime = useCallback((sec: number) => formatClock(sec * 1000, { ms: false }), []);
@@ -528,11 +552,16 @@ export default function PerfView() {
     );
   };
 
-  const { xRange, cpuChart, memChart, framesChart, series } = chartModel;
+  const { xRange, cpuChart, memChart, framesChart, frameTimesChart, series } = chartModel;
   const annotations = data.annotations;
   const showCpu = present.has('cpu');
   const showMemory = present.has('memoryMB') || present.has('heapMB');
-  const showFrames = present.has('fps') || present.has('jankyFrames');
+  // A connected app that sends metrics but has drawn no frame yet (Flutter, Android 7+): idle, not "no FPS".
+  const framesIdleSoFar = fpsIdleWhenAbsent && target.kind === 'app' && metricsPresent && appConnected && !present.has('fps');
+  const fpsIdle = stats.fps.idle || framesIdleSoFar;
+  const showFrames = present.has('fps') || present.has('jankyFrames') || framesIdleSoFar;
+  const showFrameTimes = present.has('frameBuildMs') || present.has('frameRasterMs');
+  const idleHint = framePlatform === 'flutter' ? t('perf.tiles.idleHint') : framePlatform === 'android' ? t('perf.tiles.idleHintAndroid') : undefined;
   const showRequests = target.kind === 'app' || stats.requests.total > 0;
   const missing: string[] = [];
   if (metricsPresent) {
@@ -551,6 +580,13 @@ export default function PerfView() {
   const memNow = stats.memory.now;
   const heapNow = stats.heap.now;
   const fpsNow = stats.fps.now;
+  const launch = target.kind === 'app' ? data.launch : undefined;
+  const launchParts = (() => {
+    if (launch?.info.kind !== 'cold') return undefined;
+    const text = formatDuration(launch.info.ms, { lang });
+    const i = text.lastIndexOf(' ');
+    return i > 0 ? [text.slice(0, i), text.slice(i + 1)] : [text, ''];
+  })();
   const errorsTotal = stats.errorLogs + stats.failedRequests;
 
   // Tiles that cannot apply to the target (e.g. FPS of a polled system process) are left out instead of
@@ -628,11 +664,11 @@ export default function PerfView() {
                 label={t('perf.tiles.fps')}
                 color={colors.fps}
                 value={fpsNow !== undefined ? fmt.int(fpsNow) : undefined}
-                placeholder={stats.fps.idle ? t('perf.tiles.idle') : t('perf.tiles.noData')}
-                sub={stats.fps.avg !== undefined ? t('perf.tiles.avg', { value: fmt.int(stats.fps.avg) }) : undefined}
-                hint={flutterLike ? `${t('perf.tiles.fpsHint')} ${t('perf.tiles.idleHint')}` : t('perf.tiles.fpsHint')}
+                placeholder={fpsIdle ? t('perf.tiles.idle') : t('perf.tiles.noData')}
+                sub={stats.fps.avg !== undefined ? t('perf.tiles.avg', { value: fmt.int(stats.fps.avg) }) : fpsIdle ? t('perf.tiles.idleNone') : undefined}
+                hint={idleHint ? `${t('perf.tiles.fpsHint')} ${idleHint}` : t('perf.tiles.fpsHint')}
                 trend={stats.fps.trend}
-                stale={stale(stats.fps.nowTs) && !stats.fps.idle}
+                stale={stale(stats.fps.nowTs) && !fpsIdle}
               />
             ),
           },
@@ -647,7 +683,7 @@ export default function PerfView() {
                 label={t('perf.tiles.jank')}
                 color={colors.jank}
                 value={stats.jank.perSecNow !== undefined ? fmt.perSec(stats.jank.perSecNow) : undefined}
-                placeholder={t('perf.tiles.noData')}
+                placeholder={fpsIdle ? t('perf.tiles.idle') : t('perf.tiles.noData')}
                 sub={
                   stats.jank.count > 0
                     ? stats.jank.total === 0
@@ -659,6 +695,39 @@ export default function PerfView() {
                 }
                 hint={t('perf.tiles.jankHint')}
                 trend={stats.jank.trend}
+              />
+            ),
+          },
+        ]
+      : []),
+    ...(isApp && (launch || reportsLaunch(sessions))
+      ? [
+          {
+            key: 'launch',
+            node: (
+              <StatTile
+                label={t('perf.tiles.launch')}
+                color={colors.launch}
+                value={launchParts?.[0]}
+                unit={launchParts?.[1]}
+                placeholder={launch?.info.kind === 'prewarmed' ? t('perf.tiles.launchPrewarmed') : t('perf.tiles.noData')}
+                sub={
+                  launch
+                    ? launch.info.kind === 'prewarmed'
+                      ? t('perf.tiles.launchNotTimed')
+                      : [t('perf.tiles.launchCold'), launch.info.screen].filter(Boolean).join(' · ')
+                    : appConnected
+                      ? t('perf.tiles.launchNone')
+                      : undefined
+                }
+                hint={launch ? `${launchText(launch.info, lang).tip}` : t('perf.tiles.launchHint')}
+                action={
+                  launch ? (
+                    <Button size="sm" variant="ghost" onClick={() => ui.focusLog(launch.id)}>
+                      {t('perf.events.open')}
+                    </Button>
+                  ) : undefined
+                }
               />
             ),
           },
@@ -737,7 +806,7 @@ export default function PerfView() {
         {target.kind === 'process' && polling ? <FrameStatsNote deviceId={target.deviceId} className="pf-callout" /> : null}
         {tiles}
         {view === 'table' ? (
-          <PerfTableView data={data} showRequests={showRequests} />
+          <PerfTableView data={data} showRequests={showRequests} frameLabels={frameNames.table} />
         ) : (
           <div className="pf-charts" aria-label={t('perf.charts.label')}>
             {windowEmpty ? (
@@ -800,6 +869,8 @@ export default function PerfView() {
                 {...common}
                 {...rectProps('frames')}
                 title={t('perf.charts.frames')}
+                hint={idleHint}
+                emptyText={fpsIdle ? t('perf.charts.framesIdle') : t('perf.charts.noData')}
                 series={framesChart.series}
                 xs={charts.frames.xs}
                 ys={framesChart.ys}
@@ -810,7 +881,30 @@ export default function PerfView() {
                   ...(present.has('fps') ? [fpsNow !== undefined ? fmt.int(fpsNow) : stats.fps.idle ? t('perf.tiles.idle') : undefined] : []),
                   ...(present.has('jankyFrames') ? [stats.jank.perSecNow !== undefined ? fmt.rate(stats.jank.perSecNow) : undefined] : []),
                 ]}
-                ariaLabel={`${t('perf.charts.frames')}: ${fpsNow !== undefined ? fmt.int(fpsNow) : '—'}`}
+                ariaLabel={`${t('perf.charts.frames')}: ${fpsNow !== undefined ? fmt.int(fpsNow) : fpsIdle ? t('perf.tiles.idle') : '—'}`}
+              />
+            ) : null}
+            {showFrameTimes ? (
+              <TimeChart
+                {...common}
+                title={t('perf.charts.frameTimes')}
+                hint={frameNames.hint}
+                series={frameTimesChart.series}
+                xs={charts.frameTimes.xs}
+                ys={frameTimesChart.ys}
+                softMax={20}
+                yFormat={(v) => fmt.ms(v)}
+                // Idle: no frame now, so no frame time either (the last one stays on the chart).
+                legendValues={[
+                  ...(present.has('frameBuildMs') ? [fpsIdle ? t('perf.tiles.idle') : stats.frameBuild.now !== undefined ? fmt.ms(stats.frameBuild.now) : undefined] : []),
+                  ...(present.has('frameRasterMs') ? [fpsIdle ? t('perf.tiles.idle') : stats.frameRaster.now !== undefined ? fmt.ms(stats.frameRaster.now) : undefined] : []),
+                ]}
+                ariaLabel={`${t('perf.charts.frameTimes')}: ${[
+                  stats.frameBuild.now !== undefined ? `${frameNames.build} ${fmt.ms(stats.frameBuild.now)}` : '',
+                  stats.frameRaster.now !== undefined ? `${frameNames.raster} ${fmt.ms(stats.frameRaster.now)}` : '',
+                ]
+                  .filter(Boolean)
+                  .join(', ') || '—'}`}
               />
             ) : null}
             {showRequests ? (
@@ -850,10 +944,10 @@ export default function PerfView() {
   );
 }
 
-function PerfTableView({ data, showRequests }: { data: ReturnType<typeof usePerfData>; showRequests: boolean }) {
+function PerfTableView({ data, showRequests, frameLabels }: { data: ReturnType<typeof usePerfData>; showRequests: boolean; frameLabels: FrameTimeLabels }) {
   const rows = useMemo(
     () => perSecondRows(data.fieldSamples, [data.logBuckets, data.netBuckets], data.fromSec, data.toSec).reverse(),
     [data],
   );
-  return <PerfTable rows={rows} showRequests={showRequests} />;
+  return <PerfTable rows={rows} showRequests={showRequests} frameLabels={frameLabels} />;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appLifecycleOf, exitMemoryKill, exitReportMessage, exitReportOf, isExitAnr, navigationOf, signalName } from './appEvents';
+import { appLifecycleOf, exitMemoryKill, exitReportMessage, exitReportOf, isExitAnr, launchOf, navigationOf, signalName } from './appEvents';
 
 const fmt = { seconds: (s: number) => `${s} s` };
 const app = (data: Record<string, unknown>) => ({ source: 'app' as const, data: { previousLaunch: true, ...data } });
@@ -45,5 +45,25 @@ describe('screen changes and lifecycle', () => {
     expect(appLifecycleOf({ source: 'app', tag: 'lifecycle', message: 'AppLifecycleState.paused' })).toBe('paused');
     expect(appLifecycleOf({ source: 'app', tag: 'lifecycle', message: 'paused' })).toBeUndefined();
     expect(appLifecycleOf({ source: 'device', tag: 'lifecycle', message: 'AppLifecycleState.resumed' })).toBeUndefined();
+  });
+});
+
+describe('cold start (durbun.launch)', () => {
+  const ev = (data: unknown, message = 'durbun.launch') => ({ kind: 'event' as const, message, data });
+
+  it('reads the Android and iOS cold-start events', () => {
+    expect(launchOf(ev({ kind: 'cold', ms: 1243, to: 'firstFrame', from: 'launchRequest', screen: 'MainActivity' }))).toEqual({ kind: 'cold', ms: 1243, from: 'launchRequest', screen: 'MainActivity' });
+    // Android sends `screen: null` when the activity has no name to give.
+    expect(launchOf(ev({ kind: 'cold', ms: 980, to: 'firstFrame', from: 'processStart', screen: null }))).toEqual({ kind: 'cold', ms: 980, from: 'processStart' });
+    expect(launchOf(ev({ kind: 'prewarmed', to: 'firstFrame' }))).toEqual({ kind: 'prewarmed' });
+  });
+
+  it('ignores other events and shapes it cannot word', () => {
+    expect(launchOf(ev({ kind: 'cold', ms: 1243 }, 'navigation'))).toBeUndefined();
+    expect(launchOf({ kind: 'text', message: 'durbun.launch', data: { kind: 'cold', ms: 1 } })).toBeUndefined();
+    expect(launchOf(ev({ kind: 'cold' }))).toBeUndefined();
+    expect(launchOf(ev({ kind: 'cold', ms: -5 }))).toBeUndefined();
+    expect(launchOf(ev({ kind: 'warm', ms: 300 }))).toBeUndefined();
+    expect(launchOf(ev(null))).toBeUndefined();
   });
 });

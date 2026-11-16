@@ -220,11 +220,23 @@ const tr: MessageTree = {
       paused: 'Arka plana geçti',
       detached: 'Görünümden ayrıldı',
     },
+    launch: {
+      cold: 'Soğuk açılış {time}',
+      coldOn: 'Soğuk açılış {time} · {screen}',
+      prewarmed: 'Önceden başlatılmış açılış · süre ölçülmedi',
+      prewarmedOn: 'Önceden başlatılmış açılış · {screen} · süre ölçülmedi',
+      coldTip:
+        'Uygulamanın süreci başladığından ilk ekranının ilk karesi çizilene kadar geçen süre; SDK her süreçte bir kez ölçer. Debug derlemeler daha yavaş açılır: aynı derlemenin açılışlarını karşılaştırın.',
+      coldTipRequest:
+        'Sistemden uygulamayı başlatması istendiğinden ilk ekranın ilk karesi çizilene kadar geçen süre (Android 13+); SDK her süreçte bir kez ölçer. Debug derlemeler daha yavaş açılır: aynı derlemenin açılışlarını karşılaştırın.',
+      prewarmedTip:
+        'iOS bu süreci kullanıcı uygulamayı açmadan önce başlattı (prewarm). Süreç başlangıcı kullanıcının ne kadar beklediğini göstermediği için süre gönderilmedi.',
+    },
   },
   row: {
     moreLines: { one: '+{count, number} satır', other: '+{count, number} satır' },
-    frames: { one: '{count, number} frame', other: '{count, number} frame' },
-    appFrames: { one: '{count, number} uygulama frame’i', other: '{count, number} uygulama frame’i' },
+    frames: { one: '{count, number} yığın satırı', other: '{count, number} yığın satırı' },
+    appFrames: { one: '{count, number} uygulama satırı', other: '{count, number} uygulama satırı' },
     collapse: 'Daralt',
     expandLines: 'Tüm satırları göster',
     expandStack: 'Yığın izini göster',
@@ -309,8 +321,9 @@ const tr: MessageTree = {
     network: 'Ağ isteği',
     props: 'Olay özellikleri',
     copyMessage: 'Mesajı kopyala',
-    copyJson: 'JSON kopyala',
+    copyJson: 'Satırı JSON olarak kopyala',
     copyLine: 'Satırı kopyala',
+    position: 'Satır {index, number} / {total, number}',
     copyStack: 'Yığın izini kopyala',
     noSymbols: {
       title: 'Sembolsüz Dart yığını',
@@ -742,6 +755,16 @@ const en: MessageTree = {
       paused: 'Went to the background',
       detached: 'Detached from its view',
     },
+    launch: {
+      cold: 'Cold start {time}',
+      coldOn: 'Cold start {time} · {screen}',
+      prewarmed: 'Prewarmed launch · not timed',
+      prewarmedOn: 'Prewarmed launch · {screen} · not timed',
+      coldTip: 'Time from the app’s process start to the first frame of its first screen; the SDK measures it once per process. Debug builds start slower: compare launches of the same build.',
+      coldTipRequest:
+        'Time from the moment the system was asked to start the app (Android 13+) to the first frame of its first screen; the SDK measures it once per process. Debug builds start slower: compare launches of the same build.',
+      prewarmedTip: 'iOS started this process before the user opened the app (prewarming). Its start says nothing about how long the user waited, so no time was sent.',
+    },
   },
   row: {
     moreLines: { one: '+{count, number} line', other: '+{count, number} lines' },
@@ -831,8 +854,9 @@ const en: MessageTree = {
     network: 'Network request',
     props: 'Event properties',
     copyMessage: 'Copy message',
-    copyJson: 'Copy JSON',
+    copyJson: 'Copy the line as JSON',
     copyLine: 'Copy line',
+    position: 'Row {index, number} of {total, number}',
     copyStack: 'Copy stack trace',
     noSymbols: {
       title: 'Dart stack without symbols',

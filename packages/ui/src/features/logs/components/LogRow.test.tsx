@@ -131,3 +131,57 @@ describe('crash banner with several devices', () => {
     expect(container.querySelector('.lg-banner__dev')?.getAttribute('title')).toBe('Pixel 8 · Demo');
   });
 });
+
+describe('crash banner text', () => {
+  it('keeps the app and the device whole, cuts only the headline and says everything in the tooltip', async () => {
+    const { CrashBanner } = await import('./Banners');
+    setLanguage('tr');
+    const e = line({ id: 10, kind: 'crash', level: 'fatal', source: 'app', deviceId: 'demo:1', message: 'java.lang.IllegalStateException: Fragment CheckoutFragment not attached to a context' });
+    const { container } = render(<CrashBanner crashes={[e]} appName={() => 'Kasa'} device={() => ({ name: 'Pixel 8 · Demo', short: 'Pixel 8', hue: 152 })} onGoto={() => {}} onDismiss={() => {}} />);
+    const text = container.querySelector('.lg-banner__text')!;
+    expect(text.getAttribute('title')).toBe('Kasa çöktü · Pixel 8 · Demo · java.lang.IllegalStateException: Fragment CheckoutFragment not attached to a context');
+    // The device chip is a banner chip: it never shrinks (logs.css `.lg-banner__dev.lg-dev--inline`).
+    expect(container.querySelector('.lg-banner__dev')?.classList.contains('lg-dev--inline')).toBe(true);
+  });
+});
+
+describe('cold start (durbun.launch)', () => {
+  const launch = (id: number, data: Record<string, unknown>) => line({ id, source: 'app', appId: 'app:3', kind: 'event', tag: 'event', message: 'durbun.launch', data });
+
+  it('reads as a quiet line with the time and the first screen, and says what it measures', () => {
+    setLanguage('tr');
+    const { container } = show({ id: 1, e: launch(1, { kind: 'cold', ms: 1243, to: 'firstFrame', from: 'processStart', screen: 'MainActivity' }), n: 1 });
+    expect(container.querySelector('.lg-sep--moment .lg-sep__text')?.textContent).toBe('Soğuk açılış 1,24 sn · MainActivity');
+    expect(container.querySelector('.lg-sep--moment')?.getAttribute('title')).toMatch(/^Soğuk açılış 1,24 sn · MainActivity — Uygulamanın süreci başladığından/);
+  });
+
+  it('names the launch-request start of Android 13+ and words a prewarmed launch without a time', () => {
+    setLanguage('en');
+    const { container } = show({ id: 2, e: launch(2, { kind: 'cold', ms: 412, from: 'launchRequest' }), n: 1 });
+    expect(container.querySelector('.lg-sep__text')?.textContent).toBe('Cold start 412 ms');
+    expect(container.querySelector('.lg-sep--moment')?.getAttribute('title')).toMatch(/asked to start the app \(Android 13\+\)/);
+    cleanup();
+    const pre = show({ id: 3, e: launch(3, { kind: 'prewarmed', to: 'firstFrame' }), n: 1 });
+    expect(pre.container.querySelector('.lg-sep__text')?.textContent).toBe('Prewarmed launch · not timed');
+    expect(pre.container.querySelector('.lg-sep--moment')?.getAttribute('title')).not.toMatch(/\d+(\.\d+)? ?(ms|s)\b/);
+  });
+
+  it('leaves a shape it does not know as a plain event line', () => {
+    const { container } = show({ id: 4, e: launch(4, { kind: 'warm', ms: 300 }), n: 1 });
+    expect(container.querySelector('.lg-sep--moment')).toBeNull();
+    expect(container.querySelector('.lg-event-name')?.textContent).toBe('durbun.launch');
+  });
+});
+
+describe('stack frame chips', () => {
+  it('count the stack’s lines in Turkish words, frames in English', () => {
+    const stack = 'Exception: boom\n#0      main (package:app/main.dart:10:3)\n#1      run (package:app/run.dart:4:1)\n#2      _rootRun (dart:async/zone.dart:1399:13)';
+    setLanguage('tr');
+    const e = line({ id: 20, level: 'error', message: stack });
+    const { container } = show({ id: 20, e, n: 1 });
+    expect(container.querySelector('.lg-badge--stack')?.textContent).toBe('3 yığın satırı');
+    cleanup();
+    setLanguage('en');
+    expect(show({ id: 20, e, n: 1 }).container.querySelector('.lg-badge--stack')?.textContent).toBe('3 frames');
+  });
+});

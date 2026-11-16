@@ -90,6 +90,32 @@ export function hasMetricsCapability(a: Pick<AppSession, 'capabilities'>): boole
 }
 
 /**
+ * How a target's frames are drawn, which names its frame times: Flutter (`frameBuildMs` / `frameRasterMs` = build
+ * and raster), a native Android app (UI thread and RenderThread time per frame), anything else (iOS, React Native,
+ * a polled process: they send no frame times today).
+ */
+export type FramePlatform = 'flutter' | 'android' | 'other';
+
+export function framePlatformOf(sessions: readonly Pick<AppSession, 'sdk'>[]): FramePlatform {
+  if (sessions.some((s) => s.sdk.platform === 'flutter' || s.sdk.platform === 'dart-vm')) return 'flutter';
+  if (sessions.some((s) => s.sdk.platform === 'android')) return 'android';
+  return 'other';
+}
+
+/**
+ * Flutter, and Android 7+ through FrameMetrics, count only the frames actually drawn: a sample without `fps` (or
+ * with 0) is an idle screen, never a drop to 0 FPS and never "does not report FPS" (SPEC §9.4).
+ */
+export function framesIdleWhenAbsent(p: FramePlatform): boolean {
+  return p !== 'other';
+}
+
+/** Apps whose SDK reports the cold-start time (`durbun.launch`): the native Android and iOS SDKs. */
+export function reportsLaunch(sessions: readonly Pick<AppSession, 'sdk'>[]): boolean {
+  return sessions.some((s) => s.sdk.platform === 'android' || s.sdk.platform === 'ios');
+}
+
+/**
  * Default target for a scope: the scoped app; on a device/all scope the connected app with the metrics
  * capability that connected most recently (else the most recent one that has metric samples).
  */

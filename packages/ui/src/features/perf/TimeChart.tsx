@@ -1,5 +1,7 @@
 import { memo, useEffect, useRef, type ReactNode } from 'react';
 import uPlot from 'uplot';
+import { Info } from 'lucide-react';
+import { Tooltip } from '../../components';
 import 'uplot/dist/uPlot.min.css';
 import { withAlpha, type ChartColors } from './theme';
 import { yRange } from './model';
@@ -23,6 +25,8 @@ export interface TimeChartProps {
   title: string;
   /** Small note next to the title (e.g. "5-second average"). */
   note?: ReactNode;
+  /** What the chart measures (info icon with a tooltip next to the title). */
+  hint?: string;
   series: readonly ChartSeriesSpec[];
   xs: readonly number[];
   ys: readonly (readonly (number | null | undefined)[])[];
@@ -68,7 +72,7 @@ export const Y_AXIS_SIZE = 50;
  * chart (canvas colors are resolved from tokens); data changes only call setData.
  */
 export const TimeChart = memo(function TimeChart(props: TimeChartProps) {
-  const { title, note, series, xs, ys, xRange, colors, annotations, legendValues, emptyText, ariaLabel } = props;
+  const { title, note, hint, series, xs, ys, xRange, colors, annotations, legendValues, emptyText, ariaLabel } = props;
   const plotRef = useRef<HTMLDivElement>(null);
   const uRef = useRef<uPlot | null>(null);
   const latest = useRef(props);
@@ -341,6 +345,13 @@ export const TimeChart = memo(function TimeChart(props: TimeChartProps) {
     <section className="pf-chart" aria-label={title}>
       <header className="pf-chart__head">
         <h3 className="pf-chart__title">{title}</h3>
+        {hint ? (
+          <Tooltip content={hint} side="bottom">
+            <span className="pf-chart__hint" tabIndex={0} role="note" aria-label={hint}>
+              <Info size={12} aria-hidden />
+            </span>
+          </Tooltip>
+        ) : null}
         {note ? <span className="pf-chart__note">{note}</span> : null}
         <span className="grow" />
         {series.length > 0 ? (

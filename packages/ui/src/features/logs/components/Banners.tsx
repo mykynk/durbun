@@ -41,11 +41,15 @@ export const CrashBanner = memo(function CrashBanner({ crashes, appName, device,
   const Icon = kind === 'anr' ? Hourglass : kind === 'flutter-error' ? TriangleAlert : OctagonX;
   const more = crashes.length - 1;
   const dev = device?.(latest);
+  const title = crashTitle(latest, appName(latest));
+  const headline = a.crash?.title ?? latest.message;
+  // The headline gives way first; the app and the device stay readable. Anything cut is in the tooltip.
+  const full = [title, dev?.name, headline].filter(Boolean).join(' · ');
   return (
     <div className={`lg-banner lg-banner--${kind}`} role="alert">
       <Icon size={16} className="lg-banner__icon" aria-hidden />
-      <div className="lg-banner__text">
-        <span className="lg-banner__title">{crashTitle(latest, appName(latest))}</span>
+      <div className="lg-banner__text" title={full}>
+        <span className="lg-banner__title">{title}</span>
         {dev ? (
           <span className="lg-dev lg-dev--inline lg-banner__dev" style={{ '--dev-h': dev.hue } as CSSProperties} title={dev.name}>
             <span className="lg-dev__name">{dev.short ?? dev.name}</span>
@@ -54,9 +58,7 @@ export const CrashBanner = memo(function CrashBanner({ crashes, appName, device,
         <span className="lg-banner__sep" aria-hidden>
           ·
         </span>
-        <span className="lg-banner__headline mono" title={a.crash?.title}>
-          {a.crash?.title ?? latest.message}
-        </span>
+        <span className="lg-banner__headline mono">{headline}</span>
         <span className="lg-banner__time tnum">{formatClock(latest.ts, { ms: false })}</span>
         {more > 0 ? <span className="lg-banner__more">{t('logs.crash.more', { count: more })}</span> : null}
       </div>

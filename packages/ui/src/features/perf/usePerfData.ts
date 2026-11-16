@@ -43,7 +43,7 @@ import {
   type PerfWindow,
   type RateStats,
 } from './model';
-import { LogTraffic, networkTraffic, type Annotation, type AnnotationType } from './traffic';
+import { LogTraffic, networkTraffic, type Annotation, type AnnotationType, type LaunchMark } from './traffic';
 
 export interface ChartData {
   xs: number[];
@@ -69,13 +69,16 @@ export interface PerfData {
   fromSupplement: ReadonlySet<MetricField>;
   /** Window samples per field (CSV / table). */
   fieldSamples: Partial<Record<MetricField, readonly MetricSample[]>>;
-  charts: { cpu: ChartData; memory: ChartData; frames: ChartData; requests: ChartData; logs: ChartData };
+  /** `frameTimes`: build / raster (Flutter) or UI thread / RenderThread (native Android) ms per frame. */
+  charts: { cpu: ChartData; memory: ChartData; frames: ChartData; frameTimes: ChartData; requests: ChartData; logs: ChartData };
   stats: {
     cpu: FieldStats;
     memory: FieldStats;
     heap: FieldStats;
     fps: FieldStats;
     jank: JankStats;
+    frameBuild: FieldStats;
+    frameRaster: FieldStats;
     requests: RateStats;
     logs: RateStats;
     failedRate: RateStats;
@@ -85,6 +88,8 @@ export interface PerfData {
     errorTrend: number[];
   };
   annotations: Annotation[];
+  /** Cold-start report of the newest session (`durbun.launch`), when it sent one. */
+  launch?: LaunchMark;
   logBuckets: RateBuckets;
   netBuckets: RateBuckets;
   /** The target's log lines and requests (for "what happened in this range"). */
@@ -117,10 +122,12 @@ export function usePerfData(opts: {
   /** Pause time (frozen view) or null when live. */
   pausedAt: number | null;
   active: boolean;
-  flutterLike: boolean;
+  /** The target sends no `fps` while idle (Flutter, Android FrameMetrics): absent or 0 is a gap, not a drop. */
+  fpsIdleWhenAbsent: boolean;
   describeAnnotation: (e: LogEntry, type: AnnotationType) => string;
 }): PerfData {
-  const { target, sessions, apps, window: win, pausedAt, active, flutterLike } = opts;
+  const { target, sessions, apps, window: win, pausedAt, active, fpsIdleWhenAbsent } = opts;
+  const latestAppId = target?.kind === 'app' ? sessions[0]?.id : undefined;
   const live = active && pausedAt === null;
   const mv = useMetricsVersion({ throttleMs: 1000, enabled: live });
   const lv = useLogVersion({ throttleMs: 1000, enabled: live });
@@ -238,9 +245,12 @@ export function usePerfData(opts: {
     const cpuPts = toPoints(cpuSrc, 'cpu', { gapMs });
     const memJoin = joinPoints([toPoints(memSrc, 'memoryMB', { gapMs }), toPoints(heapSrc, 'heapMB', { gapMs })]);
     const framesJoin = joinPoints([
-      toPoints(fpsSrc, 'fps', { gapMs, zeroIsIdle: flutterLike }),
+      toPoints(fpsSrc, 'fps', { gapMs, zeroIsIdle: fpsIdleWhenAbsent }),
       toPoints(fieldSamples.jankyFrames ?? EMPTY, 'jankyFrames', { gapMs, value: (s, prev) => jankPerSecond(s, prev, intervalMs) }),
     ]);
+    const buildSrc = fieldSamples.frameBuildMs ?? EMPTY;
+    const rasterSrc = fieldSamples.frameRasterMs ?? EMPTY;
+    const frameTimesJoin = joinPoints([toPoints(buildSrc, 'frameBuildMs', { gapMs }), toPoints(rasterSrc, 'frameRasterMs', { gapMs })]);
 
     // Rates: complete seconds only (the current second is still filling up).
     const fromSec = Math.ceil(from / 1000);
@@ -278,6 +288,7 @@ export function usePerfData(opts: {
         cpu: { xs: cpuPts.xs, ys: [cpuPts.ys] },
         memory: memJoin,
         frames: framesJoin,
+        frameTimes: frameTimesJoin,
         requests: { xs: req.xs, ys: req.ys },
         logs: { xs: logs.xs, ys: logs.ys },
       },
@@ -285,8 +296,10 @@ export function usePerfData(opts: {
         cpu: fieldStats(inWindow(cpuSrc), 'cpu'),
         memory: fieldStats(inWindow(memSrc), 'memoryMB'),
         heap: fieldStats(inWindow(heapSrc), 'heapMB'),
-        fps: fieldStats(inWindow(fpsSrc), 'fps', { zeroIsIdle: flutterLike }),
+        fps: fieldStats(inWindow(fpsSrc), 'fps', { zeroIsIdle: fpsIdleWhenAbsent }),
         jank: jankStats(inWindow(fieldSamples.jankyFrames ?? EMPTY), intervalMs),
+        frameBuild: fieldStats(inWindow(buildSrc), 'frameBuildMs'),
+        frameRaster: fieldStats(inWindow(rasterSrc), 'frameRasterMs'),
         requests: rateStats(netBuckets, fromSec, toSec, 'requests'),
         logs: rateStats(traffic.buckets, fromSec, toSec, 'logs'),
         failedRate: rateStats(netBuckets, fromSec, toSec, 'failedRequests'),
@@ -296,6 +309,7 @@ export function usePerfData(opts: {
         errorTrend: compactErrors,
       },
       annotations,
+      launch: latestAppId ? traffic.launches.get(latestAppId) : undefined,
       logBuckets: traffic.buckets,
       netBuckets,
       logInTarget: logPredicate,
@@ -303,7 +317,7 @@ export function usePerfData(opts: {
     };
     // tick: the window slides every second while live.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [samples, present, trafficRev, netBuckets, win, pausedAt, tick, flutterLike, logPredicate, netPredicate]);
+  }, [samples, present, trafficRev, netBuckets, win, pausedAt, tick, fpsIdleWhenAbsent, logPredicate, netPredicate, latestAppId]);
 }
 
 /** Label of an annotated log entry (system lines localized, crashes → their headline). */

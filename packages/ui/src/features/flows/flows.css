@@ -1076,6 +1076,11 @@
   cursor: pointer;
   z-index: 4;
 }
+/* Steps under the bottom corner (Canvas `minimapCorner`): the top-right corner is free of the canvas tools. */
+.fl-minimap--top {
+  top: 10px;
+  bottom: auto;
+}
 .fl-minimap__view {
   fill: var(--accent-soft);
   stroke: var(--accent);

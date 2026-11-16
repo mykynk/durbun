@@ -290,8 +290,10 @@
   gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
 }
+/* Only the headline shrinks: the app and the device stay whole (the tooltip has everything). */
 .lg-banner__title {
   font-weight: 600;
   color: var(--text);
@@ -299,11 +301,14 @@
 }
 .lg-banner__sep {
   color: var(--text-subtle);
-}
-.lg-banner__dev {
   flex-shrink: 0;
 }
+.lg-banner__dev.lg-dev--inline {
+  flex-shrink: 0;
+  max-width: none;
+}
 .lg-banner__headline {
+  flex: 0 1 auto;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1304,7 +1309,7 @@
   height: 28px;
   padding: 0 10px 0 12px;
   border-radius: var(--radius-pill);
-  background: var(--accent);
+  background: var(--accent-fill);
   color: var(--text-on-accent);
   font-size: var(--fs-sm);
   font-weight: 600;
@@ -1312,7 +1317,7 @@
   transition: background var(--dur) var(--ease);
 }
 .lg-pill:hover {
-  background: var(--accent-hover);
+  background: var(--accent-fill-hover);
 }
 .lg-pill__kbd {
   padding: 0 5px;
@@ -1320,7 +1325,7 @@
   font-family: var(--font-ui);
   font-size: 10.5px;
   line-height: 16px;
-  background: rgba(255, 255, 255, 0.18);
+  background: color-mix(in srgb, var(--text-on-accent) 18%, transparent);
 }
 
 /* ───────────── detail panel ───────────── */
@@ -1332,6 +1337,7 @@
   min-width: 0;
   background: var(--bg-panel);
   border-left: 1px solid var(--border);
+  container: lg-detail / inline-size;
 }
 .lg-detail__head {
   display: flex;
@@ -1341,23 +1347,54 @@
   padding: 0 6px 0 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  min-width: 0;
+}
+.lg-detail__head > .lvl {
+  flex-shrink: 0;
 }
 .lg-detail__time {
+  flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   color: var(--text-muted);
 }
+/* The kind ("Çökme", "Flutter hatası") never gives way; a long tag may. */
 .lg-detail__kind {
+  flex-shrink: 0;
   font-size: var(--fs-sm);
   color: var(--text-muted);
   white-space: nowrap;
+}
+.lg-detail__kind--tag {
+  flex-shrink: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.lg-detail__acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
 .lg-detail__pos {
+  margin: 0 4px;
   font-size: var(--fs-xs);
   color: var(--text-subtle);
   white-space: nowrap;
+}
+/* Narrow panel: the counter keeps its position only ("23388"), then goes to the arrows' tooltips; the time is in
+   the details below. */
+@container lg-detail (max-width: 520px) {
+  .lg-detail__pos-total {
+    display: none;
+  }
+}
+@container lg-detail (max-width: 400px) {
+  .lg-detail__pos,
+  .lg-detail__time {
+    display: none;
+  }
 }
 .lg-detail__body {
   flex: 1 1 auto;
@@ -1513,10 +1550,17 @@
 .lg-detail__foot {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   padding: 8px 12px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+}
+/* One row down to the panel's narrowest size: "Copy line" keeps its icon (its name stays in the tooltip). */
+@container lg-detail (max-width: 430px) {
+  .lg-detail__foot-label {
+    display: none;
+  }
 }
 .lg-kv {
   display: grid;

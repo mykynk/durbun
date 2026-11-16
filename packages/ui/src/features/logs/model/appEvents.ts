@@ -147,6 +147,30 @@ export function navigationOf(e: Pick<LogEntry, 'kind' | 'message' | 'data'>): { 
   return from ? { to, from } : { to };
 }
 
+/** The event the native SDKs send once per process with the cold-start time (Android `LaunchTimer`, iOS `LaunchTiming`). */
+export const LAUNCH_EVENT = 'durbun.launch';
+
+export type LaunchInfo =
+  /** `ms` from the process start (Android 13+: from the launch request, `from: 'launchRequest'`) to the first frame. */
+  | { kind: 'cold'; ms: number; from?: string; screen?: string }
+  /** iOS started the process ahead of the tap (prewarm): the process start says nothing about the wait, so no time. */
+  | { kind: 'prewarmed'; screen?: string };
+
+/** The cold-start report a line carries (`durbun.launch` event), or undefined (any other line, or a shape the UI does not know). */
+export function launchOf(e: Pick<LogEntry, 'kind' | 'message' | 'data'>): LaunchInfo | undefined {
+  if (e.kind !== 'event' || e.message !== LAUNCH_EVENT) return undefined;
+  const d = dataOf(e);
+  if (!d) return undefined;
+  const screen = text(d.screen);
+  const extra = screen ? { screen } : {};
+  if (d.kind === 'prewarmed') return { kind: 'prewarmed', ...extra };
+  const ms = num(d.ms);
+  // A cold start with its duration; a kind a newer SDK may add stays a plain event line (never called "cold").
+  if (ms === undefined || ms < 0 || (d.kind !== undefined && d.kind !== 'cold')) return undefined;
+  const from = text(d.from);
+  return { kind: 'cold', ms, ...(from ? { from } : {}), ...extra };
+}
+
 export type AppLifecycle = 'resumed' | 'inactive' | 'hidden' | 'paused' | 'detached';
 const LIFECYCLE = /^AppLifecycleState\.(resumed|inactive|hidden|paused|detached)$/;
 

@@ -419,7 +419,10 @@
 }
 .mk-preset.is-on {
   color: var(--text-on-accent);
-  background: var(--accent);
+  background: var(--accent-fill);
+}
+.mk-preset.is-on:hover {
+  background: var(--accent-fill-hover);
 }
 .mk-preset.is-2xx:not(.is-on) {
   color: var(--st-2xx);

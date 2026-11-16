@@ -12,6 +12,8 @@ const COLUMNS: { key: keyof PerSecondRow; label: string; digits: number }[] = [
   { key: 'heapMB', label: 'perf.table.cols.heap', digits: 1 },
   { key: 'fps', label: 'perf.table.cols.fps', digits: 0 },
   { key: 'jankyFrames', label: 'perf.table.cols.jank', digits: 0 },
+  { key: 'frameBuildMs', label: 'frameBuild', digits: 1 },
+  { key: 'frameRasterMs', label: 'frameRaster', digits: 1 },
   { key: 'logs', label: 'perf.table.cols.logs', digits: 0 },
   { key: 'errorLogs', label: 'perf.table.cols.errorLogs', digits: 0 },
   { key: 'requests', label: 'perf.table.cols.requests', digits: 0 },
@@ -25,7 +27,13 @@ const COLUMNS: { key: keyof PerSecondRow; label: string; digits: number }[] = [
 const ALWAYS: ReadonlySet<keyof PerSecondRow> = new Set(['logs', 'errorLogs']);
 const REQUEST_COLS: ReadonlySet<keyof PerSecondRow> = new Set(['requests', 'failedRequests']);
 
-export const PerfTable = memo(function PerfTable({ rows, showRequests = true }: { rows: readonly PerSecondRow[]; showRequests?: boolean }) {
+/** Column titles of the frame times, named for the target's platform (build / raster, UI thread / RenderThread). */
+export interface FrameTimeLabels {
+  frameBuild: string;
+  frameRaster: string;
+}
+
+export const PerfTable = memo(function PerfTable({ rows, showRequests = true, frameLabels }: { rows: readonly PerSecondRow[]; showRequests?: boolean; frameLabels?: FrameTimeLabels }) {
   const t = useT();
   const scrollRef = useRef<HTMLDivElement>(null);
   // Metric columns the target never reported in this window are left out.
@@ -50,7 +58,7 @@ export const PerfTable = memo(function PerfTable({ rows, showRequests = true }: 
       </span>
       {columns.map((c) => (
         <span key={c.key} className="pf-table__cell" role="columnheader">
-          {t(c.label)}
+          {c.label === 'frameBuild' || c.label === 'frameRaster' ? (frameLabels?.[c.label] ?? c.key) : t(c.label)}
         </span>
       ))}
     </div>

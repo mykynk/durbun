@@ -89,6 +89,12 @@ All notable changes to Dürbün are listed here. The format follows
   detail instead of a raw English line.
 - The footer of paused automations was cut off and the last-run pill covered the minimap.
 - A selected warning or error log row keeps its colour.
+- Flows: the minimap no longer covers a step. The canvas fits the flow again when the run panel opens and gets
+  its view back when the panel closes.
+- Logs: the crash banner keeps the app and the device readable; the detail panel keeps its title and its footer
+  on one line at narrow widths.
+- Turkish: stack chips read "yığın satırı"; the pin-limit and Slack messages end with a full stop. Selected mock
+  presets and the "new lines" pill keep their contrast in the light theme.
 
 ### Changed
 
@@ -350,7 +356,11 @@ All notable changes to Dürbün are listed here. The format follows
   reasons); SSE from `XMLHttpRequest`-based libraries such as `react-native-sse`, from `fetch` streams and from
   the browser's `EventSource`. They are sent only while the Mac app asks for them, and their payloads follow the
   body settings.
-
+- Logs and Performance: the cold start time the Android and iOS SDKs measure (`durbun.launch`) reads as a line
+  in Logs ("Cold start 1.24 s"; a prewarmed iOS launch is named and carries no time) and as a Launch tile in
+  Performance that opens the line.
+- Performance: frame times have their own chart, named after the platform (Flutter build / raster, Android UI
+  thread / RenderThread). An Android or Flutter app that draws nothing reads as idle, never as 0 FPS.
 ## [0.2.0] - 2026-11-12
 
 ### Added

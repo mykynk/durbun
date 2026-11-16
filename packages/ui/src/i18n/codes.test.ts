@@ -575,7 +575,7 @@ describe('server codes → i18n', () => {
     expect(errorText({ code: 'replay.invalidMethod', message: 'Invalid HTTP method "G E T"' })).toBe('Geçersiz HTTP metodu: G E T');
     expect(errorText({ code: 'upload.tooLarge', message: 'File is too large (limit 2 GB)' })).toBe('Dosya çok büyük (en fazla 2 GB)');
     expect(errorText({ code: 'action.failed', message: 'The action failed' })).toBe('İşlem başarısız oldu');
-    expect(errorText({ code: 'slack.rateLimited', message: 'Slack is limiting messages: 30 s' })).toBe('Slack şu an mesajları sınırlıyor. 30 s sonra yeniden gönderin');
+    expect(errorText({ code: 'slack.rateLimited', message: 'Slack is limiting messages: 30 s' })).toBe('Slack şu an mesajları sınırlıyor. 30 s sonra yeniden gönderin.');
     expect(errorText({ code: 'device.readOnly', message: 'Imported sessions are read-only recordings' })).toBe(
       'İçe aktarılan kayıtlar salt okunurdur; cihaz işlemleri kullanılamaz',
     );

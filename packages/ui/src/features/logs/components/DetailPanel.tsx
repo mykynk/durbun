@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { Bug, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Funnel, FunnelX, History, LocateFixed, Share2, Timer, X } from 'lucide-react';
+import { Braces, Bug, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Funnel, FunnelX, History, LocateFixed, Share2, Timer, X } from 'lucide-react';
 import type { DeviceInfo, LogEntry, NetworkEntry } from '@durbun/protocol';
 import { Button, CodeView, CopyButton, IconButton, JsonTree, LevelBadge, MethodBadge, StatusBadge, copyText, formatBytes, formatClock, formatDateTime, formatDuration, sdkLabel, toast } from '../../../components';
 import { networkStore, ui, useHub, useMocks, useNetworkVersion } from '../../../data';
@@ -269,14 +269,30 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
         <span className="lg-detail__time tnum" title={seconds ? `${new Date(e.ts).toISOString()} · ${t('logs.detail.secondsOnly')}` : new Date(e.ts).toISOString()}>
           {entryClock(e)}
         </span>
-        {e.kind && e.kind !== 'text' ? <span className="lg-detail__kind">{kindLabel}</span> : e.tag ? <span className="lg-detail__kind mono">{e.tag}</span> : null}
+        {e.kind && e.kind !== 'text' ? (
+          <span className="lg-detail__kind" title={kindLabel}>
+            {kindLabel}
+          </span>
+        ) : e.tag ? (
+          <span className="lg-detail__kind lg-detail__kind--tag mono" title={e.tag}>
+            {e.tag}
+          </span>
+        ) : null}
         <span className="grow" />
-        {onReport ? <IconButton icon={Bug} label={t('report.open')} size="sm" onClick={onReport} /> : null}
-        {onShare ? <IconButton icon={Share2} label={t('logs.share.title')} size="sm" onClick={onShare} /> : null}
-        <span className="lg-detail__pos tnum">{index >= 0 ? `${index + 1} / ${total}` : ''}</span>
-        <IconButton icon={ChevronUp} label={t('logs.detail.prev')} shortcut="K" size="sm" disabled={index <= 0} onClick={onPrev} />
-        <IconButton icon={ChevronDown} label={t('logs.detail.next')} shortcut="J" size="sm" disabled={index < 0 || index >= total - 1} onClick={onNext} />
-        <IconButton icon={X} label={t('logs.detail.close')} shortcut="Escape" size="sm" onClick={onClose} />
+        <span className="lg-detail__acts">
+          {onReport ? <IconButton icon={Bug} label={t('report.open')} size="sm" onClick={onReport} /> : null}
+          {onShare ? <IconButton icon={Share2} label={t('logs.share.title')} size="sm" onClick={onShare} /> : null}
+          {/* The title comes first: on a narrow panel the counter keeps only its position (the tooltip has both). */}
+          {index >= 0 ? (
+            <span className="lg-detail__pos tnum" title={t('logs.detail.position', { index: index + 1, total })}>
+              {index + 1}
+              <span className="lg-detail__pos-total"> / {total}</span>
+            </span>
+          ) : null}
+          <IconButton icon={ChevronUp} label={t('logs.detail.prev')} shortcut="K" size="sm" disabled={index <= 0} onClick={onPrev} />
+          <IconButton icon={ChevronDown} label={t('logs.detail.next')} shortcut="J" size="sm" disabled={index < 0 || index >= total - 1} onClick={onNext} />
+          <IconButton icon={X} label={t('logs.detail.close')} shortcut="Escape" size="sm" onClick={onClose} />
+        </span>
       </header>
 
       <div className="lg-detail__body">
@@ -470,12 +486,11 @@ export function DetailPanel({ entry: e, row, index, total, d, onClose, onPrev, o
             {t('logs.detail.around')}
           </Button>
         ) : null}
-        <Button size="sm" icon={Copy} onClick={() => void copy(row?.id === e.id ? rowAsLines(row) : entryAsLine(e))}>
-          {t('logs.detail.copyLine')}
+        {/* On a narrow panel this one keeps its icon only (the label stays its name and tooltip). */}
+        <Button size="sm" icon={Copy} aria-label={t('logs.detail.copyLine')} title={t('logs.detail.copyLine')} onClick={() => void copy(row?.id === e.id ? rowAsLines(row) : entryAsLine(e))}>
+          <span className="lg-detail__foot-label">{t('logs.detail.copyLine')}</span>
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => void copy(JSON.stringify(e, null, 2))}>
-          {t('logs.detail.copyJson')}
-        </Button>
+        <IconButton icon={Braces} label={t('logs.detail.copyJson')} size="sm" onClick={() => void copy(JSON.stringify(e, null, 2))} />
       </footer>
     </aside>
   );

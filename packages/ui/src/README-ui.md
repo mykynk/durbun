@@ -585,6 +585,16 @@ monospace content at `var(--log-fs)`, row height `var(--row-h)`. Detail panes: `
   `app-diagnostics` (iOS MetricKit) reports of an earlier launch are worded per reason (`logs.exit.*`); a
   low-memory one counts as `is:oom`, an ANR one as `is:anr`. `navigation` events (`is:nav`) and Flutter lifecycle
   lines render as quiet separator rows (`MomentRow`).
+- Launch time (`durbun.launch`, native Android / iOS SDKs, `launchOf`): a quiet `MomentRow` ("Soğuk açılış 1,24 sn",
+  prewarmed in words, no time) and the Performance tab's "Açılış" tile for the app's newest launch
+  (`LogTraffic.launches`), with the start point (`processStart` / `launchRequest`) in the tooltip. Unknown `kind`s
+  stay plain event lines.
+- Frame phases follow the app (`perf/model.ts framePlatformOf`): Flutter "Build" / "Raster", native Android "UI
+  thread" / "RenderThread". Flutter and Android count only drawn frames: a sample without `fps` is an idle screen
+  (`framesIdleWhenAbsent`), never 0 FPS or "does not report".
+- Flow canvas (`flows/model/viewport.ts`): when the canvas shrinks (run panel, window) a flow that was all on screen
+  is fitted again and gets its view back when the canvas grows; the minimap moves to the top-right corner, then
+  hides, rather than sit on a node.
 - App sessions (`sources/session.ts`): `sdkProtocol`, a `protocolMismatch` badge with what to update, and the device
   clock when it is more than 5 s off the Mac (`clockSkewOf`; app info, log details, one line above the log list).
   Log times are never corrected.

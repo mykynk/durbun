@@ -125,6 +125,25 @@ describe('LogTraffic', () => {
   });
 });
 
+describe('launch times', () => {
+  const launch = (sec: number, appId: string, data: unknown) => log(sec, { appId, kind: 'event', tag: 'event', message: 'durbun.launch', data });
+
+  it('keeps the newest durbun.launch per app session and ignores shapes it cannot word', () => {
+    const store = new FakeStore();
+    const first = launch(0, 'app:1', { kind: 'cold', ms: 1400, to: 'firstFrame', from: 'processStart' });
+    const second = launch(5, 'app:1', { kind: 'cold', ms: 980, to: 'firstFrame', from: 'launchRequest', screen: 'MainActivity' });
+    const other = launch(6, 'app:2', { kind: 'prewarmed', to: 'firstFrame' });
+    store.entries.push(first, second, other, launch(7, 'app:2', { kind: 'warm', ms: 10 }), log(8, { appId: 'app:1', message: 'durbun.launch' }));
+    const tr = new LogTraffic();
+    tr.update(store, 'k', () => true, describe2, T0 + 60_000);
+    expect(tr.launches.get('app:1')).toMatchObject({ id: second.id, info: { kind: 'cold', ms: 980, from: 'launchRequest', screen: 'MainActivity' } });
+    expect(tr.launches.get('app:2')).toMatchObject({ id: other.id, info: { kind: 'prewarmed' } });
+    // A new target starts from scratch.
+    tr.update(store, 'other', (e) => e.appId === 'app:2', describe2, T0 + 60_000);
+    expect(tr.launches.has('app:1')).toBe(false);
+  });
+});
+
 describe('networkTraffic', () => {
   const net = (id: string, p: Partial<NetworkEntry>): NetworkEntry => ({
     id,

@@ -18,6 +18,9 @@ export interface ChartColors {
   heap: string;
   fps: string;
   jank: string;
+  frameBuild: string;
+  frameRaster: string;
+  launch: string;
   requests: string;
   failed: string;
   logs: string;
@@ -43,6 +46,9 @@ const VARS: Record<Exclude<keyof ChartColors, 'font' | 'theme'>, string> = {
   heap: '--pick-orange',
   fps: '--pick-blue',
   jank: '--warning',
+  frameBuild: '--pick-violet',
+  frameRaster: '--pick-orange',
+  launch: '--pick-pink',
   requests: '--st-3xx',
   failed: '--danger',
   logs: '--text-muted',

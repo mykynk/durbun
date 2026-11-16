@@ -28,6 +28,7 @@ import {
   type Rect,
 } from '../model/graph';
 import { nodeIcon } from '../model/icons';
+import { MINIMAP, allNodesInView, minimapCorner, shouldRefit, type MinimapCorner } from '../model/viewport';
 import { nodeSummary } from '../model/summary';
 import { GROUP_COLOR, nodeDescription, nodeName } from '../model/text';
 
@@ -112,6 +113,8 @@ type Drag =
   | { kind: 'connect'; from: string; port: FlowPort; sx: number; sy: number }
   | { kind: 'marquee'; sx: number; sy: number; additive: boolean; base: Selection };
 
+const sameViewport = (a: Viewport, b: Viewport) => Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.zoom - b.zoom) < 1e-6;
+
 function isEditableTarget(el: EventTarget | null): boolean {
   const e = el as HTMLElement | null;
   return !!e && (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA' || e.tagName === 'SELECT' || e.isContentEditable);
@@ -141,12 +144,37 @@ export const Canvas = memo(function Canvas(props: CanvasProps) {
   selRef.current = selection;
 
   /* ── size ── */
+  // A canvas that gets smaller (the run panel opens, the window shrinks) fits the flow again when it was all on
+  // screen and would now be cut or sit under the minimap; a view the user zoomed or panned stays as it is.
+  const fitRef = useRef<(mode?: 'all' | 'readable', opts?: { maxZoom?: number }) => Viewport>(() => vpRef.current);
+  const setViewportRef = useRef<(v: Viewport) => void>(() => {});
+  const minimapOnRef = useRef(showMinimap);
+  minimapOnRef.current = showMinimap && flow.nodes.length > 1;
   useLayoutEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+    let last = { w: el.clientWidth, h: el.clientHeight };
+    // The view before an automatic fit: the canvas growing back (the run panel closed) restores it when the user
+    // has not moved the view since and it still shows every step.
+    let auto: { before: Viewport; after: Viewport } | null = null;
+    const ro = new ResizeObserver(() => {
+      const next = { w: el.clientWidth, h: el.clientHeight };
+      const nodes = flowRef.current.nodes;
+      const v = vpRef.current;
+      if (auto && !sameViewport(v, auto.after)) auto = null;
+      if (shouldRefit(nodes, v, last, next, { minimap: minimapOnRef.current })) {
+        const before = auto?.before ?? v;
+        auto = { before, after: fitRef.current('all', { maxZoom: v.zoom }) };
+      } else if (auto && next.w >= last.w && next.h >= last.h && (next.w > last.w || next.h > last.h) && allNodesInView(nodes, auto.before, next)) {
+        const restore = auto.before;
+        auto = null;
+        setViewportRef.current(restore);
+      }
+      last = next;
+      setSize(next);
+    });
     ro.observe(el);
-    setSize({ w: el.clientWidth, h: el.clientHeight });
+    setSize(last);
     return () => ro.disconnect();
   }, []);
 
@@ -161,34 +189,37 @@ export const Canvas = memo(function Canvas(props: CanvasProps) {
     [viewKey],
   );
 
+  setViewportRef.current = setViewport;
+
   useEffect(() => onViewportChange?.(vp), [vp, onViewportChange]);
 
   const fit = useCallback(
-    (mode: 'all' | 'readable' = 'all') => {
+    (mode: 'all' | 'readable' = 'all', opts: { maxZoom?: number } = {}): Viewport => {
       const el = rootRef.current;
       const b = boundsOf(flowRef.current.nodes);
-      if (!el || !b) {
-        setViewport({ x: 40, y: 40, zoom: 1 });
-        return;
-      }
+      const apply = (v: Viewport) => {
+        setViewport(v);
+        return v;
+      };
+      if (!el || !b) return apply({ x: 40, y: 40, zoom: 1 });
       // The palette sits on top and the zoom bar and hint at the bottom: keep the nodes clear of both.
       const pad = 48;
       const top = 64;
       const bottom = 72;
       const w = el.clientWidth || 800;
       const h = el.clientHeight || 600;
-      const zoom = clampZoom(Math.min((w - pad * 2) / Math.max(b.w, 1), (h - top - bottom) / Math.max(b.h, 1), 1.1));
+      const zoom = clampZoom(Math.min((w - pad * 2) / Math.max(b.w, 1), (h - top - bottom) / Math.max(b.h, 1), 1.1, opts.maxZoom ?? Infinity));
       if (mode === 'readable' && zoom < READABLE_ZOOM) {
         // Too big to read whole: start where the flow starts (left, triggers) at a size the cards can be read.
         const z = READABLE_ZOOM;
         const fitsHeight = b.h * z <= h - top - bottom;
-        setViewport({ zoom: z, x: pad - b.x * z, y: fitsHeight ? top + (h - top - bottom - b.h * z) / 2 - b.y * z : top - b.y * z });
-        return;
+        return apply({ zoom: z, x: pad - b.x * z, y: fitsHeight ? top + (h - top - bottom - b.h * z) / 2 - b.y * z : top - b.y * z });
       }
-      setViewport({ zoom, x: (w - b.w * zoom) / 2 - b.x * zoom, y: top + (h - top - bottom - b.h * zoom) / 2 - b.y * zoom });
+      return apply({ zoom, x: (w - b.w * zoom) / 2 - b.x * zoom, y: top + (h - top - bottom - b.h * zoom) / 2 - b.y * zoom });
     },
     [setViewport],
   );
+  fitRef.current = fit;
 
   // A flow opened for the first time in this window is fitted.
   const fitted = useRef<string | null>(null);
@@ -509,6 +540,15 @@ export const Canvas = memo(function Canvas(props: CanvasProps) {
     return out;
   }, [flow, lang, t]);
   const nodes = useMemo(() => (dragPos ? flow.nodes.map((n) => (dragPos.has(n.id) ? { ...n, position: dragPos.get(n.id)! } : n)) : flow.nodes), [flow.nodes, dragPos]);
+
+  // The minimap never covers a step: it takes the free right corner (or steps aside), re-checked when the view, the
+  // stage or the steps change; not while a drag is under way (it would jump under the pointer).
+  const minimapFits = showMinimap && nodes.length > 1 && size.h >= 360 && size.w >= 560;
+  const [mmCorner, setMmCorner] = useState<MinimapCorner>('bottom');
+  useLayoutEffect(() => {
+    if (!minimapFits || panning || dragPos) return;
+    setMmCorner((c) => minimapCorner(nodes, vp, size, c));
+  }, [minimapFits, nodes, vp, size, panning, dragPos]);
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const edges = useMemo(
     () =>
@@ -608,7 +648,7 @@ export const Canvas = memo(function Canvas(props: CanvasProps) {
         ) : null}
       </div>
       {/* A short or narrow stage (run panel open, small window) has no room for it: it would cover the nodes. */}
-      {showMinimap && nodes.length > 1 && size.h >= 360 && size.w >= 560 ? <Minimap nodes={nodes} vp={vp} size={size} onMove={(x, y) => setViewport((v) => ({ ...v, x, y }))} /> : null}
+      {minimapFits && mmCorner !== 'hidden' ? <Minimap nodes={nodes} vp={vp} size={size} corner={mmCorner} onMove={(x, y) => setViewport((v) => ({ ...v, x, y }))} /> : null}
     </div>
   );
 });
@@ -745,10 +785,10 @@ function EdgeActions({ at, zoom, onInsert, onDelete }: { at: FlowPosition; zoom:
 
 /* ───────────── minimap ───────────── */
 
-const MM_W = 180;
-const MM_H = 120;
+const MM_W = MINIMAP.w;
+const MM_H = MINIMAP.h;
 
-function Minimap({ nodes, vp, size, onMove }: { nodes: readonly FlowNode[]; vp: Viewport; size: { w: number; h: number }; onMove(x: number, y: number): void }) {
+function Minimap({ nodes, vp, size, corner, onMove }: { nodes: readonly FlowNode[]; vp: Viewport; size: { w: number; h: number }; corner: Exclude<MinimapCorner, 'hidden'>; onMove(x: number, y: number): void }) {
   const t = useT();
   const b = boundsOf(nodes)!;
   const view = { x: -vp.x / vp.zoom, y: -vp.y / vp.zoom, w: size.w / vp.zoom, h: size.h / vp.zoom };
@@ -770,7 +810,7 @@ function Minimap({ nodes, vp, size, onMove }: { nodes: readonly FlowNode[]; vp: 
   const v = toMap(view.x, view.y);
   return (
     <svg
-      className="fl-ui fl-minimap"
+      className={clsx('fl-ui fl-minimap', corner === 'top' && 'fl-minimap--top')}
       width={MM_W}
       height={MM_H}
       role="img"
