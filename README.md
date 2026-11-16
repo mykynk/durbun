@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <a href="https://appnify.dev/durbun/">Website</a> · <a href="https://appnify.dev/durbun/#demo">Live demo</a>
+</p>
+
+<p align="center">
   <a href="https://pub.dev/packages/durbun"><img src="https://img.shields.io/pub/v/durbun?label=pub.dev" alt="pub.dev"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
@@ -17,7 +21,7 @@
   English · <a href="README.tr.md">Türkçe</a> · <a href="docs/README.md">Docs</a>
 </p>
 
-![Dürbün with sample data: live logs, a request's JSON response, a mock rule made from that request, and performance charts](docs/images/demo.webp)
+![Dürbün with sample data: live logs from three devices and their apps, with an Android crash opened to its stack trace](docs/images/logs.webp)
 
 Plug in an Android or iOS device, or start a simulator or emulator, and Dürbün shows everything the app
 does in one readable, live window. *Dürbün* is Turkish for binoculars.
@@ -27,9 +31,13 @@ does in one readable, live window. *Dürbün* is Turkish for binoculars.
 - **Network.** HTTP(S) requests with headers, bodies and timings, from the clients each SDK hooks into (see
   [What gets captured](#what-gets-captured)). Copy as cURL, fetch, Dio, Swift or OkHttp, resend or edit and
   send, compare two requests, export HAR.
+
+  ![Dürbün's network view: captured requests with status, timing and device, and the JSON response of the selected request](docs/images/network.webp)
 - **Mocks.** Answer matching requests with a canned response, add latency or simulate a failure. The SDK
   applies the rules inside the app, so no proxy or certificate is involved (see [Mock rules](docs/guides/mocks.md)).
 - **Performance.** CPU, memory, heap, FPS and jank, requests per second and logs per second.
+
+  ![Dürbün's performance view for one app: CPU, memory, heap, FPS, jank, requests, logs and errors over the last minute](docs/images/performance.webp)
 - **Flows.** Tests you draw as a graph: requests sent from the Mac, checks, waits on what the app does, mock
   scenarios and device actions, chained and calling each other as sub-flows (see [Flows](#flows)). Write them
   by hand, from captured requests, or with your own AI assistant.
@@ -44,14 +52,12 @@ does in one readable, live window. *Dürbün* is Turkish for binoculars.
   dark mode, font size, location, simulator push notifications, status bar overrides, and buttons your app
   adds itself.
 
+  ![Dürbün's device view for an Android phone: device details, the settings Dürbün changed with an Undo for each, screenshot, deep link and the app's own debug tools](docs/images/device.webp)
+
 Device logs need no SDK. Flutter debug apps without the SDK are attached automatically through the Dart VM
 Service. The SDKs add app logs, network capture, metrics and mocks.
 
 The interface is available in English and Turkish and follows your system language.
-
-![Dürbün's network view: a list of HTTP requests and the JSON response of the selected one](docs/images/network.png)
-
-![Dürbün's log view: logs from three devices, a crash banner and a folded stack trace](docs/images/logs.png)
 
 ## Install
 
@@ -151,6 +157,8 @@ Each SDK guide has the details, and shows how to report other clients yourself.
 
 The **Flows** tab chains what you test by hand into a graph you can run again. Each step is a node; arrows
 decide what runs next, and a step that fails leaves through its error arrow when you draw one.
+
+![Dürbün's flow editor: a checkout flow drawn as a graph with an error branch, and its last run, which failed at the cart request with a 401](docs/images/flows.webp)
 
 | Group | Nodes |
 | --- | --- |

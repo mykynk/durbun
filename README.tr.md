@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <a href="https://appnify.dev/durbun/?lang=tr">Web sitesi</a> · <a href="https://appnify.dev/durbun/?lang=tr#demo">Canlı demo</a>
+</p>
+
+<p align="center">
   <a href="https://pub.dev/packages/durbun"><img src="https://img.shields.io/pub/v/durbun?label=pub.dev" alt="pub.dev"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT lisansı"></a>
 </p>
@@ -17,7 +21,7 @@
   <a href="README.md">English</a> · Türkçe · <a href="docs/README.md">Belgeler</a>
 </p>
 
-![Örnek verilerle Dürbün: canlı loglar, bir isteğin JSON yanıtı, o istekten oluşturulan mock kuralı ve performans grafikleri](docs/images/demo.webp)
+![Örnek verilerle Dürbün: üç cihazdan ve uygulamalarından canlı loglar, stack trace'iyle açılmış bir Android çökmesi](docs/images/logs.tr.webp)
 
 Android veya iOS cihazı takın ya da simülatör/emülatör açın: Dürbün uygulamanın yaptığı her şeyi tek, okunaklı
 ve canlı bir pencerede gösterir.
@@ -28,9 +32,13 @@ ve canlı bir pencerede gösterir.
 - **Ağ.** Her SDK'nın bağlandığı istemcilerden gelen HTTP(S) istekleri, başlıkları, gövdeleri ve
   zamanlamalarıyla (bkz. [Ne yakalanır](#ne-yakalanır)). cURL, fetch, Dio, Swift veya OkHttp olarak kopyalama,
   yeniden ya da düzenleyip gönderme, iki isteği karşılaştırma, HAR olarak dışa aktarma.
+
+  ![Dürbün'ün ağ ekranı: durumu, süresi ve cihazıyla yakalanan istekler ve seçili isteğin JSON yanıtı](docs/images/network.tr.webp)
 - **Mock'lar.** Eşleşen isteklere hazır yanıt verme, gecikme ekleme veya hata simüle etme. Kuralları SDK
   uygulamanın içinde uygular; proxy ya da sertifika gerekmez (bkz. [Mock kuralları](docs/guides/mocks.md)).
 - **Performans.** CPU, bellek, heap, FPS ve takılmalar, saniyede istek ve saniyede log.
+
+  ![Dürbün'ün bir uygulama için performans ekranı: son bir dakikadaki CPU, bellek, heap, FPS, takılmalar, istekler, loglar ve hatalar](docs/images/performance.tr.webp)
 - **Akışlar.** Graf olarak çizdiğiniz testler: Mac'ten gönderilen istekler, kontroller, uygulamanın
   yaptıklarını bekleme, mock senaryoları ve cihaz işlemleri; birbirine zincirlenir, birbirini alt akış olarak
   çağırır (bkz. [Akışlar](#akışlar)). Elle, kayıtlı isteklerden ya da kendi yapay zekâ asistanınızla yazın.
@@ -45,14 +53,12 @@ ve canlı bir pencerede gösterir.
   kaldırma, koyu mod, yazı boyutu, konum, simülatöre push bildirimi, durum çubuğu ve uygulamanın kendi
   eklediği butonlar.
 
+  ![Dürbün'ün bir Android telefon için cihaz ekranı: cihaz bilgileri, Dürbün'ün değiştirdiği ve tek tek geri alınabilen ayarlar, ekran görüntüsü, deep link ve uygulamanın kendi hata ayıklama araçları](docs/images/device.tr.webp)
+
 Cihaz logları SDK olmadan da gelir. SDK'sı olmayan Flutter debug uygulamalarına Dürbün Dart VM Service
 üzerinden kendiliğinden bağlanır. Uygulama logları, ağ yakalama, ölçümler ve mock'lar için SDK eklenir.
 
 Arayüz İngilizce ve Türkçedir, sistem dilini izler.
-
-![Dürbün'ün ağ ekranı: HTTP istekleri listesi ve seçili isteğin JSON yanıtı](docs/images/network.png)
-
-![Dürbün'ün log ekranı: üç cihazdan loglar, çökme bandı ve katlanmış stack trace](docs/images/logs.png)
 
 ## Kurulum
 
@@ -156,6 +162,8 @@ Ayrıntılar ve diğer istemcileri kendiniz nasıl bildireceğiniz her SDK'nın 
 
 **Akışlar** sekmesi elle test ettiklerinizi tekrar çalıştırılabilen bir grafa dönüştürür. Her adım bir
 düğümdür; oklar sırada neyin çalışacağını belirler, bir hata oku çizdiyseniz başarısız adım oradan devam eder.
+
+![Dürbün'ün akış editörü: hata dalı olan, graf olarak çizilmiş bir ödeme akışı ve sepet isteğinde 401 alıp başarısız olan son çalıştırması](docs/images/flows.tr.webp)
 
 | Grup | Düğümler |
 | --- | --- |
