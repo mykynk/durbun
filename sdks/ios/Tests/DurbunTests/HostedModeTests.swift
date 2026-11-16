@@ -110,7 +110,7 @@ final class HostedModeTests: XCTestCase {
         XCTAssertTrue(core.isHosted, "a native Durbun.start() does not replace the Flutter-hosted core")
         let headers = core.redacting([("Authorization", "Bearer x"), ("Accept", "*/*")])
         XCTAssertEqual(headers.map(\.1), ["••••", "*/*"])
-        XCTAssertEqual(core.hostedCapabilities(options: hostedOptions(network: true)), ["logs", "events", "commands", "network", "mocks"])
+        XCTAssertEqual(core.hostedCapabilities(options: hostedOptions(network: true)), ["logs", "events", "commands", "network", "mocks", "streams"])
         Durbun.stop()
         XCTAssertFalse(core.isHosted)
     }

@@ -9,7 +9,8 @@ import ObjectiveC
 ///    protocol subclass with its own forwarding session (`SessionBinding`), so the real request
 ///    runs with that session's cache, cookies, proxy, TLS and connectivity settings.
 /// The swizzle is installed once and stays; the protocol itself declines everything while the SDK
-/// is stopped. Background sessions run out of process and cannot be intercepted.
+/// is stopped. Background sessions run out of process and cannot be intercepted. WebSocket tasks
+/// never reach a URLProtocol: `WebSocketCapture` hooks their class instead.
 enum NetworkCapture {
     private static let lock = UnfairLock()
     private static var swizzled = false
@@ -19,6 +20,8 @@ enum NetworkCapture {
         lock.withLock {
             if !swizzled {
                 swizzled = true
+                // First: its probe task (never resumed) is made before the session swizzles exist.
+                WebSocketCapture.install()
                 exchangeClassMethod(
                     URLSessionConfiguration.self,
                     original: NSSelectorFromString("defaultSessionConfiguration"),

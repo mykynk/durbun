@@ -21,7 +21,7 @@ crashes, URLSession network traffic and performance metrics live to the Dürbün
 | `print`, `debugPrint`, `NSLog`, `printf`, stderr | Logs tagged `stdout` / `stderr`. Xcode's console **keeps working** (every byte is also written to the original output). Multi-line output (pretty JSON, `dump()`, stack traces) is grouped into one entry; levels are inferred from markers such as `[ERROR]`, `Warning:` and `❌`; NSLog's date/process prefix is stripped |
 | Crashes | Uncaught Objective-C exceptions **immediately** (`kind: crash`). Swift runtime traps (force-unwrapping `nil`, index out of range, `fatalError`), EXC_BAD_ACCESS and other fatal signals **on the next launch**, with the last console lines ("Fatal error: …") and a backtrace |
 | Earlier launches (MetricKit) | What iOS reports later: watchdog kills (0x8badf00d), main-thread hangs, CPU and disk-write exceptions, slow launches (see [Earlier launches](#earlier-launches-metrickit)) |
-| Network | `URLSession.shared` **and** your own sessions (Alamofire included): headers, bodies, redirects, timings (DNS/TCP/TLS/wait/receive), protocol (h2/h3), errors and cancellations |
+| Network | `URLSession.shared` **and** your own sessions (Alamofire included): headers, bodies, redirects, timings (DNS/TCP/TLS/wait/receive), protocol (h2/h3), errors and cancellations; `URLSessionWebSocketTask` messages and Server-Sent Events (see [WebSockets and Server-Sent Events](#websockets-and-server-sent-events)) |
 | Mocks | Rules defined in the Mac app: synthesized responses, latency, natural failures (timeout, connection, DNS, TLS) |
 | Performance | CPU (%), memory (phys_footprint, the number Xcode shows), thread count, FPS and janky frames (CADisplayLink), launch time |
 | Events | `Durbun.event("purchase", ["amount": 49.9])` |
@@ -166,6 +166,28 @@ own session.
   `httpBody` are resent as usual.
 - WKWebView and AVPlayer traffic does not go through URLSession protocols.
 - `redactHeaders` masks header values as `••••`; `ignoredHosts` leaves hosts (and their subdomains) out.
+
+#### WebSockets and Server-Sent Events
+
+When the Mac app asks for them (it does by default), each `URLSessionWebSocketTask` and each
+`text/event-stream` response is one entry in the Network tab with its messages, in the order the app saw them:
+
+| Stack | Captured without code changes |
+|---|---|
+| `URLSessionWebSocketTask` (iOS 13+), completion handlers and `async` `send` / `receive` | Handshake (request headers, the 101 and its headers, the subprotocol), every text and binary message both ways, `sendPing` and its pong, the close frame from either side with code and reason, failures and `cancel()` |
+| Server-Sent Events over URLSession: a delegate's `didReceive data`, `bytes(for:)` / `bytes(from:)`, libraries built on them | The response as soon as its first bytes arrive, then one row per event (`event`, `id`, `retry`, the `data` lines); the normal end, a broken stream and cancelling the reader |
+| Starscream (its own engine), SocketRocket, Socket.IO, anything on raw sockets or Network.framework | Not captured: they do not use URLSession. Starscream with `useCustomEngine: false` runs on `URLSessionWebSocketTask` and is captured |
+
+- The messages are a copy: nothing is consumed, reordered or delayed, and the app's blocks run on their usual
+  threads. Payloads are cut at the Mac app's limit (64 KB by default; sizes are always exact); with
+  `captureBodies: false` only sizes are sent.
+- An event stream's data is never kept as a response body. Comments (`:` lines) are not shown.
+- Only what URLSession shows is reported: pings the server sends and their automatic answers are not, and URLSession
+  reads a pong only while a `receive` is pending. When the app closes a socket, the server's answering close frame
+  is not shown separately.
+- Sockets opened before the Mac app asked for messages appear when it does, with their real handshake times and the
+  messages from then on; a stream that was shown is always ended.
+- To find the task class it hooks, the SDK creates one WebSocket task at start and never resumes it.
 
 ### Logs and events
 

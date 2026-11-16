@@ -153,6 +153,19 @@ final class DurbunCore {
 
     /// Bodies above this are always truncated, whatever is asked (keeps every frame well below 16 MiB).
     static let maxBodyBytesCap = 8 * 1024 * 1024
+    /// The payload cap of one `net.ws` / `net.sse` message while the connected desktop asks for them
+    /// (`config.captureStreams`); nil: send none. The app's `captureBodies` / `maxBodyBytes` options can
+    /// only lower the desktop's cap.
+    var streamMessageCap: Int? {
+        lock.withLock {
+            guard running, connected, policy.active, config.captureStreams else { return nil }
+            var cap = max(0, config.maxStreamMessageBytes)
+            if bodyOverride.captureBodies == false { cap = 0 }
+            if let limit = bodyOverride.maxBodyBytes { cap = min(cap, max(0, limit)) }
+            return cap
+        }
+    }
+
     var mockRules: [MockRule] { lock.withLock { mocks } }
     var networkPolicy: NetworkCapturePolicy { lock.withLock { policy } }
     var appIdentifier: String? { lock.withLock { environment?.app.id } }
@@ -399,10 +412,11 @@ final class DurbunCore {
         guard let data = json.data(using: .utf8),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return }
-        let (hosted, connectionChanged): (Bool, Bool) = lock.withLock {
-            guard running, relay != nil else { return (false, false) }
+        let (hosted, connectionChanged, lostRelay): (Bool, Bool, HostRelay?) = lock.withLock {
+            guard running, relay != nil else { return (false, false, nil) }
             if let newConfig = object["config"] as? [String: Any] {
                 config = SdkConfig(json: newConfig, fallback: config)
+                if config.captureStreams { WebSocketWatch.shared.checkSoon() }
             }
             if object["mocks"] != nil { mocks = MockRule.parseList(object["mocks"]) }
             let wasConnected = connected
@@ -412,8 +426,9 @@ final class DurbunCore {
             if let wanted = object["deviceLogs"] as? [String: Any] {
                 hostDeviceLogs = HostDeviceLogs(json: wanted, fallback: hostDeviceLogs)
             }
-            return (true, wasConnected != connected)
+            return (true, wasConnected != connected, wasConnected && !connected ? relay : nil)
         }
+        lostRelay?.dropStreamLines()
         if hosted { applyDeviceLogs() }
         if connectionChanged {
             sendSystemDiagnostics()
@@ -438,7 +453,7 @@ final class DurbunCore {
     /// Capabilities the native layer adds to the host's session.
     func hostedCapabilities(options: DurbunOptions) -> [String] {
         var capabilities = ["logs", "events", "commands"]
-        if options.captureNetwork { capabilities += ["network", "mocks"] }
+        if options.captureNetwork { capabilities += ["network", "mocks", "streams"] }
         if options.captureCrashes { capabilities.append("crash") }
         return capabilities
     }
@@ -486,6 +501,7 @@ final class DurbunCore {
         osLog?.stop()
         if crash { CrashCapture.uninstall() }
         NetworkCapture.uninstall()
+        WebSocketCapture.forgetAll()
         transport?.stop()
         relay?.stop()
     }
@@ -742,6 +758,17 @@ final class DurbunCore {
         }
     }
 
+    /// A `net.ws` / `net.sse` message: goes out only on the connection that is up now, never kept for a
+    /// later one, and is dropped before other messages when the buffers are full.
+    func sendStream(_ message: JSONValue) {
+        let (transport, relay) = lock.withLock { running && connected ? (self.transport, self.relay) : (nil, nil) }
+        if let relay {
+            relay.enqueue(JSONWriter.line(message), stream: true)
+        } else {
+            transport?.send(message, stream: true)
+        }
+    }
+
     func flush(timeout: TimeInterval) -> Bool {
         let (transport, relay) = lock.withLock { running ? (self.transport, self.relay) : (nil, nil) }
         if let relay { return relay.flush(timeout: timeout) }
@@ -901,6 +928,7 @@ final class DurbunCore {
         }
         guard current else { return }
         metrics?.start(intervalMs: welcome.config.metricsIntervalMs)
+        if welcome.config.captureStreams { WebSocketWatch.shared.checkSoon() }
         applyDeviceLogs()
         sendSystemDiagnostics()
         notifyStatus()
@@ -934,6 +962,8 @@ final class DurbunCore {
                 return (self.metrics, connected)
             }
             if isConnected { metrics?.start(intervalMs: newConfig.metricsIntervalMs) }
+            // Open WebSockets are reported from now on (their handshake first), without waiting for traffic.
+            if newConfig.captureStreams { WebSocketWatch.shared.checkSoon() }
             applyDeviceLogs()
         case let .command(id, name, params):
             commands.handle(name: name, params: params) { [weak self] result in

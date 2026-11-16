@@ -109,10 +109,13 @@ final class Transport {
     }
 
     /// Queues one message; it is serialized on the transport queue so callers never pay for it.
-    func send(_ message: JSONValue) {
+    /// A `stream` message (`net.ws` / `net.sse`) is sent only on the link that is active now: it is
+    /// never kept for a later connection, and it is dropped first when the buffer is full.
+    func send(_ message: JSONValue, stream: Bool = false) {
         queue.async {
             guard self.running else { return }
-            self.outgoing.append(JSONWriter.line(message))
+            if stream, self.active == nil { return }
+            self.outgoing.append(JSONWriter.line(message), stream: stream)
             self.pump()
         }
     }
@@ -524,6 +527,8 @@ final class Transport {
         let wasActive = active === link
         if wasActive {
             active = nil
+            // The next desktop may not ask for stream messages (an older one, or captureStreams off).
+            outgoing.removeAllDroppable()
             signalFlushWaiters(drained: false)
             Diagnostics.info("Dürbün disconnected from the desktop (\(link.origin.rawValue))")
             callbacks.disconnected()

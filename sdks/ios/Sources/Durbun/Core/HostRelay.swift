@@ -55,12 +55,18 @@ final class HostRelay {
         self.interval = interval
     }
 
-    func enqueue(_ line: Data) {
+    /// `stream`: a `net.ws` / `net.sse` line, dropped first when the buffer is full.
+    func enqueue(_ line: Data, stream: Bool = false) {
         queue.async {
             guard !self.stopped else { return }
-            self.buffer.append(line)
+            self.buffer.append(line, stream: stream)
             self.scheduleDrain()
         }
+    }
+
+    /// The host lost the desktop: stream lines not handed over yet are not kept for the next one.
+    func dropStreamLines() {
+        queue.async { self.buffer.removeAllDroppable() }
     }
 
     func stop() {

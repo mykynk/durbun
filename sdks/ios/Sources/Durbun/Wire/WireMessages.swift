@@ -7,7 +7,7 @@ enum Wire {
     static let protocolVersion = 1
     static let sdkName = "durbun-ios"
     static let networkSource = "urlsession"
-    static let capabilities = ["logs", "network", "mocks", "metrics", "events", "crash", "commands"]
+    static let capabilities = ["logs", "network", "mocks", "metrics", "events", "crash", "commands", "streams"]
 }
 
 /// `WireBody`: `size` is the full decoded size even when `data` was truncated.
@@ -279,6 +279,56 @@ enum WireMessage {
         if cancelled { b.set("cancelled", true) }
         if mocked { b.set("mocked", true) }
         b.set("mockRuleId", mockRuleId)
+        return b.value
+    }
+
+    /// `SdkNetWs`: one WebSocket message of the connection whose handshake was `net.request` `id`.
+    /// `dir`: 'in' | 'out'; `opcode`: 'text' | 'binary' | 'ping' | 'pong' | 'close'.
+    static func netWs(
+        id: String,
+        ts: Double,
+        dir: String,
+        opcode: String,
+        size: Int,
+        body: WireBody?,
+        closeCode: Int? = nil,
+        closeReason: String? = nil
+    ) -> JSONValue {
+        var b = JSONObjectBuilder()
+        b.set("type", "net.ws")
+        b.set("id", id)
+        b.set("ts", ts)
+        b.set("dir", dir)
+        b.set("opcode", opcode)
+        b.set("size", size)
+        b.set("body", body?.json)
+        b.set("closeCode", closeCode)
+        b.set("closeReason", closeReason)
+        return b.value
+    }
+
+    /// `SdkNetSse`: one Server-Sent Events event of the response to `net.request` `id`, or the normal
+    /// end of the stream (`end`). `event` is left out for the default "message".
+    static func netSse(
+        id: String,
+        ts: Double,
+        event: String? = nil,
+        eventId: String? = nil,
+        retry: Int? = nil,
+        size: Int? = nil,
+        body: WireBody? = nil,
+        end: Bool = false
+    ) -> JSONValue {
+        var b = JSONObjectBuilder()
+        b.set("type", "net.sse")
+        b.set("id", id)
+        b.set("ts", ts)
+        b.set("event", event)
+        b.set("eventId", eventId)
+        b.set("retry", retry)
+        b.set("size", size)
+        b.set("body", body?.json)
+        if end { b.set("end", true) }
         return b.value
     }
 

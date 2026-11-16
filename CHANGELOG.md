@@ -362,6 +362,11 @@ All notable changes to Dürbün are listed here. The format follows
   directions, show under the handshake entry. It is a `WebSocket.Factory`, so it also fits Ktor's OkHttp engine.
   A socket opened with `client.newWebSocket` shows its handshake and one line saying how to see its messages.
   A busy socket drops its own oldest messages before any log or request.
+- iOS SDK: `URLSessionWebSocketTask` connections show with their handshake, every text and binary message in
+  both directions, the app's pings and their pongs, and the close frame with its code and reason. Completion
+  handlers and `async` calls both work, with no code change.
+- iOS SDK: Server-Sent Events over URLSession show one row per event (`event`, `id`, `retry` and the data) as
+  they arrive; the stream is no longer held as a response body.
 - Logs and Performance: the cold start time the Android and iOS SDKs measure (`durbun.launch`) reads as a line
   in Logs ("Cold start 1.24 s"; a prewarmed iOS launch is named and carries no time) and as a Launch tile in
   Performance that opens the line.

@@ -60,6 +60,13 @@ final class DurbunURLProtocol: URLProtocol {
     private var responseBody = BodyAccumulator(limit: 0)
     private var metrics: URLSessionTaskMetrics?
     private var challengeSenders: [ChallengeSender] = []
+    /// The response is a `text/event-stream` (2xx, from the network).
+    private var eventStreamResponse = false
+    /// Set once the response went out at the headers without a body: the data is parsed into
+    /// `net.sse` events (SPEC §6.1.1), never kept as a body, and the end is reported by the stream.
+    private var eventStream: EventStreamCapture?
+    /// When the response headers arrived (an event stream's response carries this time).
+    private var headersTs = 0.0
 
     // MARK: URLProtocol
 
@@ -274,7 +281,13 @@ final class DurbunURLProtocol: URLProtocol {
     // MARK: Inner task callbacks (ForwardingSession's serial delegate queue)
 
     func innerDidReceive(response: URLResponse) {
-        state.withLock { self.response = response }
+        let isEventStream = (response as? HTTPURLResponse).map(EventStreamCapture.isEventStream) ?? false
+        let ts = Clock.nowMs()
+        state.withLock {
+            self.response = response
+            eventStreamResponse = isEventStream
+            headersTs = ts
+        }
         onClientThread {
             guard !self.isClientDone else { return }
             // `.notAllowed` here would also keep the response out of the session's cache (CFNetwork
@@ -282,14 +295,41 @@ final class DurbunURLProtocol: URLProtocol {
             let policy = (response as? HTTPURLResponse).map { Self.cacheStoragePolicy(for: self.request, response: $0) }
             self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: policy ?? .notAllowed)
         }
+        if isEventStream, DurbunCore.shared.streamMessageCap != nil { startEventStream(midStream: false) }
     }
 
     func innerDidReceive(data: Data) {
-        state.withLock { responseBody.append(data) }
+        let (stream, isEventStream) = state.withLock { () -> (EventStreamCapture?, Bool) in
+            if eventStream == nil { responseBody.append(data) }
+            return (eventStream, eventStreamResponse)
+        }
         onClientThread {
             guard !self.isClientDone else { return }
             self.client?.urlProtocol(self, didLoad: data)
         }
+        guard isEventStream else { return }
+        if let stream {
+            stream.received(data)
+        } else if DurbunCore.shared.streamMessageCap != nil, let started = startEventStream(midStream: true) {
+            // The desktop asked for streams after the headers: from now on, at the next event boundary.
+            started.received(data)
+        }
+    }
+
+    /// Reports the event stream's response now, without a body, and parses its data from here on.
+    /// Nil when the response was already reported (or the request stopped).
+    @discardableResult
+    private func startEventStream(midStream: Bool) -> EventStreamCapture? {
+        let stream: EventStreamCapture? = state.withLock {
+            guard eventStream == nil, eventStreamResponse, !reported, !stopped else { return nil }
+            reported = true
+            let created = EventStreamCapture(id: requestId, startsMidStream: midStream)
+            eventStream = created
+            responseBody = BodyAccumulator(limit: 0)
+            return created
+        }
+        if stream != nil { sendResponse() }
+        return stream
     }
 
     func innerDidCollect(_ metrics: URLSessionTaskMetrics) {
@@ -302,7 +342,11 @@ final class DurbunURLProtocol: URLProtocol {
             guard !state.withLock({ stopped }) else { return }
             fail(with: error)
         } else {
-            reportResponse()
+            if let stream = state.withLock({ eventStream }) {
+                stream.end(final: nil)
+            } else {
+                reportResponse()
+            }
             onClientThread {
                 guard self.markClientDone() else { return }
                 self.client?.urlProtocolDidFinishLoading(self)
@@ -379,8 +423,13 @@ final class DurbunURLProtocol: URLProtocol {
 
     private func reportResponse() {
         guard claimReport() else { return }
-        let (id, response, body, metrics, rule, config) = state.withLock {
-            (requestId, self.response, responseBody, self.metrics, appliedRule, self.config)
+        sendResponse()
+    }
+
+    /// The response as it is now (an event stream's: without a body, before its data).
+    private func sendResponse() {
+        let (id, response, body, metrics, rule, config, streamTs) = state.withLock {
+            (requestId, self.response, responseBody, self.metrics, appliedRule, self.config, eventStream != nil ? headersTs : nil)
         }
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 200
@@ -394,7 +443,7 @@ final class DurbunURLProtocol: URLProtocol {
         let timing = NetworkTimings.from(metrics)
         DurbunCore.shared.send(WireMessage.netResponse(
             id: id,
-            ts: Clock.nowMs(),
+            ts: streamTs ?? Clock.nowMs(),
             status: status,
             statusText: HTTPStatusText.text(for: status),
             headers: DurbunCore.shared.redacting(headers),
@@ -408,6 +457,19 @@ final class DurbunURLProtocol: URLProtocol {
     }
 
     private func report(error: Error, cancelled: Bool) {
+        // An event stream already reported its response: the stream turns failed (or closed by the app).
+        let (stream, rule) = state.withLock { (eventStream, appliedRule) }
+        if let stream {
+            stream.end(final: WireMessage.netError(
+                id: stream.id,
+                ts: Clock.nowMs(),
+                error: cancelled ? "Cancelled" : NetworkErrorText.describe(error),
+                cancelled: cancelled,
+                mocked: rule != nil,
+                mockRuleId: rule?.id
+            ))
+            return
+        }
         guard claimReport() else { return }
         let message: JSONValue? = state.withLock {
             let message = WireMessage.netError(

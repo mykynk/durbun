@@ -99,7 +99,7 @@ final class WireEncodingTests: XCTestCase {
         XCTAssertEqual((hello["app"] as? [String: Any])?["id"] as? String, "com.mykynk.pati")
         XCTAssertEqual((hello["app"] as? [String: Any])?["pid"] as? Int, 4242)
         XCTAssertEqual((hello["device"] as? [String: Any])?["simulatorUdid"] as? String, device.simulatorUdid)
-        XCTAssertEqual(hello["capabilities"] as? [String], ["logs", "network", "mocks", "metrics", "events", "crash", "commands"])
+        XCTAssertEqual(hello["capabilities"] as? [String], ["logs", "network", "mocks", "metrics", "events", "crash", "commands", "streams"])
         let actions = hello["actions"] as? [[String: Any]]
         XCTAssertEqual(actions?.first?["kind"] as? String, "select")
         XCTAssertEqual((actions?.first?["options"] as? [[String: Any]])?.first?["value"] as? String, "dark")
@@ -324,6 +324,9 @@ final class WireEncodingTests: XCTestCase {
                                                        protocolName: "h2", remoteAddress: "a", timings: WireTimings(dns: 1),
                                                        mocked: true, mockRuleId: "r")),
             ("SdkNetError", WireMessage.netError(id: "1", ts: 1, error: "e", cancelled: true, mocked: true, mockRuleId: "r")),
+            ("SdkNetWs", WireMessage.netWs(id: "1", ts: 1, dir: "in", opcode: "close", size: 1, body: body,
+                                           closeCode: 1000, closeReason: "r")),
+            ("SdkNetSse", WireMessage.netSse(id: "1", ts: 1, event: "e", eventId: "i", retry: 1, size: 1, body: body, end: true)),
             ("SdkEvent", WireMessage.event(ts: 1, name: "n", props: .object([]))),
             ("SdkMetric", WireMessage.metric(sample)),
             ("SdkCommandResult", WireMessage.commandResult(id: "1", ok: true, data: .null, error: "e")),
@@ -346,6 +349,8 @@ final class WireEncodingTests: XCTestCase {
                 expected.remove("apiLevel")
                 checkedApiLevel = true
             }
+            // SdkNetResponse.noStream is for SDKs that see a handshake without its messages; iOS reports only sockets it hooks.
+            if name == "SdkNetResponse" { expected.remove("noStream") }
             XCTAssertEqual(keys(value), expected, "\(name): emitted fields differ from the protocol interface")
         }
         XCTAssertTrue(checkedApiLevel)
@@ -356,6 +361,8 @@ final class WireEncodingTests: XCTestCase {
             ("SdkNetRequest", WireMessage.netRequest(id: "1", ts: 1, method: "GET", url: "u", headers: [], body: nil)),
             ("SdkNetResponse", WireMessage.netResponse(id: "1", ts: 1, status: 200, statusText: nil, headers: [], body: nil)),
             ("SdkNetError", WireMessage.netError(id: "1", ts: 1, error: "e")),
+            ("SdkNetWs", WireMessage.netWs(id: "1", ts: 1, dir: "out", opcode: "text", size: 0, body: nil)),
+            ("SdkNetSse", WireMessage.netSse(id: "1", ts: 1)),
             ("SdkEvent", WireMessage.event(ts: 1, name: "n", props: nil)),
             ("SdkMetric", WireMessage.metric(WireMetricSample(ts: 1))),
             ("SdkCommandResult", WireMessage.commandResult(id: "1", ok: true, data: nil, error: nil)),
@@ -363,6 +370,17 @@ final class WireEncodingTests: XCTestCase {
         for (name, value) in minimal {
             let fields = try XCTUnwrap(tsFields(source, name))
             XCTAssertTrue(fields.required.isSubset(of: keys(value)), "\(name): missing required \(fields.required.subtracting(keys(value)))")
+        }
+
+        // Value spellings: capabilities and WebSocket opcodes.
+        let lines = source.components(separatedBy: "\n")
+        let capabilityType = try XCTUnwrap(lines.first { $0.hasPrefix("export type SdkCapability =") })
+        for capability in Wire.capabilities {
+            XCTAssertTrue(capabilityType.contains("'\(capability)'"), "capability \(capability) is not an SdkCapability")
+        }
+        let opcodeType = try XCTUnwrap(lines.first { $0.hasPrefix("export type WsOpcode =") })
+        for opcode in ["text", "binary", "ping", "pong", "close"] {
+            XCTAssertTrue(opcodeType.contains("'\(opcode)'"), "opcode \(opcode) is not a WsOpcode")
         }
 
         // Fields the SDK reads from the server.
