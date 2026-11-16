@@ -28,7 +28,7 @@ afterEach(async () => {
 
 function setup(h: Hub) {
   h.upsertDevice(device(PIXEL));
-  const app = h.registerApp(appInput(PIXEL, { app: { id: 'com.example.chat', name: 'Chat', pid: 4001 } }));
+  const app = h.registerApp(appInput(PIXEL, { app: { id: 'com.example.chat', name: 'Chat', pid: 4001 }, capabilities: ['logs', 'network', 'streams'] }));
   return app.id;
 }
 
@@ -75,6 +75,39 @@ describe('stream messages on the wire', () => {
     sdk.setConfig({ captureBodies: false, captureStreams: false });
     const config = await waitFor(() => received.find((m) => m.type === 'config'));
     expect(config.type === 'config' && config.config).toMatchObject({ captureStreams: false, maxStreamMessageBytes: 0 });
+  });
+
+  it('an SDK that was not asked for stream messages: its 101 stays a plain response; asked again, the next one opens a stream', async () => {
+    hub = makeHub();
+    const settings = makeSettings({ captureStreams: false });
+    sdk = createSdkLayerWithTimings({ hub, logger: silentLogger, settings: () => settings, mocks: () => [], serverVersion: '0.1.0' }, { helloTimeoutMs: 50, idleTimeoutMs: 1_000, pingIntervalMs: 1_000 });
+    hub.upsertDevice(device('demo:1', { kind: 'virtual' }));
+    const session = sdk.openVirtual({ transport: 'demo', deviceId: 'demo:1' });
+    const received: ServerToSdk[] = [];
+    session.onMessage((m) => received.push(m));
+    session.send(hello({ capabilities: ['logs', 'network', 'streams'] }));
+    const appId = await session.appId;
+    const upgrade = (id: string, ts: number) => {
+      session.send({ type: 'net.request', id, ts, method: 'GET', url: 'wss://chat.example.com/socket', headers: [['Upgrade', 'websocket']], source: 'dart:io' });
+      session.send({ type: 'net.response', id, ts: ts + 5, status: 101, statusText: 'Switching Protocols', headers: [['Upgrade', 'websocket']] });
+    };
+    upgrade('w1', 10);
+    session.send({ type: 'net.request', id: 's1', ts: 20, method: 'GET', url: 'https://api.example.com/events', headers: [], source: 'dart:io' });
+    session.send({ type: 'net.response', id: 's1', ts: 25, status: 200, headers: [['Content-Type', 'text/event-stream']] });
+    const plain = await waitFor(() => (entry(hub!, `${appId}:s1`)?.state === 'complete' ? entry(hub!, `${appId}:s1`) : undefined));
+    expect(plain.stream).toBeUndefined();
+    expect(entry(hub, `${appId}:w1`)).toMatchObject({ state: 'complete', status: 101 });
+    expect(entry(hub, `${appId}:w1`).stream).toBeUndefined();
+
+    sdk.setConfig({ captureStreams: true });
+    await waitFor(() => received.find((m) => m.type === 'config'));
+    upgrade('w2', 30);
+    const open = await waitFor(() => (entry(hub!, `${appId}:w2`)?.stream ? entry(hub!, `${appId}:w2`) : undefined));
+    expect(open.stream).toMatchObject({ kind: 'websocket', state: 'open', openTs: 35 });
+    // The socket that opened before the setting: its first message still makes it a stream.
+    session.send({ type: 'net.ws', id: 'w1', ts: 40, dir: 'in', opcode: 'text', size: 2, body: text('hi') });
+    const late = await waitFor(() => (entry(hub!, `${appId}:w1`)?.stream ? entry(hub!, `${appId}:w1`) : undefined));
+    expect(late.stream).toMatchObject({ kind: 'websocket', state: 'open', count: 1, in: 1 });
   });
 });
 
@@ -129,6 +162,21 @@ describe('stream entries in the hub', () => {
     hub.netRequest(appId, { type: 'net.request', id: 'old', ts: 1, method: 'GET', url: 'https://api.example.com/events', headers: [], source: 'okhttp' });
     hub.netResponse(appId, { type: 'net.response', id: 'old', ts: 9, status: 200, headers: [['Content-Type', 'text/event-stream']], body: text('data: x\n\n') });
     expect(entry(hub, `${appId}:old`).stream).toBeUndefined();
+  });
+
+  it('an app whose SDK has no streams capability: a 101 and SSE headers stay plain responses and do not hang open', () => {
+    hub = makeHub();
+    hub.upsertDevice(device(PIXEL));
+    const appId = hub.registerApp(appInput(PIXEL, { capabilities: ['logs', 'network'] })).id;
+    const id = openSocket(hub, appId);
+    hub.netRequest(appId, { type: 'net.request', id: 's1', ts: 1, method: 'GET', url: 'https://api.example.com/events', headers: [], source: 'okhttp' });
+    hub.netResponse(appId, { type: 'net.response', id: 's1', ts: 2, status: 200, headers: [['Content-Type', 'text/event-stream']] });
+    expect(entry(hub, id)).toMatchObject({ state: 'complete', status: 101 });
+    expect(entry(hub, id).stream).toBeUndefined();
+    expect(entry(hub, `${appId}:s1`).stream).toBeUndefined();
+    hub.markAppDisconnected(appId);
+    expect(entry(hub, id)).toMatchObject({ state: 'complete', status: 101 });
+    expect(entry(hub, id).stream).toBeUndefined();
   });
 
   it('a broken connection fails the stream and keeps the handshake complete; a gone app fails its open streams', () => {

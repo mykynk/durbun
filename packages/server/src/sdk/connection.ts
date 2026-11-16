@@ -110,6 +110,8 @@ export class SdkConnection {
   closed = false;
   /** Last config sent (to push updates only when something changed). */
   lastConfigKey = '';
+  /** The last config sent asked for stream messages (`captureStreams`). */
+  streamsAsked = false;
   private lastInboundAt = Date.now();
   private helloTimer: ReturnType<typeof setTimeout> | undefined;
   private pingTimer: ReturnType<typeof setInterval> | undefined;
@@ -264,7 +266,7 @@ export class SdkConnection {
         hub.netRequest(appId, msg);
         return;
       case 'net.response':
-        hub.netResponse(appId, msg);
+        hub.netResponse(appId, msg, this.streamsAsked ? undefined : { streaming: false });
         return;
       case 'net.error':
         hub.netError(appId, msg);
@@ -341,6 +343,7 @@ export class SdkConnection {
 
     const config = this.host.configFor(resolved.deviceId);
     this.lastConfigKey = configKey(config);
+    this.streamsAsked = config.captureStreams === true;
     this.send({
       type: 'welcome',
       protocol: PROTOCOL_VERSION,

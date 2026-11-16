@@ -170,7 +170,11 @@ export interface Hub extends HubSink {
   /* app data (called by the SDK layer) */
   pushAppLog(appId: string, log: Omit<SdkLog, 'type'> | (Omit<SdkLog, 'type' | 'kind'> & { kind?: LogKind })): LogEntry | undefined;
   netRequest(appId: string, msg: SdkNetRequest): void;
-  netResponse(appId: string, msg: SdkNetResponse): void;
+  /**
+   * `opts.streaming` false: the SDK was not asked for stream messages, so a 101 or an SSE response without a body
+   * stays a plain response (no stream is opened for it). Absent: decided by the app's `streams` capability.
+   */
+  netResponse(appId: string, msg: SdkNetResponse, opts?: { streaming?: boolean }): void;
   netError(appId: string, msg: SdkNetError): void;
   /**
    * A `net.request` / `net.response` / `net.error` of this app was larger than the frame limit and dropped

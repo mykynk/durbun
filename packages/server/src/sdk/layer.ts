@@ -216,6 +216,7 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
     const key = configKey(config);
     if (key === conn.lastConfigKey) return undefined;
     conn.lastConfigKey = key;
+    conn.streamsAsked = config.captureStreams === true;
     return config;
   }
 
@@ -298,6 +299,7 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
       const key = configKey(config);
       if (key === conn.lastConfigKey) continue;
       conn.lastConfigKey = key;
+      conn.streamsAsked = config.captureStreams === true;
       conn.send({ type: 'config', config });
     }
   });
@@ -634,6 +636,7 @@ export function createSdkLayerWithTimings(opts: CreateSdkLayerOptions, overrides
       for (const conn of established()) {
         const config = host.configFor(conn.deviceId ?? '');
         conn.lastConfigKey = configKey(config);
+        conn.streamsAsked = config.captureStreams === true;
         conn.send({ type: 'config', config });
       }
     },

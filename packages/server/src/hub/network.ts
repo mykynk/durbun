@@ -353,7 +353,11 @@ export class NetworkStore {
     return { entry, first: true };
   }
 
-  response(id: string, appId: string | undefined, deviceId: string, msg: SdkNetResponse): NetworkEntry {
+  /**
+   * `opensStream` false: the sender reports no stream messages (an SDK without the capability, or one that was not
+   * asked), so a 101 or a bodiless SSE response is a plain response; a stream still appears with its first message.
+   */
+  response(id: string, appId: string | undefined, deviceId: string, msg: SdkNetResponse, opensStream = true): NetworkEntry {
     const entry = this.entries.get(id) ?? this.placeholder(id, appId, deviceId, msg.ts);
     const hit = isNewMockHit(entry, msg);
     entry.state = 'complete';
@@ -374,7 +378,9 @@ export class NetworkStore {
     // A 101 is a WebSocket; SSE response headers without a body are a stream that has just opened (an SDK that
     // reports the whole SSE body at the end is a plain response).
     if (!entry.stream) {
-      if (msg.status === 101) entry.stream = newStream('websocket', msg.ts);
+      if (!opensStream) {
+        // Nothing will follow the handshake: without this the entry would read "open" until the app goes away.
+      } else if (msg.status === 101) entry.stream = newStream('websocket', msg.ts);
       else if (!msg.body && entry.responseContentType?.toLowerCase().startsWith('text/event-stream')) entry.stream = newStream('sse', msg.ts);
     } else if (entry.stream.openTs === undefined) {
       entry.stream = { ...entry.stream, openTs: msg.ts };

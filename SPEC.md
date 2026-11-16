@@ -486,7 +486,12 @@ Types: `SdkNetWs`, `SdkNetSse`, `StreamMessage`, `StreamInfo` in the protocol fi
 - **Negotiation.** Add `streams` to `hello.capabilities` when the SDK can capture them. Send `net.ws` / `net.sse`
   only while the latest `welcome.config` / `config` has `captureStreams: true`. An older server leaves the field out:
   send nothing then (it would ignore the messages but count each as an unknown type in the log). Stop or start
-  at once when a `config` message changes the flag; never buffer messages from before it.
+  at once when a `config` message changes the flag; never buffer messages from before it. With the flag off or
+  absent an SDK reports what it reported before streams existed: a handshake its HTTP capture sees anyway (an
+  upgrade request through an interceptor, an SSE response) stays a plain entry; a connection it sees only through
+  its stream hooks is not reported at all. When the flag turns on, an already-open connection may be reported from
+  then on (handshake with its real times, then the messages from that moment). A stream that was reported is
+  always finished (close, end or `net.error`), also after the flag turned off.
 - **Handshake.** WebSocket: `net.request` (GET, the `ws(s)://` URL, upgrade headers) then `net.response` with
   status 101 when the upgrade succeeds (a failed upgrade is a normal response or `net.error`). SSE: send
   `net.response` as soon as the headers arrive, with no body; never send the event stream again as a body.
@@ -513,6 +518,10 @@ Types: `SdkNetWs`, `SdkNetSse`, `StreamMessage`, `StreamInfo` in the protocol fi
   removed counts into `StreamInfo.dropped` (gaps in `seq`). The entry carries the counts (UI batches); the
   messages are paged from `GET /api/network/:id/messages?after=<seq>&limit=<n>`. Session export / import carry
   them (`NetworkDetail.streamMessages`), HAR as `_webSocketMessages` / `_eventSourceMessages`, masked like bodies.
+  The handshake (a 101, or SSE headers without a body) opens the stream only for an app with the `streams`
+  capability whose last config asked for stream messages; otherwise it is a plain response (nothing would ever
+  close it), and a stream still appears with its first message. `closeReason`, `event` and `eventId` are cut at
+  256 characters.
 
 ### 6.2 Flutter (`sdks/flutter/durbun`, package `durbun`)
 

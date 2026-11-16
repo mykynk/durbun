@@ -840,11 +840,12 @@ export function createHub(opts: CreateHubOptions): Hub {
       else row.level = networkLogLevel(entry);
     },
 
-    netResponse(appId, msg) {
+    netResponse(appId, msg, opts) {
       const app = apps.get(appId);
       if (!app || !msg || disposed) return;
       noteAppTs(appId, msg.ts);
-      settleNetRow(network.response(`${appId}:${msg.id}`, appId, app.deviceId, msg));
+      const streaming = opts?.streaming ?? app.capabilities.includes('streams');
+      settleNetRow(network.response(`${appId}:${msg.id}`, appId, app.deviceId, msg, streaming));
     },
 
     netError(appId, msg) {
