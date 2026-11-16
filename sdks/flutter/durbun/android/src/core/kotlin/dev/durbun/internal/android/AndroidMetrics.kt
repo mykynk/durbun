@@ -1,8 +1,10 @@
 package dev.durbun.internal.android
 
 import android.app.ActivityManager
+import android.app.Application
 import android.content.Context
 import android.hardware.display.DisplayManager
+import android.os.Build
 import android.os.Debug
 import android.os.Handler
 import android.os.Looper
@@ -18,11 +20,25 @@ import java.io.File
  * - `cpu`: process CPU time / wall time (percent of one core),
  * - `memoryMB`: PSS (`Debug.getPss`, sampled less often when it is slow on this device),
  * - `heapMB`: Java heap in use, `threads`: entries in /proc/self/task,
- * - `fps` / `jankyFrames`: from a Choreographer frame callback, only while the app is in the foreground.
+ * - frames, only while the app is in the foreground: on Android 7+ real frame durations of the visible activities
+ *   ([FrameMetricsMonitor]: `fps` of frames actually drawn, `jankyFrames`, `frameBuildMs`, `frameRasterMs`; no `fps`
+ *   while nothing is drawn); before Android 7, or until Dürbün has seen an activity start, a Choreographer frame
+ *   callback (`fps` / `jankyFrames`, which follow the display's refresh rate even when nothing changes on screen).
  */
 internal class AndroidMetricsSampler(context: Context) : MetricsSampler {
     private val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
     private val frames = FrameMonitor()
+    private val frameMetrics: FrameMetricsMonitor? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        (context.applicationContext as? Application)?.let { app ->
+            try {
+                FrameMetricsMonitor(app)
+            } catch (_: Throwable) {
+                null
+            }
+        }
+    } else {
+        null
+    }
 
     private var lastCpuMs = -1L
     private var lastWallMs = 0L
@@ -38,18 +54,45 @@ internal class AndroidMetricsSampler(context: Context) : MetricsSampler {
         values["heapMB"] = round1((runtime.totalMemory() - runtime.freeMemory()) / MB)
         threadCount()?.let { values["threads"] = it }
         if (isForeground()) {
-            frames.start(refreshRate())
-            frames.snapshot()?.let {
-                values["fps"] = round1(it.fps)
-                values["jankyFrames"] = it.jankyFrames
-            }
+            sampleFrames(values)
         } else {
             frames.stop()
+            frameMetrics?.stop()
         }
         return values
     }
 
-    override fun pause() = frames.stop()
+    private fun sampleFrames(values: MutableMap<String, Any?>) {
+        val rate = refreshRate()
+        val measured = frameMetrics
+        measured?.start(rate)
+        if (measured != null && measured.hasWindows) {
+            frames.stop()
+            val snapshot = measured.snapshot() ?: return
+            val fps = snapshot.fps ?: return // nothing drawn: idle, not a drop
+            values["fps"] = fps
+            values["jankyFrames"] = snapshot.jankyFrames
+            snapshot.frameBuildMs?.let { values["frameBuildMs"] = it }
+            snapshot.frameRasterMs?.let { values["frameRasterMs"] = it }
+            return
+        }
+        frames.start(rate)
+        frames.snapshot()?.let {
+            values["fps"] = round1(it.fps)
+            values["jankyFrames"] = it.jankyFrames
+        }
+    }
+
+    override fun pause() {
+        frames.stop()
+        frameMetrics?.stop()
+    }
+
+    /** Dürbün stopped: no more activity callbacks. */
+    fun release() {
+        pause()
+        frameMetrics?.release()
+    }
 
     private fun cpuPercent(): Double? {
         val cpuMs = Process.getElapsedCpuTime()

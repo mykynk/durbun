@@ -13,7 +13,7 @@
 ## What you get
 
 The Dürbün Android SDK streams your app's **logs, OkHttp traffic (headers, bodies, timings), crashes, custom
-events and performance metrics** (CPU, memory, FPS, janky frames) to the Dürbün Mac app, live. From the Mac app
+events and performance metrics** (CPU, memory, FPS, janky frames, launch time) to the Dürbün Mac app, live. From the Mac app
 you can define mock rules (fake responses, latency, timeouts, DNS / TLS / connection failures) and use tools that
 run code inside the app.
 
@@ -259,7 +259,32 @@ process to free memory. On Android 11 (API 30) and newer, the SDK reads how earl
 
 ### Performance
 
-CPU, PSS memory, Java heap, thread count, FPS and janky frames. `captureMetrics = false` turns them off.
+CPU, PSS memory, Java heap, thread count, frames and the launch time. `captureMetrics = false` turns them off.
+Samples are taken while the Mac app is connected; frames only while the app is in the foreground.
+
+| Number | What it means |
+|---|---|
+| `cpu` | Process CPU time over wall time since the previous sample, in percent of one core (can pass 100 on several cores) |
+| `memoryMB` | PSS (`Debug.getPss`); read less often on devices where it is slow |
+| `heapMB` / `threads` | Java heap in use / threads of the process |
+| `fps` | Android 7+: frames the app's activities actually drew per second. No value while nothing is drawn (an idle screen is not a drop) |
+| `jankyFrames` | Frames that missed their deadline (Android 12+ reports it per frame); before Android 12, frames longer than two refresh intervals. The first frame of a screen is not counted |
+| `frameBuildMs` / `frameRasterMs` | Average time per frame on the UI thread (input, animation, measure/layout, draw) / on the RenderThread (sync, GPU commands, buffer swap) |
+| Event `durbun.launch` | Cold start, once per process: `ms` from the process start (Android 13+: from the moment the system was asked to start it, `from: "launchRequest"`) to the first frame of the first activity that resumes (`screen`), with `kind: "cold"` |
+
+Limits:
+
+- Frames come from `Window.addOnFrameMetricsAvailableListener` for activity windows; dialogs, popups and
+  `SurfaceView` / game surfaces are not measured. With two visible activities (multi-window) their frames add up.
+- Before Android 7, and on Android 7+ until Dürbün sees an activity start (when it was started after the first
+  screen), `fps` / `jankyFrames` come from a Choreographer callback: `fps` then follows the display's refresh rate
+  even when nothing changes on screen, and a janky frame is a gap of more than 1.5 refresh intervals.
+- The launch time needs Android 7+ and Dürbün started from `Application.onCreate` or the first activity's
+  `onCreate` (the automatic start counts). Nothing is sent when the process was started for something else (a
+  receiver, a service, a job) and the screen came later, when Dürbün started more than 10 s after the process, or
+  when the first frame took more than 30 s. Warm and hot starts (the process was already running) are not reported.
+  The time includes everything before `Application.onCreate` (content providers, static initializers). Debug
+  builds launch slower than release builds: compare launches of the same build with each other.
 
 ## Mocks
 
@@ -393,7 +418,7 @@ The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, iOS and 
 | `maxBodyBytes` | `null` | Capture limit per body, at most 8 MB (the Mac app's default is 1 MB) |
 | `maxBufferedMessages` | `5000` | Messages kept in memory while disconnected |
 | `captureCrashes` | `true` | Report uncaught exceptions (the previous handler always runs) and how earlier launches ended |
-| `captureMetrics` | `true` | CPU, PSS memory, Java heap, thread count, FPS, janky frames |
+| `captureMetrics` | `true` | CPU, PSS memory, Java heap, thread count, frames (FPS, janky frames, frame times), launch time |
 | `captureLogcat` | `true` | Forward the app's own logcat when the Mac app cannot read device logs |
 | `appName` | `null` | Name shown in the Mac app (default: the app label) |
 | `captureNetwork` | `true` | OkHttp capture and mocks through `DurbunInterceptor` (`false` makes the interceptor a pass-through: no capture, no mocks) |

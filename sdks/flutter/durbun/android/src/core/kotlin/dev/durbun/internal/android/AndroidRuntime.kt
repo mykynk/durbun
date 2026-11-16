@@ -13,6 +13,7 @@ import dev.durbun.internal.CrashHandler
 import dev.durbun.internal.DesktopHostStore
 import dev.durbun.internal.DurbunCore
 import dev.durbun.internal.HostLink
+import dev.durbun.internal.LaunchTiming
 import dev.durbun.internal.LogcatForwarder
 import dev.durbun.internal.PendingCrashStore
 
@@ -26,12 +27,14 @@ internal object AndroidRuntime {
         core.configuredHost = { env.manifestHost() }
         if (options.captureCrashes) core.exitReasons = AndroidExitReasons(context) { env.settingsDir }
         actions.forEach(core::addAction)
-        (context.applicationContext as? Application)?.let { app ->
+        val cleanups = ArrayList<() -> Unit>()
+        val app = context.applicationContext as? Application
+        if (app != null) {
             try {
                 val debuggable = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 val watcher = LaunchHostWatcher(core, debuggable)
                 app.registerActivityLifecycleCallbacks(watcher)
-                core.onStopped = { app.unregisterActivityLifecycleCallbacks(watcher) }
+                cleanups += { app.unregisterActivityLifecycleCallbacks(watcher) }
             } catch (t: Throwable) {
                 env.logger.warn("Could not watch for the durbun.host launch extra", t)
             }
@@ -42,11 +45,29 @@ internal object AndroidRuntime {
             }
         }
         if (options.captureMetrics) {
-            core.metricsSampler = try {
+            val sampler = try {
                 AndroidMetricsSampler(context)
             } catch (t: Throwable) {
                 env.logger.warn("Metrics are unavailable on this device", t)
                 null
+            }
+            core.metricsSampler = sampler
+            if (sampler != null) cleanups += { sampler.release() }
+            if (app != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                try {
+                    val launch = LaunchTimer(app) { props -> core.event(LaunchTiming.EVENT, props) }
+                    cleanups += { launch.release() }
+                } catch (t: Throwable) {
+                    env.logger.warn("The launch time is unavailable", t)
+                }
+            }
+        }
+        core.onStopped = {
+            cleanups.forEach { cleanup ->
+                try {
+                    cleanup()
+                } catch (_: Throwable) {
+                }
             }
         }
         if (options.captureLogcat) {
