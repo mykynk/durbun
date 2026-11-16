@@ -26,7 +26,7 @@
     "app:test": "npm --prefix apps/desktop test",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test:scripts": "node --test scripts/check-versions.test.mjs scripts/release-check.test.mjs scripts/release-notes.test.mjs",
+    "test:scripts": "node --test scripts/check-versions.test.mjs scripts/release-check.test.mjs scripts/release-notes.test.mjs scripts/site-data.test.mjs",
     "app:release": "node apps/desktop/scripts/releaseSigning.mjs && DURBUN_REPO_DIR= npm run build && npm --prefix apps/desktop run release",
     "release:check": "node scripts/release-check.mjs"
   },

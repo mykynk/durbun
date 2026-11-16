@@ -144,3 +144,7 @@ All parts share one version and are released together, by hand from a maintainer
      signing key set (see `gradle/publish.gradle.kts`), zip `build/staging-deploy` and upload it on the
      Central Portal.
    - CocoaPods: `pod trunk push Durbun.podspec` from the repository root.
+7. Update the [website](https://appnify.dev/durbun/) once the release is published: `node scripts/site-data.mjs
+   --dir apps/desktop/release --date <the day it was published, UTC> --out <site>/assets/durbun/release.json`
+   writes the version, the date, the minimum macOS and each DMG's address, size and SHA-256 (it checks them
+   against `SHA256SUMS.txt`) into the one file the site reads.

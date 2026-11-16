@@ -212,6 +212,8 @@ export function nextSteps(version) {
     `     gh release create v${version} --draft --verify-tag --title "Dürbün ${version}" --notes-file notes.md \\`,
     '       apps/desktop/release/*.dmg apps/desktop/release/*.zip apps/desktop/release/durbun-update-mac-*.json apps/desktop/release/SHA256SUMS.txt',
     '  5. Publish the draft, then the packages: pub.dev, npm, Maven Central, CocoaPods.',
+    '  6. Update the website: node scripts/site-data.mjs --dir apps/desktop/release --date <publish day, UTC> \\',
+    '       --out <site>/assets/durbun/release.json (before the next app:dist overwrites that folder)',
   ];
 }
 
