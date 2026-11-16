@@ -114,8 +114,8 @@ export function maskUrl(url: string): string {
   return out + frag;
 }
 
-/** `"key": "value"` / `"key": 123` pairs of a JSON text (also inside a truncated body). */
-const JSON_PAIR = /"((?:[^"\\]|\\.)*)"(\s*:\s*)("(?:[^"\\]|\\.)*"|-?\d[\d.eE+-]*)/g;
+/** `"key": "value"` / `"key": 123` / `"key": true` pairs of a JSON text (also inside a truncated body). */
+const JSON_PAIR = /"((?:[^"\\]|\\.)*)"(\s*:\s*)("(?:[^"\\]|\\.)*"|-?\d[\d.eE+-]*|true\b|false\b)/g;
 
 /** A text body with secret JSON fields or form fields masked (other text unchanged). */
 export function maskBodyText(text: string, contentType: string | undefined): string {

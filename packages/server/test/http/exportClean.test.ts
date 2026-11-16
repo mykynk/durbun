@@ -32,6 +32,7 @@ describe('secret masking', () => {
       '{"user":"a","password":"••••","otp":"••••","nested":{"refreshToken":"••••"}}',
     );
     expect(maskBodyText('{"token":"abc","items":[1,2', undefined)).toBe('{"token":"••••","items":[1,2');
+    expect(maskBodyText('{"hasPin":true,"apiKey":false,"trueName":"x"}', 'application/json')).toBe('{"hasPin":"••••","apiKey":"••••","trueName":"x"}');
     expect(maskBodyText('username=ali&password=p%40ss', 'application/x-www-form-urlencoded; charset=utf-8')).toBe('username=ali&password=••••');
     expect(maskBodyText('token is abc', 'text/plain')).toBe('token is abc');
   });
