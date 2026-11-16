@@ -1266,6 +1266,11 @@ export interface SdkNetResponse {
   timings?: Timings;
   mocked?: boolean;
   mockRuleId?: string;
+  /**
+   * The SDK cannot see this connection's messages (a WebSocket opened outside its hook): the server opens no
+   * stream for this handshake and the entry stays a plain response (SPEC §6.1.1).
+   */
+  noStream?: boolean;
 }
 
 export interface SdkNetError {

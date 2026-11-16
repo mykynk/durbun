@@ -263,6 +263,7 @@ export function parseSdkMessage(value: unknown): SdkToServer | undefined {
       if (v.mocked === true) msg.mocked = true;
       const mockRuleId = idOf(v.mockRuleId);
       if (mockRuleId) msg.mockRuleId = mockRuleId;
+      if (v.noStream === true) msg.noStream = true;
       return msg;
     }
     case 'net.error': {

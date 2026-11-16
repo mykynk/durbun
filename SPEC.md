@@ -496,6 +496,8 @@ Types: `SdkNetWs`, `SdkNetSse`, `StreamMessage`, `StreamInfo` in the protocol fi
   status 101 when the upgrade succeeds (a failed upgrade is a normal response or `net.error`). SSE: send
   `net.response` as soon as the headers arrive, with no body; never send the event stream again as a body.
   Messages use the handshake request's `id`; send them after its `net.request` (ideally after the response).
+  A handshake the SDK sees without a hook on its messages (a socket opened outside the SDK's wrapper): send its
+  `net.response` with `noStream: true`, so the entry stays a plain response instead of a stream that never ends.
 - **`net.ws`** `{ id, ts, dir: 'in' | 'out', opcode: 'text' | 'binary' | 'ping' | 'pong' | 'close', size, body?,
   closeCode?, closeReason? }`. One message per text / binary message (join continuation frames). `size` = full
   payload bytes. `body`: text → utf8, binary → base64, cut at `config.maxStreamMessageBytes` (`truncated`,

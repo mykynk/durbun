@@ -844,7 +844,8 @@ export function createHub(opts: CreateHubOptions): Hub {
       const app = apps.get(appId);
       if (!app || !msg || disposed) return;
       noteAppTs(appId, msg.ts);
-      const streaming = opts?.streaming ?? app.capabilities.includes('streams');
+      // `noStream`: the SDK saw the handshake but has no hook on the messages; nothing would ever close a stream.
+      const streaming = msg.noStream !== true && (opts?.streaming ?? app.capabilities.includes('streams'));
       settleNetRow(network.response(`${appId}:${msg.id}`, appId, app.deviceId, msg, streaming));
     },
 

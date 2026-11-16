@@ -182,6 +182,7 @@ export interface SdkNetResponse {
   timings?: Timings;
   mocked?: boolean;
   mockRuleId?: string;
+  noStream?: boolean;
 }
 
 export interface SdkNetError {

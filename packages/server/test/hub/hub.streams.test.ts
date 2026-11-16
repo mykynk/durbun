@@ -179,6 +179,17 @@ describe('stream entries in the hub', () => {
     expect(entry(hub, id).stream).toBeUndefined();
   });
 
+  it('noStream: a handshake whose messages the SDK cannot see stays a plain response', () => {
+    hub = makeHub();
+    const appId = setup(hub);
+    expect(parseSdkMessage({ type: 'net.response', id: 'w', ts: 2, status: 101, headers: [], noStream: true })).toMatchObject({ noStream: true });
+    expect(parseSdkMessage({ type: 'net.response', id: 'w', ts: 2, status: 101, headers: [], noStream: 'yes' })).not.toHaveProperty('noStream');
+    hub.netRequest(appId, { type: 'net.request', id: 'w', ts: 1, method: 'GET', url: 'wss://chat.example.com/socket', headers: [], source: 'okhttp' });
+    hub.netResponse(appId, { type: 'net.response', id: 'w', ts: 2, status: 101, headers: [], noStream: true });
+    expect(entry(hub, `${appId}:w`)).toMatchObject({ state: 'complete', status: 101 });
+    expect(entry(hub, `${appId}:w`).stream).toBeUndefined();
+  });
+
   it('a broken connection fails the stream and keeps the handshake complete; a gone app fails its open streams', () => {
     hub = makeHub();
     const appId = setup(hub);
