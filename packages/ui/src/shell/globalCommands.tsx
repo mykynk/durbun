@@ -8,6 +8,7 @@ import {
   FileDown,
   FileUp,
   FlaskConical,
+  FolderClock,
   Globe,
   Info,
   Keyboard,
@@ -30,6 +31,7 @@ import {
   Stethoscope,
   Sun,
   Trash,
+  Undo2,
   Video,
   Workflow,
 } from 'lucide-react';
@@ -66,6 +68,7 @@ import { TAB_ICONS } from './TopBar';
 import { deviceSubtitle } from './labels';
 import { transfer } from '../features/transfer/store';
 import { bugReport } from '../features/report/store';
+import { recordings, useRecordings } from '../features/recordings/store';
 import { requestFlowIntent } from '../features/flows/intent';
 import { automatedFlows, pauseAutomations, resumable, resumeAutomations, usePausedAutomations, type BulkResult } from '../features/flows/model/automations';
 import { requestDeviceSection } from '../features/device/request';
@@ -118,6 +121,8 @@ export function useGlobalCommands(): void {
   const flows = useFlows((s) => s.summaries);
   const mockRules = useMocks((s) => s.rules);
   const pausedAutomations = usePausedAutomations((s) => s.ids);
+  const viewingRecording = useRecordings((s) => s.viewing !== null);
+  const previousRecording = useRecordings((s) => s.list?.previous);
 
   const nav = t('shell.palette.groups.navigation');
   const scopeGroup = t('shell.palette.groups.scope');
@@ -288,6 +293,13 @@ export function useGlobalCommands(): void {
     { id: 'package.share', title: t('transfer.menu.share'), group: data, icon: Share2, keywords: ['package', 'paket', 'export', 'team', 'takım', ...both('transfer.menu.share')], run: () => transfer.openExport('share') },
     { id: 'package.backup', title: t('transfer.menu.backup'), group: data, icon: Archive, keywords: ['package', 'paket', 'backup', 'yedek', 'mac', ...both('transfer.menu.backup')], run: () => transfer.openExport('backup') },
     { id: 'package.open', title: t('transfer.menu.open'), group: data, icon: PackageOpen, keywords: ['package', 'paket', 'restore', 'geri yükle', 'import', ...both('transfer.menu.open')], run: () => transfer.openImport() },
+    { id: 'recordings', title: t('recordings.cmdOpen'), group: data, icon: FolderClock, keywords: ['recording', 'kayıt', 'session', 'oturum', 'history', 'geçmiş', 'previous', 'önceki', ...both('recordings.cmdOpen')], run: recordings.openDialog },
+    ...(previousRecording && !viewingRecording
+      ? [{ id: 'recordings.previous', title: t('recordings.cmdPrevious'), group: data, icon: FolderClock, keywords: ['recording', 'kayıt', 'previous', 'önceki', 'yesterday', 'dün', ...both('recordings.cmdPrevious')], run: () => void recordings.open(previousRecording) } satisfies PaletteCommand]
+      : []),
+    ...(viewingRecording
+      ? [{ id: 'recordings.live', title: t('recordings.cmdLive'), group: data, icon: Undo2, priority: 9, keywords: ['live', 'canlı', 'recording', 'kayıt', ...both('recordings.cmdLive')], run: recordings.backToLive } satisfies PaletteCommand]
+      : []),
     { id: 'package.auto', title: t('transfer.menu.autoBackup'), group: data, icon: Archive, keywords: ['backup', 'yedek', 'icloud', 'auto', 'otomatik', ...both('transfer.menu.autoBackup')], run: () => ui.openSettings('backup') },
     {
       id: 'demo',

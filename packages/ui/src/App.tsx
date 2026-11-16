@@ -23,6 +23,7 @@ import { DataSourcesDialog } from './sources';
 import { DropImport } from './shell/DropImport';
 import { TransferHost } from './features/transfer/TransferHost';
 import { BugReportHost } from './features/report/BugReportHost';
+import { LaunchOffer, RecordingBanner, RecordingsHost } from './features/recordings/RecordingsParts';
 import { useGlobalCommands } from './shell/globalCommands';
 import { useCrashNotifications } from './shell/crashNotify';
 import { initSidebarFit, useSidebarCompact } from './shell/sidebarFit';
@@ -69,9 +70,13 @@ export function App() {
           </PartBoundary>
           <PartBoundary name="banners">
             <ConnectionBanner />
+            <RecordingBanner />
             <DeviceAttentionBanner />
           </PartBoundary>
           <FeatureHost />
+          <PartBoundary name="recordings">
+            <LaunchOffer />
+          </PartBoundary>
         </main>
         <PartBoundary name="statusbar">
           <StatusBar />
@@ -87,6 +92,7 @@ export function App() {
       </DialogBoundary>
       <TransferHost />
       <BugReportHost />
+      <RecordingsHost />
       <DropImport />
       <ConfirmHost />
       <ContextMenuHost />

@@ -12,6 +12,7 @@ import { Button } from '../components/Button';
 import { formatNumber } from '../lib/format';
 import { isDesktopApp } from '../lib/platform';
 import { setDemo } from './actions';
+import { RecorderStatusItem } from '../features/recordings/RecordingsParts';
 
 /**
  * The UI and the server speak different protocol versions. In the Mac app that means it reached another Dürbün
@@ -144,6 +145,7 @@ export function StatusBar() {
         </span>
       </Tooltip>
       <span className="grow" />
+      <RecorderStatusItem />
       {server && lan ? (
         <Tooltip content={`${server.hostAddresses.length ? t('shell.status.lanHint', { hosts: server.hostAddresses.join(', ') }) : t('shell.status.lanOn')} · ${t('shell.status.lanAction')}`}>
           <button type="button" className="st-badge st-badge--warn" onClick={() => ui.openSettings('connection')} aria-label={`${t('shell.status.lanOn')}: ${t('shell.status.lanAction')}`}>

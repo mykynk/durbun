@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
-import { Archive, Bell, ExternalLink, Info, Network, Palette, RotateCcw, ScrollText, Send, Settings, Unplug, Wifi } from 'lucide-react';
+import { Archive, Bell, ExternalLink, FolderClock, Info, Network, Palette, RotateCcw, ScrollText, Send, Settings, Unplug, Wifi } from 'lucide-react';
 import { DEFAULT_PORTS, type ServerSettings } from '@durbun/protocol';
 import { errorText, useLanguage, useT } from '../i18n';
 import {
@@ -33,9 +33,10 @@ import { DesktopServerRows } from './DesktopServerRows';
 import { hasDesktopConfig } from './desktopConfig';
 import { Snippet } from './Snippet';
 import { SLACK_ADD_URL, toSlackText } from '../lib/slack';
-import { Group, OfflineNote, Row, SectionHeader } from './settingsParts';
+import { Group, NumberField, OfflineNote, Row, SectionHeader, useServerPatch } from './settingsParts';
 import { useDesktopPrefs } from './desktopPrefs';
 import { BackupSection } from '../features/transfer/BackupSection';
+import { RecordingsSection } from '../features/recordings/RecordingsSection';
 
 /** Inclusive ranges the server accepts (packages/server/src/config.ts SETTINGS_LIMITS); KB for bodies. */
 const LIMITS = {
@@ -54,6 +55,7 @@ const SECTIONS: { id: SettingsSection; icon: typeof Palette }[] = [
   { id: 'connection', icon: Wifi },
   { id: 'slack', icon: Send },
   { id: 'backup', icon: Archive },
+  { id: 'recordings', icon: FolderClock },
   { id: 'about', icon: Info },
 ];
 
@@ -85,6 +87,7 @@ export function SettingsDialog() {
             {section === 'connection' ? <ConnectionSection /> : null}
             {section === 'slack' ? <SlackSection /> : null}
             {section === 'backup' ? <BackupSection /> : null}
+            {section === 'recordings' ? <RecordingsSection /> : null}
             {section === 'about' ? <AboutSection /> : null}
           </div>
         </div>
@@ -207,86 +210,6 @@ function AppearanceSection() {
 }
 
 /* ───────────── Server settings helpers ───────────── */
-
-function useServerPatch() {
-  const t = useT();
-  const [savedKey, setSavedKey] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
-  const save = async (key: keyof ServerSettings, patch: Partial<ServerSettings>) => {
-    try {
-      await updateServerSettings(patch);
-      setSavedKey(key);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setSavedKey(null), 1600);
-    } catch (err) {
-      toast.error(t('shell.settings.saveFailed'), { description: errorMessage(err) });
-    }
-  };
-  return { save, savedKey };
-}
-
-function NumberField({
-  value,
-  onCommit,
-  min,
-  max,
-  unit,
-  scale = 1,
-  step = 1,
-  disabled,
-  label,
-}: {
-  value: number;
-  onCommit: (v: number) => void;
-  min: number;
-  max: number;
-  unit?: string;
-  /** Displayed value = stored / scale. */
-  scale?: number;
-  step?: number;
-  disabled?: boolean;
-  label: string;
-}) {
-  const t = useT();
-  const shown = Math.round((value / scale) * 100) / 100;
-  const [draft, setDraft] = useState(String(shown));
-  useEffect(() => setDraft(String(shown)), [shown]);
-  const parsed = Number(draft.replace(',', '.'));
-  const invalid = draft.trim() === '' || !Number.isFinite(parsed) || parsed < min || parsed > max;
-  const commit = () => {
-    if (invalid) {
-      setDraft(String(shown));
-      return;
-    }
-    if (parsed !== shown) onCommit(Math.round(parsed * scale));
-  };
-  return (
-    <Input
-      size="sm"
-      className="setting-number tnum"
-      inputMode="decimal"
-      value={draft}
-      step={step}
-      disabled={disabled}
-      invalid={invalid}
-      aria-label={label}
-      title={invalid ? t('shell.settings.range', { min: formatNumber(min), max: formatNumber(max) }) : undefined}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') commit();
-        if (e.key === 'Escape') {
-          setDraft(String(shown));
-          e.stopPropagation();
-        }
-      }}
-      trailing={unit ? <span className="input-unit">{unit}</span> : undefined}
-    />
-  );
-}
 
 function TextField({ value, onCommit, placeholder, disabled, label }: { value: string; onCommit: (v: string) => void; placeholder?: string; disabled?: boolean; label: string }) {
   const [draft, setDraft] = useState(value);

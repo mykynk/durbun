@@ -33,6 +33,7 @@ import {
   Sun,
   Waypoints,
   Workflow,
+  FolderClock,
 } from 'lucide-react';
 import { useT } from '../i18n';
 import { deviceDisplayName } from '../i18n/codes';
@@ -73,6 +74,7 @@ import { BuildBadgeChip, ScopeSourcesButton, SourceBadge } from '../sources';
 import { exportHar, exportSession, pickAndImport, setTheme, toggleLanguage, toggleSidebar } from './actions';
 import { transfer } from '../features/transfer/store';
 import { bugReport } from '../features/report/store';
+import { recordings } from '../features/recordings/store';
 
 export const TAB_ICONS: Record<TabId, IconType> = {
   logs: ScrollText,
@@ -429,6 +431,7 @@ function ImportExportMenu() {
         ...packageItems(t),
         { type: 'separator' },
         { label: t('shell.io.import'), icon: FileUp, description: t('shell.io.importHint'), onSelect: () => void pickAndImport() },
+        { label: t('recordings.openEllipsis'), icon: FolderClock, onSelect: recordings.openDialog },
       ]}
     >
       {(p) => <IconButton icon={ArrowDownUp} label={t('shell.io.title')} {...p} />}
@@ -447,6 +450,7 @@ function MoreMenu() {
         { label: t('shell.io.exportAll'), icon: FileDown, hint: t('shell.io.exportHint'), onSelect: exportSession },
         { label: t('shell.io.exportHar'), icon: FileDown, onSelect: exportHar },
         { label: t('shell.io.import'), icon: FileUp, onSelect: () => void pickAndImport() },
+        { label: t('recordings.openEllipsis'), icon: FolderClock, onSelect: recordings.openDialog },
         { type: 'separator' },
         ...packageItems(t),
         { type: 'separator' },

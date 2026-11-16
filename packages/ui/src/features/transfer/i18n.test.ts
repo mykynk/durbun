@@ -138,14 +138,14 @@ describe('what a backup leaves out', () => {
   const en: TFunction = (key, params) => translate('en', key, params);
 
   it('is one plain sentence in both languages', () => {
-    expect(BACKUP_EXCLUDED).toEqual(['transfer.backup.excludedItem.media']);
-    expect(backupExcludedText(en)).toBe('Not in the backup: screenshots and recordings saved from devices.');
-    expect(backupExcludedText(tr)).toBe('Yedeğe girmeyenler: cihazlardan kaydedilen ekran görüntüleri ve kayıtlar.');
+    expect(BACKUP_EXCLUDED).toEqual(['transfer.backup.excludedItem.media', 'transfer.backup.excludedItem.sessions']);
+    expect(backupExcludedText(en)).toBe('Not in the backup: screenshots and recordings saved from devices, session recordings (they stay on this Mac).');
+    expect(backupExcludedText(tr)).toBe('Yedeğe girmeyenler: cihazlardan kaydedilen ekran görüntüleri ve kayıtlar, oturum kayıtları (bu Mac’te kalır).');
   });
 
   it('takes a second item without rewording', () => {
     const more = [...BACKUP_EXCLUDED, 'transfer.import.history'];
-    expect(backupExcludedText(en, more)).toBe('Not in the backup: screenshots and recordings saved from devices, Version history and deleted flows.');
-    expect(backupExcludedText(tr, more)).toBe('Yedeğe girmeyenler: cihazlardan kaydedilen ekran görüntüleri ve kayıtlar, Sürüm geçmişi ve silinen akışlar.');
+    expect(backupExcludedText(en, more)).toBe('Not in the backup: screenshots and recordings saved from devices, session recordings (they stay on this Mac), Version history and deleted flows.');
+    expect(backupExcludedText(tr, more)).toBe('Yedeğe girmeyenler: cihazlardan kaydedilen ekran görüntüleri ve kayıtlar, oturum kayıtları (bu Mac’te kalır), Sürüm geçmişi ve silinen akışlar.');
   });
 });

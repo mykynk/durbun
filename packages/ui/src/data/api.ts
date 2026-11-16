@@ -18,9 +18,12 @@ import type {
   PackageImportResult,
   PackageManifest,
   SessionExport,
+  SessionRecordingList,
+  SessionRecordingOpen,
   ToolCheck,
 } from '@durbun/protocol';
 import { downloadBlob } from '../lib/download';
+import { withView } from './view';
 
 /** REST helpers for `/api/*` (same origin; Vite proxies `/api` in dev). */
 
@@ -98,7 +101,7 @@ export function health(signal?: AbortSignal): Promise<{ ok: boolean; name: strin
 
 /** Full network entry with bodies (`GET /api/network/:id`). */
 export function getNetworkDetail(id: string, signal?: AbortSignal): Promise<NetworkDetail> {
-  return json(`/api/network/${enc(id)}`, { signal });
+  return json(withView(`/api/network/${enc(id)}`), { signal });
 }
 
 /**
@@ -110,7 +113,7 @@ export async function getStreamMessages(id: string, opts: { after?: number; limi
   if (opts.after) q.set('after', String(opts.after));
   if (opts.limit) q.set('limit', String(opts.limit));
   const qs = q.toString();
-  const res = await json<Partial<StreamMessagesPage>>(`/api/network/${enc(id)}/messages${qs ? `?${qs}` : ''}`, { signal: opts.signal });
+  const res = await json<Partial<StreamMessagesPage>>(withView(`/api/network/${enc(id)}/messages${qs ? `?${qs}` : ''}`), { signal: opts.signal });
   const page: StreamMessagesPage = { messages: Array.isArray(res.messages) ? res.messages : [], more: res.more === true };
   if (res.stream) page.stream = res.stream;
   return page;
@@ -118,7 +121,7 @@ export async function getStreamMessages(id: string, opts: { after?: number; limi
 
 /** URL of a raw body (original Content-Type). `download` adds Content-Disposition. */
 export function bodyUrl(id: string, which: 'request' | 'response', opts: { download?: boolean } = {}): string {
-  return `/api/network/${enc(id)}/body/${which}${opts.download ? '?download=1' : ''}`;
+  return withView(`/api/network/${enc(id)}/body/${which}${opts.download ? '?download=1' : ''}`);
 }
 
 /** Server-side search over URLs, headers and bodies. Resolves with matching network ids. */
@@ -127,7 +130,7 @@ export async function searchNetwork(
   opts: { ids?: string[]; caseSensitive?: boolean; signal?: AbortSignal } = {},
 ): Promise<string[]> {
   const res = await json<{ ids?: string[] }>(
-    '/api/network/search',
+    withView('/api/network/search'),
     postJson({ text, ids: opts.ids, caseSensitive: opts.caseSensitive }, opts.signal),
   );
   return Array.isArray(res.ids) ? res.ids : [];
@@ -146,7 +149,7 @@ export function exportUrl(scope: { deviceId?: string; appId?: string; bundleId?:
   if (scope.bundleId && scope.deviceId) q.set('bundleId', scope.bundleId);
   if (scope.mask === false) q.set('mask', '0');
   const qs = q.toString();
-  return `/api/export${qs ? `?${qs}` : ''}`;
+  return withView(`/api/export${qs ? `?${qs}` : ''}`);
 }
 
 export interface ImportOptions {
@@ -216,7 +219,7 @@ function isAbortSignal(v: unknown): v is AbortSignal {
  */
 export async function harExport(ids?: string[], opts: { mask?: boolean; signal?: AbortSignal } | AbortSignal = {}): Promise<Blob> {
   const o = isAbortSignal(opts) ? { signal: opts } : opts;
-  const res = await fetchOk('/api/har', postJson({ ids, ...(o.mask === false ? { mask: false } : {}) }, o.signal));
+  const res = await fetchOk(withView('/api/har'), postJson({ ids, ...(o.mask === false ? { mask: false } : {}) }, o.signal));
   return res.blob();
 }
 
@@ -232,7 +235,7 @@ export async function downloadHar(ids?: string[], filename?: string, opts: { mas
  * (`X-Durbun-Skipped`: a screenshot the temp-dir cleanup removed, a crash report that is gone).
  */
 export async function bugReport(req: BugReportRequest, signal?: AbortSignal): Promise<{ blob: Blob; fileName: string; skipped: string[] }> {
-  const res = await fetchOk('/api/bug-report', postJson(req, signal));
+  const res = await fetchOk(withView('/api/bug-report'), postJson(req, signal));
   const skipped = (res.headers.get('X-Durbun-Skipped') ?? '')
     .split(',')
     .map((s) => s.trim())
@@ -585,4 +588,40 @@ export function getUiPrefs(signal?: AbortSignal): Promise<Record<string, unknown
 
 export async function putUiPrefs(prefs: Record<string, unknown>): Promise<void> {
   await fetchOk('/api/ui-prefs', { ...postJson(prefs), method: 'PUT' });
+}
+
+/* ── Session recordings (SPEC §13): every server run written to this Mac's disk ── */
+
+/** The recordings on disk, newest first, with the recorder's status and the previous run (`previous`). */
+export function listRecordings(signal?: AbortSignal): Promise<SessionRecordingList> {
+  return json('/api/recordings', { signal });
+}
+
+/** Delete one recording (not the one being written: 409 `recorder.live`). Resolves with the new list. */
+export function deleteRecording(id: string): Promise<SessionRecordingList> {
+  return json(`/api/recordings/${enc(id)}`, { method: 'DELETE' });
+}
+
+/** Delete every recording but the one being written. Resolves with the new list. */
+export function deleteAllRecordings(): Promise<SessionRecordingList> {
+  return json('/api/recordings', { method: 'DELETE' });
+}
+
+/** Load a recording for this window (then reconnect with `view=<id>`). */
+export function openRecording(id: string, signal?: AbortSignal): Promise<SessionRecordingOpen> {
+  return json(`/api/recordings/${enc(id)}/open`, { method: 'POST', signal });
+}
+
+/** The window went back to live: the server may free the recording's memory. Never throws. */
+export async function releaseRecording(id: string): Promise<void> {
+  try {
+    await fetchOk(`/api/recordings/${enc(id)}/open`, { method: 'DELETE', keepalive: true });
+  } catch {
+    /* the server drops idle recordings by itself */
+  }
+}
+
+/** Download URL of a recording as a `.durbun.json` session file (masked unless `mask: false`). */
+export function recordingExportUrl(id: string, opts: { mask?: boolean } = {}): string {
+  return `/api/recordings/${enc(id)}/export${opts.mask === false ? '?mask=0' : ''}`;
 }

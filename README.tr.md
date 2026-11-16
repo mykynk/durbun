@@ -48,6 +48,8 @@ ve canlı bir pencerede gösterir.
   kopyalayın, Markdown olarak kaydedin ya da tek tıkla ekibinizin Slack kanalına gönderin (Ayarlar → Slack).
   Kanalın webhook adresini almak da tek tık: [Slack'e ekle](https://appnify.dev/durbun/slack/?lang=tr).
   Flutter uygulama içi paneli de telefondan gönderebilir.
+- **Oturum kayıtları.** Her oturum yakalanırken Mac'inize kaydedilir: Dürbün kapansa ya da çökse bile önceki
+  oturumu canlı veriden ayrı olarak yeniden açarsınız. Hiçbir şey Mac'ten çıkmaz.
 - **Yedekleme ve paylaşım.** Akışlarınız, mock kurallarınız, ortamlarınız ve ayarlarınız tek bir `.durbun`
   dosyasında: kurulumunuzu takımla paylaşın ya da yeni bir Mac için her şeyi yedekleyin; elle ya da iCloud
   Drive'a veya istediğiniz klasöre otomatik (bkz. [Paylaşım ve yedekleme](#paylaşım-ve-yedekleme)).

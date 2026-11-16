@@ -34,6 +34,8 @@ import { FLOW_CODES, FLOW_PREPARE } from './flowCodes';
  *   config.writeFailed                      { file, error }
  *   action.screenshot.saved (reply data)    { url, file, width, height, media? }
  *   media.screenshot / media.recording      { device, duration? }   (marker lines; data.media = MediaRef)
+ *   recorder.diskFull / recorder.noAccess   { dir } / { dir, error }   (session recorder paused; also RecorderStatus.paused)
+ *   recorder.diskLow / recorder.writeFailed { free, min } (bytes) / { error }
  * Derived params (computed here, never sent): `details` (device.connected), `reason`
  * (device.disconnected, vm.detached), `why` (logs.scopeNotApplied), `link` / `gap` (logs.connectionLost|Restored), `via` / `failed` (app.*), `size` (screenshot), `detail` / `limit`
  * (errors: the specific part of the server's English message).
@@ -78,6 +80,12 @@ export const SERVER_CODES = {
     'sdk.routeElsewhere',
     'device.transportChanged',
     'logs.history',
+    'recorder.diskFull',
+    'recorder.diskLow',
+    'recorder.noAccess',
+    'recorder.writeFailed',
+    'recorder.tooSlow',
+    'recorder.resumed',
   ],
   /** `DeviceInfo.stateCode`. */
   deviceStates: [
@@ -370,6 +378,11 @@ export const SERVER_CODES = {
     'upload.failed',
     'upload.tooLarge',
     'url.invalid',
+    'recorder.unknown',
+    'recorder.live',
+    'recorder.unreadable',
+    'recorder.notOpen',
+    'recorder.notLive',
   ],
   /** Flow preflight issues about requests to this Mac (`FlowPreflightIssue.code`, params { host }). */
   flowTargets: ['preflight.http.ownServer', 'preflight.http.thisMac'],
@@ -506,6 +519,12 @@ registerMessages('code', {
       'Telefonun log arabelleğinden uygulamalarınızın önceki {lines, number} satırı eklendi (son {minutes, number} dk)',
       'Telefonun log arabelleğinden uygulamalarınızın önceki satırları eklendi',
     ],
+    'recorder.diskFull': 'Disk dolu: oturum kaydı duraklatıldı. Yer açıldığında kendiliğinden sürer',
+    'recorder.diskLow': ['Mac’in diskinde {freeGb} boş yer kaldı: oturum kaydı {minGb} altına düşmemek için duraklatıldı', 'Mac’in diskinde az yer kaldı: oturum kaydı duraklatıldı'],
+    'recorder.noAccess': ['Oturum kaydı duraklatıldı: Dürbün {dir} klasörüne yazamıyor ({error})', 'Oturum kaydı duraklatıldı: Dürbün kayıt klasörüne yazamıyor'],
+    'recorder.writeFailed': ['Oturum kaydı duraklatıldı: yazılamadı ({error})', 'Oturum kaydı duraklatıldı: yazılamadı'],
+    'recorder.tooSlow': 'Oturum kaydı kısa süre duraklatıldı: disk, gelen veriye yetişemedi. Bu aradaki satırlar kayıtta eksik',
+    'recorder.resumed': 'Oturum yeniden kaydediliyor',
 
     /* ── device states ── */
     'device.unauthorized': 'Cihazdaki “USB hata ayıklamaya izin verilsin mi?” sorusunu onaylayın',
@@ -868,6 +887,11 @@ registerMessages('code', {
     'upload.failed': ['Yüklenen dosya kaydedilemedi: {detail}', 'Yüklenen dosya kaydedilemedi'],
     'upload.tooLarge': ['Dosya çok büyük (en fazla {limit})', 'Dosya çok büyük'],
     'url.invalid': 'Geçersiz adres',
+    'recorder.unknown': 'Bu kayıt bulunamadı; silinmiş olabilir',
+    'recorder.live': 'Bu, şu an yazılan oturumun kaydı: verisi zaten canlı görünümde',
+    'recorder.unreadable': ['Kayıt okunamadı ({error})', 'Kayıt okunamadı'],
+    'recorder.notOpen': 'Bu kayıt artık açık değil; listeden yeniden açın',
+    'recorder.notLive': 'Bu bir kayıt, canlı değil: cihaz ve uygulama komutları yalnızca canlı görünümde çalışır',
     'flowRun.pinLimit': [
       'En fazla {max, number} çalıştırma sabitlenebilir. Yenisini sabitlemek için önce birinin sabitlemesini kaldırın.',
       'Sabitlenebilecek çalıştırma sınırına ulaşıldı. Yenisini sabitlemek için önce birinin sabitlemesini kaldırın.',
@@ -1121,6 +1145,12 @@ registerMessages('code', {
       '{lines, number} earlier lines of your apps added from the phone’s log buffer (last {minutes, number} min)',
       'Earlier lines of your apps added from the phone’s log buffer',
     ],
+    'recorder.diskFull': 'The disk is full: session recording paused. It goes on by itself once there is room',
+    'recorder.diskLow': ['{freeGb} free on this Mac’s disk: session recording paused to stay above {minGb}', 'This Mac’s disk is almost full: session recording paused'],
+    'recorder.noAccess': ['Session recording paused: Dürbün cannot write to {dir} ({error})', 'Session recording paused: Dürbün cannot write to the recordings folder'],
+    'recorder.writeFailed': ['Session recording paused: writing failed ({error})', 'Session recording paused: writing failed'],
+    'recorder.tooSlow': 'Session recording paused for a moment: the disk could not keep up. Lines from that moment are missing in the recording',
+    'recorder.resumed': 'Recording this session again',
 
     /* ── device states ── */
     'device.unauthorized': 'Accept the “Allow USB debugging?” prompt on the device',
@@ -1476,6 +1506,11 @@ registerMessages('code', {
     'upload.failed': ['Could not save the upload: {detail}', 'Could not save the upload'],
     'upload.tooLarge': ['The file is too large (limit {limit})', 'The file is too large'],
     'url.invalid': 'Malformed URL',
+    'recorder.unknown': 'This recording was not found; it may have been deleted',
+    'recorder.live': 'This is the recording of the session being captured now: its data is the live view',
+    'recorder.unreadable': ['The recording could not be read ({error})', 'The recording could not be read'],
+    'recorder.notOpen': 'This recording is no longer open; open it again from the list',
+    'recorder.notLive': 'This is a recording, not live: device and app commands work in the live view only',
     'flowRun.pinLimit': ['At most {max, number} runs can be pinned. Unpin one to pin another.', 'The pinned run limit is reached. Unpin one to pin another.'],
     network: 'Could not reach the Dürbün server',
 
@@ -1641,6 +1676,13 @@ function num(v: unknown): number | undefined {
   return undefined;
 }
 
+/** "1.5 GB" / "1,5 GB"; '' when unknown. */
+function gigabytes(bytes: number | undefined, lang: Lang): string {
+  if (!bytes || bytes <= 0) return '';
+  const gb = Math.round((bytes / 1024 ** 3) * 10) / 10;
+  return `${lang === 'tr' ? String(gb).replace('.', ',') : gb} GB`;
+}
+
 /** "17.2 MB" / "17,2 MB"; '' when the size is unknown (0 or absent). */
 function megabytes(bytes: number | undefined, lang: Lang): string {
   if (!bytes || bytes <= 0) return '';
@@ -1689,6 +1731,8 @@ const SETTING_LABEL_KEYS: Record<string, string> = {
   maxBodyStoreMB: 'shell.settings.maxBodyStoreMB',
   logcatTail: 'shell.settings.logcatTail',
   metricsIntervalMs: 'shell.settings.metricsInterval',
+  recordingsMaxDays: 'recordings.settings.maxDays',
+  recordingsMaxMB: 'recordings.settings.maxMB',
 };
 
 function formatNum(n: number, lang: Lang): string {
@@ -1811,6 +1855,7 @@ const PREPARE: Record<string, Preparer> = {
     return { params: { ...p, reason: known ? part(lang, `reason.${known}`) : reason } };
   },
   'settings.adjusted': (p, lang) => ({ params: { ...p, details: localizeAdjustedDetails(str(p.details), lang) } }),
+  'recorder.diskLow': (p, lang) => ({ params: { ...p, freeGb: gigabytes(num(p.free), lang), minGb: gigabytes(num(p.min), lang) } }),
   'settings.lanOn': (p) => (num(p.restartRequired) ? { key: 'settings.lanOnRestart' } : undefined),
   'settings.lanOff': (p) => (num(p.restartRequired) ? { key: 'settings.lanOffRestart' } : undefined),
   'action.screenshot.saved': (p) => {

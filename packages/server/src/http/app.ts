@@ -14,7 +14,7 @@ import type { Socket } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { Duplex } from 'node:stream';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, type WebSocket } from 'ws';
 import {
   MAX_FRAME_BYTES,
   PROTOCOL_VERSION,
@@ -28,7 +28,12 @@ import {
 } from '@durbun/protocol';
 import { cleanTempDir, MEDIA_DIR_NAME, TEMP_CLEAN_INTERVAL_MS, TEMP_KEEP_WHILE_RUNNING, TEMP_MAX_AGE_MS, type ConfigStore } from '../config';
 import { runDoctor as runDoctorChecks, type PortState } from '../doctor';
-import type { ClearEvent, DeviceDriver, DriverContext, FlutterVmModule, Hub, HubChange, Logger, SdkLayer } from '../types';
+import type { ClearEvent, CreateHubOptions, DeviceDriver, DriverContext, FlutterVmModule, Hub, HubChange, Logger, SdkLayer } from '../types';
+import { createHub as createRealHub } from '../hub/index';
+import { SessionRecorder, type RecorderOptions } from '../recordings/recorder';
+import { recordingRoutes } from '../recordings/routes';
+import { RECORDINGS_DIR_NAME } from '../recordings/store';
+import { RecordingViews, VIEW_PATHS } from '../recordings/views';
 import { SERVER_VERSION } from '../version';
 import { createApiHandler } from './api';
 import { MediaLibrary } from './media';
@@ -74,6 +79,10 @@ export interface HttpAppDeps {
   tempMaxAgeMs?: number;
   /** Automatic flow runs and backups (default true; tests turn them off). */
   flowsBackground?: boolean;
+  /** Session recorder (SPEC §13): false = off for this app (tests), or options for it (shorter intervals…). */
+  recordings?: false | Partial<Omit<RecorderOptions, 'root' | 'hub' | 'settings' | 'logger' | 'version'>>;
+  /** Hubs of opened recordings (default: the real hub). */
+  createHub?: (opts: CreateHubOptions) => Hub;
 }
 
 export interface SdkListenerState {
@@ -108,6 +117,8 @@ export interface HttpApp {
   /** (Re)bind the raw-TCP SDK listener on 127.0.0.1 or 0.0.0.0. Never throws; resolves with success. */
   bindSdk(lan: boolean): Promise<boolean>;
   readonly sdkListener: SdkListenerState;
+  /** The session recorder (undefined when turned off for this app). */
+  readonly recorder: SessionRecorder | undefined;
   broadcast(message: ServerToUi): void;
   notice(notice: UiNotice): void;
   driverStatuses(): DriverStatus[];
@@ -255,61 +266,143 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     slack,
     fetchImpl: deps.fetchImpl,
     ownPorts,
-    broadcast: (message) => ui.broadcast(message),
-    notice: (n) => ui.broadcast({ type: 'notice', ...n }),
+    broadcast: (message) => broadcast(message),
+    notice: (n) => broadcast({ type: 'notice', ...n }),
     version,
     background: deps.flowsBackground,
   });
+
+  /** The snapshot of `h`: the live hub, or an opened recording's (its data with the server's mocks, drivers and flows). */
+  function snapshotOf(h: Hub, resume: UiResumeRequest | undefined): ServerToUi {
+    const resumed = canResume(h, resume);
+    const msg: Extract<ServerToUi, { type: 'snapshot' }> = {
+      type: 'snapshot',
+      devices: h.getDevices(),
+      apps: h.getApps(),
+      network: resumed && h.getNetworkSince ? h.getNetworkSince(resume!.netSeq) : h.getNetwork(),
+      mocks: config.mocks,
+      drivers: driverStatuses(),
+      processes: h.getProcesses(),
+      metrics: h.getMetrics(),
+      logCount: h.getLogCount(),
+      deviceApps: h.getDeviceApps(),
+      flows: flowsModule.summaries(),
+      flowRuns: flowsModule.runningRuns(),
+    };
+    if (config.mocksRevision !== undefined) msg.mocksRevision = config.mocksRevision;
+    const epoch = h.getEpoch?.();
+    if (epoch !== undefined) msg.epoch = epoch;
+    const netSeq = h.getNetworkSeq?.();
+    if (netSeq !== undefined) msg.netSeq = netSeq;
+    const evictions = h.getEvictions?.();
+    if (evictions) msg.evictions = evictions;
+    const mockHits = h.getMockHits?.();
+    if (mockHits) msg.mockHits = mockHits;
+    if (resumed) msg.resumed = { afterLogId: resume!.afterLogId, networkIds: h.getNetworkIds!() };
+    return msg;
+  }
 
   const ui = new UiChannel({
     hub,
     logger: logger.child('ui'),
     router,
     hello: () => withLimits({ type: 'hello', server: info(), settings: config.settings }),
-    snapshot: (resume) => {
-      const resumed = canResume(resume);
-      const msg: Extract<ServerToUi, { type: 'snapshot' }> = {
-        type: 'snapshot',
-        devices: hub.getDevices(),
-        apps: hub.getApps(),
-        network: resumed && hub.getNetworkSince ? hub.getNetworkSince(resume!.netSeq) : hub.getNetwork(),
-        mocks: config.mocks,
-        drivers: driverStatuses(),
-        processes: hub.getProcesses(),
-        metrics: hub.getMetrics(),
-        logCount: hub.getLogCount(),
-        deviceApps: hub.getDeviceApps(),
-        flows: flowsModule.summaries(),
-        flowRuns: flowsModule.runningRuns(),
-      };
-      if (config.mocksRevision !== undefined) msg.mocksRevision = config.mocksRevision;
-      const epoch = hub.getEpoch?.();
-      if (epoch !== undefined) msg.epoch = epoch;
-      const netSeq = hub.getNetworkSeq?.();
-      if (netSeq !== undefined) msg.netSeq = netSeq;
-      const evictions = hub.getEvictions?.();
-      if (evictions) msg.evictions = evictions;
-      const mockHits = hub.getMockHits?.();
-      if (mockHits) msg.mockHits = mockHits;
-      if (resumed) msg.resumed = { afterLogId: resume!.afterLogId, networkIds: hub.getNetworkIds!() };
-      return msg;
-    },
+    snapshot: (resume) => snapshotOf(hub, resume),
   });
 
   /** A reconnecting UI can continue its copy: same data generation and nothing it claims is ahead of the hub. */
-  function canResume(resume: UiResumeRequest | undefined): boolean {
-    if (!resume || !hub.getEpoch || !hub.getLastLogId || !hub.getNetworkSeq || !hub.getNetworkSince || !hub.getNetworkIds) return false;
-    return resume.epoch === hub.getEpoch() && resume.afterLogId <= hub.getLastLogId() && resume.netSeq <= hub.getNetworkSeq();
+  function canResume(h: Hub, resume: UiResumeRequest | undefined): boolean {
+    if (!resume || !h.getEpoch || !h.getLastLogId || !h.getNetworkSeq || !h.getNetworkSince || !h.getNetworkIds) return false;
+    return resume.epoch === h.getEpoch() && resume.afterLogId <= h.getLastLogId() && resume.netSeq <= h.getNetworkSeq();
   }
 
-  function withLimits<M extends Extract<ServerToUi, { type: 'hello' | 'settings' }>>(msg: M): M {
-    const limits = hub.getLimits?.();
+  function withLimits<M extends Extract<ServerToUi, { type: 'hello' | 'settings' }>>(msg: M, h: Hub = hub): M {
+    const limits = h.getLimits?.();
     if (limits) msg.limits = limits;
     return msg;
   }
 
-  const broadcast = (message: ServerToUi) => ui.broadcast(message);
-  const notice = (n: UiNotice) => ui.broadcast({ type: 'notice', ...n });
+  /* ───────────── session recorder (SPEC §13) ───────────── */
+
+  const recordingsRoot = path.join(config.dataDir, RECORDINGS_DIR_NAME);
+  const recorder =
+    deps.recordings === false
+      ? undefined
+      : new SessionRecorder({
+          root: recordingsRoot,
+          hub,
+          settings: () => config.settings,
+          logger: logger.child('recorder'),
+          version,
+          ...(deps.recordings ?? {}),
+        });
+  void recorder?.start();
+
+  /** Commands a window showing a recording may send: the server-wide ones go to the live router. */
+  const GLOBAL_COMMANDS = new Set(['mocks.set', 'settings.update', 'doctor.run', 'demo.set']);
+  const VIEW_COMMANDS = new Set(['clear', 'net.replay']);
+
+  const views = new RecordingViews({
+    root: recordingsRoot,
+    settings: () => config.settings,
+    logger: logger.child('recordings'),
+    version,
+    createHub: (settings) => (deps.createHub ?? createRealHub)({ settings, logger: logger.child('recording-hub') }),
+    liveId: () => recorder?.currentId,
+    wire: (viewHub, recording) => {
+      const viewRouter = createCommandRouter({
+        hub: viewHub,
+        sdk,
+        config,
+        logger: logger.child('commands'),
+        drivers: () => [],
+        vm: null,
+        setDemo: (enabled) => setDemo(enabled),
+        runDoctor,
+        onLanChanged,
+        replayTimeoutMs: deps.replayTimeoutMs,
+        fetchImpl: deps.fetchImpl,
+        ownPorts,
+        tempDir: config.tempDir,
+      });
+      const channel = new UiChannel({
+        hub: viewHub,
+        logger: logger.child('ui-recording'),
+        router: {
+          handle: async (command, client) => {
+            const name = command && typeof command === 'object' ? (command as { name?: unknown }).name : undefined;
+            if (typeof name === 'string' && GLOBAL_COMMANDS.has(name)) return router.handle(command, client);
+            if (typeof name === 'string' && VIEW_COMMANDS.has(name)) return viewRouter.handle(command, client);
+            return { ok: false, error: 'This is a saved session, not live: go back to live to use the device and the apps', code: 'recorder.notLive' };
+          },
+          clientClosed: (id) => viewRouter.clientClosed(id),
+        },
+        hello: () => withLimits({ type: 'hello', server: info(), settings: config.settings, recording }, viewHub),
+        snapshot: (resume) => snapshotOf(viewHub, resume),
+      });
+      const unsubs = [
+        viewHub.subscribe(guard('recording batch', (change: HubChange) => channel.broadcastChange(change))),
+        viewHub.onCleared(guard('recording cleared', (e: ClearEvent) => channel.broadcast({ type: 'cleared', ...e }))),
+      ];
+      const viewApi = createApiHandler({ hub: viewHub, tempDir: config.tempDir, logger: logger.child('api-recording'), version, runDoctor });
+      return {
+        channel,
+        api: viewApi,
+        dispose: () => {
+          for (const u of unsubs) u();
+          channel.dispose();
+        },
+      };
+    },
+  });
+
+  /** Live data changes go to live windows only; everything server-wide also to windows showing a recording. */
+  const broadcastLive = (message: ServerToUi) => ui.broadcast(message);
+  const broadcast = (message: ServerToUi) => {
+    ui.broadcast(message);
+    views.broadcast(message);
+  };
+  const notice = (n: UiNotice) => broadcast({ type: 'notice', ...n });
 
   function guard<A extends unknown[]>(what: string, fn: (...args: A) => void): (...args: A) => void {
     return (...args: A) => {
@@ -323,7 +416,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
 
   unsubscribers.push(
     hub.subscribe(guard('hub batch', (change: HubChange) => ui.broadcastChange(change))),
-    hub.onCleared(guard('hub cleared', (e: ClearEvent) => broadcast({ type: 'cleared', ...e }))),
+    hub.onCleared(guard('hub cleared', (e: ClearEvent) => broadcastLive({ type: 'cleared', ...e }))),
     hub.onNotice(guard('hub notice', (n: UiNotice) => notice(n))),
     config.onSettings(
       guard('settings change', (settings: ServerSettings, previous: ServerSettings) => {
@@ -345,6 +438,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
           }
         }
         broadcast(withLimits({ type: 'settings', settings }));
+        void recorder?.applySettings(settings);
       }),
     ),
     config.onMocks(
@@ -478,7 +572,12 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     uploadLimitBytes: deps.uploadLimitBytes,
     importLimitBytes: deps.importLimitBytes,
     slack,
-    modules: [flowsModule, media.module(), createWirelessModule({ drivers: () => deps.drivers, devices: () => hub.getDevices() })],
+    modules: [
+      flowsModule,
+      media.module(),
+      createWirelessModule({ drivers: () => deps.drivers, devices: () => hub.getDevices() }),
+      ...(recorder ? [recordingRoutes({ recorder, views, root: recordingsRoot, tempDir: config.tempDir, settings: () => config.settings, version })] : []),
+    ],
   });
 
   async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -488,6 +587,12 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
       if (!access.ok) {
         logger.warn(`blocked ${req.method} ${pathname}: ${access.reason}`);
         sendError(res, 403, 'Forbidden', 'access.denied');
+        return;
+      }
+      // An opened recording's data (SPEC §13): `view=<id>` on the network / HAR / export / bug report routes.
+      const viewId = query.get('view');
+      if (viewId !== null && VIEW_PATHS.test(pathname)) {
+        await views.handleApi(viewId, req, res, pathname, query);
         return;
       }
       await api(req, res, pathname, query);
@@ -555,7 +660,30 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
         rejectUpgrade(socket, 403, 'Forbidden');
         return;
       }
-      const resume = parseResumeQuery(splitTarget(req.url).query);
+      const query = splitTarget(req.url).query;
+      const resume = parseResumeQuery(query);
+      const viewId = query.get('view');
+      if (viewId) {
+        // An opened recording; one that cannot be shown (deleted, unreadable) lands on the live data, whose hello
+        // carries no `recording`, so the window says so and leaves the recording.
+        const upgrade = () =>
+          new Promise<WebSocket | undefined>((resolve) => {
+            if (socket.destroyed || closed) return resolve(undefined);
+            uiWss.handleUpgrade(req, socket, head, (ws) => resolve(ws));
+          });
+        void views
+          .attach(viewId, upgrade, resume)
+          .then(async (shown) => {
+            if (shown) return;
+            const ws = await upgrade();
+            if (ws) ui.attach(ws, resume);
+          })
+          .catch((err) => {
+            logger.warn(`WebSocket /ui?view: ${errorMessage(err)}`);
+            socket.destroy();
+          });
+        return;
+      }
       uiWss.handleUpgrade(req, socket, head, (ws) => ui.attach(ws, resume));
       return;
     }
@@ -666,6 +794,8 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     clearInterval(driverTimer);
     clearInterval(tempTimer);
     media.dispose();
+    views.dispose();
+    await recorder?.stop().catch((err) => logger.warn(`recorder did not stop cleanly: ${errorMessage(err)}`));
     await flowsModule.dispose().catch((err) => logger.warn(`flows did not stop cleanly: ${errorMessage(err)}`));
     for (const u of unsubscribers) {
       try {
@@ -720,6 +850,7 @@ export function createHttpApp(deps: HttpAppDeps): HttpApp {
     get sdkListener() {
       return sdkListener;
     },
+    recorder,
     broadcast,
     notice,
     driverStatuses,

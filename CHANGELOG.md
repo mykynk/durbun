@@ -187,6 +187,13 @@ All notable changes to Dürbün are listed here. The format follows
   screenshot, device and app facts and your note, and shows the counts before anything leaves. Secret values
   are masked by default. Copy it as Markdown, save one .zip (report, logs, masked HAR, screenshot, iOS crash
   report and a Dürbün recording of the window) or send the text to Slack.
+- **Session recordings.** Every run of Dürbün is written to this Mac as it happens, so what you captured
+  survives a quit or a crash. When Dürbün starts it offers the previous session, and **Recordings** (top bar,
+  ⌘K, Settings) lists them with their devices, apps and counts; one that was cut short is marked. An opened
+  recording is kept apart from live data and marked as not live: Logs, Network, exports and Report a bug work
+  on it while live capture goes on underneath. Recordings are kept for 7 days and up to 1 GB by default;
+  Settings → Recordings turns recording off, changes the limits and deletes everything. They hold what was
+  captured, secret values included, stay on this Mac and are not part of backups or packages.
 - Logs and Network say when the memory limit has dropped the oldest lines or requests.
 - An iPhone with Developer Mode off says so, and actions that need it explain how to turn it on.
 - Android: log lines of your apps from before the phone was plugged in are read from the phone's log buffer.

@@ -13,6 +13,7 @@ import { errorText } from '../i18n/codes';
 import { toast } from '../components/Toast';
 import { toggleTightSidebar } from './sidebarFit';
 import { confirm } from '../components/Dialog';
+import { recordings } from '../features/recordings/store';
 
 /** Human message for a failed command/request (localized for known codes). */
 export function errorMessage(err: unknown): string {
@@ -154,6 +155,8 @@ export async function importFile(file: File): Promise<void> {
     else toast.warn(t('shell.io.notDurbun'), { description: t('shell.io.sessionHint') });
     return;
   }
+  // Recordings and HARs land in the live data: a window showing a session recording goes back to live first.
+  if (kind === 'har' || kind === 'session') await recordings.leaveForImport();
   if (kind === 'har') return importHar(file);
   if (kind === 'package' || kind === 'flow') {
     try {
@@ -211,6 +214,7 @@ export async function importFiles(files: readonly File[]): Promise<void> {
   let firstDevice: { id: string; har: boolean } | undefined;
   for (const file of files) {
     const kind = await classifyImport(file);
+    if (kind === 'har' || kind === 'session') await recordings.leaveForImport();
     try {
       if (kind === 'install') skipped.push({ name: file.name, reason: t('shell.io.many.reasonInstall') });
       else if (kind === 'notDurbun') skipped.push({ name: file.name, reason: t('shell.io.many.reasonNotDurbun') });

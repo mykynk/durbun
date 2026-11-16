@@ -14,6 +14,7 @@ export * from './package';
 export * from './secrets';
 export * from './bugReport';
 export * from './har';
+export * from './recordings';
 
 export const PROTOCOL_VERSION = 1;
 export const PRODUCT_NAME = 'Dürbün';
@@ -1341,6 +1342,12 @@ export interface ServerSettings {
   metricsIntervalMs: number;
   adbPath?: string;
   idevicesyslogPath?: string;
+  /** Write every session to the Mac's disk (SPEC §13, recordings.ts). Optional for older servers; absent = on. */
+  recordSessions?: boolean;
+  /** Recordings whose last write is older than this many days are removed (absent = RECORDING_DEFAULTS.maxDays). */
+  recordingsMaxDays?: number;
+  /** All recordings together stay under this many MB on disk (absent = RECORDING_DEFAULTS.maxMB). */
+  recordingsMaxMB?: number;
 }
 
 export const DEFAULT_SETTINGS: ServerSettings = {
@@ -1501,6 +1508,11 @@ export type ServerToUi =
       settings: ServerSettings;
       /** Optional for older servers. */
       limits?: StoreLimits;
+      /**
+       * The saved session this connection shows (`WS /ui?view=<id>`, SPEC §13): its data, not the live data. Absent on
+       * a live connection, also when the asked recording could not be opened.
+       */
+      recording?: import('./recordings').SessionRecording;
     }
   | {
       type: 'snapshot';

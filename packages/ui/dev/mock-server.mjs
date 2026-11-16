@@ -17,6 +17,8 @@
  * installed by hand, a TestFlight build next to an Xcode build — both "Runner" — on a USB iPhone), exact
  * log origins, dropbox / .ips crash records (one marked `duplicateOf`, one with a downloadable .ips),
  * device readers (frame stats without data on the Pixel, dropbox refused on the Galaxy) and SDK layers.
+ * Session recordings (mock-recordings.mjs): /api/recordings and WS /ui?view=<id> (a frozen copy of the data, imported
+ * devices, no live batches); `--recordings empty|paused|off` for the empty list, the paused and the off states.
  * `--empty` starts with no devices (onboarding); `demo.set {enabled:true}` then fills everything.
  * `--no-flows` starts the Flows tab empty (its welcome page with the starter flows).
  * Stream entries (SPEC §6.1.1): Pati's vet chat over a WebSocket (open, growing, 2 000+ messages with a gap after
@@ -38,6 +40,7 @@ import { createMockMedia, mediaClock } from './mock-media.mjs';
 import { appDataArchive, appDataReply } from './mock-app-data.mjs';
 import { createMockWireless } from './mock-wireless.mjs';
 import { createMockRules } from './mock-rules.mjs';
+import { createMockRecordings } from './mock-recordings.mjs';
 
 const args = process.argv.slice(2);
 const argValue = (name, fallback) => {
@@ -1242,8 +1245,12 @@ const queue = { logs: [], network: [], devices: [], apps: [], metrics: [], proce
 function send(ws, msg) {
   if (ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
+/** Windows showing a session recording (ws → recording id): only server-wide messages reach them. */
+const viewClients = new Map();
+const SERVER_WIDE = new Set(['settings', 'mocks', 'flows', 'flowRun', 'drivers', 'notice']);
 function broadcast(msg) {
   for (const ws of clients) send(ws, msg);
+  if (SERVER_WIDE.has(msg.type)) for (const ws of viewClients.keys()) send(ws, msg);
 }
 function pushLogs(entries) {
   for (const e of entries) {
@@ -1460,6 +1467,50 @@ function enableDemo(on) {
 /* ───────────── media library (like server http/media.ts) ───────────── */
 const media = createMockMedia({ png: screenshotPng, sampleVideo: argValue('--sample-video'), devices: baseDevices() });
 const wireless = createMockWireless();
+const recs = createMockRecordings({
+  mode: argValue('--recordings', 'seeded'),
+  liveDevices: () => devices.filter((d) => !d.id.startsWith('import:')).map((d) => ({ id: d.id, name: d.name, platform: d.platform })),
+  liveCounts: () => ({ logs: logs.length, requests: network.size, errors: logs.reduce((n, l) => n + (l.level === 'error' || l.level === 'fatal' ? 1 : 0), 0), crashes: 0 }),
+});
+
+/* ── an opened recording: a frozen copy of the data at that moment, its devices imported (read-only) ── */
+const frozen = new Map();
+function viewData(id) {
+  const opened = recs.view(id);
+  if (!opened) return undefined;
+  let v = frozen.get(id);
+  if (v) return v;
+  const r = opened.recording;
+  const label = `recording ${new Date(r.startedAt).toISOString().slice(0, 16).replace('T', ' ')}`;
+  const ids = new Map(devices.filter((d) => !d.id.startsWith('import:')).map((d, i) => [d.id, `import:${900 + frozen.size * 10 + i}`]));
+  const dev = (x) => ids.get(x) ?? x;
+  const shift = Date.now() - r.lastWriteAt;
+  v = {
+    opened,
+    devices: devices
+      .filter((d) => ids.has(d.id))
+      .map((d) => ({ ...d, id: dev(d.id), state: 'disconnected', stateCode: 'device.imported', stateDetail: `Imported from ${label}`, logs: { status: 'stopped' }, actions: [], lastSeen: d.lastSeen - shift })),
+    apps: apps.map((a) => ({ ...a, deviceId: dev(a.deviceId), connected: false })),
+    deviceApps: deviceApps.map((d) => ({ ...d, deviceId: dev(d.deviceId) })),
+    logs: logs.slice(-4000).map((e) => ({ ...e, deviceId: dev(e.deviceId), ts: e.ts - shift })),
+    network: new Map([...network.values()].map((n) => [n.id, { ...n, deviceId: dev(n.deviceId), ts: n.ts - shift, ...(n.endTs ? { endTs: n.endTs - shift } : {}) }])),
+  };
+  frozen.set(id, v);
+  return v;
+}
+function viewSnapshot(v) {
+  return { type: 'snapshot', devices: v.devices, apps: v.apps, network: [...v.network.values()].map(strip), mocks: mockRules.rules, mocksRevision: mockRules.revision, drivers: drivers(), processes: [], metrics: [], deviceApps: v.deviceApps, logCount: v.logs.length, flows: flowSummaries(), flowRuns: [] };
+}
+function viewExport(v, mask) {
+  const exp = { format: 'durbun-session', version: 1, exportedAt: Date.now(), server: { version: '0.2.0' }, devices: v.devices, apps: v.apps, logs: v.logs, network: [...v.network.values()], deviceApps: v.deviceApps };
+  if (mask) {
+    exp.network = exp.network.map(maskDetail);
+    exp.masked = true;
+  }
+  return exp;
+}
+/** REST a `view=<id>` sends to the opened recording (the server's VIEW_PATHS). */
+const VIEW_PATHS = /^\/api\/(?:network(?:\/.*)?|har|export|bug-report)\/?$/;
 if (!args.includes('--no-media')) media.seed();
 
 /** Keep a screenshot / recording and put its marker on the device's log timeline (as the server does for a window). */
@@ -1714,6 +1765,7 @@ function handleCommand(ws, { requestId, command }) {
     }
     case 'settings.update':
       settings = { ...settings, ...(command.patch ?? {}) };
+      recs.applySettings(command.patch ?? {});
       broadcast({ type: 'settings', settings });
       if ('allowLan' in (command.patch ?? {})) for (const c of clients) send(c, { type: 'hello', server: server(), settings });
       return reply(settings);
@@ -1893,6 +1945,15 @@ const httpServer = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
   const p = url.pathname;
   try {
+    if (recs.handle(req, res, p, url.searchParams, { exportOf: (r, mask) => (viewData(r.id) ? viewExport(viewData(r.id), mask) : undefined), onDeleted: dropView })) return;
+    const viewId = url.searchParams.get('view');
+    const view = viewId && VIEW_PATHS.test(p) ? viewData(viewId) : undefined;
+    if (viewId && VIEW_PATHS.test(p) && !view) return json(res, 404, { error: 'This recording is not open', code: 'recorder.notOpen' });
+    const netOf = (id) => (view ? view.network.get(id) : network.get(id));
+    if (view && p === '/api/export') {
+      const date = new Date(view.opened.recording.startedAt).toISOString().slice(0, 10);
+      return json(res, 200, viewExport(view, maskParam(url.searchParams.get('mask'))), { 'Content-Disposition': `attachment; filename="durbun-${date}.durbun.json"` });
+    }
     if (p === '/api/health') return json(res, 200, { ok: true, name: 'durbun', version: '0.2.0' });
     if (p === '/api/doctor') return setTimeout(() => json(res, 200, doctorChecks()), 350);
     if (p === '/api/network/search' && req.method === 'POST') {
@@ -1905,7 +1966,7 @@ const httpServer = http.createServer(async (req, res) => {
     }
     const body = /^\/api\/network\/(.+)\/body\/(request|response)$/.exec(p);
     if (body) {
-      const d = network.get(decodeURIComponent(body[1]));
+      const d = netOf(decodeURIComponent(body[1]));
       const b = body[2] === 'request' ? d?.requestBody : d?.responseBody;
       if (!d || !b) return json(res, 404, { error: 'No body' });
       res.writeHead(200, { 'Content-Type': (body[2] === 'request' ? d.requestContentType : d.responseContentType) ?? 'application/octet-stream' });
@@ -1920,8 +1981,8 @@ const httpServer = http.createServer(async (req, res) => {
     }
     const detail = /^\/api\/network\/(.+)$/.exec(p);
     if (detail && req.method === 'GET') {
-      const d = network.get(decodeURIComponent(detail[1]));
-      return d ? json(res, 200, d) : json(res, 404, { error: 'Unknown network entry' });
+      const d = netOf(decodeURIComponent(detail[1]));
+      return d ? json(res, 200, d) : json(res, 404, { error: 'Unknown network entry', code: 'net.unknown' });
     }
     if (p === '/api/export') {
       // Same scoping as the server: ?deviceId= (one device), + &appId= (one session) or &bundleId= (one app the device reports).
@@ -2057,7 +2118,7 @@ httpServer.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
-  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws));
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
 });
 
 function syncClient(ws) {
@@ -2067,18 +2128,49 @@ function syncClient(ws) {
   for (let i = 0; i < logs.length; i += 5000) send(ws, { type: 'history', logs: logs.slice(i, i + 5000), done: i + 5000 >= logs.length });
 }
 
-wss.on('connection', (ws) => {
-  clients.add(ws);
-  syncClient(ws);
+/** Commands a window showing a recording may send (the server: the rest is refused with recorder.notLive). */
+const VIEW_COMMANDS = new Set(['mocks.set', 'settings.update', 'doctor.run', 'demo.set']);
+
+function syncView(ws, id, v) {
+  send(ws, { type: 'hello', server: server(), settings, recording: v.opened.recording });
+  send(ws, viewSnapshot(v));
+  if (!v.logs.length) send(ws, { type: 'history', logs: [], done: true });
+  for (let i = 0; i < v.logs.length; i += 5000) send(ws, { type: 'history', logs: v.logs.slice(i, i + 5000), done: i + 5000 >= v.logs.length });
+}
+
+/** A deleted recording: its windows reconnect (and land on the live data). */
+function dropView(id) {
+  frozen.delete(id);
+  for (const [ws, vid] of viewClients) if (vid === id) ws.close(4004, 'This recording was deleted');
+}
+
+wss.on('connection', (ws, req) => {
+  const viewId = new URL(req?.url ?? '/', 'http://x').searchParams.get('view');
+  const v = viewId ? viewData(viewId) : undefined;
+  if (v) {
+    viewClients.set(ws, viewId);
+    syncView(ws, viewId, v);
+  } else {
+    clients.add(ws);
+    syncClient(ws);
+  }
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(String(data));
-      if (msg?.type === 'command') handleCommand(ws, msg);
+      if (msg?.type !== 'command') return;
+      if (v && !VIEW_COMMANDS.has(msg.command?.name)) {
+        send(ws, { type: 'reply', requestId: msg.requestId, ok: false, error: 'This is a recording, not live data', code: 'recorder.notLive' });
+        return;
+      }
+      handleCommand(ws, msg);
     } catch {
       /* ignore */
     }
   });
-  ws.on('close', () => clients.delete(ws));
+  ws.on('close', () => {
+    clients.delete(ws);
+    viewClients.delete(ws);
+  });
 });
 
 seedHistory();
@@ -2093,6 +2185,7 @@ function shutdown() {
   clearInterval(simTimer);
   clearInterval(flushTimer);
   for (const ws of clients) ws.terminate();
+  for (const ws of viewClients.keys()) ws.terminate();
   httpServer.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 500).unref();
 }

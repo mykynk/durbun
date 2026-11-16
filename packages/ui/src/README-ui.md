@@ -105,6 +105,24 @@ import { registerMessages, useT } from '../../i18n';
   `dev/mock-wireless.mjs` (code `123456` pairs, `000000` is wrong, `10.*` is unreachable, `192.168.1.77` pairs
   without a connect service).
 
+### 1.3 Session recordings (`features/recordings/`, SPEC §13)
+
+- `store.ts`: the list and the recorder's status (`useRecordings`, `recordings.refresh()`, refreshed on connect, on
+  `recorder.*` system lines, on recorder settings and every 5 s while the dialog or Settings → Recordings shows it),
+  the list dialog, the launch offer's closed state, and which recording this window shows (`viewing`).
+  `recordings.open(id)` → `POST /api/recordings/:id/open`, `data/view.ts` gets the id, `reconnectFresh()` loads the
+  recording's own snapshot; `backToLive()` releases it and puts back the scope the window had;
+  `leaveForImport()` (imports land in the live data); a hello without the asked `recording` leaves view mode with
+  a toast. `initRecordings()` runs once from `RecordingsHost`.
+- `RecordingsParts.tsx`: `LaunchOffer` (corner card in `<main>`, once per recording, `model.ts` `offerSeen`),
+  `RecordingBanner` ("Kayıt: 15 Kas 21:40 · canlı değil", "Canlıya dön"; `DeviceAttentionBanner` stays quiet for
+  imported devices meanwhile), `RecorderStatusItem` (status bar: "Kayıt" badge while viewing, "Kayıt duraklatıldı"
+  while paused, a quiet icon while recording), `RecordingsHost`. `RecordingsDialog.tsx`: the list and its states
+  (loading, error, empty on / off). `RecordingsSection.tsx`: Settings → Recordings (turning off asks whether to
+  delete what exists). `model.ts`: wording (when, span, devices / apps, counts, pause reason).
+- Entry points: top bar import/export menu (and the narrow "more" menu), ⌘K (`recordings`, `recordings.previous`,
+  `recordings.live`), Settings, the status bar icon, the launch offer.
+
 ## 2. Running
 
 ```bash
@@ -122,6 +140,10 @@ npm run build -w @durbun/ui               # → dist/ui
 The mock also carries the phase-3 data: `snapshot.deviceApps` (Play, Firebase, a hand-installed APK, two "Runner"
 apps on a USB iPhone), exact origins, dropbox / .ips crash records (one `duplicateOf`, one downloadable .ips), device
 readers and SDK layers.
+Session recordings come from `dev/mock-recordings.mjs` (yesterday evening's session for the launch offer, an
+interrupted one, an older trimmed one; this run "being recorded"); `WS /ui?view=<id>` serves a frozen copy of the
+mock data with imported devices. `--recordings empty|paused|off` shows the empty list, the paused and the off
+states. `packages/server/test/http/recordingsContract.test.ts` compares its answers with the real server's.
 Flows, environments, packages, backups and UI prefs come from `dev/mock-flows.mjs`: an in-memory store with the real
 REST shapes (sample flows tagged `smoke`, runs that pass or fail on purpose, nothing is written to disk). It also
 answers set runs (`/api/flow-batches`, one finished `smoke` set seeded), versions (`/api/flows/:id/history`, three
@@ -191,6 +213,11 @@ onResync(() => resetMyDerivedCaches())   // fired on every snapshot, resumed or 
 onServerMessage((msg: ServerToUi) => …)  // every message, after stores were updated (keep it cheap)
 onNotice((n: UiNotice) => …)             // the shell already shows notices as toasts
 ```
+
+**View mode** (`data/view.ts`, SPEC §13.3): while a session recording is shown, `currentView()` holds its id, the
+socket connects `/ui?view=<id>` and `withView()` adds `view=<id>` to the REST calls that read shown data
+(`getNetworkDetail`, `getStreamMessages`, `bodyUrl`, `searchNetwork`, `exportUrl`, `harExport`, `bugReport`).
+`reconnectFresh()` switches (no resume). Only `features/recordings/store.ts` changes the view.
 
 ### 4.2 High-frequency stores (outside React)
 
@@ -416,6 +443,7 @@ with `tCode(code, data, fallback)`. Default timeouts: 15 s; `device.action` 30 s
 | `api.exportPackage(req)` → `{ blob, fileName }`, `api.inspectPackage(text, passphrase?)`, `api.importPackage(req)` | `/api/packages/*` (`.durbun` share / backup) |
 | `api.getBackup()`, `updateBackup(patch)`, `runBackup()`, `backupSuggestions()`, `backupFiles()`, `readBackupFile(name)`, `getUiPrefs()`, `putUiPrefs(prefs)` | Settings → Backup and the server copy of the portable UI prefs (`features/transfer/prefsSync.ts` keeps it current). A backup export sends `include.history: true`; the import dialog shows `manifest.history` as its own part (on for backups) and sums up `result.history`. What backups leave out is one sentence (`features/transfer/excluded.tsx`, `BACKUP_EXCLUDED`: append a message key for a new store that stays out) under the backup dialog's contents and in Settings → Backup |
 | `api.slackStatus()`, `api.updateSlack(patch)`, `api.sendToSlack(text)` | `/api/slack` (Send to Slack; never returns the webhook URL). Prefer `useSlackStatus()` / `updateSlack()` from `data` and the `SlackButton` component, which converts a share report with `toSlackText` (`lib/slack.ts`) |
+| `api.listRecordings()`, `deleteRecording(id)`, `deleteAllRecordings()`, `openRecording(id)`, `releaseRecording(id)`, `recordingExportUrl(id, { mask? })` | `/api/recordings*` (SPEC §13): `SessionRecordingList`, `SessionRecordingOpen`; codes `recorder.unknown` / `recorder.live` / `recorder.unreadable` |
 
 **Edit conflicts.** Mock rules, flows and flow environments are saved against the copy this window loaded:
 `mocks.set` with `baseRevision`, `saveFlow` with `baseUpdatedAt` (the loaded flow's `updatedAt`), and

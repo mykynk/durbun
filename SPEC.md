@@ -273,6 +273,9 @@ REST:
 | `GET /api/slack` | `{ configured, hint?, sender? }`: Send to Slack status; never the webhook URL (`hint` = host + last 4 characters) |
 | `PUT /api/slack` `{ webhookUrl?: string \| null, sender?: string \| null }` | same status; `https://` only (`slack.invalidUrl`); stored in `<dataDir>/slack.json` (0600), not in settings.json (which every UI receives) |
 | `POST /api/slack/send` `{ text }` (Slack mrkdwn, ≤ 40,000 chars, built by the UI) | `{ ok: true }`; posts `{ text, unfurl_links: false, unfurl_media: false }`, no redirects, 15 s timeout; `slack.notConfigured` 409, `slack.rateLimited` 429 (message ends in `: <seconds> s` from Retry-After, 30 s when missing), `slack.rejected` / `slack.unreachable` 502 |
+| `GET /api/recordings` · `DELETE /api/recordings` | `SessionRecordingList` (§13): the recordings on disk, the recorder's status, `previous`; DELETE removes every one but the recording being written |
+| `DELETE /api/recordings/:id` · `GET /api/recordings/:id/export[?mask=0]` | the new list / a `.durbun.json` download (masked unless `mask=0`); 404 `recorder.unknown`, 409 `recorder.live` (the one being written) |
+| `POST /api/recordings/:id/open` · `DELETE /api/recordings/:id/open` | `SessionRecordingOpen` (loads it into a hub of its own, §13.3; 422 `recorder.unreadable`) / `{ ok: true }` (the window went back to live) |
 
 The UI document, every static file, 304s and the "please build the UI" page carry a Content-Security-Policy:
 scripts only from the server (inline scripts are hashed at startup and re-hashed when index.html changes; no
@@ -1340,3 +1343,58 @@ pick one, or report on all devices without a screenshot (one device is picked by
 Nothing in the window: the parts say "none in this window" and the report still goes out with the note. Screenshot
 unavailable (why) / taking / failed (why, retry). Slack not set up: the button opens Settings → Slack. Imported
 recording: reported from the recording, no screenshot. Window cut: says to how much.
+
+## 13. Session recorder (authoritative)
+
+### 13.1 What
+Every server run is written to this Mac's disk while it captures, on by default (Settings → Recordings,
+`recordSessions`). After a restart or a crash the previous session can be opened again, apart from the live data.
+Nothing leaves the Mac: recordings are not in backups or `.durbun` packages; they are stored as captured (secrets
+included) and masked only when exported. A run that captured nothing leaves nothing behind.
+
+### 13.2 On disk (`packages/server/src/recordings/store.ts`)
+`<dataDir>/recordings/<id>/` (folders 0700, files 0600), id `20261115T184012Z-a1b2` (UTC start + random):
+`meta.json` (written atomically: start, last write, end, counts, devices, apps, gaps, trimmed) and append-only
+`chunk-NNNNNN.ndjson.gz`. Each flush (about once a second, earlier past 10 000 queued records) appends gzip members
+of NDJSON records (`log`, `net`, `metric`, `device`, `app`, `deviceApp`, `gap`); a chunk rotates at 8 MB and starts
+with the devices and apps it needs. A hard kill loses at most the last flush: the reader decodes member by member
+and skips a torn tail. A recording without an end at startup is marked `interrupted`. Reading builds a
+`SessionExport` (the import path): newest chunks first, within the live limits; the newest state of a request wins.
+
+Limits (`RECORDING_DEFAULTS`): 7 days (1–90), 1 GB in total (100 MB–50 GB), one recording at most
+min(256 MB, total / 2) (its oldest chunks go first: `trimmed`). A sweep at start and every 10 minutes removes
+the oldest recordings past the limits, never the one being written.
+
+Capture is never slowed: the recorder subscribes to hub batches, serializes in slices off the ingestion path and
+writes one flush at a time; its queue is bounded (100 000 records / 48 MB). A full queue, a full disk (ENOSPC),
+no access, a failed write or less than 1 GB free pause recording with one system line (`recorder.tooSlow`,
+`recorder.diskFull` { dir }, `recorder.noAccess` { dir, error }, `recorder.writeFailed` { error },
+`recorder.diskLow` { free, min }) and `RecorderStatus.paused`; it retries every 30 s, says `recorder.resumed`, and
+counts what it missed as a `gap`. Demo and imported devices are not recorded; Clear does not touch the recording.
+Turning recording off closes the recording at once; the UI then offers to delete what exists.
+
+### 13.3 Opening a recording
+An opened recording is never mixed into the live data (an import would share its limits and could push live data
+out): `POST /api/recordings/:id/open` reads it into a hub of its own (imported, read-only `import:` devices) with
+its own UI channel and REST handler. The window reconnects `WS /ui?view=<id>` (the `hello` carries `recording`) and
+adds `view=<id>` to `/api/network…`, `/api/har`, `/api/export` and `/api/bug-report`. Server-wide messages
+(settings, mocks, drivers, notices, flows) reach it too; `mocks.set`, `settings.update`, `doctor.run`, `demo.set`
+go to the live server, `clear` and `net.replay` run on the recording, other commands answer `recorder.notLive`.
+Live capture and recording go on meanwhile. A view nobody shows for 60 s is dropped (at most 2 stay loaded); a
+deleted recording closes its windows (4004) and a `view` that cannot be shown lands on the live data (no
+`recording` in the hello), which the UI says.
+
+### 13.4 UI (`packages/ui/src/features/recordings`)
+- Launch offer: a dismissible card in the corner of the main area (not a modal) when the previous run left a
+  recording: when, how long, devices / apps, counts, "interrupted"; "Open previous session" and "All recordings".
+  Closing or opening it is remembered per recording.
+- Recordings list (top bar import/export menu, ⌘K, Settings, the status bar icon): date, length, devices / apps,
+  counts, size, "Recording now" / "Interrupted" / "Start trimmed" / "N items missing"; open, export (masked or
+  not), delete, delete all; empty states for on and off.
+- A shown recording: a banner above every tab, "Recording: 15 Nov 21:40 · not live", with what was loaded and
+  "Back to live" (the scope the window had comes back); a "Recording" badge in the status bar. Logs, Network,
+  Performance, crashes, Report a bug and exports work on it.
+- Settings → Recordings: on / off, days, total size, location, use, delete all, and the plain sentence that
+  recordings are stored as captured and stay on this Mac. A paused recorder shows its reason there and in the
+  status bar.
+

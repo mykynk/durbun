@@ -75,6 +75,12 @@ const SYSTEM_SAMPLES: [code: string, params: Record<string, string | number>][] 
   ['device.transportChanged', { device: 'Galaxy A73', connection: 'Wi-Fi', previous: 'USB' }],
   // Lines read from the phone's log buffer at connect, from before it was plugged in.
   ['logs.history', { lines: 214, minutes: 38 }],
+  ['recorder.diskFull', { dir: '~/Library/Application Support/Dürbün/recordings' }],
+  ['recorder.diskLow', { free: 700 * 1024 ** 3 / 1000, min: 1024 ** 3 }],
+  ['recorder.noAccess', { dir: '~/Library/Application Support/Dürbün/recordings', error: 'EACCES: permission denied' }],
+  ['recorder.writeFailed', { error: 'EIO: i/o error' }],
+  ['recorder.tooSlow', {}],
+  ['recorder.resumed', {}],
   ['app.messageTooLarge', { app: 'Pati', bundleId: 'com.mykynk.pati', type: 'net.response', count: 1, bytes: 18_350_080, limit: 16_777_216 }],
   ['app.messageTooLarge', { app: 'Kasa', bundleId: 'com.example.kasa', type: '?', count: 3, bytes: 0, limit: 16_777_216 }],
   ['app.messageInvalid', { app: 'Pati', bundleId: 'com.mykynk.pati', type: 'net.request', count: 1 }],
@@ -385,6 +391,7 @@ const FLOW_SAMPLES: [code: string, params: Record<string, string | number>][] = 
   ['doctor.devicectl.missing', { minXcode: '15' }],
   ['doctor.vm.status', { count: 1, names: 'Kumbara', auto: 'on' }],
   ['doctor.vm.status', { count: 0, names: '', auto: 'off' }],
+  ['recorder.unreadable', { error: 'unexpected end of file' }],
 ];
 
 /** English words that must not leak into Turkish system lines. */
@@ -457,7 +464,7 @@ describe('server codes → i18n', () => {
     // Flow node types ('flow.call', 'device.openUrl', …) are not codes.
     const nodeTypes = new Set(FLOW_NODE_SPECS.map((s) => s.type));
     const literal =
-      /'((?:device|app|logs|driver|demo|action|command|config|settings|replay|vm|server|sdk|metrics|net|params|screenshot|process|marker|import|upload|body|file|har|search|url|method|access|api|mocks|doctor|reader|flow|flowRun|preflight|package|backup|uiPrefs|template|env|export|bugReport)\.[A-Za-z][A-Za-z.]*)'/g;
+      /'((?:device|app|logs|driver|demo|action|command|config|settings|replay|vm|server|sdk|metrics|net|params|screenshot|process|marker|import|upload|body|file|har|search|url|method|access|api|mocks|doctor|reader|flow|flowRun|preflight|package|backup|uiPrefs|template|env|export|bugReport|recorder)\.[A-Za-z][A-Za-z.]*)'/g;
     const found = new Set<string>();
     for (const root of roots) {
       for (const f of walk(root)) for (const m of readFileSync(f, 'utf8').matchAll(literal)) if (!NOT_CODES.has(m[1]!) && !nodeTypes.has(m[1]!)) found.add(m[1]!);

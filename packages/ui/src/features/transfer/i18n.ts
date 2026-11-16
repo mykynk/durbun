@@ -259,6 +259,7 @@ registerMessages('transfer', {
       excluded: 'Yedeğe girmeyenler: {items}.',
       excludedItem: {
         media: 'cihazlardan kaydedilen ekran görüntüleri ve kayıtlar',
+        sessions: 'oturum kayıtları (bu Mac’te kalır)',
       },
     },
     prefsRestore: {
@@ -521,6 +522,7 @@ registerMessages('transfer', {
       excluded: 'Not in the backup: {items}.',
       excludedItem: {
         media: 'screenshots and recordings saved from devices',
+        sessions: 'session recordings (they stay on this Mac)',
       },
     },
     prefsRestore: {

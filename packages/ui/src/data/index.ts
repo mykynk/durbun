@@ -99,7 +99,8 @@ export type { StreamMessagesState } from './streamMessages';
 /* wire */
 export { sendCommand, sendCommandDetailed, CommandError, LOCAL_ERROR_CODES, defaultCommandTimeout } from './commands';
 export type { CommandReply, CommandReplyMap, CommandName, SendCommandOptions, DetailedReply } from './commands';
-export { startConnection, stopConnection, reconnectNow, sendMessage } from './ws';
+export { startConnection, stopConnection, reconnectNow, reconnectFresh, sendMessage } from './ws';
+export { currentView, withView } from './view';
 export { onServerMessage, onNotice, onResync } from './events';
 export * as api from './api';
 export { ApiError } from './api';

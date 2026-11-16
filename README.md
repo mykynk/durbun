@@ -47,6 +47,8 @@ does in one readable, live window. *Dürbün* is Turkish for binoculars.
   Markdown, or send it to your team's Slack channel with one click (Settings → Slack). Getting the channel's
   webhook is one click too: [Add to Slack](https://appnify.dev/durbun/slack/). The Flutter in-app panel can
   send it from the phone too.
+- **Session recordings.** Every run is saved on your Mac as it happens: after a quit or a crash you reopen the
+  previous session, kept apart from live data. Nothing leaves the Mac.
 - **Backups and sharing.** Your flows, mock rules, environments and settings in one `.durbun` file: share
   your setup with the team, or back everything up for a new Mac, by hand or automatically into iCloud Drive
   or any folder (see [Sharing and backups](#sharing-and-backups)).

@@ -1,0 +1,251 @@
+/* Session recordings: the list dialog, the launch offer, the "not live" banner, the status bar item. */
+
+/* ── recorder status line (dialog header, Settings) ── */
+.rec-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.rec-status__state {
+  color: var(--text);
+  font-weight: 550;
+}
+.rec-status__why {
+  color: var(--warning);
+}
+.rec-status__used {
+  margin-left: auto;
+  color: var(--text-subtle);
+}
+.rec-status--compact {
+  padding: 0;
+  margin: 4px 0 0;
+  border: 0;
+  background: none;
+  font-size: var(--fs-xs);
+}
+.rec-status--compact .rec-status__used {
+  margin-left: 0;
+}
+.rec-status--compact .rec-status__used::before {
+  content: '·';
+  margin-right: 8px;
+  color: var(--text-subtle);
+}
+
+/* ── list ── */
+.rec-dialog {
+  min-height: 240px;
+}
+.rec-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.rec-list--loading {
+  opacity: 0.85;
+}
+.rec-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+.rec-row:first-child {
+  border-top: 0;
+}
+.rec-row--live {
+  background: var(--bg-sunken);
+}
+.rec-row--shown {
+  background: var(--accent-soft);
+}
+.rec-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rec-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.rec-row__when {
+  font-weight: 600;
+  color: var(--text);
+}
+.rec-row__span {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.rec-row__who {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-row__counts {
+  color: var(--text-subtle);
+  font-size: var(--fs-xs);
+}
+.rec-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.rec-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 0;
+  color: var(--text-muted);
+}
+.rec-danger-text {
+  color: var(--danger);
+}
+
+/* ── launch offer: a card in the main area's bottom-left corner (toasts use the right), under dialogs ── */
+.rec-offer {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: var(--z-sticky);
+  display: flex;
+  gap: 10px;
+  width: min(360px, calc(100vw - 28px));
+  padding: 12px 8px 12px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-pop);
+  animation: rec-offer-in 180ms var(--ease) both;
+}
+@keyframes rec-offer-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rec-offer {
+    animation: none;
+  }
+}
+.rec-offer__icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.rec-offer__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rec-offer__title {
+  font-weight: 600;
+  color: var(--text);
+}
+.rec-offer__meta {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.rec-offer__warn {
+  color: var(--warning);
+}
+.rec-offer__who {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-offer__counts {
+  color: var(--text-subtle);
+  font-size: var(--fs-xs);
+}
+.rec-offer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.rec-offer__close {
+  align-self: flex-start;
+}
+
+/* ── banner while a recording is shown ── */
+.banner--recording {
+  background: var(--accent-soft);
+  border-bottom-color: var(--accent);
+}
+.banner--recording > svg {
+  color: var(--accent);
+}
+.banner--recording .banner__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-banner__notlive {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── status bar ── */
+.st-badge--recording {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.st-rec {
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.st-rec:hover {
+  color: var(--text-muted);
+  background: var(--bg-hover);
+}
+
+/* ── Settings ── */
+.rec-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 340px;
+}
+.rec-path__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}

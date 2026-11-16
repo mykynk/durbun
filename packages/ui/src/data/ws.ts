@@ -2,7 +2,8 @@ import type { ServerToUi, UiToServer } from '@durbun/protocol';
 import { useConnection } from './stores/connection';
 import { failInFlightCommands, setCommandTransport } from './commands';
 import { handleServerMessage } from './dispatch';
-import { withResumeQuery } from './resume';
+import { forgetResume, withResumeQuery } from './resume';
+import { withView } from './view';
 
 /**
  * The single WebSocket to the server (`/ui`). Reconnects forever with backoff. A reconnect asks to continue what
@@ -77,7 +78,7 @@ function open(): void {
   else useConnection.setState({ nextRetryAt: null });
   let ws: WebSocket;
   try {
-    ws = new WebSocket(withResumeQuery(url));
+    ws = new WebSocket(withView(withResumeQuery(url)));
   } catch (err) {
     scheduleRetry(err instanceof Error ? err.message : String(err));
     return;
@@ -145,6 +146,32 @@ export function reconnectNow(): void {
   if (!started) return;
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = null;
+  open();
+}
+
+/**
+ * Connect again now, loading everything (no resume): the window switched between the live data and an opened
+ * recording (`view.ts`). Commands in flight fail like on any reconnect.
+ */
+export function reconnectFresh(): void {
+  if (!started) return;
+  forgetResume();
+  const ws = socket;
+  socket = null;
+  ready = false;
+  if (ws) {
+    ws.onclose = null;
+    ws.onmessage = null;
+    try {
+      ws.close(1000, 'switching view');
+    } catch {
+      /* ignore */
+    }
+  }
+  failInFlightCommands();
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
+  useConnection.setState({ status: 'connecting', attempt: 0, nextRetryAt: null });
   open();
 }
 

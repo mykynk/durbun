@@ -21,6 +21,7 @@ import {
   GRAPHQL_OPERATION_TYPES,
   MAX_GRAPHQL_OPERATION_NAME,
   MOCK_MATCHERS,
+  RECORDING_LIMITS,
   type GraphqlOperationType,
   type Header,
   type MockAction,
@@ -64,15 +65,18 @@ export const SETTINGS_LIMITS = {
   maxBodyStoreMB: { min: 16, max: 8_192 },
   logcatTail: { min: 0, max: 100_000 },
   metricsIntervalMs: { min: 250, max: 60_000 },
+  // Session recorder (recordings/store.ts); absent = RECORDING_DEFAULTS.
+  recordingsMaxDays: RECORDING_LIMITS.recordingsMaxDays,
+  recordingsMaxMB: RECORDING_LIMITS.recordingsMaxMB,
 } as const;
 
 type NumericKey = keyof typeof SETTINGS_LIMITS;
-type BooleanKey = 'captureBodies' | 'captureStreams' | 'autoAttachVmService' | 'allowLan';
+type BooleanKey = 'captureBodies' | 'captureStreams' | 'autoAttachVmService' | 'allowLan' | 'recordSessions';
 type PathKey = 'adbPath' | 'idevicesyslogPath';
 type SettingsKey = keyof ServerSettings;
 
 const NUMERIC_KEYS = Object.keys(SETTINGS_LIMITS) as NumericKey[];
-const BOOLEAN_KEYS: BooleanKey[] = ['captureBodies', 'captureStreams', 'autoAttachVmService', 'allowLan'];
+const BOOLEAN_KEYS: BooleanKey[] = ['captureBodies', 'captureStreams', 'autoAttachVmService', 'allowLan', 'recordSessions'];
 const PATH_KEYS: PathKey[] = ['adbPath', 'idevicesyslogPath'];
 const ENUMS = {
   iosSimLogScope: ['apps', 'all'],

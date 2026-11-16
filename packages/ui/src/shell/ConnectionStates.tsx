@@ -11,6 +11,7 @@ import { Snippet } from './Snippet';
 import { repoDir } from './repo';
 import { isDesktopApp } from '../lib/platform';
 import { importLabel } from './labels';
+import { useRecordings } from '../features/recordings/store';
 
 /** Full-area state while the server has never been reached. */
 export function ServerUnreachable() {
@@ -99,9 +100,12 @@ export function DeviceAttentionBanner() {
     }
     return undefined;
   });
+  // A shown session recording has its own banner (its devices are imported ones).
+  const viewing = useRecordings((s) => s.viewing !== null);
   if (!device) return null;
   const name = deviceDisplayName(device);
   if (device.id.startsWith('import:')) {
+    if (viewing) return null;
     const source = importLabel(device);
     return (
       <div className="banner banner--neutral" role="status">

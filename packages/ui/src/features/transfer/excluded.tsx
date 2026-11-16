@@ -7,7 +7,7 @@ import { useT, type TFunction } from '../../i18n';
  * words; the sentence lists them in this order. A store that stays out of backups adds its key here, with its
  * Turkish and English text.
  */
-export const BACKUP_EXCLUDED: readonly string[] = ['transfer.backup.excludedItem.media'];
+export const BACKUP_EXCLUDED: readonly string[] = ['transfer.backup.excludedItem.media', 'transfer.backup.excludedItem.sessions'];
 
 /**
  * "Not in the backup: A, B." in the UI language. Items are joined with a comma in both languages (an item may hold
