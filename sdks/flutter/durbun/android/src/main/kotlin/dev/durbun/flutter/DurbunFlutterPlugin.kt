@@ -131,6 +131,16 @@ class DurbunFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCa
                             call.argument<String>("subject"),
                         ),
                     )
+                // The panel's bug report: one share sheet with a text and one or more export files.
+                "shareFiles" ->
+                    result.success(
+                        shareFiles(
+                            call.argument<String>("text"),
+                            call.argument<String>("subject"),
+                            call.argument<List<Any?>>("paths").orEmpty().map { it as? String },
+                            call.argument<List<Any?>>("mimes")?.map { it as? String },
+                        ),
+                    )
                 // Where the panel writes exports (and its previous-run log).
                 "cacheDir" -> result.success(context?.cacheDir?.absolutePath)
                 else -> result.notImplemented()
@@ -162,10 +172,7 @@ class DurbunFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCa
      */
     private fun shareFile(path: String?, mime: String?, subject: String?): Boolean {
         val ctx = context ?: return false
-        if (path.isNullOrEmpty()) return false
-        val requested = File(path).canonicalFile
-        val file = DurbunExportProvider.exportFile(ctx, requested.name) ?: return false
-        if (file != requested) return false
+        val file = exportAt(ctx, path) ?: return false
         val uri = DurbunExportProvider.uriFor(ctx, file)
         val send = Intent(Intent.ACTION_SEND).apply {
             type = if (mime.isNullOrEmpty()) DurbunExportProvider.mimeOf(file.name) else mime
@@ -176,6 +183,60 @@ class DurbunFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCa
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         return openChooser(send)
+    }
+
+    /**
+     * Opens the system share sheet with [text] and every file in [paths] (each must be a file directly in
+     * `cacheDir/durbun-export`, served by [DurbunExportProvider]); `mimes[i]`, when given, is the type of `paths[i]`.
+     * One file goes as `ACTION_SEND`, several as `ACTION_SEND_MULTIPLE`; the text rides along as `EXTRA_TEXT`.
+     * False, with nothing opened, when a path is not an export, there is neither text nor a file, or there is
+     * nowhere to open the sheet.
+     */
+    private fun shareFiles(text: String?, subject: String?, paths: List<String?>, mimes: List<String?>?): Boolean {
+        val ctx = context ?: return false
+        if (paths.isEmpty()) return share(text, subject)
+        val files = ArrayList<File>(paths.size)
+        for (path in paths) {
+            val file = exportAt(ctx, path) ?: return false
+            if (file in files) return false
+            files += file
+        }
+        val types = files.mapIndexed { i, file ->
+            mimes?.getOrNull(i)?.takeIf { it.isNotEmpty() } ?: DurbunExportProvider.mimeOf(file.name)
+        }
+        val uris = files.map { DurbunExportProvider.uriFor(ctx, it) }
+        val send = Intent(if (uris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE).apply {
+            type = commonType(types)
+            if (uris.size == 1) {
+                putExtra(Intent.EXTRA_STREAM, uris[0])
+            } else {
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+            }
+            if (!text.isNullOrEmpty()) putExtra(Intent.EXTRA_TEXT, text)
+            if (!subject.isNullOrEmpty()) putExtra(Intent.EXTRA_SUBJECT, subject)
+            // The chooser carries the grant for every file (and the preview) over to the app picked.
+            val clip = ClipData.newRawUri(files[0].name, uris[0])
+            for (i in 1 until uris.size) clip.addItem(ClipData.Item(uris[i]))
+            clipData = clip
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return openChooser(send)
+    }
+
+    // The export at [path], or null unless it is a file directly in `cacheDir/durbun-export` (all the provider serves).
+    private fun exportAt(ctx: Context, path: String?): File? {
+        if (path.isNullOrEmpty()) return null
+        val requested = File(path).canonicalFile
+        val file = DurbunExportProvider.exportFile(ctx, requested.name) ?: return null
+        return if (file == requested) file else null
+    }
+
+    // One type for the whole share: the same type, else the same family ("image/" plus a star), else any type.
+    private fun commonType(types: List<String>): String {
+        val first = types.first()
+        if (types.all { it.equals(first, ignoreCase = true) }) return first
+        val family = first.substringBefore('/')
+        return if (types.all { it.substringBefore('/').equals(family, ignoreCase = true) }) "$family/*" else "*/*"
     }
 
     private fun openChooser(send: Intent): Boolean {

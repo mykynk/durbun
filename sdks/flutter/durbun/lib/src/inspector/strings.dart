@@ -505,6 +505,102 @@ class InspectorStrings {
   String reportMore(int count) => _('… $count karakter daha gösterilmedi', '… $count more characters not shown');
   String get reportCurlNoBody => _('İstek gövdesi çok uzun olduğu için cURL’e eklenmedi.', 'The request body is too long and is left out of cURL.');
   String get reportMasked => _('Gizli değerler (token, çerez, parola) •••• ile maskelendi.', 'Secret values (tokens, cookies, passwords) are masked as ••••.');
+  /* report a bug (worded like the desktop's report.*) */
+  String get bugReport => _('Hata bildir', 'Report a bug');
+  String get bugReportEllipsis => _('Hata bildir…', 'Report a bug…');
+  String get bugReportHint => _(
+        'Bu anın loglarını, başarısız isteklerini ve ekran görüntüsünü tek raporda paylaşın',
+        'Share this moment’s logs, failed requests and a screenshot in one report',
+      );
+  String get bugMomentNow => _('Panel açıldığında', 'When the panel opened');
+  String get bugMomentNowBody => _(
+        'Panel açılmadan önceki ve sonraki kayıtlar rapora girer.',
+        'What was captured before and after the panel opened goes in.',
+      );
+  String get bugMomentRequest => _('Başarısız istek', 'Failed request');
+  String get bugMomentLog => _('Hata', 'Error');
+  String get bugNoteLabel => _('Ne oldu?', 'What happened?');
+  String get bugNoteHint => _('Ne yaptınız, ne bekliyordunuz, ne oldu?', 'What did you do, what did you expect, what happened?');
+  String get bugContents => _('Rapora girenler', 'What goes in');
+  String bugLogs(int n) => _('$n log satırı', n == 1 ? '1 log line' : '$n log lines');
+  String bugFailed(int n) => _('$n başarısız istek', n == 1 ? '1 failed request' : '$n failed requests');
+  String get bugScreenshotWord => _('ekran görüntüsü', 'screenshot');
+  String get bugNoLogs => _('Aralıkta log satırı yok', 'No log lines in the window');
+  String get bugNoFailed => _('Aralıkta başarısız istek yok', 'No failed requests in the window');
+  String bugLinesCapped(int kept, int total) => _(
+        'En yeni $kept satır girer; en eski ${total - kept} satır çıkarıldı',
+        'The newest $kept lines go in; the oldest ${total - kept} are left out',
+      );
+  String bugLinesInFile(int shown) => _(
+        'Metinde son $shown satır, ekteki dosyada hepsi',
+        'The text shows the last $shown; the attached file has every line',
+      );
+  String bugCrashCount(int n) => _('$n çökme', n == 1 ? '1 crash' : '$n crashes');
+  String get bugFromShareHint => _(
+        'Çevresindeki loglar ve ekran görüntüsüyle birlikte',
+        'Together with the logs around it and a screenshot',
+      );
+  String get bugFacts => _('Cihaz ve uygulama bilgileri', 'Device and app facts');
+  String get bugScreenshot => _('Ekran görüntüsü', 'Screenshot');
+  String bugScreenshotWhen(String time) => _('Panel açılmadan hemen önce · $time', 'Just before the panel opened · $time');
+  String get bugScreenshotNotMasked => _('Ekrandaki her şey olduğu gibi girer; maskelenmez.', 'Whatever was on the screen goes in; it is not masked.');
+  String get bugScreenshotRemove => _('Ekran görüntüsünü çıkar', 'Leave the screenshot out');
+  String get bugScreenshotAdd => _('Geri ekle', 'Put it back');
+  String get bugScreenshotOut => _('Rapora girmeyecek', 'Not in the report');
+  String get bugScreenshotNone => _('Ekran görüntüsü yok', 'No screenshot');
+  String get bugScreenshotNoneHint => _(
+        'Bu açılışta ekran görüntüsü alınamadı. Rapor onsuz da gider.',
+        'No screenshot could be taken this time. The report goes without one.',
+      );
+  String get bugScreenshotEnlarge => _('Ekran görüntüsünü büyüt', 'Enlarge the screenshot');
+  /// [before] is a choice of the segments ("1 dk").
+  String bugWindowLine(String before, int afterS) =>
+      _('Anın $before öncesi ve $afterS sn sonrası', '$before before the moment and $afterS s after');
+  String bugSeconds(int n) => _('$n sn', '$n s');
+  String bugMinutes(int n) => _('$n dk', '$n min');
+  String get bugMaskHint => _(
+        'Log satırlarındaki ve isteklerdeki token, parola, çerez ve API anahtarı değerleri •••• olur',
+        'Token, password, cookie and API key values in log lines and requests become ••••',
+      );
+  String get bugEmptyTitle => _('Bu aralıkta kayıt yok', 'Nothing captured in this window');
+  String get bugEmptyBody => _(
+        'Aralığı genişletin ya da yalnızca notunuzla ve cihaz bilgileriyle gönderin.',
+        'Widen the window, or send your note and the device facts alone.',
+      );
+  String get bugTextOnly => _(
+        'Dosyalar eklenemedi; rapor metin olarak paylaşıldı.',
+        'The files could not be attached; the report was shared as text.',
+      );
+  String get bugShareFailed => _(
+        'Paylaşım açılamadı ve rapor kopyalanamadı. Yeniden deneyin.',
+        'Sharing did not open and the report could not be copied. Try again.',
+      );
+  // The report text (the desktop's report.md.*).
+  String get bugMdTitle => _('Hata raporu', 'Bug report');
+  String bugMdTitleFor(String what) => _('Hata raporu: $what', 'Bug report: $what');
+  String get bugMdNote => _('Not', 'Note');
+  String get bugMdEnvironment => _('Ortam', 'Environment');
+  String get bugMdMoment => _('An', 'Moment');
+  String bugMdWindow(String from, String to) => _('Aralık: $from – $to', 'Window: $from – $to');
+  String get bugMdSdk => 'SDK';
+  String get bugMdTheMoment => _('O an', 'The moment');
+  String bugMdMoreRequests(int n) => _('…ve daha eski $n istek', '…and $n older ones');
+  String get bugMdNoFailed => _('Aralıkta başarısız istek yok.', 'No failed requests in the window.');
+  String bugMdLogLines(int n) => _('Log satırları ($n)', 'Log lines ($n)');
+  String bugMdLastLines(int shown, int total) => _('Son $shown satır ($total satırdan).', 'The last $shown of $total lines.');
+  String bugMdLinesCut(int n) => _('En eski $n satır rapora girmedi.', 'The oldest $n lines were left out.');
+  String get bugMdNoLogs => _('Aralıkta log satırı yok.', 'No log lines in the window.');
+  String bugMdAllInFile(String name) => _(
+        'Tüm satırlar ve başarısız isteklerin ayrıntısı ekteki $name dosyasında.',
+        'Every line and the failed requests in full are in the attached $name.',
+      );
+  String get bugMdFailedInFull => _('Başarısız isteklerin ayrıntısı', 'Failed requests in full');
+  String get bugMdAttachments => _('Ekler', 'Attachments');
+  String get bugMdAttScreenshot => _('ekran görüntüsü (panel açılmadan önce)', 'screenshot (before the panel opened)');
+  String get bugMdAttReport => _('raporun tamamı: her satır ve isteklerin ayrıntısı', 'the whole report: every line and the requests in full');
+  String get bugMdMasked => _('Gizli değerler maskeli.', 'Secret values are masked.');
+  String get bugMdRaw => _('Maskesiz: gizli değerler olduğu gibi.', 'Unmasked: secret values as they are.');
+  String get bugMdFailedWord => _('başarısız', 'failed');
   String get prevRequest => _('Önceki istek', 'Previous request');
   String get nextRequest => _('Sonraki istek', 'Next request');
   String get moreActions => _('Diğer işlemler', 'More actions');

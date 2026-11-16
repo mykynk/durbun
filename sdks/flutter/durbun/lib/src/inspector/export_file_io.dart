@@ -80,6 +80,28 @@ Future<String?> writeExportFile(String name, Iterable<String> chunks, {String? b
   }
 }
 
+/// Writes [bytes] (a screenshot) to `<cache>/durbun-export/<name>` and
+/// returns its path, or null when it could not be written. Exports older
+/// than a day go first, as with [writeExportFile].
+Future<String?> writeExportBytes(String name, List<int> bytes, {String? baseDir, DateTime? now}) async {
+  File? file;
+  try {
+    final base = baseDir ?? await inspectorCacheDir();
+    if (base.isEmpty) return null;
+    final dir = Directory('$base${Platform.pathSeparator}$kExportFolder');
+    await dir.create(recursive: true);
+    await pruneExports(dir, now: now);
+    file = File('${dir.path}${Platform.pathSeparator}$name');
+    await file.writeAsBytes(bytes, flush: true);
+    return file.path;
+  } catch (_) {
+    try {
+      await file?.delete();
+    } catch (_) {}
+    return null;
+  }
+}
+
 /// Deletes the files in [dir] last written more than [maxAge] before [now].
 Future<void> pruneExports(Directory dir, {DateTime? now, Duration maxAge = kExportMaxAge}) async {
   final limit = (now ?? DateTime.now()).subtract(maxAge);

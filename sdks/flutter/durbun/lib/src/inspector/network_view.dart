@@ -12,6 +12,8 @@ import 'package:flutter/material.dart';
 
 import '../core/streams/sse_parser.dart' show isEventStreamContentType;
 import 'body_search.dart';
+import 'bug_report.dart' show BugAnchor, isReportedFailure;
+import 'bug_report_view.dart' show openBugReport;
 import 'compare_view.dart';
 import 'filter_ui.dart';
 import 'format.dart';
@@ -1321,6 +1323,7 @@ class _CallDetailPageState extends State<CallDetailPage> {
   void _menu(String action) {
     if (action == 'replay') return unawaited(_replay());
     if (action == 'compare') return _compare();
+    if (action == 'bug') return unawaited(openBugReport(context, widget.store, BugAnchor.request(call)));
     _copyAs(action);
   }
 
@@ -1460,6 +1463,11 @@ class _CallDetailPageState extends State<CallDetailPage> {
                           value: 'replay',
                           enabled: !_replaying,
                           child: MenuRow(Icons.replay_rounded, _replaying ? t.replaying : t.replay)),
+                    // A failed request: report it with what was around it.
+                    if (isReportedFailure(call) && !widget.store.readOnly) ...<PopupMenuEntry<String>>[
+                      PopupMenuItem<String>(value: 'bug', child: MenuRow(Icons.bug_report_outlined, t.bugReportEllipsis)),
+                      const PopupMenuDivider(),
+                    ],
                     PopupMenuItem<String>(value: 'compare', child: MenuRow(Icons.compare_arrows_rounded, t.compareEllipsis)),
                     const PopupMenuDivider(),
                     PopupMenuItem<String>(value: 'url', child: MenuRow(Icons.link_rounded, t.copyUrl)),

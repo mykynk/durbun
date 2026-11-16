@@ -264,9 +264,35 @@ class _Tiles extends StatelessWidget {
         final w = (box.maxWidth - 12 * (columns - 1)) / columns;
         // An odd last tile takes the whole row instead of leaving a hole.
         final odd = children.length % columns == 1 && children.length > 1;
-        return Wrap(spacing: 12, runSpacing: 12, children: <Widget>[
-          for (var i = 0; i < children.length; i++) children[i](odd && i == children.length - 1 ? box.maxWidth : w),
-        ]);
+        final rows = <List<Widget>>[];
+        for (var i = 0; i < children.length; i += columns) {
+          final end = i + columns < children.length ? i + columns : children.length;
+          rows.add(<Widget>[
+            for (var j = i; j < end; j++) children[j](odd && j == children.length - 1 ? box.maxWidth : w),
+          ]);
+        }
+        // Tiles of a row share its height: a note under one figure ("1
+        // timeout") does not make it stand taller than its neighbours.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            for (var r = 0; r < rows.length; r++)
+              Padding(
+                padding: EdgeInsets.only(top: r == 0 ? 0 : 12),
+                child: IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      for (var k = 0; k < rows[r].length; k++) ...<Widget>[
+                        if (k > 0) const SizedBox(width: 12),
+                        rows[r][k],
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
       });
 }
 

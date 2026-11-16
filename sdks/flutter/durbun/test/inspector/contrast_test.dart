@@ -216,6 +216,39 @@ void main() {
       expectAtLeast('log error line', c.lvError, over(c.lvErrorBg, c.cardBg), 4.5);
     });
 
+    test('$theme: Report a bug', () {
+      // The moment card: a crash, an error or a failed request tinted like
+      // its card in the lists; the panel's opening on the plain card.
+      for (final (name, card) in <(String, Color)>[
+        ('crash', over(c.lvFatalBg, c.cardBg)),
+        ('error', over(c.lvErrorBg, c.cardBg)),
+      ]) {
+        expectAtLeast('moment kind on a $name card', c.text, card, 4.5);
+        expectAtLeast('moment time on a $name card', c.textMuted, card, 4.5);
+        expectAtLeast('moment icon on a $name card', c.danger, over(c.dangerSoft, card), 3);
+      }
+      expectAtLeast('opening icon', c.accentInk, over(c.accentSoft, c.cardBg), 3);
+      expectAtLeast('opening body', c.textMuted, c.cardBg, 4.5);
+      // The note: typed text, the hint and the window line under the segments.
+      expectAtLeast('note text', c.text, c.fieldBg, 4.5);
+      expectAtLeast('note hint', c.textSubtle, c.fieldBg, 4.5);
+      expectAtLeast('window line', c.textMuted, c.bgApp, 4.5);
+      // The contents card: rows, the screenshot's notes, the failed-requests
+      // icon, the placeholder of a missing picture, the left-out mark.
+      expectAtLeast('row hint', c.textSubtle, c.cardBg, 4.5);
+      expectAtLeast('screenshot status', c.textMuted, c.cardBg, 4.5);
+      expectAtLeast('failed requests icon', c.danger, c.cardBg, 3);
+      expectAtLeast('no picture icon', c.textSubtle, c.bgSunken, 3);
+      expectAtLeast('left-out mark', c.textMuted, c.bgPanel, 3);
+      // The pinned footer and its notice, the Tools card, the share sheet row.
+      expectAtLeast('summary', c.textMuted, c.bgPanel, 4.5);
+      for (final tint in <Color>[c.infoSoft, c.warningSoft]) {
+        expectAtLeast('notice on its tint', c.text, over(tint, c.bgPanel), 4.5);
+      }
+      expectAtLeast('Tools card icon', c.danger, over(c.dangerSoft, c.cardBg), 3);
+      expectAtLeast('Tools card hint', c.textMuted, c.cardBg, 4.5);
+    });
+
     test('$theme: JSON colours in a body', () {
       final body = c.isDark ? c.bgSunken : c.bgPanel;
       for (final fg in <Color>[c.jsonKey, c.jsonString, c.jsonNumber, c.jsonBool, c.jsonNull]) {

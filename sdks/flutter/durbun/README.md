@@ -636,9 +636,9 @@ required, so a tester can inspect the app on their own phone.
 The panel has its own look in light and dark: it follows the phone, and the
 switch at the top keeps your choice. Four tabs sit at the bottom: **Network**,
 **Logs**, **Performance** and **Tools** (on a short screen, such as a phone in
-landscape, they move into the header). Tools opens Mac connection, App tools,
-Mocks (only while the Mac app is connected), Statistics, Device & SDK, Export
-session, Previous run and Clear:
+landscape, they move into the header). Tools opens Report a bug, Mac
+connection, App tools, Mocks (only while the Mac app is connected), Statistics,
+Device & SDK, Export session, Previous run and Clear:
 
 - **Logs:** a live stream (newest at the bottom; it stops following when you
   scroll up and resumes with "↓ N new"), V D I W E level toggles, the quick
@@ -695,6 +695,23 @@ session, Previous run and Clear:
   received the most requests). Bodies are not decoded, and the page refreshes at
   most once a second. If the Network list is filtered, you can choose between
   *Listed* and *All*.
+- **Report a bug** (on Tools, in an error or crash line's detail, and in a
+  failed request's ⋯ menu and Share sheet): a tester with only the phone sends what
+  just happened in one share. The report is about a moment (the line, the
+  request, or the moment the panel opened) and takes the log lines and failed
+  requests from 1 minute before it to 10 seconds after (30 s, 2 min or 5 min
+  are one tap away), a screenshot of the app taken just before the panel
+  opened, the device and app facts and a note. Before anything leaves, the
+  screen lists what goes in with counts; the screenshot can be left out, and
+  secret values are masked as in Share (in log text too: tokens, cookies,
+  passwords, API keys) unless the switch is turned off. One system share sheet
+  carries the Markdown text (each failed request on one line, the last 50 log
+  lines), the whole report as a `.md` file (up to 500 lines with their stacks
+  and data, every failed request in full, cURL for the moment's request) and
+  the screenshot as a PNG; if the share sheet cannot open, the report is
+  copied. The screenshot is taken only while Dürbün runs, kept in memory only
+  while the panel is open and not masked; platform views (maps, web views,
+  video) may come out blank. The Mac app is not needed.
 - **Export session** (under Tools): the requests in the Network list (with
   filters, search and sort order applied) or all of them, as a **Report (.md)**
   (a summary table plus every request in detail; for Slack, Jira, e-mail) or

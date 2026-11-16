@@ -168,6 +168,8 @@ void main() {
         expect(find.text(tile), findsOneWidget, reason: tile);
       }
       expect(find.textContaining('3 requests'), findsOneWidget, reason: 'the Statistics tile says how many');
+      expect(find.text('Report a bug'), findsOneWidget, reason: 'above the tiles');
+      await tester.scrollUntilVisible(find.text('Clear captured data'), 120, scrollable: find.byType(Scrollable).last);
       expect(find.text('Clear captured data'), findsOneWidget);
     });
   });

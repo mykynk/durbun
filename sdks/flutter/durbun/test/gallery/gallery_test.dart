@@ -19,12 +19,14 @@ import 'dart:ui' as ui;
 import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/protocol.dart' show buildErrorInfo, buildLog;
 import 'package:durbun/src/flutter/durbun.dart' show durbunBackend;
+import 'package:durbun/src/inspector/bug_report_view.dart';
 import 'package:durbun/src/inspector/filter_ui.dart' show FilterButton;
 import 'package:durbun/src/inspector/home.dart' show PanelNavBar;
 import 'package:durbun/src/inspector/inspector.dart' show ShakeHint;
 import 'package:durbun/src/inspector/logs_view.dart' show LogRow;
 import 'package:durbun/src/inspector/network_view.dart' show CallRow;
 import 'package:durbun/src/inspector/run_log.dart';
+import 'package:durbun/src/inspector/share_sheet.dart' show debugShareHandler;
 import 'package:durbun/src/inspector/store.dart';
 import 'package:durbun/src/inspector/theme.dart' show debugResetPanelTheme;
 import 'package:durbun/src/inspector/strings.dart';
@@ -877,6 +879,114 @@ void main() {
     await shot(tester, '73-bubble');
   });
 
+  /* Report a bug */
+
+  gallery('bug report', (tester) async {
+    _fakeBugShare();
+    await openPanel(tester);
+    await step(tester, 'from a crash', () async {
+      await openTab(tester, tr.logs);
+      await openRow(tester, 'Cart is empty');
+      await shot(tester, '100-log-detail-crash-report');
+      await tester.tap(find.byKey(const ValueKey<String>('durbun-log-bug')));
+      await settle(tester);
+      await shot(tester, '101-bug-report-crash');
+      await _typeNote(tester);
+      await _revealBug(tester, find.text(tr.bugScreenshotRemove));
+      await shot(tester, '102-bug-report-note');
+      await tapText(tester, tr.bugScreenshotRemove);
+      await shot(tester, '103-bug-report-screenshot-out');
+      await tapText(tester, tr.bugScreenshotAdd);
+      await tester.tap(find.bySemanticsLabel(tr.bugScreenshotEnlarge).first);
+      await settle(tester);
+      await shot(tester, '104-bug-report-enlarged');
+      await tester.tap(find.byTooltip(tr.close).last);
+      await settle(tester);
+      await tester.drag(find.byKey(const ValueKey<String>('durbun-bug-list')), const Offset(0, -2000));
+      await settle(tester);
+      await shot(tester, '105-bug-report-end');
+      await tapText(tester, tr.shareSend);
+      await shot(tester, '106-bug-report-text-only');
+      await back(tester);
+      await back(tester);
+    });
+    await step(tester, 'from a failed request', () async {
+      await openTab(tester, tr.network);
+      await openRow(tester, '/v2/vets/nearby');
+      await tester.tap(find.byTooltip(tr.moreActions).first);
+      await settle(tester);
+      await shot(tester, '107-request-more-menu');
+      await tapText(tester, tr.bugReportEllipsis);
+      await shot(tester, '108-bug-report-request');
+      await back(tester);
+      await tester.tap(find.byTooltip(tr.share).first);
+      await settle(tester);
+      await shot(tester, '109-share-sheet-bug-row');
+      await back(tester);
+      await back(tester);
+    });
+    await step(tester, 'from Tools', () async {
+      await openTools(tester);
+      await shot(tester, '110-tools-report-card');
+      await tester.tap(find.byKey(const ValueKey<String>('durbun-tools-bug')));
+      await settle(tester);
+      await shot(tester, '111-bug-report-empty');
+      await tapText(tester, tr.bugMinutes(5));
+      await shot(tester, '112-bug-report-now-5min');
+      await back(tester);
+    });
+    await step(tester, 'statistics', () async {
+      await tapTool(tester, tr.statistics);
+      await shot(tester, '113-statistics-equal-tiles');
+    });
+  });
+
+  gallery('bug report large text', (tester) async {
+    _fakeBugShare();
+    await openPanel(tester);
+    await step(tester, 'large crash report', () async {
+      await openTab(tester, tr.logs);
+      await openRow(tester, 'Cart is empty');
+      await shot(tester, '114-text130-log-detail-crash');
+      await tester.tap(find.byKey(const ValueKey<String>('durbun-log-bug')));
+      await settle(tester);
+      await shot(tester, '115-text130-bug-report');
+      await tester.drag(find.byKey(const ValueKey<String>('durbun-bug-list')), const Offset(0, -500));
+      await settle(tester);
+      await shot(tester, '116-text130-bug-report-scrolled');
+    });
+  }, textScale: 1.3);
+
+  gallery('bug report text 200', (tester) async {
+    _fakeBugShare();
+    await openPanel(tester);
+    await step(tester, 'text 200 crash report', () async {
+      await openTab(tester, tr.logs);
+      await openRow(tester, 'Cart is empty');
+      await tester.tap(find.byKey(const ValueKey<String>('durbun-log-bug')));
+      await settle(tester);
+      await shot(tester, '117-text200-bug-report');
+      await tester.drag(find.byKey(const ValueKey<String>('durbun-bug-list')), const Offset(0, -700));
+      await settle(tester);
+      await shot(tester, '118-text200-bug-report-scrolled');
+    });
+  }, textScale: 2);
+
+  gallery('bug report landscape', (tester) async {
+    _fakeBugShare();
+    await openPanel(tester);
+    await step(tester, 'landscape crash report', () async {
+      await openTab(tester, tr.logs);
+      await openRow(tester, 'Cart is empty');
+      await tester.tap(find.byKey(const ValueKey<String>('durbun-log-bug')));
+      await settle(tester);
+      await shot(tester, '119-landscape-bug-report');
+      await tester.drag(find.byKey(const ValueKey<String>('durbun-bug-list')), const Offset(0, -300));
+      await settle(tester);
+      await shot(tester, '120-landscape-bug-report-scrolled');
+    });
+  }, size: kLandscape);
+
   /* Sizes */
 
   gallery('landscape', (tester) async {
@@ -966,6 +1076,44 @@ void main() {
       File('$_outDir/errors.txt').writeAsStringSync('${_errors.join('\n')}\n');
     });
   }, skip: _skip);
+}
+
+/// Report a bug in the gallery: files "written", a PNG "encoded" (the real
+/// encoder needs the engine's own event loop) and a host that shares text
+/// only, so the page shows its notice.
+void _fakeBugShare() {
+  debugBugTextWriter = (name, chunks) async => '/cache/durbun-export/$name';
+  debugBugBytesWriter = (name, bytes) async => '/cache/durbun-export/$name';
+  debugSnapshotPng = (_) async => Uint8List.fromList(const <int>[137, 80, 78, 71]);
+  debugShareHandler = (method, args) async {
+    if (method == 'shareFiles') throw MissingPluginException();
+    return true;
+  };
+  addTearDown(() {
+    debugBugTextWriter = null;
+    debugBugBytesWriter = null;
+    debugSnapshotPng = null;
+    debugShareHandler = null;
+  });
+}
+
+Future<void> _typeNote(WidgetTester tester) async {
+  await tester.enterText(
+      find.byKey(const ValueKey<String>('durbun-bug-note')),
+      _lang == 'en'
+          ? 'Tapped "Checkout" in the cart and the app closed. Happens every time with 3 items.'
+          : 'Sepette "Ödemeye geç"e bastım, uygulama kapandı. 3 ürünle her seferinde oluyor.');
+  FocusManager.instance.primaryFocus?.unfocus();
+  await settle(tester);
+}
+
+/// Scrolls the bug report page until [f] can be tapped.
+Future<void> _revealBug(WidgetTester tester, Finder f) async {
+  for (var i = 0; i < 20 && f.hitTestable().evaluate().isEmpty; i++) {
+    await tester.drag(find.byKey(const ValueKey<String>('durbun-bug-list')), const Offset(0, -160));
+    await tester.pump();
+  }
+  await settle(tester);
 }
 
 Future<void> _sheet(List<(String, Size)> shots, String theme, String file) async {

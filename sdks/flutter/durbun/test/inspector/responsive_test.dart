@@ -85,6 +85,37 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('Unhandled exception').first);
       await tester.pumpAndSettle();
+      // Report a bug from the crash: the page, scrolled to its end, the
+      // window widened and the screenshot left out.
+      await tester.tap(find.byKey(const ValueKey<String>('durbun-log-bug')));
+      await tester.pumpAndSettle();
+      expect(find.text('What happened?'), findsOneWidget);
+      final list = find.byKey(const ValueKey<String>('durbun-bug-list'));
+      await tester.drag(list, const Offset(0, -3000));
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      // And from Tools, about the panel's opening.
+      await tester.tap(find.byTooltip('Tools').first);
+      await tester.pumpAndSettle();
+      // Scrolled down by the visits above: back up to the card.
+      final card = find.byKey(const ValueKey<String>('durbun-tools-bug'));
+      await tester.scrollUntilVisible(card, -200, scrollable: find.byType(Scrollable).hitTestable().last);
+      await tester.pumpAndSettle();
+      await tester.tap(card);
+      await tester.pumpAndSettle();
+      expect(find.text('When the panel opened'), findsOneWidget);
+      final wider = find.text('5 min');
+      for (var i = 0; i < 20 && wider.hitTestable().evaluate().isEmpty; i++) {
+        await tester.drag(list, const Offset(0, -120));
+        await tester.pump();
+      }
+      await tester.tap(wider);
+      await tester.pumpAndSettle();
+      await tester.drag(list, const Offset(0, -3000));
+      await tester.pumpAndSettle();
     });
   }
 }

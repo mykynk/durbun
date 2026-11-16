@@ -53,6 +53,33 @@ void main() {
     expect(Localizations.localeOf(tester.element(network)).languageCode, 'en');
   });
 
+  testWidgets('Report a bug in an RTL app: English, left to right, nothing clipped', (tester) async {
+    final store = DurbunInspectorStore(notifyDelay: Duration.zero);
+    await tester.pumpWidget(MaterialApp(
+      locale: const Locale('ar'),
+      supportedLocales: const <Locale>[Locale('ar')],
+      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+        _Any<WidgetsLocalizations>(_RtlWidgets()),
+        _Any<MaterialLocalizations>(DefaultMaterialLocalizations()),
+        _Any<CupertinoLocalizations>(DefaultCupertinoLocalizations()),
+      ],
+      builder: (c, child) => DurbunInspector(store: store, child: child!),
+      home: const Scaffold(body: Text('app')),
+    ));
+    Durbun.showInspector();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Tools').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey<String>('durbun-tools-bug')));
+    await tester.pumpAndSettle();
+    final note = find.text('What happened?');
+    expect(note, findsOneWidget);
+    expect(Directionality.of(tester.element(note)), TextDirection.ltr);
+    // The note's label starts at the left edge of the page.
+    final page = tester.getTopLeft(find.ancestor(of: note, matching: find.byType(Scaffold)).first).dx;
+    expect(tester.getTopLeft(note).dx - page, lessThan(40));
+  });
+
   testWidgets('a Turkish app keeps Turkish texts', (tester) async {
     final store = DurbunInspectorStore(notifyDelay: Duration.zero);
     await tester.pumpWidget(MaterialApp(

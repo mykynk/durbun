@@ -212,6 +212,23 @@ String _decodeKey(String key) {
 final RegExp _jsonPair =
     RegExp(r'"((?:[^"\\]|\\.)*)"(\s*:\s*)("(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false)');
 
+/// `scheme://…` in log text, up to whitespace or a closing quote or bracket.
+final RegExp _urlInText = RegExp(r'''\b[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>`)\]}]+''');
+
+/// A cookie header printed in a log line: the rest of the line is values.
+final RegExp _cookieLine = RegExp(r'\b(cookie|set-cookie)\s*:\s*(?!••••)[^\n]+', caseSensitive: false);
+
+/// A JSON Web Token anywhere (`eyJ….eyJ….sig`).
+final RegExp _jwt = RegExp(r'\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*');
+
+/// `Bearer <token>` / `Basic <credentials>` (a value of 8 characters or more).
+final RegExp _authValue = RegExp(r'\b(Bearer|Basic)\s+([A-Za-z0-9\-._~+/]{8,}=*|••••)', caseSensitive: false);
+
+final RegExp _authScheme = RegExp(r'^(bearer|basic)$', caseSensitive: false);
+
+/// `key=value`, `key: value`, `key = "value"` in prose.
+final RegExp _textPair = RegExp(r'''\b([A-Za-z_][\w.-]{0,47})(\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;&"'}\])]+)''');
+
 /// Masks secret values in headers, URLs, query strings and text bodies
 /// (JSON string values, form fields) when [on]; [count] says how many it
 /// masked. Shared by the share report, the session export and the previous
@@ -275,6 +292,44 @@ class ShareMasker {
     }
     if (contentType.toLowerCase().contains('x-www-form-urlencoded')) return query(text);
     return text;
+  }
+
+  /// Free-form log text (a message, a stack, data printed as JSON) with its
+  /// secret-looking values masked: URLs with secret query values, cookie
+  /// lines, JSON Web Tokens, `Bearer …` / `Basic …` credentials, JSON pairs
+  /// and `password=…` / `apiKey: …` pairs whose name is a secret. Log text
+  /// has no fixed shape, so this masks what looks like a secret and keeps
+  /// the rest (the desktop's bug report masks log lines the same way).
+  String text(String input) {
+    if (!on || input.isEmpty) return input;
+    var out = input.replaceAllMapped(_urlInText, (m) => url(m.group(0)!));
+    out = out.replaceAllMapped(_cookieLine, (m) => _hit('${m.group(1)}: $kShareMask'));
+    out = out.replaceAllMapped(_jwt, (_) => _hit(kShareMask));
+    out = out.replaceAllMapped(
+        _authValue, (m) => m.group(2) == kShareMask ? m.group(0)! : _hit('${m.group(1)} $kShareMask'));
+    out = out.replaceAllMapped(_jsonPair, (m) {
+      final key = m.group(1)!;
+      return isSecretName(key) && m.group(3) != '"$kShareMask"' ? _hit('"$key"${m.group(2)}"$kShareMask"') : m.group(0)!;
+    });
+    // Pair by pair from every word start: a pair whose name is no secret
+    // must not swallow the next one ("retrying: refresh_token=…").
+    final pairs = StringBuffer();
+    var i = 0;
+    while (i < out.length) {
+      final m = _textPair.matchAsPrefix(out, i);
+      if (m != null) {
+        final key = m.group(1)!;
+        final value = m.group(3)!;
+        if (isSecretName(key) && !value.contains(kShareMask) && !_authScheme.hasMatch(value)) {
+          pairs.write(_hit('$key${m.group(2)}$kShareMask'));
+          i = m.end;
+          continue;
+        }
+      }
+      pairs.write(out[i]);
+      i++;
+    }
+    return pairs.toString();
   }
 
   /// Structured log data: string, number and boolean values under a secret
@@ -429,6 +484,9 @@ String _fenceLanguage(String contentType, bool json) {
   if (ct.contains('xml')) return 'xml';
   return '';
 }
+
+/// [text] as a fenced block in [out] (the bug report's log lines).
+void fencedBlock(List<String> out, String language, String text) => _fenced(out, language, text);
 
 /// A fence longer than any backtick run in [text], so the block never closes early.
 void _fenced(List<String> out, String language, String text) {
@@ -624,8 +682,12 @@ void _capped(List<String> out, String text, InspectorStrings t, [String language
 /// as it is: a free-form message has no field names to mask, so the preview
 /// is what goes out. Structured [LogShareInput.data] has field names: with
 /// [mask], secret values in it become `••••` and a closing line says so.
-String buildLogReport(LogShareInput input, InspectorStrings t, {bool mask = true}) {
-  final m = ShareMasker(mask);
+/// [maskText] masks secret-looking values in the message and the stack too
+/// ([ShareMasker.text]; the bug report does), and [masker] counts into a
+/// report that has its own closing line (no line is added here then).
+String buildLogReport(LogShareInput input, InspectorStrings t, {bool mask = true, bool maskText = false, ShareMasker? masker}) {
+  final m = masker ?? ShareMasker(mask);
+  String txt(String s) => maskText ? m.text(s) : s;
   final data = m.data(input.data);
   final head = <String?>[input.level.toUpperCase(), input.kind, input.tag].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
   final out = <String>[head, ''];
@@ -635,7 +697,7 @@ String buildLogReport(LogShareInput input, InspectorStrings t, {bool mask = true
   if (input.process != null) out.add('- ${t.reportProcess}: ${input.process}');
   out.add('');
 
-  final message = input.message.trimRight();
+  final message = txt(input.message.trimRight());
   if (message.isNotEmpty) {
     out.add('${t.message}:');
     _capped(out, message, t);
@@ -643,7 +705,7 @@ String buildLogReport(LogShareInput input, InspectorStrings t, {bool mask = true
   if (data != null) {
     String? json;
     try {
-      json = const JsonEncoder.withIndent('  ').convert(data);
+      json = txt(const JsonEncoder.withIndent('  ').convert(data));
     } catch (_) {
       json = null;
     }
@@ -652,16 +714,17 @@ String buildLogReport(LogShareInput input, InspectorStrings t, {bool mask = true
       _capped(out, json, t, 'json');
     }
   }
-  final errText = <String?>[input.errorType, input.errorMessage].whereType<String>().where((s) => s.isNotEmpty).join(': ');
-  if (errText.isNotEmpty && !message.contains(input.errorMessage ?? errText)) out.addAll(<String>['${t.reportError}: $errText', '']);
-  final stack = input.stack?.trimRight() ?? '';
+  final errorMessage = input.errorMessage == null ? null : txt(input.errorMessage!);
+  final errText = <String?>[input.errorType, errorMessage].whereType<String>().where((s) => s.isNotEmpty).join(': ');
+  if (errText.isNotEmpty && !message.contains(errorMessage ?? errText)) out.addAll(<String>['${t.reportError}: $errText', '']);
+  final stack = txt(input.stack?.trimRight() ?? '');
   if (stack.isNotEmpty && !message.contains(stack.split('\n').first)) {
     out.add('${t.stack}:');
     _capped(out, stack, t);
     final note = obfuscatedStackNote(stack, t);
     if (note != null) out.addAll(<String>[note, '']);
   }
-  if (m.count > 0) out.add(t.reportMasked);
+  if (m.count > 0 && masker == null) out.add(t.reportMasked);
   return out.join('\n').trimRight();
 }
 

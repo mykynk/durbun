@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../flutter/durbun.dart' show durbunBackend;
+import 'app_snapshot.dart';
 import 'format.dart';
 import 'panel.dart';
 import 'panel_prefs.dart';
@@ -157,7 +158,16 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   bool _listening = false;
 
   bool _open = false;
+
+  /// The app's picture is being taken for this opening.
+  bool _opening = false;
   Offset? _bubble;
+
+  /// The app's own layer: what "Report a bug" pictures when the panel opens.
+  /// Always in the tree (also while Dürbün is off) so the app's state never
+  /// moves when the SDK starts after `runApp`; nothing is pictured unless
+  /// the panel opens.
+  final GlobalKey _appLayer = GlobalKey(debugLabel: 'durbun.app');
   DurbunInspectorStore? _watched;
 
   /// Process-wide: the hint and the console line come at most once, also
@@ -361,7 +371,7 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   }
 
   Future<void> _openPanel() async {
-    if (_open || !mounted) return;
+    if (_open || _opening || !mounted) return;
     _removeHint();
     // A test store opens the panel directly; an app's panel comes from the
     // running SDK, so a build in which the SDK can never start compiles
@@ -370,15 +380,30 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
     if (!_enabled || panel == null) return _openUnavailable();
     final navigator = _navigator();
     if (navigator == null) return;
+    // The app as the tester saw it, before the panel covers it (only here:
+    // with Dürbün running and the panel opening).
+    final store = _store;
+    final opened = DateTime.now().microsecondsSinceEpoch / 1000;
+    _opening = true;
+    try {
+      final image = await snapshotApp(_appLayer);
+      setPanelOpening(store, PanelOpening(opened, image));
+    } finally {
+      _opening = false;
+    }
+    if (!mounted || _open) {
+      setPanelOpening(store, null);
+      return;
+    }
     setState(() => _open = true);
     _syncShake();
     // The theme picked last time, read before the first frame (no flash).
     if (!panelThemeLoaded) await loadPanelTheme();
     if (!mounted) {
       _open = false;
+      setPanelOpening(store, null);
       return;
     }
-    final store = _store;
     store.markSeen();
     store.panelOpen.value = true;
     late final MaterialPageRoute<void> route;
@@ -397,6 +422,9 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
       }
       store.markSeen();
       store.panelOpen.value = false;
+      // The picture lives as long as the panel (a report page holds a
+      // handle of its own while it is open).
+      setPanelOpening(store, null);
     }
   }
 
@@ -437,11 +465,13 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
 
   @override
   Widget build(BuildContext context) {
-    if (!_enabled || !widget.showBubble) return widget.child;
+    // Keyed: the app keeps its state when the bubble comes or goes.
+    final app = RepaintBoundary(key: _appLayer, child: widget.child);
+    if (!_enabled || !widget.showBubble) return app;
     return Stack(
       textDirection: TextDirection.ltr,
       children: <Widget>[
-        widget.child,
+        app,
         if (!_open) _positionedBubble(context),
       ],
     );

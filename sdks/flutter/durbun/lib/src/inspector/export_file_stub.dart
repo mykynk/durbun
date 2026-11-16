@@ -7,3 +7,5 @@ bool get canWriteFiles => false;
 Future<String> inspectorCacheDir() async => '';
 
 Future<String?> writeExportFile(String name, Iterable<String> chunks, {String? baseDir, DateTime? now}) async => null;
+
+Future<String?> writeExportBytes(String name, List<int> bytes, {String? baseDir, DateTime? now}) async => null;

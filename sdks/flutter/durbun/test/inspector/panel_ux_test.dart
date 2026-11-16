@@ -398,6 +398,8 @@ void main() {
       Future<void> askToClear() async {
         await tester.tap(find.byTooltip('Tools').first);
         await tester.pumpAndSettle();
+        // The Tools list builds lazily: scroll it to the row.
+        await tester.scrollUntilVisible(find.text('Clear captured data'), 120, scrollable: find.byType(Scrollable).last);
         await tester.ensureVisible(find.text('Clear captured data'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Clear captured data'));

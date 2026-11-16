@@ -381,6 +381,12 @@ All notable changes to Dürbün are listed here. The format follows
   streams that dart:io does not carry. `durbun_dio` shows event streams read with `ResponseType.stream`. On
   Android and iOS the native cores in the plugin report OkHttp and URLSession streams too.
 - Flutter in-app panel: a WebSocket or event-stream response says that its messages show on the Mac.
+- Flutter in-app panel: **Report a bug** sends what just happened from the phone alone, without the Mac: the
+  log lines and failed requests around a crash, an error, a failed request or the moment the panel opened, a
+  screenshot of the app as it was before the panel covered it, the device and app facts and your note. The
+  page shows the counts before anything leaves and the screenshot can be left out. One share sheet carries
+  the Markdown text, the full report as a `.md` file and the screenshot as a PNG. Secret values are masked by
+  default, in log text too.
 - Logs and Performance: the cold start time the Android and iOS SDKs measure (`durbun.launch`) reads as a line
   in Logs ("Cold start 1.24 s"; a prewarmed iOS launch is named and carries no time) and as a Launch tile in
   Performance that opens the line.

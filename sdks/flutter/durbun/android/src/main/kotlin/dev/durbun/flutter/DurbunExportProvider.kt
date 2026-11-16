@@ -89,6 +89,8 @@ class DurbunExportProvider : ContentProvider() {
                 "md" -> "text/markdown"
                 "har", "json" -> "application/json"
                 "txt" -> "text/plain"
+                "png" -> "image/png"
+                "jpg", "jpeg" -> "image/jpeg"
                 else -> "application/octet-stream"
             }
     }

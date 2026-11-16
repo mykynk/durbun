@@ -1,5 +1,5 @@
-/// The Tools page of the panel: the app and its desktop connection; tiles
-/// for Statistics, Mac connection, App tools and Device & SDK (each a page
+/// The Tools page of the panel: the app and its desktop connection; Report
+/// a bug; tiles for Statistics, Mac connection, App tools and Device & SDK (each a page
 /// of its own); Mocks (while connected), Export session and Previous run
 /// (with `keepPreviousRun`); and Clear in a red card.
 library;
@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 
 import '../flutter/durbun.dart' show Durbun, durbunBackend, durbunInspectorState;
 import 'actions_view.dart';
+import 'bug_report.dart' show BugAnchor;
+import 'bug_report_view.dart';
 import 'connection_view.dart';
 import 'export_sheet.dart';
 import 'info_view.dart';
@@ -171,6 +173,11 @@ class ToolsView extends StatelessWidget {
                 ),
               ]),
               const SizedBox(height: 12),
+              // What a tester came for most: the moment, sent on.
+              if (!store.readOnly) ...<Widget>[
+                _ReportCard(onTap: () => openBugReport(context, store, const BugAnchor.now())),
+                const SizedBox(height: 12),
+              ],
               // Two by two; one column when a tile would be too narrow.
               LayoutBuilder(
                 builder: (context, box) {
@@ -390,6 +397,60 @@ class _ToolRow extends StatelessWidget {
       value: value == null || value!.isEmpty ? null : value,
       chevron: chevron,
       onTap: onTap,
+    );
+  }
+}
+
+/// "Report a bug": an accent icon tile, the name, what goes in.
+class _ReportCard extends StatelessWidget {
+  const _ReportCard({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    return MergeSemantics(
+      child: Semantics(
+        button: true,
+        child: Pressable(
+          onTap: onTap,
+          builder: (pressed) => AnimatedContainer(
+            key: const ValueKey<String>('durbun-tools-bug'),
+            duration: DurbunMotion.of(context, DurbunMotion.fast),
+            padding: const EdgeInsetsDirectional.fromSTEB(16, 14, 12, 14),
+            decoration: BoxDecoration(
+              color: pressed ? Color.alphaBlend(c.text.withValues(alpha: 0.05), c.cardBg) : c.cardBg,
+              borderRadius: BorderRadius.circular(DurbunRadius.lg),
+              border: Border.all(color: c.border),
+            ),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(color: Color.alphaBlend(c.dangerSoft, c.cardBg), borderRadius: BorderRadius.circular(DurbunRadius.md)),
+                  child: Icon(Icons.bug_report_outlined, size: 22, color: c.danger),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(t.bugReport, style: DurbunType.heading(size: DurbunType.label, color: c.text).copyWith(height: 1.3)),
+                      const SizedBox(height: 3),
+                      Text(t.bugReportHint, style: DurbunType.ui(size: DurbunType.sm, color: c.textMuted, height: 1.35)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right_rounded, size: 20, color: c.textSubtle),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -80,6 +80,14 @@
   URLSession streams too (`DurbunWebSocketFactory`, `URLSessionWebSocketTask`).
 - In-app panel: a WebSocket or event-stream response says that its messages
   show on the Mac; in Statistics the timeouts note sits under the number.
+- In-app panel: **Report a bug** (Tools, an error or crash line's detail, a
+  failed request's ⋯ menu and Share sheet): pick 30 s to 5 min before the
+  moment (10 s after are always in), see the counts, leave the screenshot out
+  if you like, add a note, and share the text, the full report (`.md`) and
+  the screenshot (PNG) at once. Secret values are masked by default, in log
+  text too. Works without the Mac.
+- The screenshot is the app as it was just before the panel opened, taken
+  only while Dürbün runs and dropped when the panel closes.
 
 ## 0.2.0
 

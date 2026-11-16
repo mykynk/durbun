@@ -62,6 +62,14 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
             // The panel's session export: the share sheet with a file from Caches/durbun-export.
             let args = call.arguments as? [String: Any]
             result(shareFile(path: args?["path"] as? String, subject: args?["subject"] as? String))
+        case "shareFiles":
+            // The panel's bug report: one share sheet with a text and one or more export files.
+            let args = call.arguments as? [String: Any]
+            result(shareFiles(
+                text: args?["text"] as? String,
+                subject: args?["subject"] as? String,
+                paths: (args?["paths"] as? [Any])?.map { $0 as? String } ?? []
+            ))
         case "cacheDir":
             // Where the panel writes exports (and its previous-run log).
             result(Self.cachesDirectory?.path)
@@ -82,19 +90,43 @@ public final class DurbunFlutterPlugin: NSObject, FlutterPlugin {
     /// Presents the share sheet with an export file; false when [path] is not a file directly in
     /// Caches/durbun-export (the panel writes nowhere else) or there is no screen to present it from.
     private func shareFile(path: String?, subject: String?) -> Bool {
-        guard let path, !path.isEmpty, let caches = Self.cachesDirectory else { return false }
+        guard let file = Self.exportFile(path), let top = Self.topViewController() else { return false }
+        let sheet = UIActivityViewController(activityItems: [ShareFile(url: file, subject: subject ?? "")],
+                                             applicationActivities: nil)
+        Self.present(sheet, from: top)
+        return true
+    }
+
+    /// Presents one share sheet with [text] and every file in [paths] (each must be a file directly in
+    /// Caches/durbun-export). False, with nothing presented, when a path is not an export, there is neither
+    /// text nor a file, or there is no screen to present it from.
+    private func shareFiles(text: String?, subject: String?, paths: [String?]) -> Bool {
+        if paths.isEmpty { return share(text: text, subject: subject) }
+        var files: [URL] = []
+        for path in paths {
+            guard let file = Self.exportFile(path), !files.contains(file) else { return false }
+            files.append(file)
+        }
+        guard let top = Self.topViewController() else { return false }
+        var items: [Any] = []
+        if let text, !text.isEmpty { items.append(ShareText(text: text, subject: subject ?? "")) }
+        items += files.map { ShareFile(url: $0, subject: subject ?? "") }
+        let sheet = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        Self.present(sheet, from: top)
+        return true
+    }
+
+    /// The export at [path], or nil unless it is an existing file directly in Caches/durbun-export.
+    private static func exportFile(_ path: String?) -> URL? {
+        guard let path, !path.isEmpty, let caches = cachesDirectory else { return nil }
         let folder = caches.appendingPathComponent("durbun-export", isDirectory: true)
             .resolvingSymlinksInPath().standardizedFileURL
         let file = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
         var isDirectory: ObjCBool = false
         guard file.deletingLastPathComponent().standardizedFileURL.path == folder.path,
-              FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory), !isDirectory.boolValue,
-              let top = Self.topViewController()
-        else { return false }
-        let sheet = UIActivityViewController(activityItems: [ShareFile(url: file, subject: subject ?? "")],
-                                             applicationActivities: nil)
-        Self.present(sheet, from: top)
-        return true
+              FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory), !isDirectory.boolValue
+        else { return nil }
+        return file
     }
 
     private static var cachesDirectory: URL? {

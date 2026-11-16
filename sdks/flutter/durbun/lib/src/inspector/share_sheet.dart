@@ -9,6 +9,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'bug_report.dart' show BugAnchor, isReportedFailure;
+import 'bug_report_view.dart' show openBugReport;
 import 'filter_ui.dart' show SheetSwitch;
 import 'share_report.dart';
 import 'slack.dart';
@@ -21,6 +23,11 @@ import 'widgets.dart';
 final Expando<ShareOptions> _lastOptions = Expando<ShareOptions>('durbunShareOptions');
 
 ShareOptions shareOptionsOf(DurbunInspectorStore store) => _lastOptions[store] ?? const ShareOptions();
+
+/// Keeps the masking switch's state for the next share with [store] (one
+/// switch for every share of a run: a request, a log line, a bug report).
+void rememberShareMask(DurbunInspectorStore store, bool mask) =>
+    _lastOptions[store] = shareOptionsOf(store).copyWith(mask: mask);
 
 /// "Shop 2.4.1 (com.example.shop)" from the app's hello, or null.
 String? hostAppLabel(DurbunInspectorStore store) {
@@ -85,6 +92,62 @@ Future<bool> shareFileNatively(String path, {required String mime, String? subje
   }
 }
 
+/// Replaces the native share calls (tests): gets the method and its
+/// arguments, returns what the plugin would.
+@visibleForTesting
+Future<bool?> Function(String method, Map<String, Object?> args)? debugShareHandler;
+
+Future<bool> _invokeShare(String method, Map<String, Object?> args) async {
+  final handler = debugShareHandler;
+  if (handler != null) return await handler(method, args) ?? false;
+  return await _native.invokeMethod<bool>(method, args) ?? false;
+}
+
+/// How [shareFilesNatively] went.
+enum FilesShareOutcome {
+  /// The share sheet opened with the text and the files.
+  files,
+
+  /// Only the text went (no files, or a host without `shareFiles`).
+  textOnly,
+
+  /// Nothing opened.
+  failed,
+}
+
+/// Opens one system share sheet with [text] and the files at [paths]
+/// (exports in the cache directory's `durbun-export` folder; `mimes[i]` is
+/// the type of `paths[i]`). Falls back to the text alone when the host
+/// cannot share files (an older plugin build, tests, the web) or refuses
+/// them; never throws.
+Future<FilesShareOutcome> shareFilesNatively({
+  required String text,
+  String? subject,
+  List<String> paths = const <String>[],
+  List<String>? mimes,
+  String? textOnly,
+}) async {
+  if (paths.isNotEmpty) {
+    try {
+      final opened = await _invokeShare('shareFiles', <String, Object?>{
+        'text': text,
+        'subject': subject,
+        'paths': paths,
+        if (mimes != null) 'mimes': mimes,
+      });
+      if (opened) return FilesShareOutcome.files;
+    } catch (_) {
+      // MissingPluginException / notImplemented: an older host; the text alone below.
+    }
+  }
+  try {
+    if (await _invokeShare('share', <String, Object?>{'text': textOnly ?? text, 'subject': subject})) {
+      return FilesShareOutcome.textOnly;
+    }
+  } catch (_) {}
+  return FilesShareOutcome.failed;
+}
+
 /// The report for [log] (the app and device from the store's hello); secret
 /// values in its data are masked unless the last share turned masking off.
 String logShareReportFor(BuildContext context, InspectorLog log, DurbunInspectorStore store, {bool? mask}) {
@@ -105,18 +168,29 @@ Future<void> _showSheet(BuildContext context, Widget sheet) {
   );
 }
 
-Future<void> showShareSheet(BuildContext context, InspectorCall call, DurbunInspectorStore store) =>
-    _showSheet(context, _ShareSheet(call: call, store: store));
+Future<void> showShareSheet(BuildContext context, InspectorCall call, DurbunInspectorStore store) => _showSheet(
+    context,
+    _ShareSheet(
+      call: call,
+      store: store,
+      onBug: isReportedFailure(call) && !store.readOnly ? () => openBugReport(context, store, BugAnchor.request(call)) : null,
+    ));
 
 /// "Share log line": the log report with Copy, Share… and Send to Slack.
-Future<void> showLogShareSheet(BuildContext context, InspectorLog log, DurbunInspectorStore store) =>
-    _showSheet(context, _LogShareSheet(log: log, store: store));
+Future<void> showLogShareSheet(BuildContext context, InspectorLog log, DurbunInspectorStore store) => _showSheet(
+    context,
+    _LogShareSheet(
+      log: log,
+      store: store,
+      onBug: log.isError && !store.readOnly ? () => openBugReport(context, store, BugAnchor.log(log)) : null,
+    ));
 
 class _ShareSheet extends StatefulWidget {
-  const _ShareSheet({required this.call, required this.store});
+  const _ShareSheet({required this.call, required this.store, this.onBug});
 
   final InspectorCall call;
   final DurbunInspectorStore store;
+  final VoidCallback? onBug;
 
   @override
   State<_ShareSheet> createState() => _ShareSheetState();
@@ -145,6 +219,7 @@ class _ShareSheetState extends State<_ShareSheet> {
       report: shareReportFor(context, widget.call, widget.store, _options),
       subject: _subject,
       store: widget.store,
+      onBug: widget.onBug,
       options: <Widget>[
         SheetSwitch(
             label: t.shareMask,
@@ -168,10 +243,11 @@ class _ShareSheetState extends State<_ShareSheet> {
 }
 
 class _LogShareSheet extends StatefulWidget {
-  const _LogShareSheet({required this.log, required this.store});
+  const _LogShareSheet({required this.log, required this.store, this.onBug});
 
   final InspectorLog log;
   final DurbunInspectorStore store;
+  final VoidCallback? onBug;
 
   @override
   State<_LogShareSheet> createState() => _LogShareSheetState();
@@ -191,6 +267,7 @@ class _LogShareSheetState extends State<_LogShareSheet> {
       report: logShareReportFor(context, log, widget.store, mask: _options.mask),
       subject: '${log.level.toUpperCase()} ${first.length > 80 ? '${first.substring(0, 80)}…' : first}',
       store: widget.store,
+      onBug: widget.onBug,
       // Only structured data has field names to mask.
       options: <Widget>[
         if (log.data != null)
@@ -219,6 +296,7 @@ class _ReportSheet extends StatefulWidget {
     required this.subject,
     required this.store,
     this.options = const <Widget>[],
+    this.onBug,
   });
 
   final String title;
@@ -227,6 +305,9 @@ class _ReportSheet extends StatefulWidget {
   final String subject;
   final DurbunInspectorStore store;
   final List<Widget> options;
+
+  /// Opens "Report a bug" about the same moment (a failure, an error).
+  final VoidCallback? onBug;
 
   @override
   State<_ReportSheet> createState() => _ReportSheetState();
@@ -267,6 +348,10 @@ class _ReportSheetState extends State<_ReportSheet> {
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
                       child: Text(widget.description, style: DurbunType.ui(size: DurbunType.body, height: 1.4, color: c.textMuted)),
                     ),
+                    if (widget.onBug != null) _BugRow(onTap: () {
+                      Navigator.of(context).pop();
+                      widget.onBug!();
+                    }),
                     ...widget.options,
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -288,6 +373,34 @@ class _ReportSheetState extends State<_ReportSheet> {
           ),
           ShareActions(report: widget.report, subject: widget.subject, store: widget.store),
         ],
+      ),
+    );
+  }
+}
+
+/// "Report a bug…" on a share sheet: the same moment, with the logs around
+/// it and the screenshot, as a card of its own above the options.
+class _BugRow extends StatelessWidget {
+  const _BugRow({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    return Container(
+      key: const ValueKey<String>('durbun-share-bug'),
+      margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+          color: c.cardBg, borderRadius: BorderRadius.circular(DurbunRadius.lg), border: Border.all(color: c.border)),
+      child: ListRow(
+        icon: Icons.bug_report_outlined,
+        iconColor: c.danger,
+        title: t.bugReportEllipsis,
+        subtitle: t.bugFromShareHint,
+        onTap: onTap,
       ),
     );
   }

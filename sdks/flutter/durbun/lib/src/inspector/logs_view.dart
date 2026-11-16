@@ -8,6 +8,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/stack_format.dart';
+import 'bug_report.dart' show BugAnchor;
+import 'bug_report_view.dart' show openBugReport;
 import 'filter_ui.dart';
 import 'format.dart';
 import 'json_tree.dart';
@@ -716,14 +718,32 @@ class _LogDetailPageState extends State<LogDetailPage> {
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(
-              <String>[
-                formatClock(l.ts),
-                if (l.native) t.nativeLayer else 'Dart',
-                if (l.kind != null && l.kind != 'text') switch (l.kind) { 'crash' => t.crash, 'flutter-error' => 'Flutter', final k => k! },
-                if (widget.repeats > 1) t.repeated(widget.repeats),
-              ].join(' · '),
-              style: DurbunType.ui(size: DurbunType.body, color: c.textMuted),
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 12,
+              runSpacing: 6,
+              children: <Widget>[
+                Text(
+                  <String>[
+                    formatClock(l.ts),
+                    if (l.native) t.nativeLayer else 'Dart',
+                    if (l.kind != null && l.kind != 'text') switch (l.kind) { 'crash' => t.crash, 'flutter-error' => 'Flutter', final k => k! },
+                    if (widget.repeats > 1) t.repeated(widget.repeats),
+                  ].join(' · '),
+                  style: DurbunType.ui(size: DurbunType.body, color: c.textMuted),
+                ),
+                // An error or a crash: report it with what was around it
+                // (here, not in the bar: a tag and three actions fill it).
+                if (store != null && !store.readOnly && l.isError)
+                  DButton(
+                    key: const ValueKey<String>('durbun-log-bug'),
+                    kind: DButtonKind.tonal,
+                    icon: Icons.bug_report_outlined,
+                    label: t.bugReportEllipsis,
+                    onTap: () => unawaited(openBugReport(context, store, BugAnchor.log(l))),
+                  ),
+              ],
             ),
           ),
           if (tabs.length > 1)
