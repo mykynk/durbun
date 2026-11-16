@@ -148,7 +148,9 @@ final class NetworkCaptureTests: SDKTestCase {
     }
 
     func testStreamedAndUploadBodiesAreForwardedAndCaptured() throws {
-        startConnected(options(network: true))
+        var opted = options(network: true)
+        opted.interceptUploadTasks = true
+        startConnected(opted)
         let payload = Data((0..<70_000).map { UInt8($0 % 251) })
         var streamed = URLRequest(url: url("/echo"))
         streamed.httpMethod = "PUT"
@@ -176,6 +178,31 @@ final class NetworkCaptureTests: SDKTestCase {
         XCTAssertEqual(streamedBody["size"] as? Int, payload.count)
         let uploadBody = try XCTUnwrap(requests.first { $0["method"] as? String == "POST" }?["body"] as? [String: Any])
         XCTAssertEqual(uploadBody["data"] as? String, "upload task body ✓")
+    }
+
+    func testUploadTasksRunUntouchedByDefault() throws {
+        XCTAssertFalse(DurbunOptions().interceptUploadTasks, "upload progress keeps working unless the app opts in")
+        desktop.mocks = [rule("m-all", url: "/echo", action: ["type": "respond", "status": 299, "body": "mocked"])]
+        startConnected(options(network: true))
+        var upload = URLRequest(url: url("/echo"))
+        upload.httpMethod = "POST"
+        let text = Data("progress stays".utf8)
+        let done = expectation(description: "upload")
+        var status: Int?
+        var echoed: Data?
+        URLSession.shared.uploadTask(with: upload, from: text) { data, response, _ in
+            status = (response as? HTTPURLResponse)?.statusCode
+            echoed = data
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        XCTAssertEqual(status, 201, "not mocked: the upload task reached the server")
+        XCTAssertEqual(echoed, text)
+        XCTAssertTrue(desktop.messages(ofType: "net.request").isEmpty, "not captured either")
+
+        // A data task with the same body is captured (and mocked) as always.
+        upload.httpBody = text
+        XCTAssertEqual(perform(upload).response?.statusCode, 299)
     }
 
     func testLargeBodiesAreTruncatedButSizeIsKept() throws {
@@ -361,6 +388,43 @@ final class NetworkCaptureTests: SDKTestCase {
         let outcome = perform(URLRequest(url: url("/avatar.png")))
         XCTAssertGreaterThanOrEqual(outcome.elapsed, 0.38)
         XCTAssertEqual(outcome.data, Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
+    }
+
+    func testGraphqlRuleMocksOnlyItsOperation() throws {
+        var graphqlRule = rule("g-user", url: "/echo", method: "POST", action: ["type": "respond", "status": 200, "body": #"{"mocked":true}"#])
+        graphqlRule["when"] = ["graphql": ["operationName": "GetUser", "operationType": "query"]]
+        desktop.mocks = [graphqlRule]
+        startConnected(options(network: true))
+        func post(_ body: String) -> Outcome {
+            var request = URLRequest(url: url("/echo"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data(body.utf8)
+            return perform(request)
+        }
+        let before = server.requests.count
+        let mocked = post(#"{"operationName":"GetUser","query":"query GetUser { me { id } }"}"#)
+        XCTAssertEqual(String(decoding: mocked.data ?? Data(), as: UTF8.self), #"{"mocked":true}"#)
+        XCTAssertEqual(server.requests.count, before, "the mocked operation never reached the server")
+
+        let other = #"{"query":"mutation GetUser { a }"}"#
+        let real = post(other)
+        XCTAssertEqual(real.response?.statusCode, 201, "another operation type goes to the network")
+        XCTAssertEqual(String(decoding: real.data ?? Data(), as: UTF8.self), other, "with its body intact")
+    }
+
+    func testGraphqlRuleDoesNotMatchABodyItCannotRead() throws {
+        var graphqlRule = rule("g-user", url: "/echo", method: "POST", action: ["type": "respond", "status": 200, "body": "mocked"])
+        graphqlRule["when"] = ["graphql": ["operationName": "Big"]]
+        desktop.mocks = [graphqlRule]
+        startConnected(options(network: true))
+        var request = URLRequest(url: url("/echo"))
+        request.httpMethod = "POST"
+        let pad = String(repeating: "a", count: GraphqlMatching.maxChars)
+        request.httpBody = Data(#"{"operationName":"Big","pad":"\#(pad)"}"#.utf8)
+        let outcome = perform(request)
+        XCTAssertEqual(outcome.response?.statusCode, 201, "a body over the bound is unknown: the request goes to the network")
+        XCTAssertEqual(outcome.data?.count, request.httpBody?.count)
     }
 
     func testMockDelayPerformsTheRealRequestLater() throws {

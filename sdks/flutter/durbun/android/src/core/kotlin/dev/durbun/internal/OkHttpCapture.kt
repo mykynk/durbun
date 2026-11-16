@@ -46,7 +46,7 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
     }
 
     fun intercept(core: DurbunCore, chain: Interceptor.Chain): Response {
-        val request = chain.request()
+        var request = chain.request()
         val id = core.nextRequestId()
         val startWall = System.currentTimeMillis()
         val startNs = System.nanoTime()
@@ -62,7 +62,16 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
         // A socket opened through DurbunWebSocketFactory: its messages take this handshake's id.
         if (upgrade) guard(core) { request.tag(StreamTag::class.java)?.id = id }
 
-        val found = guard(core) { core.findMock(method, url) }
+        // A rule limited to a GraphQL operation needs the body: read only when such a rule matches the URL, and
+        // only a body that may be written more than once (see [heldBody]); the request then carries the copy.
+        var held: HeldBody? = null
+        val appRequest = request
+        val found = guard(core) {
+            core.findMock(method, url, appRequest.body?.contentType()?.toString() ?: appRequest.header("Content-Type")) {
+                heldBody(appRequest).also { held = it }?.text
+            }
+        }
+        held?.replacement?.let { copy -> guard(core) { request = request.newBuilder().method(method, copy).build() } }
         // A network interceptor must call proceed() exactly once, so it cannot answer from a mock.
         val mock = if (found != null && found.action is MockAction.Respond && isNetworkInterceptor(chain)) {
             guard(core) { reportSkippedMock(core, found, id, method, url) }
@@ -459,6 +468,58 @@ internal class OkHttpCapture(private val redactedHeaders: Set<String>) {
             contentEncoding = contentEncoding,
             limit = limit,
         )
+    }
+
+    /** A request body read for mock matching: its text (null = unknown) and the copy the request carries on. */
+    private class HeldBody(val text: String?, val replacement: RequestBody?)
+
+    /**
+     * Reads the request body for a rule's condition, without breaking the app's request. Only a body OkHttp itself
+     * may write more than once is read: not one-shot, not duplex, not marked unrepeatable, with a known length of at
+     * most [GraphqlMatching.MAX_BODY_BYTES] (multipart bodies, which are never GraphQL JSON, are skipped). Its one
+     * write goes into memory and the request then carries those bytes, so the app's body is still written once.
+     * Anything else is unknown: a rule with a condition does not match and the request goes to the network.
+     */
+    private fun heldBody(request: Request): HeldBody? {
+        val body = request.body ?: return null
+        if (isDuplex(body) || isOneShot(body) || hasUnrepeatableMarker(body)) return null
+        val length = contentLength(body)
+        if (length < 0 || length > GraphqlMatching.MAX_BODY_BYTES) return null
+        val type = body.contentType()
+        if (type?.toString()?.lowercase()?.startsWith("multipart/") == true) return null
+        val sink = CappedSink(GraphqlMatching.MAX_BODY_BYTES, length)
+        try {
+            val buffered = sink.buffer()
+            body.writeTo(buffered)
+            buffered.flush()
+        } catch (_: CapReached) {
+            return HeldBody(null, null) // longer than it said: leave the request alone
+        } catch (_: IOException) {
+            return HeldBody(null, null)
+        }
+        val capture = sink.capture
+        if (capture.total != length) return HeldBody(null, null)
+        val bytes = capture.bytes()
+        // A FormBody stays what it is (in-memory, side-effect free, other interceptors may look for its type).
+        val replacement = if (body is FormBody) null else HeldRequestBody(type, bytes)
+        return HeldBody(StrictUtf8.bodyText(bytes, bytes.size), replacement)
+    }
+
+    private fun isOneShot(body: RequestBody): Boolean = try {
+        body.isOneShot()
+    } catch (_: LinkageError) {
+        false // OkHttp < 3.14: unrepeatable bodies carry the marker interface instead
+    }
+
+    /** The bytes of a body read for mock matching, sent in its place (same type and length). */
+    private class HeldRequestBody(private val type: MediaType?, private val bytes: ByteArray) : RequestBody() {
+        override fun contentType(): MediaType? = type
+
+        override fun contentLength(): Long = bytes.size.toLong()
+
+        override fun writeTo(sink: BufferedSink) {
+            sink.write(bytes)
+        }
     }
 
     /** OkHttp < 3.14 marks bodies it must not retry with this interface; a wrapper would hide it. */

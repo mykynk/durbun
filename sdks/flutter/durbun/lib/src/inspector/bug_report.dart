@@ -399,12 +399,17 @@ List<String> _moment(BugReportInput input, InspectorStrings t, ShareMasker m, {r
           maskText: true,
           masker: m,
         )
-      : shareReportLines(
-          _withOffset(shareInputForCall(call!), input.utcOffsetMinutes),
-          ShareOptions(mask: input.mask, curl: curl),
-          t,
-          m,
-        ).join('\n').trimRight();
+      : <String>[
+          ...shareReportLines(
+            _withOffset(shareInputForCall(call!), input.utcOffsetMinutes),
+            ShareOptions(mask: input.mask, curl: curl),
+            t,
+            m,
+          ),
+          // The attached file carries a connection's messages; the share
+          // text stays short.
+          if (curl) ...streamExportLines(call, m, t, bodies: true),
+        ].join('\n').trimRight();
   return <String>['## ${t.bugMdTheMoment}', '', text, ''];
 }
 
@@ -509,7 +514,10 @@ Iterable<String> bugReportFile(BugReportInput input, InspectorStrings t) sync* {
     final call = c.failed[i];
     final method = (call.method.isEmpty ? 'GET' : call.method).toUpperCase();
     final path = call.uri?.path ?? '';
-    final lines = shareReportLines(_withOffset(shareInputForCall(call, peek: true), off), options, t, m);
+    final lines = <String>[
+      ...shareReportLines(_withOffset(shareInputForCall(call, peek: true), off), options, t, m),
+      ...streamExportLines(call, m, t, bodies: true),
+    ];
     yield '### ${i + 1}. $method ${path.isEmpty ? '/' : path}\n\n${lines.join('\n').trimRight()}\n\n';
   }
   yield '_${input.mask ? t.bugMdMasked : t.bugMdRaw}_\n';

@@ -537,6 +537,84 @@ void main() {
       expect(origin.hits['/avatar/42.png'], isNull);
     });
 
+    test('a rule limited to a GraphQL operation decides once the body is written', () async {
+      final gql = rule('gql-user', '/echo', {
+        'type': 'respond',
+        'status': 200,
+        'body': '{"mocked":"GetUser"}',
+      }, method: 'POST')
+        ..['when'] = {
+          'graphql': {'operationName': 'GetUser'},
+        };
+      await setMocks([gql]);
+      final hitsBefore = origin.hits['/echo'] ?? 0;
+
+      // package:http (IOClient): headers, then the body through addStream, then close.
+      final mocked = await http.post(
+        Uri.parse('${origin.base}/echo?op=GetUser'),
+        headers: {'content-type': 'application/json'},
+        body: '{"operationName":"GetUser","query":"query GetUser { me { id } }"}',
+      );
+      expect(mocked.body, '{"mocked":"GetUser"}');
+      expect(origin.hits['/echo'] ?? 0, hitsBefore, reason: 'never reached the network');
+      final (_, mockedEnd) = await net('/echo?op=GetUser');
+      expect(mockedEnd['mocked'], isTrue);
+      expect(mockedEnd['mockRuleId'], 'gql-user');
+
+      // Another operation goes to the network with its headers and body intact.
+      final c = HttpClient();
+      final req = await c.postUrl(Uri.parse('${origin.base}/echo?op=GetFeed'));
+      req.headers.contentType = ContentType.json;
+      req.headers.set('X-Trace', 'abc');
+      req.headers.removeAll(HttpHeaders.userAgentHeader);
+      req.write('{"query":"query GetFeed { feed { id } }"}');
+      final res = await req.close();
+      final text = await utf8.decoder.bind(res).join();
+      c.close();
+      expect(res.statusCode, 201);
+      expect((jsonDecode(text) as Map)['received'], '{"query":"query GetFeed { feed { id } }"}');
+      expect(origin.lastHeaders['/echo']!['x-trace'], ['abc']);
+      expect(origin.lastHeaders['/echo']!['user-agent'], isNull, reason: 'a removed default stays removed');
+      final (_, realEnd) = await net('/echo?op=GetFeed');
+      expect(realEnd['status'], 201);
+      expect(realEnd['mocked'], isNull);
+    });
+
+    test('a body too large to read goes to the network whole', () async {
+      final gql = rule('gql-big', '/echo', {'type': 'respond', 'status': 200, 'body': 'mocked'}, method: 'POST')
+        ..['when'] = {
+          'graphql': {'operationName': 'Big'},
+        };
+      await setMocks([gql]);
+      final body = '{"operationName":"Big","pad":"${'a' * (200 * 1024)}"}';
+      final c = HttpClient();
+      final req = await c.postUrl(Uri.parse('${origin.base}/echo?op=big'));
+      req.headers.contentType = ContentType.json;
+      // Written in pieces: the decision is made as soon as the bound is passed.
+      for (var i = 0; i < body.length; i += 16 * 1024) {
+        req.write(body.substring(i, i + 16 * 1024 > body.length ? body.length : i + 16 * 1024));
+      }
+      final res = await req.close();
+      final text = await utf8.decoder.bind(res).join();
+      c.close();
+      expect(res.statusCode, 201);
+      expect((jsonDecode(text) as Map)['length'], body.length);
+    });
+
+    test('a GraphQL rule with a fail action fails at close', () async {
+      final gql = rule('gql-fail', '/echo', {'type': 'fail', 'error': 'connection'}, method: 'POST')
+        ..['when'] = {
+          'graphql': {'operationName': 'Down', 'operationType': 'mutation'},
+        };
+      await setMocks([gql]);
+      final c = HttpClient();
+      final req = await c.postUrl(Uri.parse('${origin.base}/echo?op=down'));
+      req.headers.contentType = ContentType('application', 'graphql');
+      req.write('mutation Down { a }');
+      await expectLater(req.close(), throwsA(isA<SocketException>()));
+      c.close();
+    });
+
     test('delay: the real request runs after the delay and is marked mocked', () async {
       await setMocks([rule('slow-down', r'/json\?case=delay$', {'type': 'delay', 'delayMs': 300}, match: 'regex')]);
       final hitsBefore = origin.hits['/json'] ?? 0;

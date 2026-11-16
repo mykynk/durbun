@@ -6,6 +6,7 @@ import 'package:durbun/src/core/body.dart' show wireBodyFromPending;
 import 'package:durbun/src/core/protocol.dart';
 import 'package:durbun/src/inspector/export_file_io.dart';
 import 'package:durbun/src/inspector/session_export.dart';
+import 'package:durbun/src/inspector/share_report.dart' show kExportMessageChars;
 import 'package:durbun/src/inspector/store.dart';
 import 'package:durbun/src/inspector/strings.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -233,6 +234,127 @@ void main() {
       expect(md, startsWith('# Dürbün · Ağ oturumu\n'));
       expect(md, contains('- İstekler: 2 (4 istekten)'));
       expect(md, isNot(contains('İstek gövdesi')));
+    });
+  });
+
+  group('WebSocket and SSE messages', () {
+    Uint8List utf(String s) => Uint8List.fromList(utf8.encode(s));
+
+    /// A chat socket (auth with a token, text, binary, ping, close) and a
+    /// price event stream.
+    DurbunInspectorStore streams({int maxStreamMessages = DurbunInspectorStore.kDefaultStreamMessages, bool endSse = true}) {
+      final s = DurbunInspectorStore(notifyDelay: Duration.zero, maxStreamMessages: maxStreamMessages)..attached = true;
+      s
+        ..ingest(buildNetRequest(id: 'w', ts: 1000, method: 'GET', url: 'https://chat.example.com/socket', headers: const [
+          ['Upgrade', 'websocket'],
+        ]))
+        ..ingest(buildNetResponse(id: 'w', ts: 1050, status: 101, headers: const [
+          ['Upgrade', 'websocket'],
+        ]))
+        ..streamOpened('w', kind: 'ws', ts: 1050);
+      final auth = utf('{"type":"auth","token":"s3cr3t"}');
+      final hello = utf('hello password=hunter2');
+      s
+        ..streamWs('w', 1100, 'out', 'text', auth.length, auth, null, null)
+        ..streamWs('w', 1250, 'in', 'text', hello.length, hello, null, null)
+        ..streamWs('w', 1300, 'in', 'binary', 4, Uint8List.fromList(<int>[0, 1, 2, 255]), null, null)
+        ..streamWs('w', 1400, 'in', 'ping', 0, null, null, null)
+        ..streamWs('w', 2550, 'in', 'close', 5, null, 1000, 'bye')
+        ..ingest(buildNetRequest(id: 'e', ts: 3000, method: 'GET', url: 'https://api.example.com/live', headers: const []))
+        ..ingest(buildNetResponse(id: 'e', ts: 3040, status: 200, headers: const [
+          ['Content-Type', 'text/event-stream'],
+        ]))
+        ..streamOpened('e', kind: 'sse', ts: 3040);
+      final price = utf('{"px":1.5,"apiKey":"k-123"}');
+      s.streamSse('e', 3100, 'price', '7', null, price.length, price);
+      if (endSse) s.streamEnded('e', 3200);
+      return s;
+    }
+
+    test('HAR: _webSocketMessages as browsers write them, masked, with the connection under _durbun', () {
+      final har = _har(streams());
+      final ws = _byUrl(har, 'chat.example.com');
+      expect(ws['_webSocketMessages'], <Map<String, Object?>>[
+        {'type': 'send', 'time': 1.1, 'opcode': 1, 'data': '{"type":"auth","token":"••••"}'},
+        {'type': 'receive', 'time': 1.25, 'opcode': 1, 'data': 'hello password=••••'},
+        {'type': 'receive', 'time': 1.3, 'opcode': 2, 'data': 'AAEC/w=='},
+        {'type': 'receive', 'time': 1.4, 'opcode': 9, 'data': ''},
+        {'type': 'receive', 'time': 2.55, 'opcode': 8, 'data': '1000 bye'},
+      ]);
+      expect(ws.containsKey('_eventSourceMessages'), isFalse);
+      final stream = (ws['_durbun']! as Map)['stream']! as Map;
+      expect(stream, containsPair('kind', 'websocket'));
+      expect(stream, containsPair('state', 'closed'));
+      expect(stream, containsPair('closedBy', 'in'));
+      expect(stream, containsPair('closeCode', 1000));
+      expect(stream, containsPair('count', 5));
+      expect(stream, containsPair('in', 4));
+      expect(stream, containsPair('out', 1));
+      expect(stream, containsPair('control', 1));
+      expect(stream, containsPair('dropped', 0));
+      expect(stream, containsPair('lastSeq', 5));
+
+      final sse = _byUrl(har, 'api.example.com/live');
+      expect(sse['_eventSourceMessages'], <Map<String, Object?>>[
+        {'time': 3.1, 'eventName': 'price', 'eventId': '7', 'data': '{"px":1.5,"apiKey":"••••"}'},
+      ]);
+      expect(sse.containsKey('_webSocketMessages'), isFalse);
+      expect(((sse['_durbun']! as Map)['stream']! as Map)['kind'], 'sse');
+      expect((har['log']! as Map)['_durbun'], containsPair('maskedValues', greaterThanOrEqualTo(3)));
+    });
+
+    test('HAR: unmasked keeps the values; bodies off keeps the frames without their content', () {
+      final raw = _har(streams(), o: const ExportOptions(format: ExportFormat.har, mask: false));
+      final rawWs = _byUrl(raw, 'chat.example.com')['_webSocketMessages']! as List;
+      expect((rawWs.first as Map)['data'], '{"type":"auth","token":"s3cr3t"}');
+
+      final off = _har(streams(), o: const ExportOptions(format: ExportFormat.har, bodies: false));
+      final ws = _byUrl(off, 'chat.example.com');
+      expect([for (final m in ws['_webSocketMessages']! as List) (m as Map)['data']], <String>['', '', '', '', '1000 bye']);
+      expect((ws['_durbun']! as Map)['bodiesOmitted'], isTrue);
+      final sse = _byUrl(off, 'api.example.com/live')['_eventSourceMessages']! as List;
+      expect((sse.single as Map)['data'], '');
+      expect(jsonEncode(off), isNot(contains('s3cr3t')));
+    });
+
+    test('report: the messages under their request, masked, binary left out', () {
+      final md = sessionMarkdown(streams().calls, const ExportOptions(), InspectorStrings.forLanguage('en'), _ctx).join();
+      expect(md, contains('Messages (WebSocket · closed · 5 messages):'));
+      expect(md, contains('#1 · +50 ms · Sent · text · 32 B\n    {"type":"auth","token":"••••"}'));
+      expect(md, contains('#2 · +200 ms · Received · text · 22 B\n    hello password=••••'));
+      expect(md, contains('#3 · +250 ms · Received · binary · 4 B\n    binary, not included'));
+      expect(md, contains('#4 · +350 ms · Received · ping · 0 B\n#5 · +1.50 s · Received · close · 5 B · 1000 · bye'));
+      expect(md, contains('Events (SSE · closed · 1 message):'));
+      expect(md, contains('#1 · +60 ms · price · id 7 · 27 B\n    {"px":1.5,"apiKey":"••••"}'));
+      expect(md, isNot(contains('s3cr3t')));
+      expect(md, isNot(contains('hunter2')));
+      expect(md, isNot(contains('k-123')));
+      expect(md.indexOf('Messages (WebSocket'), greaterThan(md.indexOf('GET /socket')));
+
+      final off = sessionMarkdown(streams().calls, const ExportOptions(bodies: false), InspectorStrings.forLanguage('tr'), _ctx).join();
+      expect(off, contains('Mesajlar (WebSocket · kapandı · 5 mesaj):'));
+      expect(off, contains('#1 · +50 ms · Gönderildi · text · 32 B\n#2'));
+      expect(off, isNot(contains('auth')));
+    });
+
+    test('report: a gap where the memory limit removed messages; a long text is cut', () {
+      final s = streams(maxStreamMessages: 25, endSse: false);
+      for (var i = 0; i < 30; i++) {
+        final b = utf('m$i');
+        s.streamSse('e', 3300.0 + i, null, null, null, b.length, b);
+      }
+      final long = utf('x' * (kExportMessageChars + 10));
+      s.streamSse('e', 3400, null, null, null, long.length, long);
+      final md = sessionMarkdown(s.calls, const ExportOptions(), InspectorStrings.forLanguage('en'), _ctx).join();
+      expect(md, contains('Events (SSE · open · 32 messages):'));
+      // The kept head (sign-in, subscriptions), the gap, then the newest.
+      expect(RegExp(r'^#\d+ · ', multiLine: true).allMatches(md.substring(md.indexOf('Events (SSE'))), hasLength(25));
+      expect(RegExp(r'#\d+ · [^\n]*\n    m\d+\n… 7 messages removed by the memory limit\n#\d+ · ').hasMatch(md), isTrue);
+      expect(md, contains('    ${'x' * kExportMessageChars}\n    … 10 more characters not shown'));
+      final har = _har(s);
+      final events = _byUrl(har, 'api.example.com/live')['_eventSourceMessages']! as List;
+      expect(events, hasLength(25));
+      expect(((_byUrl(har, 'api.example.com/live')['_durbun']! as Map)['stream']! as Map)['dropped'], 7);
     });
   });
 

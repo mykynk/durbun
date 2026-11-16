@@ -76,7 +76,7 @@ class DurbunDioAdapter implements HttpClientAdapter {
     DurbunMockDecision? mock;
     try {
       if (Durbun.isEnabled && !_leftToOtherLayers(inner)) {
-        mock = DurbunNetwork.findMock(options.method, options.uri);
+        mock = _findMock(options);
         final call = _beginCall(options, mock, source);
         if (call != null) report = _Report(call);
       }
@@ -419,7 +419,7 @@ class DurbunDioInterceptor extends Interceptor {
         handler.next(options);
         return;
       }
-      final mock = DurbunNetwork.findMock(options.method, options.uri);
+      final mock = _findMock(options);
       final call = _beginCall(options, mock, source);
       if (mock == null) {
         if (call != null) options.extra[_callKey] = call;
@@ -620,6 +620,65 @@ DurbunHttpCall? _beginCall(
       source: source,
       mockRuleId: mock?.ruleId,
     );
+  } catch (_) {
+    return null;
+  }
+}
+
+/// The mock rule for a request, with its body for rules limited to a GraphQL
+/// operation (read only when such a rule matches the URL).
+DurbunMockDecision? _findMock(RequestOptions options) => DurbunNetwork.findMock(
+  options.method,
+  options.uri,
+  contentType: _contentTypeOf(options),
+  body: () => _mockBodyText(options.data, _contentTypeOf(options)),
+);
+
+String? _contentTypeOf(RequestOptions options) {
+  final type = options.contentType;
+  if (type != null) return type;
+  for (final entry in options.headers.entries) {
+    if (entry.key.toLowerCase() == 'content-type') return '${entry.value}';
+  }
+  return null;
+}
+
+/// Longest body (UTF-8 bytes) read for mock matching; past it a rule limited
+/// to a GraphQL operation does not match.
+const int _mockBodyMaxBytes = 3 * 64 * 1024;
+
+/// The request body as Dio will send it, as text for mock matching: a
+/// string as is; bytes when they are UTF-8; a map or list as the JSON Dio's
+/// transformer writes (form-urlencoded maps excepted). Null for streams, form
+/// data, other objects and anything over 192 KB: such a request is not
+/// matched by a rule limited to a GraphQL operation.
+String? _mockBodyText(Object? data, String? contentType) {
+  try {
+    if (data == null || data is Stream || data is FormData) return null;
+    if (data is String) return data;
+    List<int>? bytes;
+    if (data is List<int>) {
+      bytes = data;
+    } else if (data is ByteBuffer) {
+      bytes = data.asUint8List();
+    } else if (data is TypedData) {
+      bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    } else if ((data is Map || data is List) &&
+        !(contentType ?? '').contains('x-www-form-urlencoded')) {
+      final sink = _CappedBytes(_mockBodyMaxBytes);
+      try {
+        JsonUtf8Encoder().startChunkedConversion(sink)
+          ..add(data)
+          ..close();
+      } on _BodyLimitReached {
+        return null;
+      }
+      bytes = sink.takeBytes();
+    }
+    if (bytes == null || bytes.length > _mockBodyMaxBytes) return null;
+    // Strict UTF-8 (throws on malformed bytes); one leading BOM is dropped.
+    final bom = bytes.length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+    return utf8.decode(bom ? bytes.sublist(3) : bytes);
   } catch (_) {
     return null;
   }

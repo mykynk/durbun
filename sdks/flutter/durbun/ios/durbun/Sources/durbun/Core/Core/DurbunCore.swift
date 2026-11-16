@@ -3,7 +3,7 @@ import Foundation
 /// What `DurbunURLProtocol` needs on its hot path, read under one lock.
 struct NetworkCapturePolicy {
     var active = false
-    var interceptUploadTasks = true
+    var interceptUploadTasks = false
     var ignoredHosts: [String] = []
     /// Lower-cased header names whose values are replaced before they leave the device.
     var redactedHeaders: Set<String> = []

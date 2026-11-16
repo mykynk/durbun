@@ -13,8 +13,8 @@ import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * The checks in [Durbun.start] before anything starts: Flutter apps leave the native layer to the plugin, and
- * release builds run only when forced.
+ * The checks in [Durbun.start] before anything starts: Flutter apps leave the native layer to the plugin, release
+ * builds run only when forced, and the automatic start ([DurbunInitProvider]) gives way to the app's own calls.
  */
 class StartGuardTest {
     private val starts = AtomicInteger()
@@ -76,10 +76,37 @@ class StartGuardTest {
     }
 
     @Test
-    fun withoutTheManifestEntryNothingStartsByItself() {
+    fun withoutTheManifestEntryDebuggableBuildsStartByThemselves() {
         autoStartEntry = null
-        assertFalse("off by default, as before the entry existed", DurbunInitProvider.AUTO_START_DEFAULT)
+        assertTrue("on by default", DurbunInitProvider.AUTO_START_DEFAULT)
+        Durbun.startAutomatically(FakeContext(debuggable = false))
+        assertFalse("builds that are not debuggable stay off", Durbun.isStarted)
+        assertEquals(0, starts.get())
+
         Durbun.startAutomatically(FakeContext(debuggable = true))
+        assertTrue(Durbun.isStarted)
+        assertEquals(1, starts.get())
+        assertEquals("the default options", DurbunOptions(), Durbun.coreOrNull()?.options)
+    }
+
+    @Test
+    fun withoutTheManifestEntryTheAppsOwnStartStillWins() {
+        autoStartEntry = null
+        start(debuggable = true)
+        Durbun.startAutomatically(FakeContext(debuggable = true))
+        assertEquals("never a second session", 1, starts.get())
+        assertEquals("the app's options", 1, Durbun.coreOrNull()?.options?.port)
+
+        Durbun.installForTesting(null)
+        Durbun.stop()
+        Durbun.startAutomatically(FakeContext(debuggable = true))
+        assertFalse("a stop in Application.onCreate keeps it off", Durbun.isStarted)
+    }
+
+    @Test
+    fun anExplicitTrueDoesNotOverrideTheReleaseGuard() {
+        autoStartEntry = true
+        Durbun.startAutomatically(FakeContext(debuggable = false))
         assertFalse(Durbun.isStarted)
         assertEquals(0, starts.get())
     }

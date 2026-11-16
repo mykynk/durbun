@@ -309,8 +309,23 @@ abstract final class DurbunNetwork {
   );
 
   /// The mock rule from the desktop that applies to [method] [url], if any.
-  static DurbunMockDecision? findMock(String method, Uri url) =>
-      Durbun._backend.findMock(method, url);
+  ///
+  /// Rules can be limited to one GraphQL operation; pass [body] (a function
+  /// returning the request body as text, called at most once and only when
+  /// such a rule matches the URL) and [contentType] so they can match. Return
+  /// null from [body] when the body is not in memory (a stream, a file):
+  /// such a rule then does not match and the request goes to the network.
+  static DurbunMockDecision? findMock(
+    String method,
+    Uri url, {
+    String? contentType,
+    String? Function()? body,
+  }) => Durbun._backend.findMock(
+    method,
+    url,
+    contentType: contentType,
+    body: body,
+  );
 
   /// Reports a request now and returns a handle for its response/error;
   /// null when the SDK is off. Pass [mockRuleId] when a mock was applied,

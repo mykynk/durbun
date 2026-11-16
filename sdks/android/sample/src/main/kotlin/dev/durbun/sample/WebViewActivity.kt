@@ -21,11 +21,13 @@ class WebViewActivity : Activity() {
         webView = WebView(this)
         webView.settings.javaScriptEnabled = true
 
-        // 1. Attach before the first page loads.
+        // 1. Attach before the first page loads. This sample has androidx.webkit, so on a WebView that supports
+        //    document-start scripts the bridge runs before the page's own scripts, in every frame.
         DurbunWebView.attach(webView)
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                // 2. Without androidx.webkit (as in this sample) the bridge is injected here, as the page starts.
+                // 2. Kept for WebViews without document-start scripts (and apps without androidx.webkit): then the
+                //    bridge is injected here, as the page starts. With document-start scripts it does nothing.
                 DurbunWebView.onPageStarted(view)
             }
         }

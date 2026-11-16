@@ -151,7 +151,19 @@ final class DurbunURLProtocol: URLProtocol {
             fail(with: error)
             return
         }
-        let rule = MockRule.first(in: core.mockRules, method: method, url: url, appId: core.appIdentifier)
+        // A rule limited to a GraphQL operation reads the body already buffered above (never a streamed one: a
+        // body too large to buffer is unknown, and such a rule then does not match).
+        let mockRequest = MockRequest(
+            method: method,
+            url: url,
+            appId: core.appIdentifier,
+            contentType: request.value(forHTTPHeaderField: "Content-Type"),
+            body: {
+                guard case let .data(data) = body.forward, data.count <= GraphqlMatching.maxBodyBytes else { return nil }
+                return StrictUTF8.bodyText(data)
+            }
+        )
+        let rule = MockRule.first(in: core.mockRules, request: mockRequest)
         guard let rule else {
             forward(request, body: body.forward)
             return

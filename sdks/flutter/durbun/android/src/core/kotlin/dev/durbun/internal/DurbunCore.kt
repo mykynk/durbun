@@ -621,6 +621,13 @@ internal class DurbunCore(
     fun findMock(method: String, url: String): MockRule? =
         if (options.captureNetwork) MockMatcher.find(mockRules, method, url, env.appId) else null
 
+    /**
+     * The mock rule for a request. [body] gives the body text when the caller can read it without harm; it is called
+     * only when a rule with a condition (a GraphQL operation) matches method / URL / apps, and at most once.
+     */
+    fun findMock(method: String, url: String, contentType: String?, body: () -> String?): MockRule? =
+        if (options.captureNetwork) MockMatcher.find(mockRules, MockRequest(method, url, env.appId, contentType, body)) else null
+
     /* ───────────── crashes ───────────── */
 
     /**

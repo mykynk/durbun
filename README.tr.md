@@ -35,8 +35,9 @@ ve canlı bir pencerede gösterir.
   bağlantısı ya da Server-Sent Events akışı tek satırdır; mesajları uygulamanın gördüğü sırayla altında durur.
 
   ![Dürbün'ün ağ ekranı: durumu, süresi ve cihazıyla yakalanan istekler ve seçili isteğin JSON yanıtı](docs/images/network.tr.webp)
-- **Mock'lar.** Eşleşen isteklere hazır yanıt verme, gecikme ekleme veya hata simüle etme. Kuralları SDK
-  uygulamanın içinde uygular; proxy ya da sertifika gerekmez (bkz. [Mock kuralları](docs/guides/mocks.md)).
+- **Mock'lar.** Eşleşen isteklere hazır yanıt verme, gecikme ekleme veya hata simüle etme. Bir kural tek bir
+  GraphQL işlemini hedefleyebilir. Kuralları SDK uygulamanın içinde uygular; proxy ya da sertifika gerekmez
+  (bkz. [Mock kuralları](docs/guides/mocks.md)).
 - **Performans.** CPU, bellek, heap, FPS ve takılmalar, saniyede istek ve saniyede log.
 
   ![Dürbün'ün bir uygulama için performans ekranı: son bir dakikadaki CPU, bellek, heap, FPS, takılmalar, istekler, loglar ve hatalar](docs/images/performance.tr.webp)

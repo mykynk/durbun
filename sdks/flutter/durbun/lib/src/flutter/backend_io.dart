@@ -552,13 +552,23 @@ class IoDurbunBackend implements DurbunBackend {
   }
 
   @override
-  DurbunMockDecision? findMock(String method, Uri url) {
+  DurbunMockDecision? findMock(
+    String method,
+    Uri url, {
+    String? contentType,
+    String? Function()? body,
+  }) {
     final client = _client;
     if (client == null || client.isDisposed || !client.networkEnabled) {
       return null;
     }
     try {
-      final rule = client.matchMock(method.toUpperCase(), url.removeFragment().toString());
+      final rule = client.matchMockRequest(
+        method.toUpperCase(),
+        url.removeFragment().toString(),
+        contentType: contentType,
+        body: body,
+      );
       return rule == null ? null : mockDecisionFor(rule);
     } catch (_) {
       return null;

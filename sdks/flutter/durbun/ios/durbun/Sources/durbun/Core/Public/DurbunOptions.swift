@@ -24,8 +24,10 @@ public struct DurbunOptions: Sendable {
     public var captureCrashes: Bool
     /// Send CPU, memory and FPS / janky-frame samples while connected. Default true.
     public var collectMetrics: Bool
-    /// Intercept `URLSessionUploadTask`s too. URLProtocol cannot report upload progress, so set this
-    /// to false if your UI relies on `didSendBodyData` while debugging. Default true.
+    /// Intercept `URLSessionUploadTask`s too. Default false: URLProtocol cannot report upload progress, so an
+    /// intercepted upload task never calls `didSendBodyData` and progress bars stop moving. With the default,
+    /// upload tasks run untouched (not shown, not mocked); set true to see and mock them when progress does not
+    /// matter. Data tasks with a body are always intercepted.
     public var interceptUploadTasks: Bool
     /// Hosts that are never captured, e.g. `["analytics.example.com"]`. Subdomains match too.
     public var ignoredHosts: [String]
@@ -59,7 +61,7 @@ public struct DurbunOptions: Sendable {
         captureNetwork: Bool = true,
         captureCrashes: Bool = true,
         collectMetrics: Bool = true,
-        interceptUploadTasks: Bool = true,
+        interceptUploadTasks: Bool = false,
         ignoredHosts: [String] = [],
         redactHeaders: [String] = [],
         maxBufferedMessages: Int = 5000,
@@ -94,7 +96,7 @@ public struct DurbunOptions: Sendable {
         captureNetwork: Bool = true,
         captureCrashes: Bool = true,
         collectMetrics: Bool = true,
-        interceptUploadTasks: Bool = true,
+        interceptUploadTasks: Bool = false,
         ignoredHosts: [String] = [],
         redactHeaders: [String] = [],
         maxBufferedMessages: Int = 5000,

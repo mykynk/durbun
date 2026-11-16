@@ -6,7 +6,10 @@ import Foundation
 ///  - contains / exact / glob: case-insensitive; glob `*` = any run of characters (incl. `/`),
 ///    `?` = exactly one, matched against the WHOLE url;
 ///  - regex: pattern as-is (case-sensitive), searched anywhere in the url; invalid never matches;
-///  - apps: empty/nil = every app, otherwise must contain the app id.
+///  - apps: empty/nil = every app, otherwise must contain the app id;
+///  - conditions (`when`, mock matching v2, see `MockGraphql.swift`): every one must hold; `graphql` = one of the
+///    request's GraphQL operations has that name (and type). An operation that cannot be read (no body held, body
+///    too large, not GraphQL) never matches, and an unknown condition key never matches.
 /// Comparisons work on UTF-16 code units like JavaScript strings do.
 struct MockRule {
     enum Match: Equatable {
@@ -35,10 +38,28 @@ struct MockRule {
     var apps: [String]?
     var action: Action
     var createdAt: Double
+    /// `when`: conditions besides method / URL / apps.
+    var conditions: MockConditions = .none
 
     // MARK: Matching
 
+    /// The reference's `mockRuleMatches`: a rule with conditions is checked without a body (GET URLs only).
     func matches(method requestMethod: String, url requestURL: String, appId: String?) -> Bool {
+        matches(MockRequest(method: requestMethod, url: requestURL, appId: appId))
+    }
+
+    /// The reference's `mockRuleMatchesRequest`.
+    func matches(_ request: MockRequest) -> Bool {
+        guard urlMatches(method: request.method, url: request.url, appId: request.appId) else { return false }
+        return GraphqlMatching.conditionsHold(conditions) { MockRule.operations(of: request) }
+    }
+
+    static func operations(of request: MockRequest) -> [GraphqlOperation]? {
+        GraphqlMatching.operations(method: request.method, url: request.url, contentType: request.contentType, body: request.bodyText())
+    }
+
+    /// Method / URL / apps part of the matcher.
+    func urlMatches(method requestMethod: String, url requestURL: String, appId: String?) -> Bool {
         guard enabled else { return false }
         if let apps, !apps.isEmpty {
             guard let appId, apps.contains(where: { $0.utf16.elementsEqual(appId.utf16) }) else { return false }
@@ -68,7 +89,23 @@ struct MockRule {
 
     /// First enabled matching rule; rules are ordered and the first match wins.
     static func first(in rules: [MockRule], method: String, url: String, appId: String?) -> MockRule? {
-        rules.first { $0.matches(method: method, url: url, appId: appId) }
+        first(in: rules, request: MockRequest(method: method, url: url, appId: appId))
+    }
+
+    /// The reference's `findMockRuleForRequest`: the body is read at most once, and only when a rule with a
+    /// condition matches method / URL / apps.
+    static func first(in rules: [MockRule], request: MockRequest) -> MockRule? {
+        var ops: [GraphqlOperation]??
+        for rule in rules where rule.urlMatches(method: request.method, url: request.url, appId: request.appId) {
+            let holds = GraphqlMatching.conditionsHold(rule.conditions) {
+                if let ops { return ops }
+                let read = operations(of: request)
+                ops = .some(read)
+                return read
+            }
+            if holds { return rule }
+        }
+        return nil
     }
 
     /// Whole-string glob over UTF-16 code units. Equivalent to the reference implementation's
@@ -140,6 +177,7 @@ struct MockRule {
         }
         apps = (json["apps"] as? [Any])?.compactMap { $0 as? String }
         createdAt = JSONRead.double(json["createdAt"]) ?? 0
+        conditions = MockConditions(json: json["when"])
         let delayMs = JSONRead.double(action["delayMs"]).map { max(0, $0) }
         switch actionType {
         case "respond":
@@ -169,7 +207,8 @@ struct MockRule {
         match: Match,
         apps: [String]? = nil,
         action: Action,
-        createdAt: Double = 0
+        createdAt: Double = 0,
+        conditions: MockConditions = .none
     ) {
         self.id = id
         self.enabled = enabled
@@ -180,6 +219,7 @@ struct MockRule {
         self.apps = apps
         self.action = action
         self.createdAt = createdAt
+        self.conditions = conditions
     }
 }
 

@@ -73,6 +73,10 @@ class _MockCard extends StatelessWidget {
     final enabled = rule['enabled'] != false;
     final method = '${rule['method'] ?? '*'}';
     final action = rule['action'] is Map ? rule['action'] as Map : const <String, Object?>{};
+    final when = rule['when'];
+    final graphql = when is Map ? when['graphql'] : null;
+    final operation = graphql is Map && graphql['operationName'] is String ? graphql['operationName'] as String : null;
+    final operationType = graphql is Map && graphql['operationType'] is String ? graphql['operationType'] as String : null;
     final actionText = switch (action['type']) {
       'respond' => t.mockRespond('${action['status'] ?? 200}', action['delayMs'] is num ? (action['delayMs'] as num).toInt() : 0),
       'delay' => t.mockDelay(action['delayMs'] is num ? (action['delayMs'] as num).toInt() : 0),
@@ -111,6 +115,7 @@ class _MockCard extends StatelessWidget {
               runSpacing: 4,
               children: <Widget>[
                 DBadge('${rule['match'] ?? 'contains'}', mono: true),
+                if (operation != null) DBadge(t.mockGraphql(operation, operationType), mono: true, tone: BadgeTone.info),
                 DBadge(actionText, tone: BadgeTone.accent),
                 DBadge(t.mockHits(hits), tone: hits > 0 ? BadgeTone.info : BadgeTone.neutral),
               ],

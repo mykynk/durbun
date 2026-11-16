@@ -101,6 +101,8 @@ All notable changes to Dürbün are listed here. The format follows
 
 ### Changed
 
+- iOS SDK: `interceptUploadTasks` now defaults to `false`, so the app's upload progress callbacks keep working
+  with Dürbün on. Set it to `true` to see upload tasks in Network.
 - Mac app: **Check for Updates…** shows what is new, downloads only after you say yes and asks before it
   restarts. A copy that cannot update itself (a local build, or one opened from the disk image) gets the disk
   image for your Mac. Dürbün asks once whether it may check by itself once a day
@@ -323,8 +325,10 @@ All notable changes to Dürbün are listed here. The format follows
   keeps the app's own event listener working.
 - Android SDK: `redactHeaders` and `ignoredHosts` in `DurbunOptions` apply to every OkHttp client.
 - Android SDK: Appearance (light / dark, Android 12+), Dump view hierarchy and Dump SharedPreferences tools.
-- Android SDK: Dürbün can start without code: add `<meta-data android:name="dev.durbun.autoStart"
-  android:value="true" />` to the app's manifest. Without the entry nothing changes.
+- Android SDK: Dürbün starts without code in debuggable builds: adding the dependency is enough. A
+  `<meta-data android:name="dev.durbun.autoStart" android:value="false" />` entry in the manifest turns that
+  off, `true` asks for it in any build (a release build still needs `forceInRelease`), and an app that calls
+  `Durbun.start(...)` keeps its own options.
 - Android SDK: when no OkHttp client has `DurbunInterceptor`, one line on the desktop says why the network
   list is empty.
 - iOS SDK: `captureBodies`, `maxBodyBytes`, `appName` and `captureOSLog` options.
@@ -395,6 +399,8 @@ All notable changes to Dürbün are listed here. The format follows
   first 20 and the newest messages of a connection (500 in all, 16 KB of each) and says where it dropped
   some. OkHttp, URLSession and background-isolate connections show their messages there while the Mac app
   records them.
+- Flutter in-app panel: the session export, the HAR and the bug report file carry WebSocket and Server-Sent
+  Events messages, masked like any shared message.
 - Flutter in-app panel: **Report a bug** sends what just happened from the phone alone, without the Mac: the
   log lines and failed requests around a crash, an error, a failed request or the moment the panel opened, a
   screenshot of the app as it was before the panel covered it, the device and app facts and your note. The
@@ -422,7 +428,8 @@ All notable changes to Dürbün are listed here. The format follows
   on a GraphQL request fills the operation in; the rule list shows it, and the live tester takes it into
   account. A batched request matches when one of its operations does; a request whose body the app cannot read
   goes to the real server. An app whose SDK cannot match operations is never sent such a rule, and the rule
-  says where it is not active. The React Native / JavaScript SDK matches operations.
+  says where it is not active. Every SDK matches operations: Android, iOS, Flutter (`durbun_dio` included)
+  and React Native / JavaScript.
 - Backups (manual and automatic) carry the flows' version history and the deleted flows. Restoring merges them
   with what this Mac already has, inside the usual limits, and says when older versions were dropped. The backup
   dialog names what is not in the file (screenshots and recordings saved from devices). A flow replaced by a

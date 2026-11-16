@@ -12,6 +12,7 @@ import 'dart:math' as math;
 import 'connection_report.dart';
 import 'env/environment.dart';
 import 'http/http_client.dart';
+import 'http/recorder.dart';
 import 'json_safe.dart';
 import 'mocks.dart';
 import 'options.dart';
@@ -39,7 +40,12 @@ typedef DurbunCommandHandler =
 /// await client.flush(const Duration(seconds: 2));
 /// await client.dispose();
 /// ```
-class DurbunClient implements HttpCaptureHost, StreamCaptureHost, LocalStreamHost {
+class DurbunClient
+    implements
+        HttpCaptureHost,
+        MockRequestMatcher,
+        StreamCaptureHost,
+        LocalStreamHost {
   DurbunClient._({
     required this.options,
     required this.sdkPlatform,
@@ -915,6 +921,30 @@ class DurbunClient implements HttpCaptureHost, StreamCaptureHost, LocalStreamHos
   MockRule? matchMock(String method, String url) {
     if (_mocks.isEmpty) return null;
     return findMockRule(_mocks, method, url, app.id);
+  }
+
+  @override
+  bool mockNeedsBody(String method, String url) =>
+      _mocks.isNotEmpty && mockRuleNeedsBody(_mocks, method, url, app.id);
+
+  @override
+  MockRule? matchMockRequest(
+    String method,
+    String url, {
+    String? contentType,
+    String? Function()? body,
+  }) {
+    if (_mocks.isEmpty) return null;
+    return findMockRuleForRequest(
+      _mocks,
+      MockRequestInput(
+        method: method,
+        url: url,
+        appId: app.id,
+        contentType: contentType,
+        body: body,
+      ),
+    );
   }
 
   /// Requests wait only while a peer has accepted the connection and the

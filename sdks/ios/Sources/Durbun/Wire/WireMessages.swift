@@ -176,6 +176,8 @@ enum WireMessage {
         sdk.set("name", Wire.sdkName)
         sdk.set("version", sdkVersion)
         sdk.set("platform", "ios")
+        // Mock rule conditions this SDK evaluates (the server sends conditional rules only to SDKs listing them).
+        sdk.set("mockMatchers", .array(GraphqlMatching.matchers.map(JSONValue.string)))
         var b = JSONObjectBuilder()
         b.set("type", "hello")
         b.set("protocol", Wire.protocolVersion)

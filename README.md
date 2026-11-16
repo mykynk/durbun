@@ -34,8 +34,9 @@ does in one readable, live window. *Dürbün* is Turkish for binoculars.
   with its messages in the order the app saw them.
 
   ![Dürbün's network view: captured requests with status, timing and device, and the JSON response of the selected request](docs/images/network.webp)
-- **Mocks.** Answer matching requests with a canned response, add latency or simulate a failure. The SDK
-  applies the rules inside the app, so no proxy or certificate is involved (see [Mock rules](docs/guides/mocks.md)).
+- **Mocks.** Answer matching requests with a canned response, add latency or simulate a failure. A rule can
+  target one GraphQL operation. The SDK applies the rules inside the app, so no proxy or certificate is
+  involved (see [Mock rules](docs/guides/mocks.md)).
 - **Performance.** CPU, memory, heap, FPS and jank, requests per second and logs per second.
 
   ![Dürbün's performance view for one app: CPU, memory, heap, FPS, jank, requests, logs and errors over the last minute](docs/images/performance.webp)

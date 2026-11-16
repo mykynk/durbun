@@ -199,8 +199,8 @@ class InspectorStrings {
   String get exportSession => _('Oturumu dışa aktar', 'Export session');
   String get exportSessionHint => _('Rapor ya da HAR dosyası', 'A report or a HAR file');
   String get exportDescription => _(
-    'İstekleri dosya olarak paylaşın: ekibin okuyacağı bir rapor ya da tarayıcı araçlarının açtığı HAR',
-    'Share the requests as a file: a report your team can read, or a HAR that browser tools open',
+    'İstekleri WebSocket ve SSE mesajlarıyla birlikte dosya olarak paylaşın: ekibin okuyacağı bir rapor ya da tarayıcı araçlarının açtığı HAR',
+    'Share the requests, WebSocket and SSE messages included, as a file: a report your team can read, or a HAR that browser tools open',
   );
   String get exportScope => _('İstekler', 'Requests');
   String get exportListed => _('Listedekiler', 'Listed');
@@ -845,6 +845,10 @@ class InspectorStrings {
   String mockDelay(int ms) => _('$ms ms geciktir', 'Delay $ms ms');
   String mockFail(String kind) => _('Hata ver: $kind', 'Fail: $kind');
   String mockHits(int n) => _('$n kez uygulandı', 'applied $n times');
+
+  /// A rule limited to one GraphQL operation; [type] null = any type.
+  String mockGraphql(String name, String? type) =>
+      _('GraphQL: ${type == null ? '' : '$type '}$name', 'GraphQL: ${type == null ? '' : '$type '}$name');
 
   /* performance */
   String get noMetricsTitle => _('Henüz ölçüm yok', 'No samples yet');

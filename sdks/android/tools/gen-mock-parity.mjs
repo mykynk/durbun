@@ -1,9 +1,10 @@
 // Regenerates durbun/src/test/resources/mock-parity.json from the protocol's reference matcher, so the
-// Kotlin MockMatcher is tested against the exact TypeScript semantics.
+// Kotlin MockMatcher is tested against the exact TypeScript semantics, and copies the shared GraphQL vectors
+// (packages/protocol/vectors/mock-graphql.json, mock matching v2) to durbun/src/test/resources/mock-graphql.json.
 //
 // Run from the repository root (uses the pre-installed tsx loader, no downloads):
 //   node --import tsx sdks/android/tools/gen-mock-parity.mjs
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findMockRule, mockRuleMatches } from '../../../packages/protocol/src/index.ts';
@@ -104,3 +105,9 @@ const findCases = [
 
 writeFileSync(out, JSON.stringify({ generatedFrom: 'packages/protocol/src/index.ts', cases, find: { rules: ordered, cases: findCases } }, null, 2) + '\n');
 console.log(`wrote ${cases.length} match cases and ${findCases.length} find cases to ${out}`);
+
+// Mock matching v2: the shared vectors, verbatim (MockGraphqlTest also compares this copy with the original).
+const graphqlSource = join(here, '..', '..', '..', 'packages', 'protocol', 'vectors', 'mock-graphql.json');
+const graphqlOut = join(here, '..', 'durbun', 'src', 'test', 'resources', 'mock-graphql.json');
+writeFileSync(graphqlOut, readFileSync(graphqlSource));
+console.log(`copied ${graphqlSource} to ${graphqlOut}`);

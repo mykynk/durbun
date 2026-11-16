@@ -76,7 +76,12 @@ class _StubBackend implements DurbunBackend {
   bool get captureBodies => false;
 
   @override
-  DurbunMockDecision? findMock(String method, Uri url) => null;
+  DurbunMockDecision? findMock(
+    String method,
+    Uri url, {
+    String? contentType,
+    String? Function()? body,
+  }) => null;
 
   @override
   DurbunHttpCall? beginHttpCall({

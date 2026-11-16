@@ -270,6 +270,63 @@ void main() {
     await setMocks(const []);
   });
 
+  test('a rule limited to a GraphQL operation reads the body Dio will send', () async {
+    await setMocks([
+      {
+        'id': 'mock-get-user',
+        'enabled': true,
+        'method': 'POST',
+        'url': '/users',
+        'match': 'contains',
+        'when': {
+          'graphql': {'operationName': 'GetUser', 'operationType': 'query'},
+        },
+        'action': {'type': 'respond', 'status': 200, 'body': '{"mocked":"GetUser"}'},
+        'createdAt': 1,
+      },
+    ]);
+    for (final dio in [nativeDio(FakeNativeAdapter()), wrappedDio(FakeNativeAdapter())]) {
+      final adapter = (dio.httpClientAdapter is DurbunDioAdapter
+          ? (dio.httpClientAdapter as DurbunDioAdapter).inner
+          : dio.httpClientAdapter) as FakeNativeAdapter;
+      // A map (JSON-encoded by Dio), a string and UTF-8 bytes all name the operation.
+      final asMap = await dio.post<Map<String, dynamic>>(
+        '/users',
+        data: {'operationName': 'GetUser', 'query': 'query GetUser { me { id } }'},
+      );
+      expect(asMap.data, {'mocked': 'GetUser'});
+      final asString = await dio.post<Map<String, dynamic>>(
+        '/users',
+        data: '{"query":"query GetUser { me { id } }"}',
+        options: Options(contentType: 'application/json'),
+      );
+      expect(asString.data, {'mocked': 'GetUser'});
+      final asBytes = await dio.post<Map<String, dynamic>>(
+        '/users',
+        data: Uint8List.fromList(utf8.encode('{"operationName":"GetUser","query":"query GetUser { a }"}')),
+        options: Options(contentType: 'application/json'),
+      );
+      expect(asBytes.data, {'mocked': 'GetUser'});
+      expect(adapter.calls, 0);
+
+      // Another operation, and a body that cannot be read (a stream), go to the adapter.
+      final other = await dio.post<Map<String, dynamic>>(
+        '/users',
+        data: {'query': 'mutation GetUser { a }'},
+      );
+      expect(other.data!['users'], isNotEmpty);
+      final bytes = utf8.encode('{"operationName":"GetUser"}');
+      final streamed = await dio.post<Map<String, dynamic>>(
+        '/users',
+        data: Stream<List<int>>.fromIterable([bytes]),
+        options: Options(contentType: 'application/json', headers: {'content-length': bytes.length}),
+      );
+      expect(streamed.data!['users'], isNotEmpty);
+      expect(adapter.calls, 2);
+    }
+    await setMocks(const []);
+  });
+
   test('Dio with the default dart:io adapter is not reported twice', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) => req.response

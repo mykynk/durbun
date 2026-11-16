@@ -5,8 +5,8 @@ Traffic and output the SDK cannot see, and why.
 ## Network
 
 - **Background URLSessions** (`.background(withIdentifier:)`) run out of process and cannot be intercepted.
-- **Upload progress** of intercepted upload tasks: URLProtocol does not report `didSendBodyData` (see
-  ``DurbunOptions/interceptUploadTasks``).
+- **Upload tasks**, by default: URLProtocol cannot report their `didSendBodyData` progress, so they run untouched
+  unless ``DurbunOptions/interceptUploadTasks`` is `true` (then they are shown and mocked, without progress).
 - **Sessions created before** ``Durbun/start(options:)`` (other than `URLSession.shared`).
 - **WKWebView** traffic does not go through URLSession. Attach ``DurbunWebView`` to see the page's `fetch` and
   `XMLHttpRequest` calls; what the page loads by itself (documents, images, scripts) stays out of reach.

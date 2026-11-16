@@ -1,8 +1,9 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
-// A small app that shows the SDK's whole surface on one screen. It uses nothing but the Android platform and
-// OkHttp: no AndroidX, no extra libraries. Build it with `./gradlew :sample:assembleDebug` (see README.md).
+// A small app that shows the SDK's whole surface on one screen. It uses the Android platform, OkHttp and
+// androidx.webkit (so the web view page shows the document-start path); nothing else. Build it with
+// `./gradlew :sample:assembleDebug` (see README.md).
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -51,4 +52,8 @@ dependencies {
         // The Kotlin standard library comes from the Kotlin plugin.
         exclude(group = "org.jetbrains.kotlin")
     }
+
+    // Lets DurbunWebView add its script at document start (before the page's own scripts, in every frame).
+    // The sample's own dependency: the SDK modules never depend on AndroidX. 1.12.1 is the last release for minSdk 21.
+    implementation("androidx.webkit:webkit:1.12.1")
 }

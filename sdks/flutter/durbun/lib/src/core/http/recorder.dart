@@ -27,3 +27,20 @@ abstract interface class NetworkRecorder {
   /// Queues a `net.*` message.
   void sendNetMessage(Map<String, Object?> message);
 }
+
+/// A [NetworkRecorder] that also evaluates mock rules with conditions on the
+/// request body (a GraphQL operation). Optional, so other implementations of
+/// [NetworkRecorder] keep compiling; without it such rules never match.
+abstract interface class MockRequestMatcher {
+  /// Whether the rule for [method] [url] may depend on the request body.
+  bool mockNeedsBody(String method, String url);
+
+  /// First matching rule for this request. [body] returns the body text when
+  /// it is held (null otherwise); called at most once, only when needed.
+  MockRule? matchMockRequest(
+    String method,
+    String url, {
+    String? contentType,
+    String? Function()? body,
+  });
+}

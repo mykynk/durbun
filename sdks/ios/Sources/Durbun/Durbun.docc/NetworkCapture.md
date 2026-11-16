@@ -13,8 +13,9 @@ by your own session.
   `URLCache`, cookie and credential storage, proxy, TLS limits and network rules.
 - Stream (`httpBodyStream`) and file upload bodies are held in memory only up to the capture limit plus 256 KB;
   larger ones are streamed through and cannot be resent for a 307/308 redirect.
-- URLProtocol cannot report upload progress: set ``DurbunOptions/interceptUploadTasks`` to `false` when your UI
-  relies on `didSendBodyData`.
+- URLProtocol cannot report upload progress, so upload tasks are not intercepted by default and keep calling
+  `didSendBodyData`. Set ``DurbunOptions/interceptUploadTasks`` to `true` to see and mock them when progress does
+  not matter.
 
 ## Mask and skip
 

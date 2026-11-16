@@ -760,6 +760,405 @@
     "url": "https://api.example.com/graphql?operationName=FromUrl"
    },
    "expected": null
+  },
+  {
+   "description": "JSON: single quotes are invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{'operationName': 'Single'}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: unquoted key is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{operationName: \"Unquoted\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: trailing comma is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Trailing\",}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: number with a leading zero is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Zero\", \"n\": 01}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: number ending in a dot is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Dot\", \"n\": 1.}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: number with an empty exponent is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Exp\", \"n\": 1e}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: a plus sign before a number is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Plus\", \"n\": +1}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: a huge exponent is valid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Huge\", \"n\": -1.5E+400}"
+   },
+   "expected": [
+    {
+     "name": "Huge"
+    }
+   ]
+  },
+  {
+   "description": "JSON: a raw tab inside a string is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Tab\tName\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: an unknown escape is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Esc\\x41\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: a short unicode escape is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Esc\\u41\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: escapes in keys and values are decoded",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operation\\u004Eame\": \"Esc\\u0061ped\\/\"}"
+   },
+   "expected": [
+    {
+     "name": "Escaped/"
+    }
+   ]
+  },
+  {
+   "description": "JSON: a lone surrogate escape is valid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Lone\", \"x\": \"\\ud800\"}"
+   },
+   "expected": [
+    {
+     "name": "Lone"
+    }
+   ]
+  },
+  {
+   "description": "JSON: the last duplicate key wins",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"First\", \"operationName\": \"Second\"}"
+   },
+   "expected": [
+    {
+     "name": "Second"
+    }
+   ]
+  },
+  {
+   "description": "JSON: a duplicate key may drop the name",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"First\", \"operationName\": null, \"query\": \"query Doc { a }\"}"
+   },
+   "expected": [
+    {
+     "name": "Doc",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "JSON: trailing data is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Tail\"} x"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: two documents are invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"One\"}{}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: non-ASCII whitespace is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Nbsp\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: misspelled literal is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Lit\", \"x\": nul}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: deep nesting is valid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Deep\", \"x\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"
+   },
+   "expected": [
+    {
+     "name": "Deep"
+    }
+   ]
+  },
+  {
+   "description": "JSON: unterminated deep nesting is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Deep\", \"x\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: non-ASCII operation names are kept",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"İşlemÇ😀\"}"
+   },
+   "expected": [
+    {
+     "name": "İşlemÇ😀"
+    }
+   ]
+  },
+  {
+   "description": "batched array: nested arrays are not payloads",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "[[{\"operationName\": \"Nested\"}], {\"operationName\": \"Flat\"}]"
+   },
+   "expected": [
+    {
+     "name": "Flat"
+    }
+   ]
+  },
+  {
+   "description": "content type is case-insensitive",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "Application/GraphQL",
+    "body": "query Upper { a }"
+   },
+   "expected": [
+    {
+     "name": "Upper",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "keywords are case-sensitive",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/graphql",
+    "body": "Query Upper { a } query Lower { b }"
+   },
+   "expected": [
+    {
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "application/graphql shorthand document",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/graphql",
+    "body": "{ me { id } }"
+   },
+   "expected": [
+    {
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "GET percent-encoded UTF-8",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=%C3%A7ay%F0%9F%98%80"
+   },
+   "expected": [
+    {
+     "name": "çay😀"
+    }
+   ]
+  },
+  {
+   "description": "GET literal non-ASCII characters are kept",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=çay"
+   },
+   "expected": [
+    {
+     "name": "çay"
+    }
+   ]
+  },
+  {
+   "description": "GET overlong UTF-8 is undecodable",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=%C0%80"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET an encoded surrogate is undecodable",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=%ED%A0%80"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET a truncated sequence is undecodable",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=%C3x"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET an undecodable pair elsewhere makes all unknown",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?%ZZ=1&operationName=Fine"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET a name without = is empty",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName&query=query+Later+%7B+a+%7D"
+   },
+   "expected": [
+    {
+     "name": "Later",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "GET empty pairs are skipped",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?&&operationName=Skips&&"
+   },
+   "expected": [
+    {
+     "name": "Skips"
+    }
+   ]
+  },
+  {
+   "description": "GET lowercase percent escapes",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=%c3%a7"
+   },
+   "expected": [
+    {
+     "name": "ç"
+    }
+   ]
   }
  ],
  "matches": [

@@ -94,6 +94,25 @@
   text too. Works without the Mac.
 - The screenshot is the app as it was just before the panel opened, taken
   only while Dürbün runs and dropped when the panel closes.
+- Mock rules limited to one GraphQL operation (`when.graphql`: operation name,
+  optionally `query` / `mutation` / `subscription`) apply on the phone: the
+  operation is read from the JSON body (single or batched), a GraphQL
+  document, or a GET's `query` / `operationName` parameters, as the Mac reads
+  it. A body over 64 K characters, or one that is not UTF-8, never matches
+  such a rule. For dart:io
+  requests to a URL with such a rule, the request is sent once its body is
+  written (nothing changes for other requests). The panel's Mocks list shows
+  the operation on the rule.
+- `DurbunNetwork.findMock` takes the request's `contentType` and `body`, so a
+  custom reporter can apply GraphQL rules too.
+- iOS: upload tasks (`URLSession.uploadTask`) are no longer intercepted by
+  default (the native SDK's new `interceptUploadTasks: false`); they still run
+  untouched.
+- In-app panel: the session export (report and HAR) and the full file of
+  **Report a bug** carry the WebSocket messages and SSE events of the
+  connections in them, masked like the rest. The HAR writes them as
+  `_webSocketMessages` (Chrome DevTools reads them) and
+  `_eventSourceMessages`, as the Mac's HAR does.
 
 ## 0.2.0
 

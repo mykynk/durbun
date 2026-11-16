@@ -96,6 +96,7 @@ final class WireEncodingTests: XCTestCase {
         XCTAssertEqual(sdk?["name"] as? String, "durbun-ios")
         XCTAssertEqual(sdk?["version"] as? String, "0.1.0")
         XCTAssertEqual(sdk?["platform"] as? String, "ios")
+        XCTAssertEqual(sdk?["mockMatchers"] as? [String], ["graphql"])
         XCTAssertEqual((hello["app"] as? [String: Any])?["id"] as? String, "com.mykynk.pati")
         XCTAssertEqual((hello["app"] as? [String: Any])?["pid"] as? Int, 4242)
         XCTAssertEqual((hello["device"] as? [String: Any])?["simulatorUdid"] as? String, device.simulatorUdid)
@@ -387,7 +388,19 @@ final class WireEncodingTests: XCTestCase {
         XCTAssertEqual(tsFields(source, "SdkConfig")?.all, ["captureBodies", "maxBodyBytes", "metricsIntervalMs", "deviceLogsAvailable",
                                                              "captureStreams", "maxStreamMessageBytes"])
         XCTAssertEqual(tsFields(source, "ServerWelcome")?.all, ["type", "protocol", "server", "appId", "config", "mocks"])
-        XCTAssertEqual(tsFields(source, "MockRule")?.all, ["id", "enabled", "name", "method", "url", "match", "apps", "action", "createdAt"])
+        XCTAssertEqual(tsFields(source, "MockRule")?.all, ["id", "enabled", "name", "method", "url", "match", "apps", "action", "createdAt", "when"])
+        XCTAssertEqual(tsFields(source, "MockRuleConditions")?.all, Set(GraphqlMatching.matchers), "conditions this SDK reads")
+        XCTAssertEqual(tsFields(source, "MockGraphqlCondition")?.all, ["operationName", "operationType"])
+        // The hello's sdk object: every field the SDK sends is in the protocol's SdkIdentity.
+        let hello = WireMessage.hello(app: app, device: device, session: "s", actions: [], sdkVersion: "1", ts: 1)
+        guard case let .object(helloFields) = hello, let sdk = helloFields.first(where: { $0.0 == "sdk" })?.1 else {
+            return XCTFail("hello without sdk")
+        }
+        XCTAssertTrue(keys(sdk).isSubset(of: try XCTUnwrap(tsFields(source, "SdkIdentity")?.all)), "SdkIdentity fields")
+        let matcherType = try XCTUnwrap(lines.first { $0.hasPrefix("export type MockMatcher =") })
+        for matcher in GraphqlMatching.matchers {
+            XCTAssertTrue(matcherType.contains("'\(matcher)'"), "matcher \(matcher) is not a MockMatcher")
+        }
         XCTAssertTrue(source.contains("deviceSdkFirst: 9752"), "device listener range")
         XCTAssertTrue(source.contains("deviceSdkLast: 9755"), "device listener range")
         XCTAssertTrue(source.contains("sdk: 9751"), "SDK port")

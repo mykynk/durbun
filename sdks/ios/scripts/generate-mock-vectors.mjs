@@ -1,10 +1,12 @@
 // Generates Tests/DurbunTests/Fixtures/mock-vectors.json from the REFERENCE matcher
 // (`mockRuleMatches` / `findMockRule` in packages/protocol/src/index.ts), so the Swift tests prove
-// parity case by case. Run from anywhere (Node >= 22.18 strips TypeScript types natively):
+// parity case by case, and copies the shared GraphQL vectors (packages/protocol/vectors/mock-graphql.json, mock
+// matching v2) to Tests/DurbunTests/Fixtures/mock-graphql.json. Run from the repository root (the protocol's imports
+// need the pre-installed tsx loader):
 //
-//   node sdks/ios/scripts/generate-mock-vectors.mjs
+//   node --import tsx sdks/ios/scripts/generate-mock-vectors.mjs
 //
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -141,3 +143,9 @@ const target = join(here, '../Tests/DurbunTests/Fixtures/mock-vectors.json');
 writeFileSync(target, JSON.stringify(out) + '\n');
 const positives = cases.filter((c) => c.e).length;
 console.log(`wrote ${cases.length} match cases (${positives} matches) and ${finds.length} first-match cases to ${target}`);
+
+// Mock matching v2: the shared vectors, verbatim (MockGraphqlTests also compares this copy with the original).
+const graphqlSource = join(here, '../../../packages/protocol/vectors/mock-graphql.json');
+const graphqlTarget = join(here, '../Tests/DurbunTests/Fixtures/mock-graphql.json');
+writeFileSync(graphqlTarget, readFileSync(graphqlSource));
+console.log(`copied ${graphqlSource} to ${graphqlTarget}`);

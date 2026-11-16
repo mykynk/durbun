@@ -41,6 +41,8 @@ internal class MockRule(
     /** Package names the rule applies to; empty = every app. */
     val apps: List<String>,
     val action: MockAction,
+    /** `when`: conditions besides method / URL / apps (mock matching v2). */
+    val conditions: MockConditions = MockConditions.NONE,
 ) {
     /** Compiled pattern for `glob` / `regex` rules; `null` when the pattern is invalid (never matches). */
     internal val pattern: Pattern? by lazy(LazyThreadSafetyMode.PUBLICATION) {
@@ -77,6 +79,7 @@ internal class MockRule(
                 match = map.str("match") ?: "contains",
                 apps = apps,
                 action = action,
+                conditions = MockConditions.fromJson(map["when"]),
             )
         }
 
@@ -114,19 +117,33 @@ internal class MockRule(
 }
 
 /**
- * Exact port of `mockRuleMatches` / `findMockRule` from the shared protocol, so every SDK makes the same
- * decision for the same rule:
+ * Exact port of `mockRuleMatches` / `mockRuleMatchesRequest` / `findMockRuleForRequest` from the shared protocol, so
+ * every SDK makes the same decision for the same rule:
  *  - method: `*` matches anything, otherwise case-insensitive equality;
  *  - contains / exact / glob: case-insensitive; glob `*` = any run of characters (including `/`),
  *    `?` = one character, and the WHOLE url must match;
  *  - regex: pattern as-is (case-sensitive), searched anywhere in the url; an invalid pattern never matches;
- *  - apps: empty = every app, otherwise it must contain the app id.
+ *  - apps: empty = every app, otherwise it must contain the app id;
+ *  - conditions (`when`): every one must hold; `graphql` = one of the request's GraphQL operations has that name
+ *    (and type); an operation that cannot be read (no body held, body too large, not GraphQL) never matches, and
+ *    an unknown condition key never matches.
  */
 internal object MockMatcher {
     /** What JavaScript's `.` refuses to match (no `s` flag); `*` / `?` in globs inherit that. */
     private const val JS_DOT = "[^\\n\\r\\u2028\\u2029]"
 
-    fun matches(rule: MockRule, method: String, url: String, appId: String?): Boolean {
+    /** The reference's `mockRuleMatches`: a rule with conditions is checked without a body (GET URLs only). */
+    fun matches(rule: MockRule, method: String, url: String, appId: String?): Boolean =
+        matchesRequest(rule, MockRequest(method, url, appId))
+
+    /** The reference's `mockRuleMatchesRequest`. */
+    fun matchesRequest(rule: MockRule, request: MockRequest): Boolean {
+        if (!urlMatches(rule, request.method, request.url, request.appId)) return false
+        return GraphqlMatching.conditionsHold(rule.conditions) { operationsOf(request) }
+    }
+
+    /** Method / URL / apps part of the matcher. */
+    fun urlMatches(rule: MockRule, method: String, url: String, appId: String?): Boolean {
         if (!rule.enabled) return false
         if (rule.apps.isNotEmpty() && (appId == null || appId !in rule.apps)) return false
         if (rule.method != "*" && rule.method.uppercase() != method.uppercase()) return false
@@ -143,7 +160,44 @@ internal object MockMatcher {
 
     /** First enabled matching rule (rules are ordered; first match wins). */
     fun find(rules: List<MockRule>, method: String, url: String, appId: String?): MockRule? =
-        rules.firstOrNull { matches(it, method, url, appId) }
+        find(rules, MockRequest(method, url, appId))
+
+    /**
+     * The reference's `findMockRuleForRequest`: first matching rule. The body is read at most once, and only when a
+     * rule with a condition matches method / URL / apps.
+     */
+    fun find(rules: List<MockRule>, request: MockRequest): MockRule? {
+        var ops: List<GraphqlOperation>? = null
+        var opsRead = false
+        val lazyOps = {
+            if (!opsRead) {
+                opsRead = true
+                ops = operationsOf(request)
+            }
+            ops
+        }
+        for (rule in rules) {
+            if (!urlMatches(rule, request.method, request.url, request.appId)) continue
+            if (GraphqlMatching.conditionsHold(rule.conditions, lazyOps)) return rule
+        }
+        return null
+    }
+
+    /**
+     * Whether a decision for this method / URL may depend on the body: the first rule matching method / URL / apps
+     * has a condition. Lets a caller read a body only when a rule could use it.
+     */
+    fun needsBody(rules: List<MockRule>, method: String, url: String, appId: String?): Boolean {
+        for (rule in rules) {
+            if (!urlMatches(rule, method, url, appId)) continue
+            if (rule.conditions.usedKeys.isEmpty()) return false
+            if (rule.conditions.graphql != null && rule.conditions.usedKeys.size == 1) return true
+        }
+        return false
+    }
+
+    private fun operationsOf(request: MockRequest): List<GraphqlOperation>? =
+        GraphqlMatching.operationsOf(request.method, request.url, request.contentType, request.bodyText())
 
     /** Glob → anchored regex: literal runs are quoted, `*` → any run, `?` → one character. */
     fun globToPattern(glob: String): Pattern? {

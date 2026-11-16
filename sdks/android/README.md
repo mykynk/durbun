@@ -63,37 +63,47 @@ To try changes that are not released yet, see [Unreleased changes from a clone](
 
 ## Start
 
-In your `Application`:
+Adding the dependency is the whole setup: in a debuggable build, Dürbün starts by itself right after
+`Application.onCreate`, with the default options (USB and emulators need nothing else). Builds that are not
+debuggable stay off.
+
+`start()` never blocks the main thread; all networking and disk work happens on Dürbün's low-priority
+background threads. The SDK never crashes your app: internal errors are swallowed and every queue is bounded.
+
+### Starting from code
+
+Call `Durbun.start` in your `Application` to pass options (a Wi-Fi address, redacted headers, a release build with
+`forceInRelease`):
 
 ```kotlin
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
-        Durbun.start(this)   // nothing else needed for USB and emulators
+        Durbun.start(this, DurbunOptions(host = "192.168.1.20"))
     }
 }
 ```
 
-`start()` never blocks the main thread; all networking and disk work happens on Dürbün's low-priority
-background threads. The SDK never crashes your app: internal errors are swallowed and every queue is bounded.
+- A `Durbun.start(...)` or `Durbun.stop()` in `Application.onCreate` always decides: the automatic start then does
+  nothing (never a second session). A later `Durbun.start` with options (for example from the first `Activity`)
+  restarts the session with them; one without options keeps it.
+- Without options, Wi-Fi addresses come from the
+  [`dev.durbun.host` manifest entry](#giving-the-app-the-macs-address) or `Durbun.setDesktopHost`.
 
-### Start without code (optional)
+### Turning the automatic start off
 
-An app that should not carry any Dürbün call (or has no `Application` class) can let the SDK start itself right
-after `Application.onCreate`, with one line inside `<application>` in its `AndroidManifest.xml`:
+One line inside `<application>` in the app's `AndroidManifest.xml`:
 
 ```xml
-<meta-data android:name="dev.durbun.autoStart" android:value="true" />
+<meta-data android:name="dev.durbun.autoStart" android:value="false" />
 ```
 
-- Without the entry, or with `"false"`, nothing starts by itself.
-- It starts with the default options; over Wi-Fi the Mac's address comes from the
-  [`dev.durbun.host` manifest entry](#giving-the-app-the-macs-address) or `Durbun.setDesktopHost`.
-- A `Durbun.start(...)` or `Durbun.stop()` in `Application.onCreate` still decides. A later `Durbun.start` with
-  options (for example from the first `Activity`) restarts the session with them; one without options keeps it.
-- The entry is read on Dürbün's own thread, like `dev.durbun.host`. It is part of `durbun` only: with
-  `durbun-noop`, nothing starts. It runs in the app's main process; other processes (`android:process=":sync"`)
-  start Dürbün only with `Durbun.start`.
+- With `"false"`, Dürbün starts only when the app calls `Durbun.start`. With `"true"` (or without the entry) it
+  starts by itself; a build that is not debuggable still needs `Durbun.start` with `forceInRelease = true`.
+- The entry is read on Dürbün's own thread, like `dev.durbun.host`. The automatic start is part of `durbun` only:
+  with `durbun-noop`, nothing starts. It runs in the app's main process; other processes
+  (`android:process=":sync"`) start Dürbün only with `Durbun.start`.
+- Until 0.2, nothing started without `Durbun.start` or `android:value="true"`.
 
 ## Connect to the Mac
 
@@ -364,6 +374,13 @@ to every `OkHttpClient` that has `DurbunInterceptor`:
 
 - With `addNetworkInterceptor`, `respond` rules are skipped (see [Network](#network)); delay and failure rules
   still work.
+- A rule can be limited to one GraphQL operation (name, and optionally query / mutation / subscription). The
+  operation is read from a JSON body (`operationName`, else the first operation of `query`; batched arrays too),
+  an `application/graphql` body, or the URL of a GET request. To read a body before deciding, the SDK writes it
+  once into memory and the call then sends that copy, so your body is still written once. That is done only for a
+  body OkHttp may write more than once and whose length is known and at most 192 KB: a one-shot or duplex body, a
+  streamed body of unknown length, a multipart body or a larger one cannot be read, and such a rule then does not
+  match (the call goes to the network, or to the next rule).
 - Hosts in `ignoredHosts` are never mocked.
 - When the connection drops, the mock rules that connection pushed are removed at once; the Mac app sends them
   again when it reconnects.
@@ -399,7 +416,8 @@ Handlers run on the main thread. Built in:
 ### Which builds run Dürbün
 
 - A build with `durbun-noop` contains no Dürbün code, threads or sockets.
-- In a non-debuggable build with `durbun`, `Durbun.start()` does nothing; with `forceInRelease = true` it runs,
+- In a non-debuggable build with `durbun`, `Durbun.start()` and the automatic start do nothing; with
+  `Durbun.start(this, DurbunOptions(forceInRelease = true))` it runs,
   wherever the app was installed from (Firebase, Google Play, other stores, adb). Each project decides which
   builds run Dürbün.
 
@@ -443,9 +461,9 @@ Durbun.start(this, DurbunOptions(forceInRelease = BuildConfig.DURBUN))
   `"prodReleaseImplementation"` for `durbun-noop`, and set `DURBUN` per flavor.
 - The `durbun` module adds the `INTERNET` permission to the builds it is part of. No R8 rules and no cleartext
   settings are needed.
-- Without `forceInRelease`, a non-debuggable build with `durbun` stays off and logs
+- Without `forceInRelease`, a non-debuggable build with `durbun` stays off. A `Durbun.start` call there logs
   `Dürbün is off: this build is not debuggable (set forceInRelease = true to override).` under the `Durbun`
-  tag.
+  tag; the automatic start stays off without a log line.
 - A build with Dürbün on behaves as described in [Connect to the Mac](#connect-to-the-mac), wherever it is
   installed from: over USB the phone needs USB debugging, over Wi-Fi the app needs the Mac's address
   ([without a rebuild](#giving-the-app-the-macs-address) too).
@@ -455,7 +473,7 @@ The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, iOS and 
 ### Safety and security
 
 - The `durbun` module's manifest adds the `INTERNET` permission and a small start-up provider
-  (`exported="false"`; it starts nothing unless `dev.durbun.autoStart` is `true`); with `debugImplementation`
+  (`exported="false"`; it starts Dürbün in debuggable builds unless `dev.durbun.autoStart` is `false`); with `debugImplementation`
   both are merged into debug builds only.
 - Dürbün uses a **plain TCP socket, not HTTP**: no `usesCleartextTraffic` or network security config changes
   are needed.
@@ -571,7 +589,8 @@ after changing the script, run `npm run webview:generate -w @durbun/react-native
 404, slow, failing), a WebSocket through `DurbunWebSocketFactory`, a Server-Sent Events stream, a log line at
 each level, an event, a crash and app tools (`Durbun.addAction`), plus a web view page with `DurbunWebView`. It talks
 to a tiny server it runs itself on 127.0.0.1, so it needs no network. Its debug build uses `durbun`, its release
-build `durbun-noop`.
+build `durbun-noop`. The sample depends on `androidx.webkit` (the SDK does not), so its web view page shows the
+document-start path: the bridge runs before the page's own scripts, in every frame, on WebViews that support it.
 
 ```bash
 cd sdks/android

@@ -66,6 +66,7 @@ void main() {
           'platform': 'flutter',
           // No plugin here: only the Dart layer feeds the session.
           'layers': ['dart'],
+          'mockMatchers': ['graphql'],
         });
         final app = hello['app']! as Map<String, Object?>;
         expect(app['id'], 'com.example.durbun_test');

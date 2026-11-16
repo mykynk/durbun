@@ -9,18 +9,24 @@ import android.os.Looper
 import android.util.Log
 
 /**
- * Starts Dürbün without a line of code, for apps that opt in with one manifest entry inside `<application>`:
+ * Starts Dürbün without a line of code: adding the `durbun` dependency is the whole setup. The artifact's manifest
+ * declares this provider, so it is part of the builds that carry the real SDK (never of `durbun-noop` builds).
+ *
+ * Android creates providers before `Application.onCreate`; this one only posts [Durbun.startAutomatically] to the
+ * main thread, which runs after `Application.onCreate` has returned and reads the app's manifest on a Dürbün thread.
+ * Without an entry, Dürbün starts by itself in debuggable builds ([AUTO_START_DEFAULT]) and stays off in the others.
+ * One entry inside `<application>` decides instead, both ways:
  *
  * ```xml
- * <meta-data android:name="dev.durbun.autoStart" android:value="true" />
+ * <!-- never start by itself (the app may still call Durbun.start) -->
+ * <meta-data android:name="dev.durbun.autoStart" android:value="false" />
  * ```
  *
- * The `durbun` artifact's manifest declares this provider, so it is part of the builds that carry the real SDK.
- * Android creates providers before `Application.onCreate`; this one only posts [Durbun.startAutomatically] to the
- * main thread, which runs after `Application.onCreate` has returned and reads the entry on a Dürbün thread. Without
- * the entry, [AUTO_START_DEFAULT] applies. An app that calls [Durbun.start] (with its own options) or [Durbun.stop]
- * in `Application.onCreate` keeps full control; one that calls [Durbun.start] with options later gets a restart
- * with them.
+ * `true` starts it by itself as well; a build that is not debuggable still needs [DurbunOptions.forceInRelease]
+ * (which only `Durbun.start` can pass), as before. An app that calls [Durbun.start] (with its own options) or
+ * [Durbun.stop] in `Application.onCreate` keeps full control: the automatic start then does nothing. One that calls
+ * [Durbun.start] with options later gets a restart with them (same default options: the session stays, never a
+ * second one). Flutter apps never start this way: `package:durbun` starts the native layer from Dart.
  */
 internal class DurbunInitProvider : ContentProvider() {
     override fun onCreate(): Boolean {
@@ -43,8 +49,11 @@ internal class DurbunInitProvider : ContentProvider() {
         /** `<meta-data>` name inside `<application>`: `true` starts Dürbün without code, `false` never does. */
         const val AUTO_START_META_DATA = "dev.durbun.autoStart"
 
-        /** Without the entry: no automatic start, as in the releases before it existed. */
-        const val AUTO_START_DEFAULT = false
+        /**
+         * Without the entry: start by itself, in debuggable builds only (a build that is not debuggable stays off
+         * silently). Until 0.2 the default was off.
+         */
+        const val AUTO_START_DEFAULT = true
 
         /** The entry's value: a boolean resource or literal, or the text `true` / `false`; null otherwise. */
         fun parseAutoStart(value: Any?): Boolean? = when (value) {

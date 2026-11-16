@@ -308,6 +308,9 @@ Map<String, Object?> buildHello({
       'version': kSdkVersion,
       'platform': platform,
       if (layers != null) 'layers': layers,
+      // Mock rule conditions this SDK evaluates (the server sends conditional
+      // rules only to SDKs listing them).
+      'mockMatchers': kMockMatchers,
     },
     'app': app,
     'device': device,

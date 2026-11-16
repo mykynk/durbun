@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import '../mocks.dart';
+import 'deferred.dart';
 import 'mock.dart';
 import 'recorder.dart';
 import 'request.dart';
@@ -263,12 +264,45 @@ class DurbunHttpClient implements HttpClient {
     Uri uri,
     Future<HttpClientRequest> Function() opener,
   ) {
+    final url = uri.toString();
+    final host = _host;
+    // A rule limited to a GraphQL operation needs the body: the request is
+    // opened once the app has written it (see DeferredHttpClientRequest).
+    try {
+      if (host case final MockRequestMatcher matcher
+          when matcher.mockNeedsBody(method, url)) {
+        return Future<HttpClientRequest>.value(
+          DeferredHttpClientRequest(
+            method: method,
+            uri: uri,
+            client: this,
+            decide: (contentType, body) => matcher.matchMockRequest(
+              method,
+              url,
+              contentType: contentType,
+              body: body,
+            ),
+            open: (rule) => _dispatchRule(method, uri, opener, rule),
+          ),
+        );
+      }
+    } catch (_) {}
     MockRule? rule;
     try {
-      rule = _host.matchMock(method, uri.toString());
+      rule = _host.matchMock(method, url);
     } catch (_) {
       rule = null;
     }
+    return _dispatchRule(method, uri, opener, rule);
+  }
+
+  /// Opens the request [rule] (null: none) leads to.
+  Future<HttpClientRequest> _dispatchRule(
+    String method,
+    Uri uri,
+    Future<HttpClientRequest> Function() opener,
+    MockRule? rule,
+  ) {
     if (rule == null) return _openReal(method, uri, opener, null);
     final action = rule.action;
     if (action.isRespond) {

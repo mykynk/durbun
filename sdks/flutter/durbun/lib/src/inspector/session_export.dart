@@ -3,7 +3,12 @@
 /// share report prints it) or a HAR 1.2 log that browser tools, Charles and
 /// Proxyman open. Secret values are masked by default with the share
 /// report's rules (headers, URL credentials, query and form fields, JSON
-/// string values).
+/// string values). A WebSocket's messages and an event stream's events go
+/// in too: under the request in the report (each text cut at
+/// [kExportMessageChars]), as `_webSocketMessages` / `_eventSourceMessages`
+/// in the HAR, as the desktop's HAR writes them. Only what the panel keeps
+/// is exported (its per-connection and memory limits apply), with the same
+/// masking.
 ///
 /// Both builders are lazy: they yield one piece per request and read each
 /// body only then, without keeping its decoded copy, so a writer can write
@@ -164,7 +169,10 @@ Iterable<String> sessionMarkdown(List<InspectorCall> calls, ExportOptions o, Ins
   final options = ShareOptions(mask: o.mask, bodies: o.bodies, curl: false);
   for (var i = 0; i < calls.length; i++) {
     final c = calls[i];
-    final lines = shareReportLines(shareInputForCall(c, peek: true), options, t, m);
+    final lines = <String>[
+      ...shareReportLines(shareInputForCall(c, peek: true), options, t, m),
+      ...streamExportLines(c, m, t, bodies: o.bodies),
+    ];
     yield '### ${i + 1}. ${_title(c, t)}\n\n${lines.join('\n').trimRight()}\n\n';
   }
   if (m.count > 0) yield '---\n\n${t.reportMasked}\n';
@@ -344,6 +352,8 @@ Map<String, Object?> harEntry(InspectorCall c, ShareMasker m, {required bool bod
     InspectorCallState.done => 'complete',
   };
   final gql = graphqlLabel(c);
+  final s = c.stream;
+  final messages = s?.messages ?? const <InspectorStreamMessage>[];
   return <String, Object?>{
     'startedDateTime': _iso(c.ts),
     'time': _ms3(total),
@@ -367,10 +377,83 @@ Map<String, Object?> harEntry(InspectorCall c, ShareMasker m, {required bool bod
       if (c.bodiesDropped) 'bodiesDropped': true,
       if (reqBody?.truncated == true) 'requestBodyTruncated': true,
       if (resBody?.truncated == true) 'responseBodyTruncated': true,
-      if (!bodies && (c.hasRequestBody || c.hasResponseBody)) 'bodiesOmitted': true,
+      if (!bodies && (c.hasRequestBody || c.hasResponseBody || messages.any((x) => x.hasPayload))) 'bodiesOmitted': true,
+      if (s != null) 'stream': _harStream(s, m),
     },
+    if (s != null && s.kind == StreamKind.webSocket)
+      '_webSocketMessages': <Map<String, Object?>>[for (final msg in messages) _harWebSocketMessage(msg, m, bodies)],
+    if (s != null && s.kind == StreamKind.sse)
+      '_eventSourceMessages': <Map<String, Object?>>[
+        for (final msg in messages)
+          if (msg.type == 'event') _harEventSourceMessage(msg, m, bodies),
+      ],
   };
 }
+
+/* WebSocket messages and SSE events, as the desktop's HAR writes them:
+ * `_webSocketMessages` in the format browsers' developer tools write and
+ * read (type send / receive, time in epoch seconds, opcode 1 text / 2
+ * binary with base64 data / 8 close / 9 ping / 10 pong) and
+ * `_eventSourceMessages` ({time, eventName, eventId, data}). Text is masked
+ * like the single message's share report; without bodies only the frames'
+ * order, times and types go in. */
+
+const Map<String, int> _opcodes = <String, int>{'text': 1, 'binary': 2, 'close': 8, 'ping': 9, 'pong': 10};
+
+double _seconds(double ts) => ts.roundToDouble() / 1000;
+
+/// The connection's state and counts (the desktop's `StreamInfo`).
+Map<String, Object?> _harStream(InspectorStream s, ShareMasker m) {
+  final reason = s.closeReason;
+  return <String, Object?>{
+    'kind': s.kind == StreamKind.sse ? 'sse' : 'websocket',
+    'state': s.state.name,
+    'openTs': s.openTs,
+    if (s.endTs != null) 'closedTs': s.endTs,
+    if (s.closedBy != null) 'closedBy': s.closedBy,
+    if (s.closeCode != null) 'closeCode': s.closeCode,
+    if (reason != null && reason.isNotEmpty) 'closeReason': m.text(reason),
+    if (s.error != null) 'error': m.text(s.error!),
+    'count': s.count,
+    'in': s.received,
+    'out': s.sent,
+    'control': s.control,
+    'bytesIn': s.bytesIn,
+    'bytesOut': s.bytesOut,
+    'dropped': s.dropped,
+    'lastSeq': s.count,
+  };
+}
+
+Map<String, Object?> _harWebSocketMessage(InspectorStreamMessage msg, ShareMasker m, bool bodies) {
+  String data;
+  if (msg.isClose) {
+    final reason = msg.closeReason;
+    data = <String>[
+      if (msg.closeCode != null) '${msg.closeCode}',
+      if (reason != null && reason.isNotEmpty) m.text(reason),
+    ].join(' ');
+  } else if (!bodies || !msg.hasPayload) {
+    data = '';
+  } else if (msg.isText) {
+    data = exportMessageText(msg, m) ?? '';
+  } else {
+    data = msg.body()?.data ?? '';
+  }
+  return <String, Object?>{
+    'type': msg.out ? 'send' : 'receive',
+    'time': _seconds(msg.ts),
+    'opcode': _opcodes[msg.type] ?? 1,
+    'data': data,
+  };
+}
+
+Map<String, Object?> _harEventSourceMessage(InspectorStreamMessage msg, ShareMasker m, bool bodies) => <String, Object?>{
+      'time': _seconds(msg.ts),
+      'eventName': msg.event ?? 'message',
+      'eventId': msg.eventId ?? '',
+      'data': bodies && msg.hasPayload ? exportMessageText(msg, m) ?? '' : '',
+    };
 
 /// The HAR 1.2 log of [calls] (by start time, as HAR viewers expect), one
 /// piece at a time: the log header, each entry, then the closing part with

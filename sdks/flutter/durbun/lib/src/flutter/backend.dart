@@ -98,8 +98,15 @@ abstract class DurbunBackend {
   /// Whether bodies are captured at all (`config.captureBodies`).
   bool get captureBodies;
 
-  /// Mock rule applying to a request made outside dart:io, if any.
-  DurbunMockDecision? findMock(String method, Uri url);
+  /// Mock rule applying to a request made outside dart:io, if any. [body]
+  /// gives the request body as text when the caller holds it (rules limited
+  /// to a GraphQL operation read it); called at most once, only when needed.
+  DurbunMockDecision? findMock(
+    String method,
+    Uri url, {
+    String? contentType,
+    String? Function()? body,
+  });
 
   /// Starts reporting a request made outside dart:io (null when off).
   DurbunHttpCall? beginHttpCall({

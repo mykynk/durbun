@@ -1,0 +1,2234 @@
+{
+ "about": "Mock matching v2 test vectors (GraphQL operation condition), generated from the reference functions in packages/protocol/src/index.ts. Requests: { method, url, appId?, contentType?, body? }; a large body is given as bodyPattern instead: [text, times] pairs, body = each text repeated times, joined in order. Body lengths count UTF-16 code units. operations[].expected is graphqlOperationsOf(request): a list of { name?, type? } or null (unknown). matches[].expected is mockRuleMatchesRequest(rule, request); matchesNoBody is mockRuleMatches(rule, method, url, appId) (the old signature, no body). finds[].expectedId is findMockRuleForRequest(rules, request)?.id.",
+ "regenerate": "node --import tsx packages/protocol/vectors/gen-mock-graphql.mjs",
+ "maxChars": 65536,
+ "operations": [
+  {
+   "description": "operationName wins, type from the named operation",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser($id: ID!) { user(id: $id) { id } }\",\"variables\":{\"id\":\"1\"}}"
+   },
+   "expected": [
+    {
+     "name": "GetUser",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "no operationName: first operation of the document",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"query GetFeed { feed { id } } query Other { x }\"}"
+   },
+   "expected": [
+    {
+     "name": "GetFeed",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "operationName selects among several operations",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"B\",\"query\":\"query A { a } mutation B { b } subscription C { c }\"}"
+   },
+   "expected": [
+    {
+     "name": "B",
+     "type": "mutation"
+    }
+   ]
+  },
+  {
+   "description": "operationName not in the document: name only, type unknown",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"Missing\",\"query\":\"query Present { a }\"}"
+   },
+   "expected": [
+    {
+     "name": "Missing"
+    }
+   ]
+  },
+  {
+   "description": "mutation",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"mutation LikeStory($id: ID!) { likeStory(storyId: $id) { id } }\"}"
+   },
+   "expected": [
+    {
+     "name": "LikeStory",
+     "type": "mutation"
+    }
+   ]
+  },
+  {
+   "description": "subscription",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"subscription OnMessage { messageAdded { id } }\"}"
+   },
+   "expected": [
+    {
+     "name": "OnMessage",
+     "type": "subscription"
+    }
+   ]
+  },
+  {
+   "description": "anonymous shorthand query",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"{ me { id } }\"}"
+   },
+   "expected": [
+    {
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "anonymous query keyword",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"query { me { id } }\"}"
+   },
+   "expected": [
+    {
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "anonymous mutation with variables",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"mutation($id: ID!) { archive(id: $id) }\"}"
+   },
+   "expected": [
+    {
+     "type": "mutation"
+    }
+   ]
+  },
+  {
+   "description": "fragment first, then the operation",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"fragment F on User { id } query WithFragment { me { ...F } }\"}"
+   },
+   "expected": [
+    {
+     "name": "WithFragment",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "comments, strings and block strings are skipped",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"# query Fake { x }\\n\\\"\\\"\\\"block query Fake2 { y }\\\"\\\"\\\" query Real(arg: \\\"query Nope\\\") { z }\"}"
+   },
+   "expected": [
+    {
+     "name": "Real",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "comment between keyword and name",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"query # note\\n  Named { a }\"}"
+   },
+   "expected": [
+    {
+     "name": "Named",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "commas and BOM are insignificant",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"﻿,,query ,, Comma { a }\"}"
+   },
+   "expected": [
+    {
+     "name": "Comma",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "words inside selections are not operations",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"{ query { mutation } } mutation Late { x }\"}"
+   },
+   "expected": [
+    {
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "empty operationName is ignored",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"\",\"query\":\"query Fallback { a }\"}"
+   },
+   "expected": [
+    {
+     "name": "Fallback",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "non-string operationName is ignored",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":7,\"query\":\"query Fallback { a }\"}"
+   },
+   "expected": [
+    {
+     "name": "Fallback",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "persisted query: operationName only",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetPersisted\",\"variables\":{},\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"abc\"}}}"
+   },
+   "expected": [
+    {
+     "name": "GetPersisted"
+    }
+   ]
+  },
+  {
+   "description": "neither query nor operationName",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"variables\":{\"a\":1}}"
+   },
+   "expected": null
+  },
+  {
+   "description": "query that is not a string",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":{\"a\":1}}"
+   },
+   "expected": null
+  },
+  {
+   "description": "document without operations",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"fragment F on User { id }\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "case is kept",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"query getUSER { a }\"}"
+   },
+   "expected": [
+    {
+     "name": "getUSER",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "batched array: one operation per element",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "[{\"operationName\":\"A\",\"query\":\"query A { a }\"},{\"query\":\"mutation B { b }\"},7,{\"variables\":{}}]"
+   },
+   "expected": [
+    {
+     "name": "A",
+     "type": "query"
+    },
+    {
+     "name": "B",
+     "type": "mutation"
+    }
+   ]
+  },
+  {
+   "description": "batched array without operations",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "[1, 2, {\"x\": 1}]"
+   },
+   "expected": null
+  },
+  {
+   "description": "empty array",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "[]"
+   },
+   "expected": null
+  },
+  {
+   "description": "application/graphql body: first operation",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/graphql",
+    "body": "query FromDoc { a } mutation Second { b }"
+   },
+   "expected": [
+    {
+     "name": "FromDoc",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "application/graphql without operations",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/graphql; charset=utf-8",
+    "body": "fragment F on User { id }"
+   },
+   "expected": null
+  },
+  {
+   "description": "application/graphql+json is JSON",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/graphql-response+json",
+    "body": "{\"query\":\"query J { a }\"}"
+   },
+   "expected": [
+    {
+     "name": "J",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "JSON detected by the first character whatever the content type",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"query NoCt { a }\"}"
+   },
+   "expected": [
+    {
+     "name": "NoCt",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "surrounding ASCII whitespace is trimmed",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "\r\n\t {\"query\":\"query Trim { a }\"} \n"
+   },
+   "expected": [
+    {
+     "name": "Trim",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "invalid JSON",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\": \"query Broken { a }\""
+   },
+   "expected": null
+  },
+  {
+   "description": "not JSON, not GraphQL",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/x-www-form-urlencoded",
+    "body": "a=1&query=query%20Form%20%7B%20a%20%7D"
+   },
+   "expected": null
+  },
+  {
+   "description": "whitespace-only body counts as no body (POST)",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "  \n "
+   },
+   "expected": null
+  },
+  {
+   "description": "no body (POST): unknown",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql"
+   },
+   "expected": null
+  },
+  {
+   "description": "empty body string (POST): unknown",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": ""
+   },
+   "expected": null
+  },
+  {
+   "description": "body at the bound",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "bodyPattern": [
+     [
+      "{\"operationName\":\"Big\",\"query\":\"query Big { a }\",\"pad\":\"",
+      1
+     ],
+     [
+      "a",
+      65478
+     ],
+     [
+      "\"}",
+      1
+     ]
+    ]
+   },
+   "expected": [
+    {
+     "name": "Big",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "body one over the bound",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "bodyPattern": [
+     [
+      "{\"operationName\":\"Big\",\"query\":\"query Big { a }\",\"pad\":\"",
+      1
+     ],
+     [
+      "a",
+      65479
+     ],
+     [
+      "\"}",
+      1
+     ]
+    ]
+   },
+   "expected": null
+  },
+  {
+   "description": "multi-byte UTF-8 at the bound (UTF-16 length counts)",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "bodyPattern": [
+     [
+      "{\"operationName\":\"Big\",\"query\":\"query Big { a }\",\"pad\":\"",
+      1
+     ],
+     [
+      "ş",
+      65478
+     ],
+     [
+      "\"}",
+      1
+     ]
+    ]
+   },
+   "expected": [
+    {
+     "name": "Big",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "astral chars (two UTF-16 units each) one over the bound",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "bodyPattern": [
+     [
+      "{\"operationName\":\"Big\",\"query\":\"query Big { a }\",\"pad\":\"",
+      1
+     ],
+     [
+      "😀",
+      32739
+     ],
+     [
+      "a",
+      1
+     ],
+     [
+      "\"}",
+      1
+     ]
+    ]
+   },
+   "expected": null
+  },
+  {
+   "description": "astral chars at the bound (fewer characters than units)",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "bodyPattern": [
+     [
+      "{\"operationName\":\"Big\",\"query\":\"query Big { a }\",\"pad\":\"",
+      1
+     ],
+     [
+      "😀",
+      32739
+     ],
+     [
+      "\"}",
+      1
+     ]
+    ]
+   },
+   "expected": [
+    {
+     "name": "Big",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "trailing spaces push the untrimmed body over the bound",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "bodyPattern": [
+     [
+      "{\"operationName\":\"Big\",\"query\":\"query Big { a }\",\"pad\":\"",
+      1
+     ],
+     [
+      "a",
+      65476
+     ],
+     [
+      "\"}",
+      1
+     ],
+     [
+      " ",
+      3
+     ]
+    ]
+   },
+   "expected": null
+  },
+  {
+   "description": "GET with query and operationName",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=GetUser&query=query%20GetUser%20%7B%20me%20%7B%20id%20%7D%20%7D%20query%20Other%20%7B%20x%20%7D&variables=%7B%7D"
+   },
+   "expected": [
+    {
+     "name": "GetUser",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "GET with query only",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?query=query%20OnlyQuery%20%7B%20a%20%7D"
+   },
+   "expected": [
+    {
+     "name": "OnlyQuery",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "GET with + for spaces",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?query=query+PlusName+%7B+a+%7D"
+   },
+   "expected": [
+    {
+     "name": "PlusName",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "GET %2B stays a plus sign",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=A%2BB"
+   },
+   "expected": [
+    {
+     "name": "A+B"
+    }
+   ]
+  },
+  {
+   "description": "GET persisted query (operationName and extensions)",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=GetPersisted&extensions=%7B%22persistedQuery%22%3A%7B%22version%22%3A1%7D%7D"
+   },
+   "expected": [
+    {
+     "name": "GetPersisted"
+    }
+   ]
+  },
+  {
+   "description": "GET first occurrence wins",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=First&operationName=Second"
+   },
+   "expected": [
+    {
+     "name": "First"
+    }
+   ]
+  },
+  {
+   "description": "GET fragment part is not the query string",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?query=query%20Frag%20%7B%20a%20%7D#operationName=Hash"
+   },
+   "expected": [
+    {
+     "name": "Frag",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "GET lowercase method",
+   "request": {
+    "method": "get",
+    "url": "https://api.example.com/graphql?operationName=Lower"
+   },
+   "expected": [
+    {
+     "name": "Lower"
+    }
+   ]
+  },
+  {
+   "description": "GET undecodable query string",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=Bad%E0%A4%A&x=1"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET without GraphQL parameters",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?page=2"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET without a query string",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET with a body uses the body",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=FromUrl",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"FromBody\"}"
+   },
+   "expected": [
+    {
+     "name": "FromBody"
+    }
+   ]
+  },
+  {
+   "description": "POST does not read URL parameters",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql?operationName=FromUrl"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: single quotes are invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{'operationName': 'Single'}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: unquoted key is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{operationName: \"Unquoted\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: trailing comma is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Trailing\",}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: number with a leading zero is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Zero\", \"n\": 01}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: number ending in a dot is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Dot\", \"n\": 1.}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: number with an empty exponent is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Exp\", \"n\": 1e}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: a plus sign before a number is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Plus\", \"n\": +1}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: a huge exponent is valid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Huge\", \"n\": -1.5E+400}"
+   },
+   "expected": [
+    {
+     "name": "Huge"
+    }
+   ]
+  },
+  {
+   "description": "JSON: a raw tab inside a string is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Tab\tName\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: an unknown escape is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Esc\\x41\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: a short unicode escape is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Esc\\u41\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: escapes in keys and values are decoded",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operation\\u004Eame\": \"Esc\\u0061ped\\/\"}"
+   },
+   "expected": [
+    {
+     "name": "Escaped/"
+    }
+   ]
+  },
+  {
+   "description": "JSON: a lone surrogate escape is valid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Lone\", \"x\": \"\\ud800\"}"
+   },
+   "expected": [
+    {
+     "name": "Lone"
+    }
+   ]
+  },
+  {
+   "description": "JSON: the last duplicate key wins",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"First\", \"operationName\": \"Second\"}"
+   },
+   "expected": [
+    {
+     "name": "Second"
+    }
+   ]
+  },
+  {
+   "description": "JSON: a duplicate key may drop the name",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"First\", \"operationName\": null, \"query\": \"query Doc { a }\"}"
+   },
+   "expected": [
+    {
+     "name": "Doc",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "JSON: trailing data is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Tail\"} x"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: two documents are invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"One\"}{}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: non-ASCII whitespace is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Nbsp\"}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: misspelled literal is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Lit\", \"x\": nul}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: deep nesting is valid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Deep\", \"x\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"
+   },
+   "expected": [
+    {
+     "name": "Deep"
+    }
+   ]
+  },
+  {
+   "description": "JSON: unterminated deep nesting is invalid",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"Deep\", \"x\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[}"
+   },
+   "expected": null
+  },
+  {
+   "description": "JSON: non-ASCII operation names are kept",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"İşlemÇ😀\"}"
+   },
+   "expected": [
+    {
+     "name": "İşlemÇ😀"
+    }
+   ]
+  },
+  {
+   "description": "batched array: nested arrays are not payloads",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "[[{\"operationName\": \"Nested\"}], {\"operationName\": \"Flat\"}]"
+   },
+   "expected": [
+    {
+     "name": "Flat"
+    }
+   ]
+  },
+  {
+   "description": "content type is case-insensitive",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "Application/GraphQL",
+    "body": "query Upper { a }"
+   },
+   "expected": [
+    {
+     "name": "Upper",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "keywords are case-sensitive",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/graphql",
+    "body": "Query Upper { a } query Lower { b }"
+   },
+   "expected": [
+    {
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "application/graphql shorthand document",
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/graphql",
+    "body": "{ me { id } }"
+   },
+   "expected": [
+    {
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "GET percent-encoded UTF-8",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=%C3%A7ay%F0%9F%98%80"
+   },
+   "expected": [
+    {
+     "name": "çay😀"
+    }
+   ]
+  },
+  {
+   "description": "GET literal non-ASCII characters are kept",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=çay"
+   },
+   "expected": [
+    {
+     "name": "çay"
+    }
+   ]
+  },
+  {
+   "description": "GET overlong UTF-8 is undecodable",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=%C0%80"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET an encoded surrogate is undecodable",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=%ED%A0%80"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET a truncated sequence is undecodable",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=%C3x"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET an undecodable pair elsewhere makes all unknown",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?%ZZ=1&operationName=Fine"
+   },
+   "expected": null
+  },
+  {
+   "description": "GET a name without = is empty",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName&query=query+Later+%7B+a+%7D"
+   },
+   "expected": [
+    {
+     "name": "Later",
+     "type": "query"
+    }
+   ]
+  },
+  {
+   "description": "GET empty pairs are skipped",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?&&operationName=Skips&&"
+   },
+   "expected": [
+    {
+     "name": "Skips"
+    }
+   ]
+  },
+  {
+   "description": "GET lowercase percent escapes",
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=%c3%a7"
+   },
+   "expected": [
+    {
+     "name": "ç"
+    }
+   ]
+  }
+ ],
+ "matches": [
+  {
+   "rule": {
+    "id": "g1",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": true,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g2",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser",
+      "operationType": "query"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": true,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g3",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser",
+      "operationType": "mutation"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g4",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "getuser"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g5",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetFeed"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g6",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": true,
+   "matchesNoBody": true
+  },
+  {
+   "rule": {
+    "id": "g7",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {}
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": true,
+   "matchesNoBody": true
+  },
+  {
+   "rule": {
+    "id": "g8",
+    "enabled": false,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g9",
+    "enabled": true,
+    "method": "GET",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g10",
+    "enabled": true,
+    "method": "POST",
+    "url": "/rest",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g11",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    },
+    "apps": [
+     "com.example.app"
+    ]
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}",
+    "appId": "com.example.app"
+   },
+   "expected": true,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g12",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    },
+    "apps": [
+     "com.example.app"
+    ]
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}",
+    "appId": "com.other.app"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g13",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetPersisted"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetPersisted\",\"extensions\":{\"persistedQuery\":{\"version\":1}}}"
+   },
+   "expected": true,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g14",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetPersisted",
+      "operationType": "query"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetPersisted\",\"extensions\":{\"persistedQuery\":{\"version\":1}}}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g15",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "Missing",
+      "operationType": "query"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"Missing\",\"query\":\"query Present { a }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g16",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "B"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "[{\"query\":\"query A { a }\"},{\"query\":\"mutation B { b }\"}]"
+   },
+   "expected": true,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g17",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "B",
+      "operationType": "mutation"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "[{\"query\":\"query A { a }\"},{\"query\":\"mutation B { b }\"}]"
+   },
+   "expected": true,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g18",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "B",
+      "operationType": "query"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "[{\"query\":\"query A { a }\"},{\"query\":\"mutation B { b }\"}]"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g19",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "Anything"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"query\":\"{ me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g20",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g21",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\": \"GetUser\""
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g22",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "Big"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "bodyPattern": [
+     [
+      "{\"operationName\":\"Big\",\"query\":\"query Big { a }\",\"pad\":\"",
+      1
+     ],
+     [
+      "a",
+      65478
+     ],
+     [
+      "\"}",
+      1
+     ]
+    ]
+   },
+   "expected": true,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g23",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "Big"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "bodyPattern": [
+     [
+      "{\"operationName\":\"Big\",\"query\":\"query Big { a }\",\"pad\":\"",
+      1
+     ],
+     [
+      "a",
+      65479
+     ],
+     [
+      "\"}",
+      1
+     ]
+    ]
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g24",
+    "enabled": true,
+    "method": "GET",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    }
+   },
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?operationName=GetUser"
+   },
+   "expected": true,
+   "matchesNoBody": true
+  },
+  {
+   "rule": {
+    "id": "g25",
+    "enabled": true,
+    "method": "*",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    }
+   },
+   "request": {
+    "method": "GET",
+    "url": "https://api.example.com/graphql?query=query%20GetUser%20%7B%20a%20%7D"
+   },
+   "expected": true,
+   "matchesNoBody": true
+  },
+  {
+   "rule": {
+    "id": "g26",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "FromDoc",
+      "operationType": "query"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/graphql",
+    "body": "query FromDoc { a }"
+   },
+   "expected": true,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g27",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {}
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g28",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": ""
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g29",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": 7
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g30",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser",
+      "operationType": "Query"
+     }
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g31",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": "GetUser"
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g32",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "headers": [
+      [
+       "x-test",
+       "1"
+      ]
+     ]
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g33",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     },
+     "headers": [
+      [
+       "x-test",
+       "1"
+      ]
+     ]
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": false,
+   "matchesNoBody": false
+  },
+  {
+   "rule": {
+    "id": "g34",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": null
+    }
+   },
+   "request": {
+    "method": "POST",
+    "url": "https://api.example.com/graphql",
+    "contentType": "application/json; charset=utf-8",
+    "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+   },
+   "expected": true,
+   "matchesNoBody": true
+  }
+ ],
+ "finds": {
+  "rules": [
+   {
+    "id": "g35",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetFeed"
+     }
+    }
+   },
+   {
+    "id": "g36",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser",
+      "operationType": "mutation"
+     }
+    }
+   },
+   {
+    "id": "g37",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0,
+    "when": {
+     "graphql": {
+      "operationName": "GetUser"
+     }
+    }
+   },
+   {
+    "id": "catch-all-graphql",
+    "enabled": true,
+    "method": "POST",
+    "url": "/graphql",
+    "match": "contains",
+    "action": {
+     "type": "respond",
+     "status": 200
+    },
+    "createdAt": 0
+   }
+  ],
+  "cases": [
+   {
+    "request": {
+     "method": "POST",
+     "url": "https://api.example.com/graphql",
+     "contentType": "application/json; charset=utf-8",
+     "body": "{\"operationName\":\"GetUser\",\"query\":\"query GetUser { me { id } }\"}"
+    },
+    "expectedId": "g37"
+   },
+   {
+    "request": {
+     "method": "POST",
+     "url": "https://api.example.com/graphql",
+     "contentType": "application/json; charset=utf-8",
+     "body": "{\"operationName\":\"GetFeed\",\"query\":\"query GetFeed { a }\"}"
+    },
+    "expectedId": "g35"
+   },
+   {
+    "request": {
+     "method": "POST",
+     "url": "https://api.example.com/graphql",
+     "contentType": "application/json; charset=utf-8",
+     "body": "{\"operationName\":\"GetUser\",\"query\":\"mutation GetUser { a }\"}"
+    },
+    "expectedId": "g36"
+   },
+   {
+    "request": {
+     "method": "POST",
+     "url": "https://api.example.com/graphql",
+     "contentType": "application/json; charset=utf-8",
+     "body": "{\"operationName\":\"Other\",\"query\":\"query Other { a }\"}"
+    },
+    "expectedId": "catch-all-graphql"
+   },
+   {
+    "request": {
+     "method": "POST",
+     "url": "https://api.example.com/graphql"
+    },
+    "expectedId": "catch-all-graphql"
+   },
+   {
+    "request": {
+     "method": "GET",
+     "url": "https://api.example.com/rest/users"
+    },
+    "expectedId": null
+   }
+  ]
+ }
+}

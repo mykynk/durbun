@@ -53,7 +53,10 @@ class CoreTransportTest {
         val core = core(desktop)
         val hello = desktop.await("hello")
         assertEquals(1L, hello["protocol"])
-        assertEquals(mapOf("name" to "durbun-android", "version" to Durbun.VERSION, "platform" to "android"), hello["sdk"])
+        assertEquals(
+            mapOf("name" to "durbun-android", "version" to Durbun.VERSION, "platform" to "android", "mockMatchers" to listOf("graphql")),
+            hello["sdk"],
+        )
         val app = hello.objAt("app")
         assertEquals("com.mykynk.pati", app["id"])
         assertEquals("Pati", app["name"])

@@ -31,7 +31,13 @@ internal object Wire {
         linkedMapOf(
             "type" to "hello",
             "protocol" to PROTOCOL_VERSION,
-            "sdk" to linkedMapOf("name" to SDK_NAME, "version" to sdkVersion, "platform" to "android"),
+            "sdk" to linkedMapOf(
+                "name" to SDK_NAME,
+                "version" to sdkVersion,
+                "platform" to "android",
+                // Mock rule conditions this SDK evaluates (the server sends conditional rules only to SDKs listing them).
+                "mockMatchers" to GraphqlMatching.MATCHERS,
+            ),
             "app" to app.filterValues { it != null },
             "device" to device.filterValues { it != null },
             "session" to session,

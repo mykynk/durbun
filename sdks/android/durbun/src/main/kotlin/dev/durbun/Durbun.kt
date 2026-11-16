@@ -26,8 +26,9 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Durbun.event("purchase", mapOf("amount" to 49.9))
  * ```
  *
- * Apps without code can opt in to a start right after `Application.onCreate` with the `dev.durbun.autoStart`
- * manifest entry (see [DurbunInitProvider]). Every method is safe to call from any thread, before or after [start],
+ * Without that call, Dürbün starts by itself right after `Application.onCreate` in debuggable builds, with the
+ * default options; the `dev.durbun.autoStart` manifest entry turns that off (see [DurbunInitProvider]). Calling
+ * [start] or [stop] in `Application.onCreate` always wins. Every method is safe to call from any thread, before or after [start],
  * and never throws. Release builds
  * (not debuggable) stay silent unless [DurbunOptions.forceInRelease] is set; a build that depends on
  * `durbun-noop` instead carries no Dürbün code at all.
@@ -62,8 +63,8 @@ object Durbun {
         desktopHost = null,
         desktopHostSource = null,
         issue = "notStarted",
-        hint = "Dürbün is not running: Durbun.start(context) was not called, or this build is not debuggable " +
-            "(see DurbunOptions.forceInRelease).",
+        hint = "Dürbün is not running: it was not started (Durbun.start, or the automatic start in debuggable builds " +
+            "unless dev.durbun.autoStart is false), or this build is not debuggable (see DurbunOptions.forceInRelease).",
         failedAttempts = 0,
     )
 
@@ -92,26 +93,34 @@ object Durbun {
     /**
      * Posted by [DurbunInitProvider] to run once `Application.onCreate` has returned. Unless the app called [start]
      * or [stop] itself by then, the `dev.durbun.autoStart` manifest entry is read on a Dürbün thread (like
-     * `dev.durbun.host`; [DurbunInitProvider.AUTO_START_DEFAULT] without one) and, when on, Dürbün starts with the
-     * default options.
+     * `dev.durbun.host`) and, when on, Dürbün starts with the default options. Without an entry
+     * ([DurbunInitProvider.AUTO_START_DEFAULT]) it starts in debuggable builds and stays off, without a log line, in
+     * the others; Flutter apps are left to the plugin, silently too.
      */
     internal fun startAutomatically(context: Context) {
         synchronized(lock) { if (appDecided) return }
         autoStartRunner(
             Runnable {
                 try {
+                    if (flutterPluginPresent()) return@Runnable
                     val entry = try {
                         autoStartEntry(context)
                     } catch (t: Throwable) {
                         Log.w(TAG, "Could not read ${DurbunInitProvider.AUTO_START_META_DATA}; using the default.", t)
                         null
                     }
-                    if (entry ?: DurbunInitProvider.AUTO_START_DEFAULT) start(context, DurbunOptions(), automatic = true)
+                    val on = entry ?: (DurbunInitProvider.AUTO_START_DEFAULT && isDebuggable(context))
+                    if (on) start(context, DurbunOptions(), automatic = true)
                 } catch (t: Throwable) {
                     Log.w(TAG, "Dürbün could not start automatically; the app continues without it.", t)
                 }
             },
         )
+    }
+
+    private fun isDebuggable(context: Context): Boolean {
+        val appContext = context.applicationContext ?: context
+        return (appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     }
 
     /** The `dev.durbun.autoStart` manifest entry: true / false, or null when there is none. Tests replace it. */

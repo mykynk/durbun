@@ -599,6 +599,17 @@ lookup", `HandshakeException`, "timed out"; Dio recognizes the latter as
   server.
 - In the in-app panel, Tools → Mocks lists the rules and how many times each was
   applied.
+- A rule can be limited to one GraphQL operation (name, and optionally query /
+  mutation / subscription). The operation is read from a JSON body
+  (`operationName`, else the first operation of `query`; batched arrays too),
+  an `application/graphql` body, or the URL of a GET request. With dart:io
+  (`HttpClient`, `package:http`, Dio's default adapter) such a request is
+  opened once its body is written; with `DurbunDioAdapter` /
+  `DurbunDioInterceptor` the body is Dio's `data` (a string, bytes or a
+  JSON map/list). A body that cannot be read (a stream, `FormData`, more than
+  192 KB, not UTF-8) never matches such a rule: the request goes to the
+  network, or to the next rule. Other HTTP stacks pass the body to
+  `DurbunNetwork.findMock(..., body: ...)`.
 
 ## Tools
 
@@ -741,7 +752,12 @@ Device & SDK, Export session, Previous run and Clear:
   (`durbun-export`) and sent as a file through the system share sheet. Exports
   older than a day are deleted on the next export. If the share sheet cannot be
   opened, an export smaller than 512 KB is copied to the clipboard.
-  WebSocket and event stream messages are not part of an export.
+  WebSocket messages and event stream events kept on the phone go in under
+  their request, masked the same way: in the report each text is cut at 2,000
+  characters, and the HAR writes them as `_webSocketMessages` (Chrome DevTools
+  shows them) and `_eventSourceMessages`, like the Mac's HAR. With bodies off
+  only their order, times, types and sizes go in. The full file of
+  **Report a bug** carries them too.
 - **Previous run** (opt-in, off by default; while off, Tools lists it as *Off*
   and shows what it does and the line to add): with
   `DurbunInspector(keepPreviousRun: true, child: child!)`, requests (headers and

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:durbun/durbun.dart';
@@ -415,6 +416,39 @@ void main() {
       expect(file, contains('x' * 400));
       expect(file, contains('    second line'));
     });
+  });
+
+  test('a WebSocket as the moment: its messages go into the file, masked; the share text stays short', () {
+    final s = DurbunInspectorStore(notifyDelay: Duration.zero)..attached = true;
+    s
+      ..ingest(buildNetRequest(id: 'w', ts: 1000, method: 'GET', url: 'https://chat.pati.app/socket', headers: const <List<String>>[
+        <String>['Upgrade', 'websocket'],
+      ]))
+      ..ingest(buildNetResponse(id: 'w', ts: 1050, status: 101, headers: const <List<String>>[
+        <String>['Upgrade', 'websocket'],
+      ]))
+      ..streamOpened('w', kind: 'ws', ts: 1050);
+    final auth = Uint8List.fromList(utf8.encode('{"type":"auth","token":"s3cr3t"}'));
+    s
+      ..streamWs('w', 1100, 'out', 'text', auth.length, auth, null, null)
+      ..streamEnded('w', 1500, error: 'SocketException: Connection reset by peer');
+    final call = s.callByKey('d:w')!;
+    final w = bugWindow(1000, 60);
+    final input = BugReportInput(
+        note: '',
+        anchor: BugAnchor.request(call),
+        momentMs: 1000,
+        window: w,
+        contents: collectBugContents(s, w, anchor: BugAnchor.request(call)),
+        mask: true,
+        utcOffsetMinutes: 0);
+    final file = bugReportFile(input, _en).join();
+    expect(file, contains('Messages (WebSocket · broke · 1 message):'));
+    expect(file, contains('#1 · +50 ms · Sent · text · 32 B\n    {"type":"auth","token":"••••"}'));
+    expect(file, isNot(contains('s3cr3t')));
+    final text = buildBugReportText(input, _en);
+    expect(text, isNot(contains('Messages (WebSocket')));
+    expect(text, isNot(contains('s3cr3t')));
   });
 
   group('report text', () {

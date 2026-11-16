@@ -17,7 +17,7 @@ Every option has a default, so `Durbun.start()` is enough in the Simulator and o
 | ``DurbunOptions/captureNetwork`` | `true` | Capture URLSession traffic and apply mock rules |
 | ``DurbunOptions/captureCrashes`` | `true` | Crash reports and MetricKit diagnostics |
 | ``DurbunOptions/collectMetrics`` | `true` | CPU, memory and FPS samples, and the launch time |
-| ``DurbunOptions/interceptUploadTasks`` | `true` | Intercept upload tasks; `false` keeps `didSendBodyData` progress |
+| ``DurbunOptions/interceptUploadTasks`` | `false` | Also intercept upload tasks (shown and mocked, but `didSendBodyData` progress stops); `false` leaves them untouched |
 | ``DurbunOptions/ignoredHosts`` | `[]` | Hosts never captured (subdomains included) |
 | ``DurbunOptions/redactHeaders`` | `[]` | Header names masked as `••••` |
 | ``DurbunOptions/captureBodies`` | `nil` | Overrides the Mac app's setting (`false` records sizes only) |

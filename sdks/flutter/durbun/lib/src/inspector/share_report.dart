@@ -816,3 +816,78 @@ String buildStreamMessageReport(
   if (m.count > 0) out.add(t.reportMasked);
   return out.join('\n').trimRight();
 }
+
+/// A message's text is cut here in a Markdown export or a bug report's
+/// file (the HAR carries every kept byte).
+const int kExportMessageChars = 2000;
+
+/// The kept text of [message] masked by [m] as the single message's share
+/// report masks it (JSON by key, other text by what looks secret); null
+/// for bytes or no payload.
+String? exportMessageText(InspectorStreamMessage message, ShareMasker m) {
+  final text = message.text();
+  if (text == null || text.isEmpty) return null;
+  return looksJson('', text) ? m.body(text, 'application/json', true) : m.text(text);
+}
+
+/// The messages of the connection [call] opened (a WebSocket, an event
+/// stream) for a Markdown export: a title with the state and the count,
+/// then every kept message (order, time since open, direction, type, size)
+/// with its text when [bodies], each cut at [kExportMessageChars]. A gap
+/// says how many messages the panel's memory limits removed there. Empty
+/// for any other request.
+List<String> streamExportLines(InspectorCall call, ShareMasker m, InspectorStrings t, {required bool bodies}) {
+  final s = call.stream;
+  if (s == null) return const <String>[];
+  final sse = s.kind == StreamKind.sse;
+  final title = t.streamChipTitle(sse ? 'SSE' : 'WebSocket', t.streamState(s.state.name), s.count);
+  final out = <String>['${sse ? t.eventsTab : t.messagesTab} ($title):'];
+  final messages = s.messages;
+  if (messages.isEmpty) {
+    return <String>[...out, if (s.dropped > 0) t.allDroppedTitle, ''];
+  }
+  final lines = <String>[];
+  var previous = 0;
+  for (final msg in messages) {
+    final gap = msg.seq - previous - 1;
+    if (gap > 0) lines.add('… ${t.streamGap(gap)}');
+    previous = msg.seq;
+    final since = msg.ts - s.openTs;
+    final reason = msg.closeReason;
+    lines.add(<String>[
+      '#${msg.seq}',
+      '+${shareDuration(since < 0 ? 0 : since)}',
+      if (!sse) t.streamDirName(msg.out),
+      sse ? (msg.event ?? 'message') : msg.type,
+      if (msg.eventId != null) 'id ${msg.eventId}',
+      shareBytes(msg.size),
+      if (msg.closeCode != null) '${msg.closeCode}',
+      if (reason != null && reason.isNotEmpty) m.text(reason),
+    ].join(' · '));
+    if (!bodies || msg.isClose || msg.isControl) continue;
+    if (!msg.hasPayload) {
+      if (msg.size > 0) lines.add('    ${t.body}: ${t.reportNotCaptured}');
+      continue;
+    }
+    if (!msg.isText) {
+      lines.add('    ${t.reportBinary}');
+      continue;
+    }
+    var text = exportMessageText(msg, m) ?? '';
+    var rest = 0;
+    if (text.length > kExportMessageChars) {
+      var cut = kExportMessageChars;
+      final code = text.codeUnitAt(cut - 1);
+      if (code >= 0xd800 && code <= 0xdbff) cut--;
+      rest = text.length - cut;
+      text = text.substring(0, cut);
+    }
+    for (final line in text.split('\n')) {
+      lines.add('    ${line.trimRight()}');
+    }
+    if (rest > 0) lines.add('    ${t.reportMore(rest)}');
+    if (msg.truncated) lines.add('    ${t.reportCaptured(shareBytes(msg.keptBytes), shareBytes(msg.size))}');
+  }
+  _fenced(out, '', lines.join('\n'));
+  return out;
+}

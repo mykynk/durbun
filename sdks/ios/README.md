@@ -152,8 +152,10 @@ requests are forwarded untouched (tee); timeouts and certificate validation (pin
 own session.
 
 - **Background URLSessions** (`.background(withIdentifier:)`) run out of process and cannot be intercepted.
-- URLProtocol cannot report **upload progress**: `didSendBodyData` is not called for intercepted upload tasks
-  (use `interceptUploadTasks: false` if your UI depends on it).
+- URLProtocol cannot report **upload progress**: `didSendBodyData` is not called for intercepted upload tasks.
+  So upload tasks (`uploadTask(with:from:)`, `uploadTask(with:fromFile:)`) are left alone by default: they work
+  as without Dürbün but are not shown or mocked. `interceptUploadTasks: true` captures them too, when your UI does
+  not depend on upload progress. Data tasks with a body (`httpBody`, `httpBodyStream`) are always captured.
 - An intercepted request is performed with a copy of the configuration of the session that started it: the same
   `URLCache` (or none), cookie and credential storage, proxy, TLS limits, `waitsForConnectivity`,
   cellular / expensive / constrained network rules and connection limits. This holds for sessions created after
@@ -302,6 +304,13 @@ TypeScript reference. Mocked requests are marked `mocked` in the Mac app.
 
 - `regex` mock rules use NSRegularExpression (ICU). For typical URL patterns it behaves the same as
   JavaScript; only exotic JavaScript-specific syntax may differ.
+- A rule can be limited to one GraphQL operation (name, and optionally query / mutation / subscription). The
+  operation is read from a JSON body (`operationName`, else the first operation of `query`; batched arrays too),
+  an `application/graphql` body, or the URL of a GET request; the shared test vectors of the protocol package
+  check it. The body is the one the SDK already buffers for capture: a body too large to buffer (a long
+  `httpBodyStream` or file upload), one over 192 KB, or one that is not UTF-8 cannot be read, and such a rule then
+  does not match (the request goes to the network, or to the next rule). Upload tasks are not intercepted by
+  default, so they are not mocked either (see `interceptUploadTasks`).
 - When the connection drops, the mock rules that connection pushed are removed at once; the Mac app sends them
   again when it reconnects.
 
@@ -412,7 +421,7 @@ The [test builds guide](../../docs/guides/qa-builds.md) covers Flutter, Android 
 | `captureNetwork` | `true` | Capture URLSession traffic and apply mocks |
 | `captureCrashes` | `true` | Exception and signal (crash) reports, and MetricKit diagnostics of earlier launches |
 | `collectMetrics` | `true` | CPU / memory / FPS samples (only while connected) and the launch time |
-| `interceptUploadTasks` | `true` | Intercept upload tasks; with `false`, `didSendBodyData` progress callbacks are preserved |
+| `interceptUploadTasks` | `false` | Also intercept upload tasks (shown and mocked, but `didSendBodyData` progress callbacks stop); with `false` they run untouched |
 | `ignoredHosts` | `[]` | Domains that are never captured (subdomains included) |
 | `redactHeaders` | `[]` | Header names (case-insensitive) masked as `••••`, e.g. `["Authorization", "Cookie"]`; the real request is unchanged |
 | `captureBodies` | `nil` | Overrides the Mac app's setting (`false` records sizes only) |

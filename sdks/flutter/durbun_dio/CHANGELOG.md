@@ -10,6 +10,9 @@
 - Server-Sent Events read with `ResponseType.stream` through `DurbunDioAdapter` or `DurbunDioInterceptor` show
   each event under the request while the Mac app asks for them; a stream your code stops reading shows as
   cancelled. Needs the `durbun` release that ships with this one.
+- Mock rules limited to one GraphQL operation match on the body Dio sends (a `Map` / `List` encoded as JSON, a
+  `String`, bytes). A `FormData` or `Stream` body never matches such a rule. Needs the `durbun` release that
+  ships with this one.
 
 ## 0.2.0
 
