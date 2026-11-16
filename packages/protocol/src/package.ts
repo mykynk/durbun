@@ -8,7 +8,7 @@
  * There is no cloud: a package is a file the user moves (AirDrop, Slack, a synced folder).
  */
 import type { MockRule, ServerSettings } from './index';
-import type { FlowDoc, FlowEnvironments, FlowRun } from './flows/types';
+import type { FlowDoc, FlowEnvironments, FlowRun, FlowVersionReason } from './flows/types';
 
 export const PACKAGE_FORMAT = 'durbun-package';
 export const PACKAGE_VERSION = 1;
@@ -28,6 +28,35 @@ export interface PackageRun {
   files?: PackageRunFile[];
 }
 
+/** One earlier version of a flow (backups only). `id` is the version's own id: the identity a restore merges by. */
+export interface PackageFlowVersion {
+  id: string;
+  /** When a newer save replaced this content. */
+  recordedAt: number;
+  reason: FlowVersionReason;
+  flow: FlowDoc;
+}
+
+/** A deleted flow kept in the trash, with its versions (backups only). */
+export interface PackageTrashedFlow {
+  trashId: string;
+  deletedAt: number;
+  flow: FlowDoc;
+  versions?: PackageFlowVersion[];
+}
+
+/**
+ * The flows' version history and the deleted flows (backups only; a share carries flows, not their past). Secret
+ * input defaults inside are held back like the flows' own (`secrets.history`). A Dürbün that does not know this part
+ * ignores it.
+ */
+export interface PackageFlowHistory {
+  /** flow id → its versions, newest first. */
+  versions?: Record<string, PackageFlowVersion[]>;
+  /** Newest first. */
+  trash?: PackageTrashedFlow[];
+}
+
 export interface DurbunPackageContents {
   flows?: FlowDoc[];
   mocks?: MockRule[];
@@ -45,6 +74,7 @@ export interface DurbunPackageContents {
    * keeps it only in `secrets.inputs`).
    */
   secretInputs?: Record<string, string[]>;
+  history?: PackageFlowHistory;
 }
 
 /** What the passphrase protects. */
@@ -54,6 +84,11 @@ export interface PackageSecrets {
   slackWebhook?: string;
   /** flow id → secret input name → its default value */
   inputs?: Record<string, Record<string, string | number | boolean>>;
+  /**
+   * Secret input defaults inside `contents.history`: `<flowId>/<versionId>`, `trash/<trashId>` or
+   * `trash/<trashId>/<versionId>` → input name → its default value.
+   */
+  history?: Record<string, Record<string, string | number | boolean>>;
 }
 
 export interface EncryptedBlob {
@@ -119,6 +154,8 @@ export interface PackageExportRequest {
     slack?: boolean;
     /** true = every run; ids = those runs (with their screenshots and recordings). */
     runs?: boolean | string[];
+    /** The exported flows' versions and the deleted flows (backup only; a share ignores it). */
+    history?: boolean;
   };
   /** Encrypts secrets into the package (backup only). Without it secrets stay out. */
   passphrase?: string;
@@ -151,6 +188,8 @@ export interface PackageManifest {
   uiPrefs: boolean;
   slack: boolean;
   runs: number;
+  /** The package carries version history (a backup): flows with versions, versions in all, deleted flows. */
+  history?: { flows: number; versions: number; trash: number };
   hasSecrets: boolean;
   /** Problems found while reading (invalid flows are listed with their issues). */
   warnings: { code: string; message: string; params?: Record<string, string | number> }[];
@@ -175,6 +214,8 @@ export interface PackageImportRequest {
     uiPrefs?: boolean;
     slack?: boolean;
     runs?: boolean;
+    /** Versions of the flows that come in (or are already here unchanged) and the deleted flows. */
+    history?: boolean;
   };
   /** Same id already here. */
   conflict: PackageConflict;
@@ -199,6 +240,11 @@ export interface PackageImportResult {
   automationOff?: number;
   /** Secret values that are empty here after the import. */
   emptySecrets?: PackageEmptySecret[];
+  /**
+   * Version history merged in: versions and deleted flows added (the ones already here are not counted), and how
+   * many old versions or deleted flows the history limits left out (see `package.history.trimmed`).
+   */
+  history?: { versions: number; trash: number; trimmed: number };
 }
 
 export interface BackupSettings {

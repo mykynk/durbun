@@ -10,7 +10,8 @@
  * CHECKPOINT_MS (a long session gets checkpoints), when the save overwrote without checking the copy it was based on
  * (no `baseUpdatedAt`: "save mine", a package or import replace) and when it is a restore. A flow keeps MAX_VERSIONS
  * within MAX_VERSION_BYTES; deleted flows stay TRASH_DAYS (at most MAX_TRASH of them). Both folders start with a dot:
- * the flow loader and the backups skip them on purpose (a backup restores flows, not their history).
+ * the flow loader skips them. Machine backups carry them as their own part (`exportVersions` / `exportTrash`) and a
+ * restore merges them in (`mergeVersions` / `mergeTrash`, semantics there); shared packages never do.
  */
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
@@ -51,6 +52,31 @@ interface TrashFile {
   deletedAt: number;
   flow: FlowDoc;
 }
+
+/** A version as a backup carries it (the file's content plus its id). */
+export interface HistoryEntry {
+  id: string;
+  recordedAt: number;
+  reason: FlowVersionReason;
+  flow: FlowDoc;
+}
+
+/** A deleted flow as a backup carries it, with its versions. */
+export interface TrashEntry {
+  trashId: string;
+  deletedAt: number;
+  flow: FlowDoc;
+  versions: HistoryEntry[];
+}
+
+/** What a merge brought: entries added (net of the limits) and entries the limits removed (old or incoming). */
+export interface MergeCount {
+  added: number;
+  trimmed: number;
+}
+
+const REASONS: readonly FlowVersionReason[] = ['edit', 'restore', 'import'];
+const byNewest = (a: { recordedAt: number; id: string }, b: { recordedAt: number; id: string }) => b.recordedAt - a.recordedAt || b.id.localeCompare(a.id);
 
 /** The content that makes a version (save stamps and the editor's `$schema` excluded). */
 export function contentSig(flow: FlowDoc): string {
@@ -178,7 +204,7 @@ export class FlowHistoryStore {
         this.logger.warn(`flows/${HISTORY_DIR}/${flowId}/${name}: ${(err as Error).message}`);
       }
     }
-    list.sort((a, b) => b.recordedAt - a.recordedAt || b.id.localeCompare(a.id));
+    list.sort(byNewest);
     this.index.set(flowId, list);
     return list;
   }
@@ -211,7 +237,8 @@ export class FlowHistoryStore {
     return id;
   }
 
-  private async prune(flowId: string, list: VersionMeta[]): Promise<void> {
+  /** Keeps the newest MAX_VERSIONS within MAX_VERSION_BYTES (`list` newest first); returns what it removed. */
+  private async prune(flowId: string, list: VersionMeta[], dir = this.dirOf(flowId)): Promise<VersionMeta[]> {
     let bytes = 0;
     let keep = 0;
     for (const v of list) {
@@ -219,7 +246,9 @@ export class FlowHistoryStore {
       bytes += v.size;
       keep++;
     }
-    for (const v of list.splice(keep)) await fsp.rm(path.join(this.dirOf(flowId), `${v.id}.json`), { force: true });
+    const removed = list.splice(keep);
+    for (const v of removed) await fsp.rm(path.join(dir, `${v.id}.json`), { force: true });
+    return removed;
   }
 
   /** The version list with what each version changed. `current` = the flow as it is now. */
@@ -279,6 +308,116 @@ export class FlowHistoryStore {
   async drop(flowId: string): Promise<void> {
     this.index.delete(flowId);
     await fsp.rm(this.dirOf(flowId), { recursive: true, force: true });
+  }
+
+  /* ───────────── backups ───────────── */
+
+  /** Version files of one folder, newest first (unreadable ones are skipped). */
+  private async readDir(dir: string): Promise<HistoryEntry[]> {
+    let names: string[] = [];
+    try {
+      names = await fsp.readdir(dir);
+    } catch {
+      return [];
+    }
+    const out: HistoryEntry[] = [];
+    for (const name of names) {
+      const id = name.replace(/\.json$/, '');
+      if (!name.endsWith('.json') || !isHistoryId(id)) continue;
+      try {
+        const raw = (await readJsonFile(path.join(dir, name))) as VersionFile | undefined;
+        if (!raw?.flow || typeof raw.recordedAt !== 'number') continue;
+        out.push({ id, recordedAt: raw.recordedAt, reason: REASONS.includes(raw.reason) ? raw.reason : 'edit', flow: raw.flow });
+      } catch (err) {
+        this.logger.warn(`${path.relative(this.historyRoot, path.join(dir, name))}: ${(err as Error).message}`);
+      }
+    }
+    return out.sort(byNewest);
+  }
+
+  /** A flow's versions with their content, newest first (what a backup carries). */
+  exportVersions(flowId: string): Promise<HistoryEntry[]> {
+    return this.readDir(this.dirOf(flowId));
+  }
+
+  /** The deleted flows with their versions, newest first (what a backup carries). */
+  async exportTrash(): Promise<TrashEntry[]> {
+    const out: TrashEntry[] = [];
+    for (const item of this.trashItems) {
+      out.push({ trashId: item.trashId, deletedAt: item.deletedAt, flow: item.flow, versions: await this.readDir(path.join(this.trashRoot, item.trashId, 'history')) });
+    }
+    return out;
+  }
+
+  /** Writes versions into `dir` (ids already there are left alone) and returns the metas of the ones written. */
+  private async writeEntries(dir: string, flowId: string, entries: readonly HistoryEntry[], have: Set<string>): Promise<VersionMeta[]> {
+    const written: VersionMeta[] = [];
+    for (const v of entries) {
+      if (!isHistoryId(v.id) || have.has(v.id) || typeof v.recordedAt !== 'number' || !Number.isFinite(v.recordedAt)) continue;
+      have.add(v.id);
+      const reason = REASONS.includes(v.reason) ? v.reason : 'edit';
+      const flow = { ...v.flow, id: flowId };
+      const target = path.join(dir, `${v.id}.json`);
+      await writeJsonFile(target, { format: 'durbun-flow-version', recordedAt: v.recordedAt, reason, flow } satisfies VersionFile, 0o644);
+      const size = await fsp.stat(target).then((st) => st.size, () => 0);
+      written.push({ id: v.id, recordedAt: v.recordedAt, reason, size, sig: contentSig(flow) });
+    }
+    return written;
+  }
+
+  /**
+   * Restore from a backup: `incoming` versions join `flowId`'s own. Merge semantics:
+   *   - A version is identified by its id (save time + random part), so the same version restored twice, or coming
+   *     back to the Mac it was made on, is kept once and this Mac's copy wins (a backup without its passphrase holds
+   *     secret input defaults back; the local copy still has them).
+   *   - Every other version is added; the list is ordered by when each version was replaced, whichever Mac kept it,
+   *     so both sides' versions survive and the version list reads as one timeline.
+   *   - The store's own limits then apply as after any save: the newest MAX_VERSIONS within MAX_VERSION_BYTES stay.
+   *     The oldest versions go first, this Mac's or the backup's; `trimmed` counts them so the UI can say so.
+   */
+  async mergeVersions(flowId: string, incoming: readonly HistoryEntry[]): Promise<MergeCount> {
+    const list = await this.versions(flowId);
+    const written = await this.writeEntries(this.dirOf(flowId), flowId, incoming, new Set(list.map((v) => v.id)));
+    if (!written.length) return { added: 0, trimmed: 0 };
+    list.push(...written);
+    list.sort(byNewest);
+    const removed = await this.prune(flowId, list);
+    const fresh = new Set(written.map((v) => v.id));
+    return { added: written.length - removed.filter((v) => fresh.has(v.id)).length, trimmed: removed.length };
+  }
+
+  /**
+   * Restore from a backup: `incoming` deleted flows join this Mac's trash. A deleted flow is identified by its trash
+   * id, so one already here stays as it is. Deleted flows past TRASH_DAYS (the backup is old) are not brought back;
+   * the trash then keeps its newest MAX_TRASH, this Mac's or the backup's. Each one's versions keep the per-flow
+   * limits. A deleted flow whose id is a live flow here is kept too: restoring it picks a free id.
+   */
+  async mergeTrash(incoming: readonly TrashEntry[]): Promise<MergeCount> {
+    const now = this.now();
+    const added = new Set<string>();
+    let trimmed = 0;
+    for (const item of incoming) {
+      if (!isHistoryId(item.trashId) || this.trashItems.some((x) => x.trashId === item.trashId) || added.has(item.trashId)) continue;
+      if (typeof item.deletedAt !== 'number' || !Number.isFinite(item.deletedAt)) continue;
+      if (item.deletedAt + TRASH_MS <= now) {
+        trimmed++;
+        continue;
+      }
+      const dir = path.join(this.trashRoot, item.trashId);
+      await writeJsonFile(path.join(dir, 'item.json'), { format: 'durbun-flow-trash', deletedAt: item.deletedAt, flow: item.flow } satisfies TrashFile, 0o644);
+      const historyDir = path.join(dir, 'history');
+      const versions = (await this.writeEntries(historyDir, item.flow.id, item.versions, new Set())).sort(byNewest);
+      await this.prune(item.flow.id, versions, historyDir);
+      this.trashItems.push(this.trashItem(item.trashId, item.deletedAt, item.flow, versions.length));
+      added.add(item.trashId);
+    }
+    if (!added.size) return { added: 0, trimmed };
+    this.trashItems.sort((a, b) => b.deletedAt - a.deletedAt);
+    const before = new Set(this.trashItems.map((x) => x.trashId));
+    await this.pruneTrash();
+    const kept = new Set(this.trashItems.map((x) => x.trashId));
+    const gone = [...before].filter((id) => !kept.has(id));
+    return { added: added.size - gone.filter((id) => added.has(id)).length, trimmed: trimmed + gone.length };
   }
 
   /* ───────────── deleted flows ───────────── */

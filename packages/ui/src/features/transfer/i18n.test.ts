@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { messageKeys, translate, type TFunction } from '../../i18n/core';
 import './i18n';
 import { FLOW_FILE_ACCEPT, readPicked, sniffFormat } from './store';
-import { hasFollowUps, readErrorText, resultSummary, stripBom } from './ImportDialog';
+import { hasFollowUps, historyMeta, readErrorText, resultSummary, stripBom } from './ImportDialog';
+import { BACKUP_EXCLUDED, backupExcludedText } from './excluded';
+import { packageNoticeText } from './notices';
+import { setLanguage } from '../../i18n/core';
 import type { PackageImportResult } from '@durbun/protocol';
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -115,5 +118,34 @@ describe('import helpers', () => {
   it('sums up what came in, not what was already here', () => {
     expect(resultSummary(result({ flows: { added: 1, replaced: 1, skipped: 0, renamed: 1, same: 4 } }), en)).toBe('3 flows');
     expect(resultSummary(result({ mocks: { added: 0, replaced: 0, skipped: 0, same: 2 } }), en)).toBe('');
+  });
+
+  it('names the version history that came in and what the limits left out', () => {
+    expect(resultSummary(result({ flows: { added: 1, replaced: 0, skipped: 0, renamed: 0 }, history: { versions: 12, trash: 1, trimmed: 0 } }), en)).toBe('1 flow, 12 earlier versions, 1 deleted flow');
+    expect(resultSummary(result({ history: { versions: 0, trash: 0, trimmed: 0 } }), en)).toBe('');
+    expect(historyMeta({ flows: 3, versions: 12, trash: 2 }, en)).toBe('12 versions · 2 deleted flows');
+    expect(historyMeta({ flows: 0, versions: 0, trash: 1 }, en)).toBe('1 deleted flow');
+    const notice = { code: 'package.history.trimmed', message: 'x', params: { count: 4 } };
+    setLanguage('tr');
+    expect(packageNoticeText(notice)).toBe('Geçmiş sınırları içinde kalmak için en eski 4 sürüm ya da silinen akış tutulmadı');
+    setLanguage('en');
+    expect(packageNoticeText(notice)).toBe('To stay within the history limits, the oldest versions or deleted flows were left out (4)');
+  });
+});
+
+describe('what a backup leaves out', () => {
+  const tr: TFunction = (key, params) => translate('tr', key, params);
+  const en: TFunction = (key, params) => translate('en', key, params);
+
+  it('is one plain sentence in both languages', () => {
+    expect(BACKUP_EXCLUDED).toEqual(['transfer.backup.excludedItem.media']);
+    expect(backupExcludedText(en)).toBe('Not in the backup: screenshots and recordings saved from devices.');
+    expect(backupExcludedText(tr)).toBe('Yedeğe girmeyenler: cihazlardan kaydedilen ekran görüntüleri ve kayıtlar.');
+  });
+
+  it('takes a second item without rewording', () => {
+    const more = [...BACKUP_EXCLUDED, 'transfer.import.history'];
+    expect(backupExcludedText(en, more)).toBe('Not in the backup: screenshots and recordings saved from devices, Version history and deleted flows.');
+    expect(backupExcludedText(tr, more)).toBe('Yedeğe girmeyenler: cihazlardan kaydedilen ekran görüntüleri ve kayıtlar, Sürüm geçmişi ve silinen akışlar.');
   });
 });

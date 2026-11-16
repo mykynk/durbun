@@ -1229,7 +1229,8 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
 - Deleting a flow moves it with its versions to `<dataDir>/flows/.trash/` for 30 days (at most 100 items):
   `DELETE /api/flows/:id` → `{ ok, trash: FlowTrashItem }`. `GET /api/flow-trash` → `{ items, keepDays }`,
   `POST /api/flow-trash/:trashId/restore` → `{ flow, issues }` (a free id when the old one was taken meanwhile),
-  `DELETE /api/flow-trash/:trashId` removes it for good. Backups carry flows, not their versions, trash or sets.
+  `DELETE /api/flow-trash/:trashId` removes it for good. Backups carry the versions and the trash (§11.5); shared
+  packages and sets do not.
 
 ### 11.4 Flows with the user's own AI
 - `POST /api/flows/ai-pack` builds a Markdown pack: the task, the format and schema, every node type with its
@@ -1247,7 +1248,8 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
 ### 11.5 Packages (`.durbun`, `packages/protocol/src/package.ts`, `packages/server/src/backup`)
 - `format: 'durbun-package'`, `version: 1`, `kind: 'share' | 'backup'`, `createdAt`, `createdBy {app, version,
   host?}` (backups only name the Mac), `name?`, `note?`, `contents {flows?, mocks?, environments?, settings?,
-  uiPrefs?, slack?, runs?}`, `secrets?`. Every Dürbün file names its `format` first, so the UI tells sessions,
+  uiPrefs?, slack?, runs?, history?}`, `secrets?`. New parts are optional and keep `version: 1`: a Dürbün that
+  does not know a part ignores it. Every Dürbün file names its `format` first, so the UI tells sessions,
   packages and flows apart from the first 64 KB.
 - Share: the picked flows plus the sub-flows they call; environments travel with secret values empty; the Slack
   webhook never goes in. Backup: everything; secret values and the webhook only inside `secrets`, AES-256-GCM
@@ -1255,7 +1257,8 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
 - `POST /api/packages/inspect` returns a `PackageManifest` (each item new / exists / differs, warnings, whether
   the passphrase opens the secrets) and a token kept 30 minutes; `POST /api/packages/import` takes the token (or
   the package), what to bring and the conflict mode. A replace keeps local secret values when the package has
-  none. Look and log preferences come back to the UI (`uiPrefs`), which applies the portable ones (theme,
+  none, and the content a replace overwrites becomes a version labelled "before an import" (undo from the version
+  list). Look and log preferences come back to the UI (`uiPrefs`), which applies the portable ones (theme,
   language, font size, density, time format, wrapping, noise and highlight rules, crash notifications).
 - The UI keeps a copy of those preferences on the server (`GET|PUT /api/ui-prefs`, `ui-prefs.json`) so backups
   include them. Saved log filters travel in the same copy (`logSavedFilters`); imported ones are added to the
@@ -1268,6 +1271,14 @@ quit stops the server. `npm run app` (dev) / `npm run app:dist` (→ `.app` + `.
   `keep`. Folder suggestions: iCloud Drive, sync services under `~/Library/CloudStorage` (not plain mounts),
   Documents.
 - Restoring lists the folder's backups (`GET /api/backup/files`) and opens one in the package import dialog.
+- Backups (the file and the automatic ones; `include.history`) carry `contents.history`: the versions of the flows
+  they hold and the deleted flows with theirs; secret input defaults inside only in `secrets.history`. The manifest
+  counts it (`history {flows, versions, trash}`), the import dialog offers it (on for backups), and a restore merges
+  it: versions join by id (the copy already here wins), only for flows that came in or were here unchanged (a copy
+  kept under a new id takes them along); deleted flows join by trash id. The limits then apply (30 versions / 4 MB
+  per flow, trash 30 days / 100); the result says what came in and what the limits left out
+  (`history {versions, trash, trimmed}`, notice `package.history.trimmed`). The device media library is never in a
+  backup; the dialog and Settings → Backup say so in one sentence.
 
 ### 11.7 UI
 - `features/flows`: list, canvas editor (own SVG graph: pan, zoom, minimap, tidy up, undo / redo, copy / paste,

@@ -423,6 +423,10 @@ All notable changes to Dürbün are listed here. The format follows
   account. A batched request matches when one of its operations does; a request whose body the app cannot read
   goes to the real server. An app whose SDK cannot match operations is never sent such a rule, and the rule
   says where it is not active. The React Native / JavaScript SDK matches operations.
+- Backups (manual and automatic) carry the flows' version history and the deleted flows. Restoring merges them
+  with what this Mac already has, inside the usual limits, and says when older versions were dropped. The backup
+  dialog names what is not in the file (screenshots and recordings saved from devices). A flow replaced by a
+  package import keeps its old content in the version list as "before an import".
 - Device: **Pull app data** saves a debuggable Android app's data folder, or a simulator app's data
   container, as one `.tar.gz` (up to 1 GiB, caches left out). Each refusal says why: not a debug build, not
   installed, phone locked, too large.

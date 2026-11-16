@@ -6,6 +6,11 @@
  *           flow inputs stay out). Shared flows come in with their automation off.
  *   backup  for a new Mac: everything; secrets only encrypted with a passphrase (AES-256-GCM, key from scrypt). The
  *           SHA-256 of the contents is the GCM associated data: the passphrase opens only an unchanged package.
+ *           A backup also carries the flows' version history and the deleted flows (`contents.history`); a restore
+ *           merges them with this Mac's (see `importHistory`). The device media library is never in a package.
+ *
+ * The format keeps its `version` for new optional parts: a Dürbün that does not know a part ignores it, so a newer
+ * backup still opens in an older Dürbün, and an older backup restores exactly as it did.
  *
  * An import never overwrites silently: the UI inspects the file first (what is new, what exists and differs)
  * and the user picks what to bring and what to do with the same ids (replace, keep both, skip). Items identical to
@@ -30,6 +35,8 @@ import {
   type MockRule,
   type PackageConflict,
   type PackageExportRequest,
+  type PackageFlowHistory,
+  type PackageFlowVersion,
   type PackageImportRequest,
   type PackageImportResult,
   type PackageItemPreview,
@@ -39,10 +46,12 @@ import {
   type PackageRun,
   type PackageRunFile,
   type PackageSecrets,
+  type PackageTrashedFlow,
   type ServerSettings,
 } from '@durbun/protocol';
 import { isPlainObject, validateMockRules, type ConfigStore } from '../config';
 import { normalizeEnvironments, type EnvironmentStore } from '../flows/environments';
+import type { HistoryEntry, TrashEntry } from '../flows/history';
 import { isRunId, type RunStore } from '../flows/runs';
 import type { FlowStore } from '../flows/store';
 import { timeId } from '../flows/util';
@@ -210,6 +219,35 @@ function flowShape(f: FlowDoc, kind: PackageKind): unknown {
   };
 }
 
+type SecretValues = Record<string, string | number | boolean>;
+
+/** `flow` without the default values of its secret inputs, and those values (undefined when it has none). */
+function holdSecretDefaults(flow: FlowDoc): { flow: FlowDoc; held?: SecretValues } {
+  if (!flow.inputs?.some((d) => d.secret && d.default !== undefined)) return { flow };
+  const held: SecretValues = {};
+  const inputs = flow.inputs.map((d) => {
+    if (!d.secret || d.default === undefined) return d;
+    held[d.name] = d.default;
+    const { default: _default, ...rest } = d;
+    return rest;
+  });
+  return { flow: { ...flow, inputs }, held };
+}
+
+/** Secret input defaults put back: from the backup's encrypted part, else from `local` (this Mac's live flow). */
+function fillSecretDefaults(flow: FlowDoc, restored: unknown, local?: FlowDoc): FlowDoc {
+  if (!flow.inputs?.some((d) => d.secret && d.default === undefined)) return flow;
+  const values = isPlainObject(restored) ? restored : {};
+  const inputs = flow.inputs.map((d) => {
+    if (!d.secret || d.default !== undefined) return d;
+    const v = values[d.name];
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return { ...d, default: v };
+    const mine = local?.inputs?.find((x) => x.name === d.name && x.secret && x.default !== undefined)?.default;
+    return mine !== undefined ? { ...d, default: mine } : d;
+  });
+  return { ...flow, inputs };
+}
+
 /** A mock rule as compared for "same": what it matches and does (its id and creation time aside). */
 const mockShape = (r: MockRule) => ({ ...r, id: undefined, createdAt: undefined, name: r.name || undefined });
 
@@ -315,6 +353,13 @@ export async function buildPackage(deps: PackageDeps, req: PackageExportRequest)
     if (s.webhookUrl || s.sender) contents.slack = { configured: !!s.webhookUrl, ...(s.sender ? { sender: s.sender } : {}) };
     if (encrypt && s.webhookUrl) secrets.slackWebhook = s.webhookUrl;
   }
+  // The flows' past: backups only (a share carries flows, not their history), for the flows that go in.
+  if (inc.history && kind === 'backup') {
+    const history = await exportHistory(deps.flows, (contents.flows ?? []).map((f) => f.id), (key, values) => {
+      if (encrypt) (secrets.history ??= {})[key] = values;
+    });
+    if (history) contents.history = history;
+  }
   if (inc.runs) {
     const headers = Array.isArray(inc.runs) ? deps.runs.list().filter((h) => (inc.runs as string[]).includes(h.id)) : deps.runs.list();
     const runs: PackageRun[] = [];
@@ -349,8 +394,45 @@ export async function buildPackage(deps: PackageDeps, req: PackageExportRequest)
   const note = text(req.note, 2_000);
   if (name) pkg.name = name;
   if (note) pkg.note = note;
-  if (encrypt && (secrets.env || secrets.slackWebhook || secrets.inputs)) pkg.secrets = await encryptSecrets(secrets, passphrase!, contents);
+  if (encrypt && (secrets.env || secrets.slackWebhook || secrets.inputs || secrets.history)) pkg.secrets = await encryptSecrets(secrets, passphrase!, contents);
   return pkg;
+}
+
+/**
+ * The versions of `flowIds` and every deleted flow, secret input defaults held back (`hold` gets them under their
+ * `secrets.history` key). Undefined when there is nothing.
+ */
+async function exportHistory(flows: FlowStore, flowIds: string[], hold: (key: string, values: SecretValues) => void): Promise<PackageFlowHistory | undefined> {
+  const entry = (v: HistoryEntry, key: string): PackageFlowVersion => {
+    const { flow, held } = holdSecretDefaults(v.flow);
+    if (held) hold(key, held);
+    return { id: v.id, recordedAt: v.recordedAt, reason: v.reason, flow };
+  };
+  const { versions, trash } = await flows.withHistory(async (h) => {
+    const versions: Record<string, PackageFlowVersion[]> = {};
+    for (const id of flowIds) {
+      const list = await h.exportVersions(id);
+      if (list.length) versions[id] = list.map((v) => entry(v, `${id}/${v.id}`));
+    }
+    const trash: PackageTrashedFlow[] = (await h.exportTrash()).map((t) => {
+      const { flow, held } = holdSecretDefaults(t.flow);
+      if (held) hold(`trash/${t.trashId}`, held);
+      const list = t.versions.map((v) => entry(v, `trash/${t.trashId}/${v.id}`));
+      return { trashId: t.trashId, deletedAt: t.deletedAt, flow, ...(list.length ? { versions: list } : {}) };
+    });
+    return { versions, trash };
+  });
+  if (!Object.keys(versions).length && !trash.length) return undefined;
+  return { ...(Object.keys(versions).length ? { versions } : {}), ...(trash.length ? { trash } : {}) };
+}
+
+/** What a backup's history part holds, counted as the file says (import checks each entry). */
+function historyCounts(raw: unknown): PackageManifest['history'] {
+  if (!isPlainObject(raw)) return undefined;
+  const versions = isPlainObject(raw.versions) ? Object.values(raw.versions).filter((l): l is unknown[] => Array.isArray(l) && l.length > 0) : [];
+  const trash = Array.isArray(raw.trash) ? raw.trash.length : 0;
+  const count = versions.reduce((n, l) => n + l.length, 0);
+  return count || trash ? { flows: versions.length, versions: count, trash } : undefined;
 }
 
 /* ────────────────────────────── inspect ────────────────────────────── */
@@ -496,6 +578,7 @@ export class PackageService {
       const cur = localEnvs.environments.find((x) => x.id === e.id);
       return { id: e.id, name: e.name, exists: !!cur, ...(cur ? { differs: !sameJson(envShape(this.mergeEnv(cur, e, {})), envShape(cur)) } : {}) };
     });
+    const history = historyCounts(c.history);
     let passphraseOk: boolean | undefined;
     if (pkg.secrets && passphrase) {
       try {
@@ -517,6 +600,7 @@ export class PackageService {
       uiPrefs: isPlainObject(c.uiPrefs) && Object.keys(c.uiPrefs).length > 0,
       slack: isPlainObject(c.slack),
       runs: Array.isArray(c.runs) ? c.runs.length : 0,
+      ...(header.kind === 'backup' && history ? { history } : {}),
       hasSecrets: isPlainObject(pkg.secrets),
       warnings,
       token: token ?? this.stage(pkg),
@@ -560,7 +644,9 @@ export class PackageService {
       }
     }
 
-    if (inc.flows && Array.isArray(c.flows)) await this.importFlows(c.flows, inc.flows, kind, conflict, secrets, c.secretInputs, result, warn);
+    // Package flow id → its id here, for the flows that came in or were here unchanged (their history follows them).
+    const landed = new Map<string, string>();
+    if (inc.flows && Array.isArray(c.flows)) await this.importFlows(c.flows, inc.flows, kind, conflict, secrets, c.secretInputs, result, warn, landed);
     if (inc.mocks && Array.isArray(c.mocks)) this.importMocks(c.mocks, conflict, result, warn);
     if (inc.environments && c.environments) await this.importEnvironments(c.environments, secrets, conflict, result);
     if (inc.settings && isPlainObject(c.settings)) {
@@ -590,6 +676,8 @@ export class PackageService {
       if (slack?.configured && !patch.webhookUrl) warn('package.slack.reconnect', 'Connect Slack again in Settings: the webhook travels only in an encrypted backup');
     }
     if (inc.runs && Array.isArray(c.runs)) result.runs = await this.importRuns(c.runs, warn);
+    // After the flows: a replaced flow's own content is already kept as a version ("before an import").
+    if (inc.history && kind === 'backup' && isPlainObject(c.history)) result.history = await this.importHistory(c.history, landed, Array.isArray(c.flows) ? c.flows : [], secrets, warn);
     if (inc.uiPrefs && isPlainObject(c.uiPrefs)) {
       result.uiPrefs = c.uiPrefs;
       await this.deps.uiPrefs.put(c.uiPrefs).catch(() => undefined);
@@ -608,6 +696,7 @@ export class PackageService {
     held: unknown,
     result: PackageImportResult,
     warn: (code: string, msg: string, params?: PackageNotice['params']) => void,
+    landed: Map<string, string>,
   ): Promise<void> {
     const store = this.deps.flows;
     const ids = Array.isArray(which) ? new Set(which.filter((x): x is string => typeof x === 'string')) : undefined;
@@ -650,6 +739,7 @@ export class PackageService {
       return !!cur && sameJson(flowShape(cur, kind), flowShape(f, kind));
     }).map((f) => f.id));
     result.flows.same = same.size;
+    for (const id of same) landed.set(id, id);
 
     // keepBoth: new ids first, so flow.call references between imported flows follow the rename.
     const rename = new Map<string, string>();
@@ -684,7 +774,8 @@ export class PackageService {
           saved = (await store.save(doc, { create: true })).flow;
           result.flows.added++;
         } else if (conflict === 'replace') {
-          saved = (await store.save(doc, { id: f.id })).flow;
+          // The content it replaces stays in the flow's version list as "before an import": the import can be undone.
+          saved = (await store.save(doc, { id: f.id, reason: 'import' })).flow;
           result.flows.replaced++;
         } else if (conflict === 'keepBoth') {
           const name = copyName(f.name, names);
@@ -695,6 +786,7 @@ export class PackageService {
           result.flows.skipped++;
         }
         if (saved) {
+          landed.set(f.id, saved.id);
           if (switchOff) result.automationOff!++;
           if (empty.length) result.emptySecrets!.push({ kind: 'input', id: saved.id, name: saved.name, keys: empty });
         }
@@ -702,6 +794,83 @@ export class PackageService {
         warn('package.flow.saveFailed', `${f.name}: ${message(err)}`, { flow: f.name, error: message(err) });
       }
     }
+  }
+
+  /**
+   * A backup's version history and deleted flows, merged with this Mac's (FlowHistoryStore.mergeVersions /
+   * mergeTrash hold the rules: one copy per version id, both sides' versions kept, then the store's limits).
+   *   - Versions follow their flow: only flows that came in (added, replaced, kept as a copy under a new id) or are
+   *     here unchanged (picked or not: the import dialog leaves identical flows unpicked) get them. A flow that
+   *     differs here and was skipped or not picked keeps its own history untouched.
+   *   - Deleted flows come back into the trash (not as flows), whatever flows were picked.
+   *   - Secret input defaults come from the encrypted part, else from this Mac's live flow of the same id.
+   * Nothing here is replaced wholesale: the only loss is what the limits drop, and `trimmed` (with the
+   * `package.history.trimmed` notice) says how much.
+   */
+  private async importHistory(
+    raw: Record<string, unknown>,
+    landed: ReadonlyMap<string, string>,
+    flows: readonly unknown[],
+    secrets: PackageSecrets,
+    warn: (code: string, msg: string, params?: PackageNotice['params']) => void,
+  ): Promise<NonNullable<PackageImportResult['history']>> {
+    const store = this.deps.flows;
+    const restored: Record<string, unknown> = isPlainObject(secrets.history) ? secrets.history : {};
+    const known = new Set(store.ids());
+    /** A flow from the file, checked like any import (drafts with problems are fine, unreadable ones are dropped). */
+    const readFlow = (f: unknown, id: string, key: string, local?: FlowDoc): FlowDoc | undefined => {
+      if (!isPlainObject(f)) return undefined;
+      const { flow } = validateFlow({ ...f, id }, { knownFlowIds: known });
+      return flow ? fillSecretDefaults(flow, restored[key], local) : undefined;
+    };
+    const readVersions = (list: unknown, flowId: string, keyOf: (versionId: string) => string, local?: FlowDoc): HistoryEntry[] => {
+      const out: HistoryEntry[] = [];
+      for (const v of Array.isArray(list) ? list : []) {
+        if (!isPlainObject(v) || typeof v.id !== 'string' || typeof v.recordedAt !== 'number') continue;
+        const flow = readFlow(v.flow, flowId, keyOf(v.id), local);
+        if (flow) out.push({ id: v.id, recordedAt: v.recordedAt, reason: v.reason as HistoryEntry['reason'], flow });
+      }
+      return out;
+    };
+    /** Where a flow's versions go: where it landed, else the same id when this Mac has it unchanged. */
+    const target = (id: string): string | undefined => {
+      const to = landed.get(id);
+      if (to) return to;
+      const cur = store.get(id);
+      const pkgFlow = flows.find((f) => isPlainObject(f) && f.id === id);
+      if (!cur || !pkgFlow) return undefined;
+      const { flow } = validateFlow(pkgFlow, { knownFlowIds: known });
+      return flow && sameJson(flowShape(cur, 'backup'), flowShape(flow, 'backup')) ? id : undefined;
+    };
+    const out = { versions: 0, trash: 0, trimmed: 0 };
+    try {
+      const versions = isPlainObject(raw.versions) ? raw.versions : {};
+      const trash: TrashEntry[] = [];
+      for (const t of Array.isArray(raw.trash) ? raw.trash : []) {
+        if (!isPlainObject(t) || typeof t.trashId !== 'string' || typeof t.deletedAt !== 'number' || !isPlainObject(t.flow)) continue;
+        const id = typeof t.flow.id === 'string' ? t.flow.id : '';
+        const flow = id ? readFlow(t.flow, id, `trash/${t.trashId}`) : undefined;
+        if (flow) trash.push({ trashId: t.trashId, deletedAt: t.deletedAt, flow, versions: readVersions(t.versions, flow.id, (v) => `trash/${t.trashId}/${v}`) });
+      }
+      await store.withHistory(async (h) => {
+        for (const [from, list] of Object.entries(versions)) {
+          const to = target(from);
+          if (!to) continue;
+          const r = await h.mergeVersions(to, readVersions(list, to, (v) => `${from}/${v}`, store.get(to)));
+          out.versions += r.added;
+          out.trimmed += r.trimmed;
+        }
+        const r = await h.mergeTrash(trash);
+        out.trash += r.added;
+        out.trimmed += r.trimmed;
+      });
+    } catch (err) {
+      warn('package.history.failed', `The version history was not fully restored: ${message(err)}`, { error: message(err) });
+    }
+    if (out.trimmed) {
+      warn('package.history.trimmed', `${out.trimmed} older version(s) or deleted flow(s) were left out to stay within the history limits`, { count: out.trimmed });
+    }
+    return out;
   }
 
   private importMocks(list: unknown[], conflict: PackageConflict, result: PackageImportResult, warn: (code: string, msg: string, params?: PackageNotice['params']) => void): void {

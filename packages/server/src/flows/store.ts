@@ -331,6 +331,11 @@ export class FlowStore {
     return r;
   }
 
+  /** Backups: read or merge the versions and deleted flows in the save queue, so no save writes in between. */
+  withHistory<T>(work: (history: FlowHistoryStore) => Promise<T>): Promise<T> {
+    return this.queue.run(() => work(this.history));
+  }
+
   /** Put an earlier version back as the current content (the content it replaces is kept as a version first). */
   async restoreVersion(id: string, versionId: string, baseUpdatedAt?: number): Promise<SaveResult> {
     const cur = this.entries.get(id);

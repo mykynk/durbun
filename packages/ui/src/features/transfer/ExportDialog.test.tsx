@@ -68,3 +68,22 @@ describe('share package: run history', () => {
     expect(sent[0]!.include?.runs).toBe(false);
   });
 });
+
+describe('backup file', () => {
+  it('carries the version history and says in one sentence what stays out', async () => {
+    render(<ExportDialog open mode="backup" onClose={() => {}} />);
+    expect(screen.getByText('Flow version history and deleted flows')).toBeTruthy();
+    expect(screen.getByText('Not in the backup: screenshots and recordings saved from devices.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save the file' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.include?.history).toBe(true);
+    expect(sent[0]!.kind).toBe('backup');
+  });
+
+  it('in Turkish too', () => {
+    setLanguage('tr');
+    render(<ExportDialog open mode="backup" onClose={() => {}} />);
+    expect(screen.getByText('Akışların sürüm geçmişi ve silinen akışlar')).toBeTruthy();
+    expect(screen.getByText('Yedeğe girmeyenler: cihazlardan kaydedilen ekran görüntüleri ve kayıtlar.')).toBeTruthy();
+  });
+});

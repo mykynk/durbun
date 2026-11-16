@@ -231,4 +231,19 @@ describe('UI mock ↔ server: flows routes', () => {
     expectSameShape(await callReal('DELETE', `/api/flow-trash/${r2.data.trash.trashId}`), await callMock('DELETE', `/api/flow-trash/${m2.data.trash.trashId}`), ['.ok:boolean']);
     expectSameShape(await callReal('POST', '/api/flow-trash/zz-000000/restore'), await callMock('POST', '/api/flow-trash/zz-000000/restore'), ['.code:string']);
   });
+
+  it('backups: version history in the manifest and the import result', async () => {
+    const doc = flowDoc('kept-history', 'Kept history', [], [{ id: 'start', type: 'trigger.manual' }, { id: 'note', type: 'output.note', params: { text: 'a' } }], [{ from: 'start', to: 'note' }]);
+    await callReal('POST', '/api/flows', { flow: doc });
+    await callReal('PUT', '/api/flows/kept-history', { flow: { ...doc, name: 'Kept history 2' } });
+    await callReal('POST', '/api/flows', { flow: { ...doc, id: 'binned', name: 'Binned' } });
+    await callReal('DELETE', '/api/flows/binned');
+    const pkg = (await callReal('POST', '/api/packages/export', { kind: 'backup', include: { flows: 'all', history: true } })).data;
+    expect(pkg.contents.history.versions['kept-history']).toHaveLength(1);
+    const [ri, mi] = [await callReal('POST', '/api/packages/inspect', { package: pkg }), await callMock('POST', '/api/packages/inspect', { package: pkg })];
+    expectSameShape(ri, mi, ['.history.flows:number', '.history.versions:number', '.history.trash:number', '.runs:number', '.token:string']);
+    const req = { package: pkg, include: { flows: 'all', history: true }, conflict: 'replace' };
+    const [rr, mr] = [await callReal('POST', '/api/packages/import', req), await callMock('POST', '/api/packages/import', req)];
+    expectSameShape(rr, mr, ['.history.versions:number', '.history.trash:number', '.history.trimmed:number', '.flows.replaced:number', '.notices:array']);
+  });
 });

@@ -102,7 +102,8 @@ import { registerMessages, translateOr, type Lang } from './core';
  *   Package inspect warnings: package.flow.invalid { problem }, package.flow.problems { flow, count }, package.mock.invalid { problem }
  *   Package import notices (PackageImportResult.notices): package.secrets.notRestored —, package.settings.ignored { keys },
  *     package.settings.failed / slack.failed / mocks.saveFailed { error }, package.slack.reconnect —,
- *     package.flow.saveFailed { flow, error }, package.run.failed { run, error }, package.flow.invalid / mock.invalid { problem }
+ *     package.flow.saveFailed { flow, error }, package.run.failed { run, error }, package.flow.invalid / mock.invalid { problem },
+ *     package.history.trimmed { count }, package.history.failed { error }
  *   REST `{ error, code }` (errorText adds `detail` = the specific part of the English message):
  *     flow.notFound|tooMany|id.invalid|id.taken|id.reserved|running|engine.closed|run.tooMany|automation.busy|preflight.failed|invalid|format|version|nodes,
  *     flow.batch.busy { id, tag? } | noTagged { tag } | empty | tooMany { max } | running | notFound | notRunning,
@@ -332,6 +333,8 @@ export const FLOW_CODES = {
     'package.flow.saveFailed',
     'package.mocks.saveFailed',
     'package.run.failed',
+    'package.history.trimmed',
+    'package.history.failed',
   ],
   /** REST errors of Settings → Backup. */
   backup: [
@@ -664,6 +667,8 @@ registerMessages('code', {
     'package.flow.saveFailed': ['{flow} kaydedilemedi: {error}', '{flow} kaydedilemedi', 'Bir akış kaydedilemedi'],
     'package.mocks.saveFailed': ['Mock kuralları kaydedilemedi: {error}', 'Mock kuralları kaydedilemedi'],
     'package.run.failed': ['{run} çalıştırması alınamadı: {error}', '{run} çalıştırması alınamadı', 'Bir çalıştırma alınamadı'],
+    'package.history.trimmed': ['Geçmiş sınırları içinde kalmak için en eski {count, number} sürüm ya da silinen akış tutulmadı', 'Geçmiş sınırları içinde kalmak için en eski sürümler ya da silinen akışlar tutulmadı'],
+    'package.history.failed': ['Sürüm geçmişi tam olarak geri yüklenemedi: {error}', 'Sürüm geçmişi tam olarak geri yüklenemedi'],
 
     /* ── backup ── */
     'backup.invalid': 'Yedekleme ayarları geçersiz',
@@ -1011,6 +1016,8 @@ registerMessages('code', {
     'package.flow.saveFailed': ['{flow} could not be saved: {error}', '{flow} could not be saved', 'A flow could not be saved'],
     'package.mocks.saveFailed': ['Mock rules were not saved: {error}', 'Mock rules were not saved'],
     'package.run.failed': ['The run {run} could not be brought in: {error}', 'The run {run} could not be brought in', 'A run could not be brought in'],
+    'package.history.trimmed': ['To stay within the history limits, the oldest versions or deleted flows were left out ({count, number})', 'To stay within the history limits, the oldest versions or deleted flows were left out'],
+    'package.history.failed': ['The version history was not fully restored: {error}', 'The version history was not fully restored'],
 
     /* ── backup ── */
     'backup.invalid': 'Invalid backup settings',

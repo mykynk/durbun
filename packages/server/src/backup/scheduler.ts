@@ -8,6 +8,9 @@
  * disk is unplugged or whose sync service signed out fails clearly instead of filling a local look-alike.
  * A failing automatic backup tells the UI once per failure streak and retries quietly.
  *
+ * A backup holds what "Back up everything" holds, the flows' version history and deleted flows included; the
+ * device media library (screenshots, recordings) stays out.
+ *
  * `<dataDir>/backup.json` (0600) holds the settings and, when the user set one, the passphrase.
  */
 import { constants as fsConstants, promises as fsp } from 'node:fs';
@@ -255,7 +258,7 @@ export class BackupService {
       try {
         const pkg = await this.deps.build({
           kind: 'backup',
-          include: { flows: 'all', mocks: true, environments: true, settings: true, uiPrefs: true, slack: true, runs: this.data.includeRuns },
+          include: { flows: 'all', mocks: true, environments: true, settings: true, uiPrefs: true, slack: true, history: true, runs: this.data.includeRuns },
           ...(this.data.passphrase ? { passphrase: this.data.passphrase } : {}),
         });
         const text = JSON.stringify(pkg);

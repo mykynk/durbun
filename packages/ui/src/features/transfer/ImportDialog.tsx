@@ -12,7 +12,7 @@ import { packageNoticeText } from './notices';
 
 type Parts = Required<Omit<PackageImportRequest['include'], 'flows'>>;
 
-const NO_PARTS: Parts = { mocks: false, environments: false, settings: false, uiPrefs: false, slack: false, runs: false };
+const NO_PARTS: Parts = { mocks: false, environments: false, settings: false, uiPrefs: false, slack: false, runs: false, history: false };
 
 /** The server reads packages of up to this size (PACKAGE_JSON_LIMIT_BYTES). */
 export const PACKAGE_LIMIT_MB = 256;
@@ -91,6 +91,8 @@ export function ImportDialog({ open, text: initialText, fileName: initialName, o
             uiPrefs: m.uiPrefs && backup,
             slack: m.slack,
             runs: m.runs > 0,
+            // A backup's version history merges with this Mac's (nothing here is overwritten): on by default.
+            history: !!m.history && backup,
           });
           setConflict(backup ? 'replace' : 'keepBoth');
         },
@@ -323,6 +325,9 @@ export function ImportDialog({ open, text: initialText, fileName: initialName, o
             {manifest.uiPrefs ? <PartRow checked={parts.uiPrefs} onChange={(v) => setPart('uiPrefs', v)} label={t('transfer.import.uiPrefs')} hint={t('transfer.import.uiPrefsHint')} /> : null}
             {manifest.slack ? <PartRow checked={parts.slack} onChange={(v) => setPart('slack', v)} label={t('transfer.import.slack')} hint={manifest.hasSecrets ? t('transfer.import.slackHint') : undefined} /> : null}
             {manifest.runs ? <PartRow checked={parts.runs} onChange={(v) => setPart('runs', v)} label={t('transfer.import.runs')} meta={t('transfer.import.runsCount', { count: manifest.runs })} /> : null}
+            {manifest.history && manifest.kind === 'backup' ? (
+              <PartRow checked={parts.history} onChange={(v) => setPart('history', v)} label={t('transfer.import.history')} meta={historyMeta(manifest.history, t)} hint={t('transfer.import.historyHint')} />
+            ) : null}
           </section>
 
           {conflicts > 0 ? (
@@ -471,6 +476,14 @@ function PartRow({ checked, onChange, label, meta, hint, items }: { checked: boo
   );
 }
 
+/** "12 versions · 2 deleted flows" (the parts that are there). */
+export function historyMeta(h: NonNullable<PackageManifest['history']>, t: TFunction): string {
+  const parts: string[] = [];
+  if (h.versions) parts.push(t('transfer.import.historyVersions', { count: h.versions }));
+  if (h.trash) parts.push(t('transfer.import.historyTrash', { count: h.trash }));
+  return parts.join(' · ');
+}
+
 /** "3 flows, 2 mock rules, settings" — empty when nothing came in. */
 export function resultSummary(r: PackageImportResult, t: TFunction): string {
   const parts: string[] = [];
@@ -484,6 +497,8 @@ export function resultSummary(r: PackageImportResult, t: TFunction): string {
   if (r.uiPrefs) parts.push(t('transfer.import.part.uiPrefs'));
   if (r.slack) parts.push(t('transfer.import.part.slack'));
   if (r.runs) parts.push(t('transfer.import.part.runs', { count: r.runs }));
+  if (r.history?.versions) parts.push(t('transfer.import.part.versions', { count: r.history.versions }));
+  if (r.history?.trash) parts.push(t('transfer.import.part.trash', { count: r.history.trash }));
   if (r.secretsRestored) parts.push(t('transfer.import.part.secrets'));
   return parts.join(', ');
 }

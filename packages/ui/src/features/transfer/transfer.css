@@ -80,6 +80,11 @@
 .tx-hint--warn {
   color: var(--warning);
 }
+/* What a backup leaves out: one plain sentence under the contents (dialog) or closing the settings group. */
+.tx-excluded--row {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
 .tx-error {
   color: var(--danger);
   font-size: var(--fs-sm);

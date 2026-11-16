@@ -658,6 +658,12 @@ function packageOf(req) {
   const contents = { flows: picked };
   if (kind === 'backup' || inc.environments) contents.environments = { ...environments, environments: environments.environments.map((e) => ({ ...e, vars: e.vars.map((v) => (v.secret ? { ...v, value: '' } : v)) })) };
   if ((kind === 'backup' || inc.uiPrefs) && uiPrefs) contents.uiPrefs = uiPrefs;
+  // As the server: a backup asked for its history carries the flows' versions and the deleted flows.
+  if (kind === 'backup' && inc.history) {
+    const v = Object.fromEntries(picked.filter((f) => versions.get(f.id)?.length).map((f) => [f.id, versions.get(f.id)]));
+    const t = trash.map(({ trashId, deletedAt, flow, versions: list }) => ({ trashId, deletedAt, flow, ...(list?.length ? { versions: list } : {}) }));
+    if (Object.keys(v).length || t.length) contents.history = { ...(Object.keys(v).length ? { versions: v } : {}), ...(t.length ? { trash: t } : {}) };
+  }
   // As the server: `runs: true` packs every finished run, a list packs those ids only.
   if (inc.runs) {
     const done = runs.filter((r) => r.status !== 'running' && (inc.runs === true || (Array.isArray(inc.runs) && inc.runs.includes(r.id))));
@@ -696,29 +702,87 @@ function manifestOf(pkg) {
     uiPrefs: !!c.uiPrefs,
     slack: !!c.slack,
     runs: (c.runs ?? []).length,
+    ...historyCounts(pkg),
     hasSecrets: !!pkg.secrets,
     warnings: [],
     token,
   };
 }
 
+/** `{ history: { flows, versions, trash } }` for a backup that carries version history, else nothing. */
+function historyCounts(pkg) {
+  const h = pkg.kind === 'backup' ? pkg.contents?.history : undefined;
+  const lists = Object.values(h?.versions ?? {}).filter((l) => Array.isArray(l) && l.length);
+  const count = lists.reduce((n, l) => n + l.length, 0);
+  const trashed = (h?.trash ?? []).length;
+  return count || trashed ? { history: { flows: lists.length, versions: count, trash: trashed } } : {};
+}
+
+/** Like the server: versions join by id (this side's copy wins), newest first, within the limit; deleted flows by trash id. */
+function mergeHistory(h, landed, pkgFlows) {
+  const out = { versions: 0, trash: 0, trimmed: 0 };
+  // Where versions go: where the flow landed, else the same id when it is here unchanged (picked or not).
+  const target = (id) => {
+    if (landed.has(id)) return landed.get(id);
+    const here = flows.get(id);
+    const theirs = pkgFlows.find((f) => f.id === id);
+    return here && theirs && contentSig(here) === contentSig(theirs) ? id : undefined;
+  };
+  for (const [from, list] of Object.entries(h.versions ?? {})) {
+    const to = target(from);
+    if (!to) continue;
+    const mine = versions.get(to) ?? [];
+    const fresh = list.filter((v) => !mine.some((x) => x.id === v.id)).map((v) => ({ ...v, flow: { ...v.flow, id: to } }));
+    const all = [...mine, ...fresh].sort((a, b) => b.recordedAt - a.recordedAt);
+    out.trimmed += Math.max(0, all.length - MAX_VERSIONS);
+    out.versions += fresh.filter((v) => all.indexOf(v) < MAX_VERSIONS).length;
+    versions.set(to, all.slice(0, MAX_VERSIONS));
+  }
+  for (const t of h.trash ?? []) {
+    if (trash.some((x) => x.trashId === t.trashId)) continue;
+    if (t.deletedAt + TRASH_MS <= now()) {
+      out.trimmed++;
+      continue;
+    }
+    trash.push({ trashId: t.trashId, deletedAt: t.deletedAt, flow: t.flow, versions: t.versions ?? [] });
+    out.trash++;
+  }
+  trash.sort((a, b) => b.deletedAt - a.deletedAt);
+  return out;
+}
+
 function importPackage(req) {
   const pkg = req.token ? inspected.get(req.token) : req.package;
   if (!pkg) return [410, { error: 'The package is no longer kept: send it again', code: 'package.expired' }];
   const inc = req.include ?? {};
-  const result = { flows: { added: 0, replaced: 0, skipped: 0, renamed: 0 }, mocks: { added: 0, replaced: 0, skipped: 0 }, environments: { added: 0, replaced: 0, skipped: 0 }, settings: false, slack: false, runs: 0, secretsRestored: false, warnings: [] };
+  const result = { flows: { added: 0, replaced: 0, skipped: 0, renamed: 0 }, mocks: { added: 0, replaced: 0, skipped: 0 }, environments: { added: 0, replaced: 0, skipped: 0 }, settings: false, slack: false, runs: 0, secretsRestored: false, warnings: [], notices: [] };
+  const landed = new Map();
   for (const f of pkg.contents?.flows ?? []) {
     if (inc.flows !== 'all' && !(inc.flows ?? []).includes(f.id)) continue;
     if (!flows.has(f.id)) {
       saveFlow(f);
+      landed.set(f.id, f.id);
       result.flows.added++;
     } else if (req.conflict === 'replace') {
+      // As the server: the replaced content is kept as "before an import".
+      keepVersion(flows.get(f.id), f, { reason: 'import' });
       saveFlow(f);
+      landed.set(f.id, f.id);
       result.flows.replaced++;
     } else if (req.conflict === 'keepBoth') {
-      saveFlow({ ...f, name: `${f.name} (2)` }, freeId(f.id));
+      const id = freeId(f.id);
+      saveFlow({ ...f, name: `${f.name} (2)` }, id);
+      landed.set(f.id, id);
       result.flows.renamed++;
     } else result.flows.skipped++;
+  }
+  if (inc.history && pkg.kind === 'backup' && pkg.contents?.history) {
+    result.history = mergeHistory(pkg.contents.history, landed, pkg.contents.flows ?? []);
+    if (result.history.trimmed) {
+      const message = `${result.history.trimmed} older version(s) or deleted flow(s) were left out to stay within the history limits`;
+      result.warnings.push(message);
+      result.notices.push({ code: 'package.history.trimmed', message, params: { count: result.history.trimmed } });
+    }
   }
   if (inc.environments && pkg.contents?.environments) {
     for (const e of pkg.contents.environments.environments) {

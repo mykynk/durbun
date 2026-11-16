@@ -8,6 +8,7 @@ import { api, isConnected, ui, useConnection } from '../../data';
 import type { BackupFile, BackupFolderSuggestion } from '../../data/api';
 import { errorText, useLanguage, useT } from '../../i18n';
 import { Group, OfflineNote, Row, SectionHeader } from '../../shell/settingsParts';
+import { BackupExcluded } from './excluded';
 import { MIN_PASSPHRASE } from './ExportDialog';
 import { readErrorText } from './ImportDialog';
 import { transfer } from './store';
@@ -242,6 +243,7 @@ export function BackupSection() {
             {passProblem ? <div className="tx-error">{passProblem}</div> : null}
           </form>
         ) : null}
+        <BackupExcluded className="tx-excluded--row" />
       </Group>
 
       <Group title={t('transfer.backup.last')}>

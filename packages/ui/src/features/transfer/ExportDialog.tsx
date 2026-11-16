@@ -8,6 +8,7 @@ import { api, ui, useFlows, useMocks } from '../../data';
 import { errorText, useT } from '../../i18n';
 import { useEnvironments } from '../flows/model/envStore';
 import { uiPrefsSnapshot } from './prefsSync';
+import { BackupExcluded } from './excluded';
 import { flowCountOf, flowsWithCalls, runsOfFlows } from './runs';
 
 /** Same minimum the server asks for the stored backup passphrase. */
@@ -115,7 +116,7 @@ export function ExportDialog({
     return {
       ...base,
       kind: 'backup',
-      include: { flows: 'all', mocks: true, environments: true, settings: true, uiPrefs: true, slack: true, runs: inc.runs },
+      include: { flows: 'all', mocks: true, environments: true, settings: true, uiPrefs: true, slack: true, history: true, runs: inc.runs },
       uiPrefs: uiPrefsSnapshot(),
       ...(pass ? { passphrase: pass } : {}),
     };
@@ -260,8 +261,10 @@ export function ExportDialog({
                 <Included label={t('transfer.export.settings')} />
                 <Included label={t('transfer.export.uiPrefs')} />
                 <Included label={t('transfer.export.slack')} hint={t('transfer.export.slackHint')} />
+                <Included label={t('transfer.export.history')} hint={t('transfer.export.historyHint')} />
               </ul>
               <ItemRow checked={inc.runs} onChange={(v) => set('runs', v)} label={t('transfer.export.runs')} hint={t('transfer.export.runsHint')} />
+              <BackupExcluded />
             </>
           )}
         </section>
