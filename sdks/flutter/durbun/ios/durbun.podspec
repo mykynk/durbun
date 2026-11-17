@@ -9,7 +9,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'durbun'
-  s.version          = '0.3.0'
+  s.version          = '0.3.1'
   s.summary          = 'Dürbün SDK for Flutter: native iOS layer (crashes, URLSession, native logs).'
   s.description      = <<-DESC
 Streams the app's native iOS crashes, URLSession traffic, stdout/stderr and Swift logs to the Dürbün

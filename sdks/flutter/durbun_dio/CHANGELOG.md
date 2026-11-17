@@ -1,3 +1,7 @@
+## 0.3.1
+
+- Requires `durbun: ^0.3.1`. No other changes.
+
 ## 0.3.0
 
 - Requires `durbun: ^0.3.0`.

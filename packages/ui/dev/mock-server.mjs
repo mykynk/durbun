@@ -81,7 +81,7 @@ let settings = {
 };
 const server = () => ({
   name: 'durbun',
-  version: '0.3.0',
+  version: '0.3.1',
   protocol: 1,
   ports: { http: PORT, sdk: 9751 },
   startedAt,
@@ -207,7 +207,7 @@ function baseApps() {
       id: 'app:1',
       sessionKey: 's-pati-old',
       deviceId: PIXEL,
-      sdk: { name: 'durbun', version: '0.3.0', platform: 'flutter' },
+      sdk: { name: 'durbun', version: '0.3.1', platform: 'flutter' },
       app: { name: 'Pati', id: 'com.mykynk.pati', version: '1.4.1', build: '41', pid: 11873, processName: 'com.mykynk.pati', debug: true },
       transport: 'adb-reverse',
       connected: false,
@@ -222,7 +222,7 @@ function baseApps() {
       sessionKey: 's-pati',
       deviceId: PIXEL,
       // Declares the GraphQL operation matcher; Pati on the simulator and Kasa run older SDKs that do not.
-      sdk: { name: 'durbun', version: '0.3.0', platform: 'flutter', layers: ['dart', 'android'], mockMatchers: ['graphql'] },
+      sdk: { name: 'durbun', version: '0.3.1', platform: 'flutter', layers: ['dart', 'android'], mockMatchers: ['graphql'] },
       app: { name: 'Pati', id: 'com.mykynk.pati', version: '1.4.2', build: '42', pid: 12345, processName: 'com.mykynk.pati', debug: true },
       transport: 'adb-reverse',
       connected: true,
@@ -272,7 +272,7 @@ function baseApps() {
       id: 'app:4',
       sessionKey: 's-pati-ios',
       deviceId: SIM,
-      sdk: { name: 'durbun', version: '0.3.0', platform: 'flutter', layers: ['dart', 'ios'] },
+      sdk: { name: 'durbun', version: '0.3.1', platform: 'flutter', layers: ['dart', 'ios'] },
       app: { name: 'Pati', id: 'com.mykynk.pati', version: '1.4.2', build: '42', pid: 48211, processName: 'Runner', debug: true },
       transport: 'tcp',
       connected: true,
@@ -1502,7 +1502,7 @@ function viewSnapshot(v) {
   return { type: 'snapshot', devices: v.devices, apps: v.apps, network: [...v.network.values()].map(strip), mocks: mockRules.rules, mocksRevision: mockRules.revision, drivers: drivers(), processes: [], metrics: [], deviceApps: v.deviceApps, logCount: v.logs.length, flows: flowSummaries(), flowRuns: [] };
 }
 function viewExport(v, mask) {
-  const exp = { format: 'durbun-session', version: 1, exportedAt: Date.now(), server: { version: '0.3.0' }, devices: v.devices, apps: v.apps, logs: v.logs, network: [...v.network.values()], deviceApps: v.deviceApps };
+  const exp = { format: 'durbun-session', version: 1, exportedAt: Date.now(), server: { version: '0.3.1' }, devices: v.devices, apps: v.apps, logs: v.logs, network: [...v.network.values()], deviceApps: v.deviceApps };
   if (mask) {
     exp.network = exp.network.map(maskDetail);
     exp.masked = true;
@@ -1954,7 +1954,7 @@ const httpServer = http.createServer(async (req, res) => {
       const date = new Date(view.opened.recording.startedAt).toISOString().slice(0, 10);
       return json(res, 200, viewExport(view, maskParam(url.searchParams.get('mask'))), { 'Content-Disposition': `attachment; filename="durbun-${date}.durbun.json"` });
     }
-    if (p === '/api/health') return json(res, 200, { ok: true, name: 'durbun', version: '0.3.0' });
+    if (p === '/api/health') return json(res, 200, { ok: true, name: 'durbun', version: '0.3.1' });
     if (p === '/api/doctor') return setTimeout(() => json(res, 200, doctorChecks()), 350);
     if (p === '/api/network/search' && req.method === 'POST') {
       const { text = '', ids } = JSON.parse((await readBody(req)).toString() || '{}');
@@ -1999,7 +1999,7 @@ const httpServer = http.createServer(async (req, res) => {
         format: 'durbun-session',
         version: 1,
         exportedAt: Date.now(),
-        server: { version: '0.3.0' },
+        server: { version: '0.3.1' },
         devices: deviceId ? devices.filter((d) => d.id === deviceId) : devices,
         apps: apps.filter((a) => appIds.has(a.id)),
         logs: logs.filter(inScope).slice(-5000),
@@ -2062,7 +2062,7 @@ const httpServer = http.createServer(async (req, res) => {
       if (mask !== undefined && mask !== null && typeof mask !== 'boolean') return json(res, 400, { error: 'mask must be true or false', code: 'har.invalid' });
       const masked = mask !== false;
       const picked = [...network.values()].filter((d) => !Array.isArray(ids) || ids.includes(d.id));
-      const log = { version: '1.2', creator: { name: 'Dürbün', version: '0.3.0' }, entries: harOf(masked ? picked.map(maskDetail) : picked) };
+      const log = { version: '1.2', creator: { name: 'Dürbün', version: '0.3.1' }, entries: harOf(masked ? picked.map(maskDetail) : picked) };
       if (masked) log._durbun = { masked: true };
       return json(res, 200, { log }, { 'Content-Disposition': 'attachment; filename="durbun.har"' });
     }

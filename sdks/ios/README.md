@@ -34,7 +34,7 @@ crashes, URLSession network traffic and performance metrics live to the Dürbün
 `https://github.com/mykynk/durbun`, and add the **Durbun** product to your app target. In a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/mykynk/durbun", from: "0.3.0"),
+.package(url: "https://github.com/mykynk/durbun", from: "0.3.1"),
 // in the target:
 .product(name: "Durbun", package: "durbun"),
 ```
@@ -42,15 +42,15 @@ crashes, URLSession network traffic and performance metrics live to the Dürbün
 **CocoaPods:**
 
 ```ruby
-pod 'Durbun', '~> 0.3.0'
+pod 'Durbun', '~> 0.3.1'
 # Optional: link it into the Debug configuration only, so Release builds contain no Dürbün code.
 # In that case `import Durbun` and every call must be inside `#if DEBUG`, or the Release build does not compile.
-# pod 'Durbun', '~> 0.3.0', :configurations => ['Debug']
+# pod 'Durbun', '~> 0.3.1', :configurations => ['Debug']
 ```
 
 The pod needs iOS 15 or macOS 12, the oldest targets Xcode 27 builds. For iOS 13 and 14, use Swift Package
 Manager or point the Podfile at the repository tag:
-`pod 'Durbun', :git => 'https://github.com/mykynk/durbun.git', :tag => 'v0.3.0'`.
+`pod 'Durbun', :git => 'https://github.com/mykynk/durbun.git', :tag => 'v0.3.1'`.
 
 With SwiftPM the package is linked into every configuration; in a build that is not a development build, the
 SDK does nothing by itself (see [Which builds run Dürbün](#which-builds-run-dürbün)). The package ships a privacy
