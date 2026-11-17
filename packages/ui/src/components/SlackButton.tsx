@@ -33,6 +33,8 @@ export interface SlackButtonProps {
  * only when clicked. Without a webhook it offers to connect one right here, so the dialog and its report stay open
  * and the message can go as soon as the channel is linked.
  */
+const UPLOADS_OFF = { code: 'slack.uploadsOff', message: 'This Slack connection sends text only' };
+
 export function SlackButton({ report, screenshot, screenshotTitle, disabled, onSent, onConnect, variant = 'secondary' }: SlackButtonProps) {
   const t = useT();
   const status = useSlackStatus();
@@ -53,7 +55,9 @@ export function SlackButton({ report, screenshot, screenshotTitle, disabled, onS
         ...(withShot ? { screenshot, ...(screenshotTitle ? { screenshotTitle } : {}) } : {}),
       });
       // The report is in the channel either way; a screenshot that did not go is a warning, not a failure.
-      if (result.screenshot === 'failed') toast.warn(t('common.slack.sentNoShot'), { description: errorText(result.screenshotError) });
+      // A connection without the upload key says so too, or the person sees "sent" and waits for the image.
+      const missed = result.screenshot === 'failed' ? result.screenshotError : screenshot && !withShot ? UPLOADS_OFF : undefined;
+      if (result.screenshot === 'failed' || missed) toast.warn(t('common.slack.sentNoShot'), missed ? { description: errorText(missed) } : undefined);
       else toast.success(result.screenshot === 'sent' ? t('common.slack.sentWithShot') : t('common.slack.sent'));
       onSent?.();
     } catch (err) {
