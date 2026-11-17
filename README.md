@@ -46,7 +46,8 @@ does in one readable, live window. *Dürbün* is Turkish for binoculars.
 - **Share.** A log line or a request becomes a report your team can read without Dürbün: copy it, save it as
   Markdown, or send it to your team's Slack channel with one click (Settings → Slack), formatted as it would be
   pasted, with a bug report's screenshot. Getting the channel's connection URL is one click too:
-  [Add to Slack](https://appnify.dev/durbun/slack/). The Flutter in-app panel can send it from the phone too.
+  [Add to Slack](https://appnify.dev/durbun/slack/). The Flutter in-app panel can send it from the phone too, a bug
+  report with its screenshot.
 - **Session recordings.** Every run is saved on your Mac as it happens: after a quit or a crash you reopen the
   previous session, kept apart from live data. Nothing leaves the Mac.
 - **Backups and sharing.** Your flows, mock rules, environments and settings in one `.durbun` file: share
@@ -242,7 +243,8 @@ Dürbün has no cloud, so your work lives in `~/.durbun` on this Mac. A `.durbun
   the same network reach the SDK port.
 - The SDKs contact no other service: what they capture goes only over the Dürbün connection (see
   [Security](#security)). The one exception is the Flutter in-app panel's **Send to Slack**, which posts a
-  report to the webhook you built the app with, and only when someone taps it.
+  report (and a bug report's screenshot) to the Slack connection you built the app with, and only when someone taps
+  it.
 
 ## Security
 

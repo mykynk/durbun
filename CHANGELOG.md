@@ -14,6 +14,9 @@ Planned as 0.3.1.
   report. It needs the connection URL from the [Add to Slack](https://appnify.dev/durbun/slack/) page, which now
   carries Dürbün's upload key after a `#`; a connection made before keeps sending the text only, and the bug
   report window says so. Older Dürbün versions accept the new URL and send the text only.
+- Flutter in-app panel: **Report a bug** has Send to Slack too, and given the same connection URL in
+  `DurbunOptions.slackWebhook` it uploads the screenshot from when the panel opened (the app's screen, without the
+  panel) right after the report.
 
 ### Changed
 

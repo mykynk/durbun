@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/protocol.dart';
@@ -16,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// (`logs/model/shareReport.test.ts`), and the sheet.
 
 const String _hook = 'https://hooks.slack.com/services/T000/B000/abcdWXYZ';
+const String _token = 'xoxb-1234-5678-abcdEFGH';
 
 const String _note = '… (shortened to fit Slack)';
 
@@ -378,6 +380,145 @@ void main() {
       expect(notificationText('## GET https://x.example/a?b=<c>&d\n```json\n{}\n```'), 'GET https://x.example/a?b=&lt;c&gt;&amp;d');
       expect(notificationText('```\ncode only\n```'), 'Dürbün');
       expect(notificationText('- *${'y' * 300}*'), hasLength(150));
+    });
+  });
+
+  group('the connection key', () {
+    test('the webhook before #, the key after it, both or neither', () {
+      final keyed = SlackConnection.parse('$_hook#token=$_token&channel=C0123ABCD&channel_name=%23qa');
+      expect((keyed.webhook, keyed.token, keyed.channelId, keyed.uploads), (_hook, _token, 'C0123ABCD', true));
+      expect(SlackConnection.parse('$_hook#token=$_token&channel=D0123ABCD').uploads, isTrue, reason: 'a direct message');
+      final plain = SlackConnection.parse(_hook);
+      expect((plain.webhook, plain.uploads), (_hook, false));
+      for (final bad in <String>[
+        '$_hook#token=$_token',
+        '$_hook#channel=C0123ABCD',
+        '$_hook#token=xoxp-123456789&channel=C0123ABCD',
+        '$_hook#token=$_token&channel=X0123ABCD',
+        '$_hook#%zz',
+      ]) {
+        final c = SlackConnection.parse(bad);
+        expect((c.webhook, c.uploads), (_hook, false), reason: bad);
+      }
+    });
+
+    test('the report goes to the webhook alone: the key never reaches it', () async {
+      final urls = <String>[];
+      debugPostToSlack = (webhook, payload) async {
+        urls.add(webhook);
+        return (status: 200, answer: 'ok');
+      };
+      addTearDown(() => debugPostToSlack = null);
+      expect(await sendToSlack('$_hook#token=$_token&channel=C0123ABCD', markdown: '# x', text: 'x'), isNull);
+      expect(urls, <String>[_hook]);
+    });
+  });
+
+  group('the screenshot', () {
+    final png = Uint8List.fromList(<int>[137, 80, 78, 71]);
+    const keyed = SlackConnection(webhook: _hook, token: _token, channelId: 'C0123ABCD');
+
+    /// Slack's Web API and upload host, answering [answers] by method (or
+    /// `upload`) and ok otherwise; records every call.
+    List<(String, String, Map<String, String>)> fakeSlack([Map<String, SlackAnswer> answers = const <String, SlackAnswer>{}]) {
+      final calls = <(String, String, Map<String, String>)>[];
+      debugPostSlackForm = (url, token, form) async {
+        final method = url.substring('https://slack.com/api/'.length);
+        calls.add((method, token, form));
+        return answers[method] ??
+            switch (method) {
+              'files.getUploadURLExternal' => (
+                  status: 200,
+                  answer: jsonEncode(<String, Object?>{'ok': true, 'upload_url': 'https://files.slack.com/upload/v1/ABC', 'file_id': 'F0456EFGH'}),
+                ),
+              _ => (status: 200, answer: '{"ok":true}'),
+            };
+      };
+      debugPostSlackBytes = (url, bytes) async {
+        calls.add(('upload', url, <String, String>{'bytes': bytes.join(',')}));
+        return answers['upload'] ?? (status: 200, answer: 'OK');
+      };
+      return calls;
+    }
+
+    tearDown(() {
+      debugPostSlackForm = null;
+      debugPostSlackBytes = null;
+      debugResetSlackJoins();
+    });
+
+    test('joins once, asks for an upload URL, posts the bytes there without the key, shares it in the channel', () async {
+      final calls = fakeSlack();
+      expect(await sendScreenshotToSlack(keyed, png, title: 'Screenshot · Bug report', fileName: 'durbun-bug.png'), isNull);
+      expect(calls.map((c) => c.$1), <String>['conversations.join', 'files.getUploadURLExternal', 'upload', 'files.completeUploadExternal']);
+      final [join, getUrl, upload, complete] = calls;
+      for (final call in <(String, String, Map<String, String>)>[join, getUrl, complete]) {
+        expect(call.$2, _token);
+      }
+      expect(join.$3, <String, String>{'channel': 'C0123ABCD'});
+      expect(getUrl.$3, <String, String>{'filename': 'durbun-bug.png', 'length': '4'});
+      expect(upload.$2, 'https://files.slack.com/upload/v1/ABC');
+      expect(upload.$3['bytes'], '137,80,78,71');
+      expect(complete.$3, <String, String>{
+        'files': jsonEncode(<Object?>[
+          <String, Object?>{'id': 'F0456EFGH', 'title': 'Screenshot · Bug report'},
+        ]),
+        'channel_id': 'C0123ABCD',
+      });
+
+      calls.clear();
+      await sendScreenshotToSlack(keyed, png, title: 'again');
+      expect(calls.map((c) => c.$1), isNot(contains('conversations.join')), reason: 'one join per run');
+    });
+
+    test('a direct message is not joined; a channel that cannot be joined still gets the upload', () async {
+      final calls = fakeSlack();
+      expect(await sendScreenshotToSlack(const SlackConnection(webhook: _hook, token: _token, channelId: 'D0123ABCD'), png, title: 't'),
+          isNull);
+      expect(calls.map((c) => c.$1), <String>['files.getUploadURLExternal', 'upload', 'files.completeUploadExternal']);
+
+      debugResetSlackJoins();
+      final private = fakeSlack(<String, SlackAnswer>{
+        'conversations.join': (status: 200, answer: '{"ok":false,"error":"missing_scope"}'),
+      });
+      expect(await sendScreenshotToSlack(keyed, png, title: 't'), isNull, reason: 'a key without channels:join');
+      expect(private.map((c) => c.$1).last, 'files.completeUploadExternal');
+    });
+
+    test('says why it did not go', () async {
+      final cases = <(SlackConnection, Map<String, SlackAnswer>, SlackShotProblem)>[
+        (const SlackConnection(webhook: _hook), const <String, SlackAnswer>{}, SlackShotProblem.noKey),
+        (keyed, {'files.completeUploadExternal': (status: 200, answer: '{"ok":false,"error":"not_in_channel"}')}, SlackShotProblem.notInChannel),
+        (
+          const SlackConnection(webhook: _hook, token: _token, channelId: 'D0123ABCD'),
+          {'files.completeUploadExternal': (status: 200, answer: '{"ok":false,"error":"not_in_channel"}')},
+          SlackShotProblem.notInDm,
+        ),
+        (keyed, {'files.getUploadURLExternal': (status: 200, answer: '{"ok":false,"error":"token_revoked"}')}, SlackShotProblem.reconnect),
+        (keyed, {'files.getUploadURLExternal': (status: 429, answer: '')}, SlackShotProblem.rateLimited),
+        (keyed, {'conversations.join': (status: 0, answer: 'timeout')}, SlackShotProblem.unreachable),
+        (keyed, {'upload': (status: 500, answer: 'no')}, SlackShotProblem.rejected),
+        (keyed, {'files.completeUploadExternal': (status: 200, answer: '{"ok":false,"error":"file_not_found"}')}, SlackShotProblem.rejected),
+        (
+          keyed,
+          {'files.getUploadURLExternal': (status: 200, answer: '{"ok":true,"upload_url":"https://evil.example/up","file_id":"F0456EFGH"}')},
+          SlackShotProblem.rejected,
+        ),
+        (keyed, {'files.getUploadURLExternal': (status: 200, answer: 'not json')}, SlackShotProblem.rejected),
+      ];
+      for (final (connection, answers, problem) in cases) {
+        debugResetSlackJoins();
+        final calls = fakeSlack(answers);
+        final error = await sendScreenshotToSlack(connection, png, title: 't');
+        expect(error?.problem, problem, reason: '$answers');
+        if (problem == SlackShotProblem.noKey) expect(calls, isEmpty);
+        if (answers.containsKey('files.getUploadURLExternal') && problem != SlackShotProblem.reconnect) {
+          expect(calls.map((c) => c.$1), isNot(contains('upload')), reason: 'no bytes to a host that is not Slack');
+        }
+      }
+      debugResetSlackJoins();
+      fakeSlack(<String, SlackAnswer>{'files.completeUploadExternal': (status: 200, answer: '{"ok":false,"error":"file_not_found"}')});
+      expect((await sendScreenshotToSlack(keyed, png, title: 't'))?.detail, 'file_not_found');
     });
   });
 

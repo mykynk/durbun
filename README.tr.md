@@ -48,7 +48,7 @@ ve canlı bir pencerede gösterir.
   kopyalayın, Markdown olarak kaydedin ya da tek tıkla ekibinizin Slack kanalına gönderin (Ayarlar → Slack);
   rapor Slack'e yapıştırılmış gibi biçimli, hata raporu ekran görüntüsüyle gider. Kanalın bağlantı adresini
   almak da tek tık: [Slack'e ekle](https://appnify.dev/durbun/slack/?lang=tr). Flutter uygulama içi paneli de
-  telefondan gönderebilir.
+  telefondan gönderebilir, hata raporunu ekran görüntüsüyle.
 - **Oturum kayıtları.** Her oturum yakalanırken Mac'inize kaydedilir: Dürbün kapansa ya da çökse bile önceki
   oturumu canlı veriden ayrı olarak yeniden açarsınız. Hiçbir şey Mac'ten çıkmaz.
 - **Yedekleme ve paylaşım.** Akışlarınız, mock kurallarınız, ortamlarınız ve ayarlarınız tek bir `.durbun`
@@ -250,7 +250,8 @@ yere taşır:
   **LAN**'ı açın (ya da `--lan` verin).
 - SDK'lar başka hiçbir servise bağlanmaz: yakaladıkları yalnızca Dürbün bağlantısından gider (bkz.
   [Güvenlik](#güvenlik)). Tek istisna Flutter uygulama içi panelinin **Slack'e gönder**'idir: raporu,
-  uygulamayı derlerken verdiğiniz webhook'a, yalnızca biri dokunduğunda gönderir.
+  uygulamayı derlerken verdiğiniz Slack bağlantısına (hata raporunun ekran görüntüsüyle), yalnızca biri
+  dokunduğunda gönderir.
 
 ## Güvenlik
 

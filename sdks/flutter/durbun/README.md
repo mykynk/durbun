@@ -871,20 +871,19 @@ to the Mac app stays as it is (`redactHeaders` masks a header everywhere).
 
 ### Send to Slack
 
-Give the panel a Slack incoming webhook and every Share sheet gets a
-**Send to Slack** button: the report goes to that webhook's channel (for
-example `#mobile-app`) from the phone itself, without the Mac, and only when
-someone taps it. Slack shows it as one message, the way a report pasted into
+Give the panel a Slack incoming webhook and every Share sheet, and Report a
+bug, gets a **Send to Slack** button: the report goes to that webhook's
+channel (for example `#mobile-app`) from the phone itself, without the Mac,
+and only when someone taps it. Slack shows it as one message, the way a report pasted into
 Slack looks (lists, quotes and code blocks with their language, however long),
 ending with "Sent with Dürbün (in-app panel)". A workspace that does not take
 rich text gets the report as Markdown, in numbered messages when it is long,
 and otherwise as plain text.
 
 1. Open [Add to Slack](https://appnify.dev/durbun/slack/), pick the channel
-   and copy the `https://hooks.slack.com/services/…` URL it shows. (A webhook
-   of your own Slack app works the same.)
-2. Keep the URL in your local environment, not in the repository, and pass it
-   at build time:
+   and copy the connection URL it shows. (A webhook of your own Slack app
+   works the same, for text.)
+2. Pass it at build time, or set it in code (below):
 
 ```sh
 export DURBUN_SLACK_WEBHOOK=https://hooks.slack.com/services/…   # e.g. in ~/.zshrc
@@ -895,9 +894,33 @@ A git-ignored `--dart-define-from-file` works the same way, and
 `DurbunOptions(slackWebhook: ...)` sets it in code. Only `https://` URLs are
 used; without a webhook the button does not appear.
 
-Anyone who has the webhook URL can post to its channel. The URL is compiled
-into the build you pass it to, so whoever has that build can find it; which
-builds get one is your call. The request to Slack is not captured, so the URL
+**The bug report's screenshot.** The URL from Add to Slack carries a key
+after `#` (`#token=xoxb-…&channel=…`). Give the panel the whole URL and Report
+a bug uploads its screenshot to the same channel right after the report: the
+app's screen from when the panel opened, without the panel itself. With only
+the part before `#` the report goes as text, and the page says the screenshot
+did not go (Share still sends it). If Slack answers that Dürbün is not in a
+private channel, type `/invite @Durbun` there once.
+
+To keep the URL out of some builds altogether, choose it at compile time.
+`appFlavor` (from `--flavor`) is a constant, so a build of the other flavor
+does not contain the URL at all; a check made at run time would leave it in
+every build:
+
+```dart
+import 'package:flutter/services.dart' show appFlavor;
+
+const String? slack = appFlavor == 'prod' ? null : 'https://hooks.slack.com/services/…#token=…&channel=…';
+
+await Durbun.run(() => runApp(const MyApp()), options: const DurbunOptions(slackWebhook: slack));
+```
+
+Anyone who has the webhook URL can post to its channel. The key after `#`
+also lets them upload files to the channels the Dürbün bot is in (and join
+public ones to do so); it cannot read messages, files, channels or members.
+The URL is compiled into the build you pass it to, so whoever has that build
+can find it; which builds get one is your call. Removing Dürbün from the
+Slack workspace turns the webhook and the key off. The request to Slack is not captured, so the URL
 does not appear in the Network list. The Mac app has the same button for
 logs and requests (Settings → Slack), with its own webhook.
 

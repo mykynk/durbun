@@ -10,6 +10,7 @@ import 'package:durbun/src/inspector/logs_view.dart' show LogRow;
 import 'package:durbun/src/inspector/network_view.dart' show CallRow;
 import 'package:durbun/src/inspector/perf_view.dart' show StatTile;
 import 'package:durbun/src/inspector/share_sheet.dart';
+import 'package:durbun/src/inspector/slack.dart';
 import 'package:durbun/src/inspector/store.dart';
 import 'package:durbun/src/inspector/strings.dart';
 import 'package:durbun/src/inspector/theme.dart';
@@ -660,6 +661,123 @@ void main() {
       expect(find.text('Sharing did not open; the report was copied'), findsOneWidget);
       expect(find.text('Keep me'), findsOneWidget);
       expect(find.text('Share…'), findsOneWidget, reason: 'ready to try again');
+    });
+
+    group('Send to Slack', () {
+      const hook = 'https://hooks.slack.com/services/T000/B000/abcdWXYZ';
+      const keyed = '$hook#token=xoxb-1234-5678-abcdEFGH&channel=C0123ABCD&channel_name=%23qa';
+
+      /// Slack faked: the webhook answers [webhook]; the Web API answers
+      /// [api] by method (ok otherwise). Records the report and every call.
+      (List<String>, List<String>) fakeSlack({SlackAnswer webhook = (status: 200, answer: 'ok'), Map<String, SlackAnswer> api = const {}}) {
+        final reports = <String>[];
+        final calls = <String>[];
+        debugPostToSlack = (url, payload) async {
+          expect(url, hook, reason: 'the key never goes to the webhook');
+          reports.add(payload['text']! as String);
+          return webhook;
+        };
+        debugPostSlackForm = (url, token, form) async {
+          final method = url.split('/').last;
+          calls.add(method == 'files.completeUploadExternal' ? '$method ${form['files']}' : method);
+          return api[method] ??
+              (method == 'files.getUploadURLExternal'
+                  ? (status: 200, answer: '{"ok":true,"upload_url":"https://files.slack.com/upload/v1/ABC","file_id":"F0456EFGH"}')
+                  : (status: 200, answer: '{"ok":true}'));
+        };
+        debugPostSlackBytes = (url, bytes) async {
+          calls.add('upload ${bytes.length}');
+          return (status: 200, answer: 'OK');
+        };
+        addTearDown(() {
+          debugPostToSlack = null;
+          debugPostSlackForm = null;
+          debugPostSlackBytes = null;
+          debugResetSlackJoins();
+        });
+        return (reports, calls);
+      }
+
+      Future<DurbunInspectorStore> open(WidgetTester tester, String? url) async {
+        final (s, crash) = _seeded();
+        s.slackWebhook = url;
+        setPanelOpening(s, PanelOpening(_now, await _picture(tester)));
+        addTearDown(() => setPanelOpening(s, null));
+        await _page(tester, s, BugAnchor.log(crash));
+        return s;
+      }
+
+      Finder slackButton() => find.byKey(const ValueKey<String>('durbun-bug-slack'));
+
+      testWidgets('with the key: the report, then the screenshot in the same channel', (tester) async {
+        _fakeShare(tester);
+        final (reports, calls) = fakeSlack();
+        await open(tester, keyed);
+        expect(find.text('Send to Slack'), findsOneWidget);
+        expect(find.text('Share…'), findsOneWidget, reason: 'Share still there for other apps');
+
+        await tester.tap(slackButton());
+        await tester.pumpAndSettle();
+        expect(reports.single, contains('Bug report'));
+        expect(calls.first, 'conversations.join');
+        expect(calls[1], 'files.getUploadURLExternal');
+        expect(calls[2], 'upload 4');
+        expect(calls.last, contains('"title":"Screenshot · Bug report: Pati · Galaxy A73"'));
+        expect(find.text('Sent to Slack with the screenshot'), findsOneWidget);
+        expect(find.byType(Callout), findsNothing);
+      });
+
+      testWidgets('the screenshot left out: the report alone, nothing uploaded', (tester) async {
+        _fakeShare(tester);
+        final (reports, calls) = fakeSlack();
+        await open(tester, keyed);
+        await tester.tap(find.text('Leave the screenshot out'));
+        await tester.pumpAndSettle();
+        await tester.tap(slackButton());
+        await tester.pumpAndSettle();
+        expect(reports, hasLength(1));
+        expect(calls, isEmpty);
+        expect(find.text('Sent to Slack'), findsOneWidget);
+      });
+
+      testWidgets('a webhook without the key: the report goes, the page says why the screenshot did not', (tester) async {
+        _fakeShare(tester);
+        final (reports, calls) = fakeSlack();
+        await open(tester, hook);
+        await tester.tap(slackButton());
+        await tester.pumpAndSettle();
+        expect(reports, hasLength(1));
+        expect(calls, isEmpty);
+        expect(find.text('The report went to Slack, the screenshot did not'), findsOneWidget);
+        expect(find.text('This build’s Slack connection sends text only. You can still send the screenshot with Share.'), findsOneWidget);
+      });
+
+      testWidgets('the bot not in the channel: the page says to invite it', (tester) async {
+        _fakeShare(tester);
+        fakeSlack(api: <String, SlackAnswer>{'files.completeUploadExternal': (status: 200, answer: '{"ok":false,"error":"not_in_channel"}')});
+        await open(tester, keyed);
+        await tester.tap(slackButton());
+        await tester.pumpAndSettle();
+        expect(find.textContaining('/invite @Durbun'), findsOneWidget);
+      });
+
+      testWidgets('the report refused: nothing else tried, the page stays as it was', (tester) async {
+        _fakeShare(tester);
+        final (_, calls) = fakeSlack(webhook: (status: 404, answer: 'no_service'));
+        await open(tester, keyed);
+        await tester.enterText(find.byKey(const ValueKey<String>('durbun-bug-note')), 'Keep me');
+        await tester.tap(slackButton());
+        await tester.pumpAndSettle();
+        expect(calls, isEmpty);
+        expect(find.text('Could not send to Slack: no_service'), findsOneWidget);
+        expect(find.text('Keep me'), findsOneWidget);
+      });
+
+      testWidgets('no connection: no Slack button, Share is the main action', (tester) async {
+        _fakeShare(tester);
+        await open(tester, null);
+        expect(slackButton(), findsNothing);
+      });
     });
 
     testWidgets('no screenshot: said plainly, not as an error', (tester) async {

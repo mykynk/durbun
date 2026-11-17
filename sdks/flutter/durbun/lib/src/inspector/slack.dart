@@ -12,6 +12,12 @@
 /// (`packages/server/src/http/slack.ts`); `slack_test.dart` and
 /// `slack.test.ts` pin the same output.
 ///
+/// The URL from the Add to Slack page may carry a key after `#`
+/// (`token=xoxb-…&channel=C…`, [SlackConnection]). The report goes to the
+/// webhook before `#` either way; with the key, a bug report's screenshot
+/// is uploaded to the same channel right after it
+/// ([sendScreenshotToSlack]), as the Mac app does.
+///
 /// [toSlackMarkdown] and [toSlackText] prepare the report as the desktop UI
 /// does (`packages/ui/src/lib/slack.ts`; `slack.test.ts` there pins the same
 /// output): a run of backticks inside a block is broken up so it cannot
@@ -22,6 +28,8 @@
 /// fallback, escapes `&`, `<` and `>` (Slack reads `<…>` as a link or an
 /// @channel mention) and makes every fence plain ```.
 library;
+
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
@@ -428,6 +436,8 @@ Future<String?> sendToSlack(
   required String text,
   Duration partGap = kSlackPartGap,
 }) async {
+  // The key after `#` is for uploads only; the webhook never sees it.
+  webhook = SlackConnection.parse(webhook).webhook;
   try {
     if (markdown.trim().isEmpty) return await _postText(webhook, text);
     return await _postRichText(webhook, markdown, text, partGap);
@@ -487,3 +497,206 @@ Future<String?> _postMarkdown(String webhook, String markdown, String fallbackTe
   }
   return null;
 }
+
+/* ─────────────────────── the screenshot ─────────────────────── */
+
+final RegExp _tokenRe = RegExp(r'^xoxb-[A-Za-z0-9-]{8,250}$');
+
+/// A channel (C…), an older private channel (G…) or a direct message (D…).
+final RegExp _channelRe = RegExp(r'^[CGD][A-Z0-9]{2,30}$');
+final RegExp _fileIdRe = RegExp(r'^F[A-Z0-9]{2,30}$');
+
+/// `DurbunOptions.slackWebhook` read: the webhook the report goes to and,
+/// when the URL from the Add to Slack page carries it after `#`, the key
+/// that uploads a bug report's screenshot (the bot token and the channel).
+/// A key that does not read is left out: the report still goes, as text.
+@immutable
+class SlackConnection {
+  const SlackConnection({required this.webhook, this.token, this.channelId});
+
+  factory SlackConnection.parse(String url) {
+    final hash = url.indexOf('#');
+    if (hash < 0) return SlackConnection(webhook: url);
+    final webhook = url.substring(0, hash);
+    final Map<String, String> params;
+    try {
+      params = Uri.splitQueryString(url.substring(hash + 1));
+    } catch (_) {
+      return SlackConnection(webhook: webhook);
+    }
+    final token = params['token'];
+    final channel = params['channel'];
+    if (token == null || !_tokenRe.hasMatch(token) || channel == null || !_channelRe.hasMatch(channel)) {
+      return SlackConnection(webhook: webhook);
+    }
+    return SlackConnection(webhook: webhook, token: token, channelId: channel);
+  }
+
+  /// The incoming webhook (the URL before `#`).
+  final String webhook;
+
+  /// The bot token (`xoxb-…`) and the channel id, both or neither.
+  final String? token;
+  final String? channelId;
+
+  /// Whether a bug report's screenshot can go too.
+  bool get uploads => token != null && channelId != null;
+}
+
+/// Why a screenshot did not reach Slack (the report did).
+enum SlackShotProblem {
+  /// The connection has no key: the webhook alone takes text only.
+  noKey,
+
+  /// Slack no longer takes the key (the app was removed, the key revoked).
+  reconnect,
+
+  /// The bot is not in the (private) channel: `/invite @Durbun` there.
+  notInChannel,
+
+  /// Slack would not share a file in this direct message.
+  notInDm,
+
+  /// Slack is limiting requests just now.
+  rateLimited,
+
+  /// No answer: the network, a timeout.
+  unreachable,
+
+  /// Any other refusal; [SlackShotError.detail] has Slack's word.
+  rejected,
+}
+
+@immutable
+class SlackShotError {
+  const SlackShotError(this.problem, [this.detail = '']);
+
+  final SlackShotProblem problem;
+
+  /// Slack's error word or the network error, for the curious.
+  final String detail;
+
+  @override
+  String toString() => detail.isEmpty ? problem.name : '${problem.name}: $detail';
+}
+
+const String _slackApi = 'https://slack.com/api/';
+
+/// Slack API error words that mean the key no longer works.
+const Set<String> _reconnectErrors = <String>{
+  'invalid_auth',
+  'not_authed',
+  'account_inactive',
+  'token_revoked',
+  'token_expired',
+  'missing_scope',
+  'not_allowed_token_type',
+};
+
+/// …and the ones that mean the bot is not in the channel.
+const Set<String> _notInChannelErrors = <String>{'not_in_channel', 'channel_not_found', 'no_permission'};
+
+/// Channels joined (or already in) this run: one `conversations.join` each.
+final Set<String> _joined = <String>{};
+
+/// Replaces the Slack Web API call (tests): the method URL, the token and
+/// the form.
+@visibleForTesting
+Future<SlackAnswer> Function(String url, String token, Map<String, String> form)? debugPostSlackForm;
+
+/// Replaces the upload of the bytes (tests): the upload URL and the bytes.
+@visibleForTesting
+Future<SlackAnswer> Function(String url, List<int> bytes)? debugPostSlackBytes;
+
+/// Forgets the channels joined (tests).
+@visibleForTesting
+void debugResetSlackJoins() => _joined.clear();
+
+/// Shares [png] in the connection's channel the way the Mac app does: joins
+/// a public channel once (not a direct message; a refusal is not fatal, the
+/// upload says whether the bot is in), asks Slack for an upload URL, posts
+/// the bytes there (to `*.slack.com` only, without the token) and completes
+/// the upload into the channel with [title]. Every call goes with a client
+/// Dürbün does not capture. Returns null when it was shared, else why not;
+/// never throws.
+Future<SlackShotError?> sendScreenshotToSlack(
+  SlackConnection connection,
+  Uint8List png, {
+  required String title,
+  String fileName = 'screenshot.png',
+}) async {
+  final token = connection.token;
+  final channel = connection.channelId;
+  if (token == null || channel == null) return const SlackShotError(SlackShotProblem.noKey);
+  try {
+    final dm = channel.startsWith('D');
+    if (!dm && !_joined.contains(channel)) {
+      final joined = await _api(token, 'conversations.join', <String, String>{'channel': channel});
+      if (joined.status == 0) return SlackShotError(SlackShotProblem.unreachable, joined.answer);
+      if (joined.status == 429) return const SlackShotError(SlackShotProblem.rateLimited);
+      // Already in, just joined, or not joinable (a private channel, a key
+      // without channels:join): the upload below tells which.
+      if (_apiProblem(joined, dm) == null) _joined.add(channel);
+    }
+    final got = await _api(token, 'files.getUploadURLExternal', <String, String>{'filename': fileName, 'length': '${png.length}'});
+    final gotProblem = _apiProblem(got, dm);
+    if (gotProblem != null) return gotProblem;
+    final body = _json(got.answer);
+    final uploadUrl = body['upload_url'];
+    final fileId = body['file_id'];
+    if (uploadUrl is! String || !_isSlackHost(uploadUrl) || fileId is! String || !_fileIdRe.hasMatch(fileId)) {
+      return const SlackShotError(SlackShotProblem.rejected, 'unexpected upload answer');
+    }
+    final up = await (debugPostSlackBytes ?? platform.postSlackBytes)(uploadUrl, png);
+    if (up.status == 0) return SlackShotError(SlackShotProblem.unreachable, up.answer);
+    if (up.status == 429) return const SlackShotError(SlackShotProblem.rateLimited);
+    if (up.status < 200 || up.status >= 300) return SlackShotError(SlackShotProblem.rejected, 'HTTP ${up.status}');
+    final done = await _api(token, 'files.completeUploadExternal', <String, String>{
+      'files': jsonEncode(<Object?>[
+        <String, Object?>{'id': fileId, 'title': title},
+      ]),
+      'channel_id': channel,
+    });
+    return _apiProblem(done, dm);
+  } catch (e) {
+    return SlackShotError(SlackShotProblem.unreachable, '$e');
+  }
+}
+
+Future<SlackAnswer> _api(String token, String method, Map<String, String> form) =>
+    (debugPostSlackForm ?? platform.postSlackForm)('$_slackApi$method', token, form);
+
+Map<String, Object?> _json(String text) {
+  try {
+    final value = jsonDecode(text);
+    return value is Map<String, Object?> ? value : const <String, Object?>{};
+  } catch (_) {
+    return const <String, Object?>{};
+  }
+}
+
+/// Null for an `ok: true` answer, else why not.
+SlackShotError? _apiProblem(SlackAnswer res, bool dm) {
+  if (res.status == 0) return SlackShotError(SlackShotProblem.unreachable, res.answer);
+  if (res.status == 429) return const SlackShotError(SlackShotProblem.rateLimited);
+  final body = _json(res.answer);
+  if (res.status >= 200 && res.status < 300 && body['ok'] == true) return null;
+  final error = body['error'];
+  final word = error is String && error.isNotEmpty ? error : 'HTTP ${res.status}';
+  if (word == 'ratelimited') return const SlackShotError(SlackShotProblem.rateLimited);
+  if (_reconnectErrors.contains(word)) return SlackShotError(SlackShotProblem.reconnect, word);
+  if (_notInChannelErrors.contains(word)) {
+    return SlackShotError(dm ? SlackShotProblem.notInDm : SlackShotProblem.notInChannel, word);
+  }
+  return SlackShotError(SlackShotProblem.rejected, word);
+}
+
+/// Slack's own hosts over https: the bytes go nowhere else.
+bool _isSlackHost(String url) {
+  final u = Uri.tryParse(url);
+  return u != null &&
+      u.scheme == 'https' &&
+      u.userInfo.isEmpty &&
+      (u.host == 'slack.com' || u.host.endsWith('.slack.com'));
+}
+

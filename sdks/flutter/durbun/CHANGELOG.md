@@ -8,6 +8,12 @@
   their language, in one message however long. A workspace that does not
   take rich text gets it as Markdown (in numbered messages when it is long),
   and otherwise as plain text, as before.
+- In-app panel: **Report a bug** has **Send to Slack** too. Given the whole
+  connection URL from [Add to Slack](https://appnify.dev/durbun/slack/) (the
+  key after `#` included), it uploads the screenshot to the same channel right
+  after the report: the app's screen from when the panel opened, without the
+  panel. With a plain webhook the report goes as text and the page says why
+  the screenshot did not; Share still sends it.
 
 ## 0.3.0
 

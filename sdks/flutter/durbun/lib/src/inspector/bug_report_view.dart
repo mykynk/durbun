@@ -1,9 +1,11 @@
 /// "Report a bug" (Hata bildir): a tester with only the phone gathers what
 /// just happened (the moment, the log lines and failed requests around it,
 /// the app's screenshot from when the panel opened, the device and app
-/// facts and a note) and sends it through one system share sheet. Nothing
-/// leaves the phone until the share sheet does; secret values are masked by
-/// default, and the screenshot can be left out.
+/// facts and a note) and sends it through one system share sheet, or
+/// straight to Slack when the app has a Slack connection (the screenshot
+/// too when the connection carries the upload key). Nothing leaves the
+/// phone until one of them is tapped; secret values are masked by default,
+/// and the screenshot can be left out.
 library;
 
 import 'dart:async';
@@ -20,6 +22,7 @@ import 'export_sheet.dart' show ExportWriter;
 import 'filter_ui.dart' show SheetSwitch;
 import 'format.dart' show formatClock;
 import 'share_sheet.dart' show FilesShareOutcome, canShareNatively, rememberShareMask, shareFilesNatively, shareOptionsOf;
+import 'slack.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
@@ -90,8 +93,12 @@ class _BugReportPageState extends State<BugReportPage> {
 
   bool _busy = false;
 
-  /// What the last send said (files left out, nothing opened).
-  (String, CalloutTone)? _notice;
+  /// The busy send is the Slack one (its button says Sending…).
+  bool _sendingSlack = false;
+
+  /// What the last send said (files left out, nothing opened): the title,
+  /// the tone and an optional line under it.
+  (String, CalloutTone, String?)? _notice;
 
   @override
   void initState() {
@@ -201,7 +208,7 @@ class _BugReportPageState extends State<BugReportPage> {
           setState(() {
             _busy = false;
             // The text went; say so only when files were meant to go along.
-            if (paths.isNotEmpty || _sendsShot) _notice = (t.bugTextOnly, CalloutTone.info);
+            if (paths.isNotEmpty || _sendsShot) _notice = (t.bugTextOnly, CalloutTone.info, null);
           });
         case FilesShareOutcome.failed:
           await _fallBackToClipboard(textOnly, t);
@@ -222,9 +229,82 @@ class _BugReportPageState extends State<BugReportPage> {
     if (!mounted) return;
     setState(() {
       _busy = false;
-      _notice = copied ? (t.shareFallback, CalloutTone.info) : (t.bugShareFailed, CalloutTone.warning);
+      _notice = copied ? (t.shareFallback, CalloutTone.info, null) : (t.bugShareFailed, CalloutTone.warning, null);
     });
   }
+
+  /// Posts the report to Slack, then the screenshot when it is in and the
+  /// connection has the upload key. Everything went: the page closes. Only
+  /// the screenshot did not: the page stays and says why, so Share can still
+  /// send the picture. The report did not go: the page stays as it was.
+  Future<void> _slack(BugContents contents, String url) async {
+    final t = InspectorStrings.of(context);
+    FocusManager.instance.primaryFocus?.unfocus();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final navigator = Navigator.of(context);
+    setState(() {
+      _busy = true;
+      _sendingSlack = true;
+      _notice = null;
+    });
+    final input = _input(contents);
+    final report = buildBugReportText(input, t);
+    final connection = SlackConnection.parse(url);
+    final error = await sendToSlack(
+      connection.webhook,
+      markdown: toSlackMarkdown(report, cutNote: t.slackCutNote, footer: t.slackFooter),
+      text: toSlackText(report, cutNote: t.slackCutNote, footer: t.slackFooter),
+    );
+    if (!mounted) return;
+    if (error != null) {
+      setState(() {
+        _busy = false;
+        _sendingSlack = false;
+        _notice = (t.slackFailed(error), CalloutTone.warning, null);
+      });
+      return;
+    }
+    _drafts[widget.store] = null;
+    final shot = _sendsShot ? _shot : null;
+    String? shotWhy;
+    if (shot != null) {
+      if (!connection.uploads) {
+        shotWhy = t.slackShotNoKey;
+      } else {
+        Uint8List? bytes;
+        try {
+          bytes = await _png(shot);
+        } catch (_) {}
+        final stem = bugFileStem(input.appName, DateTime.fromMicrosecondsSinceEpoch((_now * 1000).round()));
+        final problem = bytes == null || bytes.isEmpty
+            ? const SlackShotError(SlackShotProblem.rejected, 'PNG')
+            : await sendScreenshotToSlack(connection, bytes,
+                title: '${t.bugScreenshot} · ${bugSubject(input, t)}', fileName: '$stem.png');
+        if (problem != null) shotWhy = _shotReason(problem, t);
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _sendingSlack = false;
+      if (shotWhy != null) _notice = (t.slackShotNotSent, CalloutTone.warning, t.slackShotWhy(shotWhy));
+    });
+    if (shotWhy != null) return;
+    messenger?.hideCurrentSnackBar();
+    messenger?.showSnackBar(SnackBar(
+        content: Text(shot != null ? t.slackSentWithShot : t.slackSent), duration: const Duration(milliseconds: 1600)));
+    if (navigator.canPop()) navigator.pop();
+  }
+
+  static String _shotReason(SlackShotError e, InspectorStrings t) => switch (e.problem) {
+        SlackShotProblem.noKey => t.slackShotNoKey,
+        SlackShotProblem.reconnect => t.slackShotReconnect,
+        SlackShotProblem.notInChannel => t.slackShotNotInChannel,
+        SlackShotProblem.notInDm => t.slackShotNotInDm,
+        SlackShotProblem.rateLimited => t.slackShotRateLimited,
+        SlackShotProblem.unreachable => t.slackShotUnreachable,
+        SlackShotProblem.rejected => t.slackShotRejected(e.detail),
+      };
 
   void _setBefore(int seconds) {
     _lastBefore[widget.store] = seconds;
@@ -308,6 +388,8 @@ class _BugReportPageState extends State<BugReportPage> {
           final contents = collectBugContents(widget.store, _window, anchor: widget.anchor);
           final off = widget.utcOffsetMinutes;
           final range = '${bugClock(_window.fromMs, off)} – ${bugClock(_window.toMs, off)}';
+          // One webhook per app: a restored previous run's store has none of its own.
+          final slackUrl = canSendToSlack ? widget.store.slackWebhook ?? DurbunInspectorStore.existing?.slackWebhook : null;
           final summary = <String>[
             t.bugLogs(contents.totalLines),
             t.bugFailed(contents.totalFailed),
@@ -364,8 +446,11 @@ class _BugReportPageState extends State<BugReportPage> {
                 summary: summary,
                 notice: _notice,
                 busy: _busy,
+                sendingSlack: _sendingSlack,
+                slack: slackUrl != null,
                 onCopy: _busy ? null : () => _copy(contents),
                 onSend: _busy ? null : () => unawaited(_send(contents)),
+                onSlack: _busy || slackUrl == null ? null : () => unawaited(_slack(contents, slackUrl)),
               ),
             ],
           );
@@ -768,15 +853,28 @@ class _Thumbnail extends StatelessWidget {
 }
 
 /// Pinned under the page: what goes (counts), a notice from the last try,
-/// Copy and the one main action, Share….
+/// Copy and the one main action, Share…; with a Slack connection, Send to
+/// Slack is the main action, full width above them.
 class _Footer extends StatelessWidget {
-  const _Footer({required this.summary, required this.notice, required this.busy, required this.onCopy, required this.onSend});
+  const _Footer({
+    required this.summary,
+    required this.notice,
+    required this.busy,
+    required this.sendingSlack,
+    required this.slack,
+    required this.onCopy,
+    required this.onSend,
+    required this.onSlack,
+  });
 
   final String summary;
-  final (String, CalloutTone)? notice;
+  final (String, CalloutTone, String?)? notice;
   final bool busy;
+  final bool sendingSlack;
+  final bool slack;
   final VoidCallback? onCopy;
   final VoidCallback? onSend;
+  final VoidCallback? onSlack;
 
   @override
   Widget build(BuildContext context) {
@@ -792,7 +890,7 @@ class _Footer extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (notice != null) ...<Widget>[
-            Callout(title: notice!.$1, tone: notice!.$2),
+            Callout(title: notice!.$1, tone: notice!.$2, body: notice!.$3),
             const SizedBox(height: 10),
           ],
           LayoutBuilder(builder: (context, box) {
@@ -808,25 +906,43 @@ class _Footer extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: DurbunType.ui(size: DurbunType.sm, color: c.textMuted, weight: FontWeight.w500, height: 1.35)),
             );
-            final buttons = Row(
+            final row = Row(
               children: <Widget>[
                 Expanded(
-                  child: DButton(large: true, primary: !share, icon: Icons.copy_rounded, label: t.copy, onTap: onCopy),
+                  child: DButton(large: true, primary: !share && !slack, icon: Icons.copy_rounded, label: t.copy, onTap: onCopy),
                 ),
                 if (share) ...<Widget>[
                   const SizedBox(width: 10),
                   Expanded(
                     child: DButton(
                       large: true,
-                      primary: true,
+                      primary: !slack,
                       icon: defaultTargetPlatform == TargetPlatform.iOS ? Icons.ios_share_rounded : Icons.share_rounded,
-                      label: busy ? t.exportPreparing : t.shareSend,
+                      label: busy && !sendingSlack ? t.exportPreparing : t.shareSend,
                       onTap: onSend,
                     ),
                   ),
                 ],
               ],
             );
+            final Widget buttons = !slack
+                ? row
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      DButton(
+                        key: const ValueKey<String>('durbun-bug-slack'),
+                        large: true,
+                        primary: true,
+                        icon: Icons.send_rounded,
+                        label: sendingSlack ? t.slackSending : t.slackSend,
+                        onTap: onSlack,
+                      ),
+                      const SizedBox(height: 10),
+                      row,
+                    ],
+                  );
             if (wide) {
               return Row(
                 children: <Widget>[

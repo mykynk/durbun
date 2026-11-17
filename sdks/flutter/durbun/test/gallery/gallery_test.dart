@@ -27,6 +27,7 @@ import 'package:durbun/src/inspector/logs_view.dart' show LogRow;
 import 'package:durbun/src/inspector/network_view.dart' show CallRow;
 import 'package:durbun/src/inspector/run_log.dart';
 import 'package:durbun/src/inspector/share_sheet.dart' show debugShareHandler;
+import 'package:durbun/src/inspector/slack.dart' show debugPostSlackForm, debugPostToSlack, debugResetSlackJoins;
 import 'package:durbun/src/inspector/store.dart';
 import 'package:durbun/src/inspector/theme.dart' show debugResetPanelTheme;
 import 'package:durbun/src/inspector/strings.dart';
@@ -1059,7 +1060,30 @@ void main() {
 
   gallery('bug report', (tester) async {
     _fakeBugShare();
-    await openPanel(tester);
+    final store = await openPanel(tester);
+    await step(tester, 'with Slack', () async {
+      // A connection with the upload key; the bot is not in the channel, so
+      // the page shows the "screenshot did not go" notice.
+      store.slackWebhook = 'https://hooks.slack.com/services/T000/B000/abcd#token=xoxb-1234-5678-abcdEFGH&channel=C0123ABCD';
+      debugPostToSlack = (url, payload) async => (status: 200, answer: 'ok');
+      debugPostSlackForm = (url, token, form) async => (status: 200, answer: '{"ok":false,"error":"not_in_channel"}');
+      addTearDown(() {
+        debugPostToSlack = null;
+        debugPostSlackForm = null;
+        debugResetSlackJoins();
+      });
+      await openTab(tester, tr.logs);
+      await openRow(tester, 'Cart is empty');
+      await tester.tap(find.byKey(const ValueKey<String>('durbun-log-bug')));
+      await settle(tester);
+      await shot(tester, '114-bug-report-slack');
+      await tester.tap(find.byKey(const ValueKey<String>('durbun-bug-slack')));
+      await settle(tester);
+      await shot(tester, '115-bug-report-slack-no-shot');
+      store.slackWebhook = null;
+      await back(tester);
+      await back(tester);
+    });
     await step(tester, 'from a crash', () async {
       await openTab(tester, tr.logs);
       await openRow(tester, 'Cart is empty');

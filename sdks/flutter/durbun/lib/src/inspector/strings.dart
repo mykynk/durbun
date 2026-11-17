@@ -634,6 +634,19 @@ class InspectorStrings {
   String slackFailed(String why) => _('Slack’e gönderilemedi: $why', 'Could not send to Slack: $why');
   String get slackCutNote => _('… (Slack sınırı nedeniyle kısaltıldı)', '… (shortened to fit Slack)');
   String get slackFooter => _('Dürbün ile gönderildi (uygulama içi panel)', 'Sent with Dürbün (in-app panel)');
+  String get slackSentWithShot => _('Slack’e ekran görüntüsüyle gönderildi', 'Sent to Slack with the screenshot');
+  String get slackShotNotSent => _('Rapor Slack’e gitti, ekran görüntüsü gitmedi', 'The report went to Slack, the screenshot did not');
+  String slackShotWhy(String reason) => _(
+      '$reason Ekran görüntüsünü Paylaş ile gönderebilirsiniz.', '$reason You can still send the screenshot with Share.');
+  String get slackShotNoKey => _('Bu build’in Slack bağlantısı yalnızca metin gönderir.', 'This build’s Slack connection sends text only.');
+  String get slackShotNotInChannel => _('Dürbün kanalda değil: kanalda /invite @Durbun yazın.', 'Dürbün is not in the channel: type /invite @Durbun there.');
+  String get slackShotNotInDm =>
+      _('Slack bu özel mesaja dosya paylaşılmasına izin vermedi.', 'Slack would not share a file in this direct message.');
+  String get slackShotReconnect => _('Slack bu anahtarı artık kabul etmiyor: Dürbün’ü Slack’e yeniden ekleyin.',
+      'Slack no longer accepts this key: add Dürbün to Slack again.');
+  String get slackShotRateLimited => _('Slack şu an istekleri sınırlıyor.', 'Slack is limiting requests just now.');
+  String get slackShotUnreachable => _('Slack’e ulaşılamadı.', 'Slack could not be reached.');
+  String slackShotRejected(String word) => _('Slack kabul etmedi ($word).', 'Slack refused it ($word).');
   String get reportPending => _('Bekliyor: henüz yanıt yok', 'Pending: no response yet');
   String get reportFailed => _('Başarısız', 'Failed');
   String get reportCancelled => _('İptal edildi', 'Cancelled');
