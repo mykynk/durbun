@@ -404,7 +404,9 @@ export class SlackStore {
         this.joined.add(channelId);
       } catch (err) {
         const code = err instanceof HttpError ? err.code : undefined;
-        if (code === 'slack.unreachable' || code === 'slack.rateLimited' || code === 'slack.reconnect') throw err;
+        // A key without channels:join still uploads where the bot was invited: the upload below tells.
+        const noJoinScope = code === 'slack.reconnect' && err instanceof Error && err.message.endsWith(': missing_scope');
+        if (!noJoinScope && (code === 'slack.unreachable' || code === 'slack.rateLimited' || code === 'slack.reconnect')) throw err;
       }
     }
 

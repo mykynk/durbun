@@ -409,6 +409,11 @@ describe('Markdown and screenshots', () => {
     const store = SlackStore.inDataDir(await makeTempDir(), silentLogger, priv.fetch, 0);
     await store.update({ webhookUrl: KEYED });
     expect(await store.send({ markdown: 'bug' }, PNG)).toEqual({ ok: true, screenshot: 'sent' });
+    // So does a key without channels:join.
+    const noJoin = fakeSlackApi({ 'conversations.join': () => Response.json({ ok: false, error: 'missing_scope' }) });
+    const noJoinStore = SlackStore.inDataDir(await makeTempDir(), silentLogger, noJoin.fetch, 0);
+    await noJoinStore.update({ webhookUrl: KEYED });
+    expect(await noJoinStore.send({ markdown: 'bug' }, PNG)).toEqual({ ok: true, screenshot: 'sent' });
 
     // A direct message (the person picked themselves) skips the join; a refusal there says to pick a channel.
     const dmKey = `${HOOK}#token=${TOKEN}&channel=D0123ABCD&channel_name=%40yusuf`;
