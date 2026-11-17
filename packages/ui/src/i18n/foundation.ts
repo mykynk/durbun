@@ -453,7 +453,7 @@ registerMessages('shell', {
       slackAppAdd: 'Slack’e ekle',
       slackWebhookHint: 'Slack’e ekle sayfasının verdiği bağlantı adresini ya da kendi Slack uygulamanızın webhook adresini yapıştırın. Adres yalnızca bu Mac’te saklanır.',
       slackLinkedTo: 'Bağlı: {hint}. Adres bir daha gösterilmez; yenisini girmek için bağlantıyı kaldırın.',
-      slackUploadsOn: 'Hata raporlarının ekran görüntüsü de {channel} kanalına gider.',
+      slackUploadsOn: 'Hata raporlarının ekran görüntüsü de oraya gider: {channel}.',
       slackUploadsOnNoChannel: 'Hata raporlarının ekran görüntüsü de bu kanala gider.',
       slackUploadsOff: 'Bu bağlantı yalnızca metin gönderir. Ekran görüntüsü için bağlantıyı kaldırın, Slack’e ekle sayfasından yeni adresi alıp yapıştırın.',
       slackLink: 'Bağla',

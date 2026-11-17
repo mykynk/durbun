@@ -372,6 +372,7 @@ export const SERVER_CODES = {
     'slack.invalidUrl',
     'slack.notConfigured',
     'slack.notInChannel',
+    'slack.notInDm',
     'slack.rateLimited',
     'slack.reconnect',
     'slack.rejected',
@@ -886,6 +887,7 @@ registerMessages('code', {
     'slack.invalidUrl': 'Webhook adresi https:// ile başlamalı',
     'slack.invalidKey': 'Adresin # işaretinden sonraki kısmı eksik. Slack’e ekle sayfasındaki adresi baştan sona yeniden kopyalayın.',
     'slack.notInChannel': 'Dürbün kanalda değil. Kanalda /invite @Durbun yazıp yeniden gönderin.',
+    'slack.notInDm': 'Slack bu özel mesaja ekran görüntüsü paylaşılmasına izin vermedi. Ekran görüntüleri için Dürbün’ü Slack’e yeniden ekleyip bir kanal seçin.',
     'slack.reconnect': [
       'Slack, Dürbün’ün ekran görüntüsü anahtarını artık kabul etmiyor ({detail}). Dürbün’ü Slack’e yeniden ekleyip yeni adresi Ayarlar → Slack’e yapıştırın.',
       'Slack, Dürbün’ün ekran görüntüsü anahtarını artık kabul etmiyor. Dürbün’ü Slack’e yeniden ekleyip yeni adresi Ayarlar → Slack’e yapıştırın.',
@@ -1514,6 +1516,7 @@ registerMessages('code', {
     'slack.invalidUrl': 'The webhook URL must start with https://',
     'slack.invalidKey': 'The part after # in the URL is incomplete. Copy the whole URL from the Add to Slack page again.',
     'slack.notInChannel': 'Dürbün is not in the channel. Type /invite @Durbun in the channel and send again.',
+    'slack.notInDm': 'Slack did not let Dürbün share the screenshot in this direct message. For screenshots, add Dürbün to Slack again and pick a channel.',
     'slack.reconnect': [
       'Slack no longer accepts Dürbün’s screenshot key ({detail}). Add Dürbün to Slack again and paste the new URL in Settings → Slack.',
       'Slack no longer accepts Dürbün’s screenshot key. Add Dürbün to Slack again and paste the new URL in Settings → Slack.',

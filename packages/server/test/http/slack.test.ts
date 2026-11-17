@@ -169,7 +169,7 @@ describe('connection URL', () => {
   });
 
   it('refuses a cut or altered key, and an http webhook', () => {
-    for (const bad of [`${HOOK}#token=${TOKEN}`, `${HOOK}#channel=C0123ABCD`, `${HOOK}#token=xoxp-123456789&channel=C0123ABCD`, `${HOOK}#token=${TOKEN}&channel=D0123ABCD`]) {
+    for (const bad of [`${HOOK}#token=${TOKEN}`, `${HOOK}#channel=C0123ABCD`, `${HOOK}#token=xoxp-123456789&channel=C0123ABCD`, `${HOOK}#token=${TOKEN}&channel=X0123ABCD`]) {
       expect(() => parseConnection(bad), bad).toThrow(expect.objectContaining({ status: 400, code: 'slack.invalidKey' }));
     }
     expect(() => parseConnection(`http://hooks.slack.com/x#token=${TOKEN}&channel=C0123ABCD`)).toThrow(expect.objectContaining({ code: 'slack.invalidUrl' }));
@@ -409,6 +409,22 @@ describe('Markdown and screenshots', () => {
     const store = SlackStore.inDataDir(await makeTempDir(), silentLogger, priv.fetch, 0);
     await store.update({ webhookUrl: KEYED });
     expect(await store.send({ markdown: 'bug' }, PNG)).toEqual({ ok: true, screenshot: 'sent' });
+
+    // A direct message (the person picked themselves) skips the join; a refusal there says to pick a channel.
+    const dmKey = `${HOOK}#token=${TOKEN}&channel=D0123ABCD&channel_name=%40yusuf`;
+    const dm = fakeSlackApi();
+    const dmStore = SlackStore.inDataDir(await makeTempDir(), silentLogger, dm.fetch, 0);
+    expect(await dmStore.update({ webhookUrl: dmKey })).toMatchObject({ uploads: true, channel: '@yusuf' });
+    expect(await dmStore.send({ markdown: 'bug' }, PNG)).toEqual({ ok: true, screenshot: 'sent' });
+    expect(dm.calls()).toEqual(['webhook', 'files.getUploadURLExternal', 'upload', 'files.completeUploadExternal']);
+    const dmRefused = SlackStore.inDataDir(
+      await makeTempDir(),
+      silentLogger,
+      fakeSlackApi({ 'files.completeUploadExternal': () => Response.json({ ok: false, error: 'not_in_channel' }) }).fetch,
+      0,
+    );
+    await dmRefused.update({ webhookUrl: dmKey });
+    expect(await dmRefused.send({ markdown: 'bug' }, PNG)).toMatchObject({ screenshot: 'failed', screenshotError: { code: 'slack.notInDm' } });
 
     const gone = SlackStore.inDataDir(await makeTempDir(), silentLogger, fakeSlackApi().fetch, 0);
     await gone.update({ webhookUrl: KEYED });

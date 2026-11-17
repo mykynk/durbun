@@ -38,8 +38,8 @@ const MAX_TITLE_CHARS = 200;
 const MAX_ANSWER_CHARS = 200;
 const SLACK_API = 'https://slack.com/api/';
 const TOKEN_RE = /^xoxb-[A-Za-z0-9-]{8,250}$/;
-/** A channel (C…) or an older private channel (G…); a DM (D…) gets no key from the Add to Slack page. */
-const CHANNEL_RE = /^[CG][A-Z0-9]{2,30}$/;
+/** A channel (C…), an older private channel (G…) or a direct message (D…: the person picked themselves). */
+const CHANNEL_RE = /^[CGD][A-Z0-9]{2,30}$/;
 const FILE_ID_RE = /^F[A-Z0-9]{2,30}$/;
 const IMAGE_RE = /\.(png|jpe?g|heic|webp)$/i;
 /**
@@ -393,7 +393,9 @@ export class SlackStore {
     if (!data?.length) throw new HttpError(410, 'The screenshot is no longer on this Mac', 'slack.screenshotGone');
     if (!IMAGE_RE.test(shot.name)) throw new HttpError(400, 'Slack refused the screenshot: only a PNG, JPEG, HEIC or WebP image can go', 'slack.uploadRejected');
 
-    if (!this.joined.has(channelId)) {
+    // A direct message cannot be joined: the file goes to the conversation the webhook posts to, or Slack says no.
+    const dm = channelId.startsWith('D');
+    if (!dm && !this.joined.has(channelId)) {
       // A public channel: join it so the file can be shared there (channels:join; harmless when already in). A
       // private channel answers method_not_supported_for_channel_type: someone has to invite the bot, and
       // completeUploadExternal says so below.
@@ -422,7 +424,15 @@ export class SlackStore {
     if (res.status === 429) throw this.rateLimited(res.headers.get('retry-after'));
     if (!res.ok) throw new HttpError(502, `Slack refused the screenshot: HTTP ${res.status}`, 'slack.uploadRejected');
     const title = oneLine(shot.title, MAX_TITLE_CHARS) ?? 'Screenshot';
-    await this.callApi(token, 'files.completeUploadExternal', { files: JSON.stringify([{ id: fileId, title }]), channel_id: channelId });
+    try {
+      await this.callApi(token, 'files.completeUploadExternal', { files: JSON.stringify([{ id: fileId, title }]), channel_id: channelId });
+    } catch (err) {
+      // "/invite @Durbun" is no help in a direct message; picking a channel is.
+      if (dm && err instanceof HttpError && err.code === 'slack.notInChannel') {
+        throw new HttpError(409, `Slack did not let Dürbün share the screenshot in this direct message: ${err.message}`, 'slack.notInDm');
+      }
+      throw err;
+    }
   }
 
   /** A Slack Web API method with the bot token; its `error` word becomes an HttpError the UI can explain. */
