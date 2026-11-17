@@ -560,7 +560,8 @@ Stack traces of `--split-debug-info` builds: see
 
 FPS (while rendering), janky frames, average build/raster time, memory, and CPU
 and threads where the platform reports them. FPS is reported only while frames
-are drawn (an idle app does not show "0 FPS"). `metrics: false` turns them off.
+are drawn (an idle app does not show "0 FPS"). `metrics: false` turns them off,
+and the in-app panel then has no Performance tab.
 
 ### Platforms and engines
 
@@ -658,10 +659,10 @@ required, so a tester can inspect the app on their own phone.
 
 The panel has its own look in light and dark: it follows the phone, and the
 switch at the top keeps your choice. Four tabs sit at the bottom: **Network**,
-**Logs**, **Performance** and **Tools** (on a short screen, such as a phone in
-landscape, they move into the header). Tools opens Report a bug, Mac
-connection, App tools, Mocks (only while the Mac app is connected), Statistics,
-Device & SDK, Export session, Previous run and Clear:
+**Logs**, **Performance** (not there with `metrics: false`) and **Tools** (on a
+short screen, such as a phone in landscape, they move into the header). Tools
+opens Report a bug, Mac connection, App tools, Mocks (only while the Mac app is
+connected), Statistics, Device & SDK, Export session, Previous run and Clear:
 
 - **Logs:** a live stream (newest at the bottom; it stops following when you
   scroll up and resumes with "↓ N new"), V D I W E level toggles, the quick
@@ -873,8 +874,11 @@ to the Mac app stays as it is (`redactHeaders` masks a header everywhere).
 Give the panel a Slack incoming webhook and every Share sheet gets a
 **Send to Slack** button: the report goes to that webhook's channel (for
 example `#mobile-app`) from the phone itself, without the Mac, and only when
-someone taps it. Slack shows it as one message with code blocks, ending with
-"Sent with Dürbün (in-app panel)".
+someone taps it. Slack shows it as one message, the way a report pasted into
+Slack looks (lists, quotes and code blocks with their language, however long),
+ending with "Sent with Dürbün (in-app panel)". A workspace that does not take
+rich text gets the report as Markdown, in numbered messages when it is long,
+and otherwise as plain text.
 
 1. Open [Add to Slack](https://appnify.dev/durbun/slack/), pick the channel
    and copy the `https://hooks.slack.com/services/…` URL it shows. (A webhook

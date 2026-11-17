@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/protocol.dart';
 import 'package:durbun/src/inspector/share_report.dart';
@@ -7,8 +10,12 @@ import 'package:durbun/src/inspector/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Send to Slack from the in-app panel: the same mrkdwn and log report as the
-/// desktop (`slack.test.ts`, `logs/model/shareReport.test.ts`), and the sheet.
+/// Send to Slack from the in-app panel: the same Markdown, mrkdwn, rich text
+/// blocks, parts and fallbacks as the desktop (`packages/ui/src/lib/slack.ts`,
+/// `packages/server/test/http/slack.test.ts`), the same log report
+/// (`logs/model/shareReport.test.ts`), and the sheet.
+
+const String _hook = 'https://hooks.slack.com/services/T000/B000/abcdWXYZ';
 
 const String _note = '… (shortened to fit Slack)';
 
@@ -104,6 +111,382 @@ void main() {
     });
   });
 
+  group('toSlackMarkdown', () {
+    test('keeps the Markdown and the language, breaks backtick runs, italic footer', () {
+      expect(
+        toSlackMarkdown(_report, cutNote: _note, footer: 'Sent with Dürbün · Ayşe'),
+        <String>[
+          'POST https://api.example.com/login?next=<home>&x=1',
+          '→ 500 Internal Server Error · 340 ms',
+          '',
+          '- Time: 2026-11-10 14:03:22.120 (UTC+03:00)',
+          '',
+          'Response body:',
+          '```json',
+          '{',
+          '  "md": "`​`​`code`​`​`",',
+          '  "html": "<b>&</b>"',
+          '}',
+          '```',
+          '',
+          '_Sent with Dürbün · Ayşe_',
+        ].join('\n'),
+      );
+    });
+
+    test('rich text reads no mentions: nothing is escaped', () {
+      expect(toSlackMarkdown('<!channel> <@U123> @here', cutNote: _note), '<!channel> <@U123> @here');
+    });
+
+    test('cuts long reports like the text version, closing the block and adding the note', () {
+      final long = <String>['```http', for (var i = 0; i < 5000; i++) 'h-$i: ${'v' * 20}', '```'].join('\n');
+      final md = toSlackMarkdown(long, cutNote: _note);
+      expect(md.length, lessThanOrEqualTo(kSlackMaxChars));
+      expect(md.startsWith('```http\n'), isTrue);
+      expect(md.endsWith('\n```\n_${_note}_'), isTrue);
+    });
+
+    test('a longer fence becomes ``` with its language', () {
+      final long = <String>['GET https://x.test', '````json', for (var i = 0; i < 5000; i++) 'line $i & more', '````'].join('\n');
+      final md = toSlackMarkdown(long, cutNote: _note, footer: 'Sent with Dürbün');
+      expect(md.length, lessThanOrEqualTo(kSlackMaxChars));
+      expect(md, startsWith('GET https://x.test\n```json\nline 0 & more\n'));
+      expect(md.endsWith(<String>['```', '_${_note}_', '', '_Sent with Dürbün_'].join('\n')), isTrue);
+    });
+
+    test('the rich text of a prepared report keeps one code block with its language', () {
+      final block = markdownToRichText(toSlackMarkdown(_report, cutNote: _note, footer: 'Sent with Dürbün'));
+      final elements = (block['elements']! as List<Object?>).cast<Map<String, Object?>>();
+      final code = elements.where((e) => e['type'] == 'rich_text_preformatted').toList();
+      expect(code, hasLength(1));
+      expect(code.single['language'], 'json');
+      expect(((code.single['elements']! as List<Object?>).single! as Map<String, Object?>)['text'],
+          '{\n  "md": "`​`​`code`​`​`",\n  "html": "<b>&</b>"\n}');
+      expect(elements.last, <String, Object?>{
+        'type': 'rich_text_section',
+        'elements': <Object?>[
+          <String, Object?>{'type': 'text', 'text': 'Sent with Dürbün', 'style': <String, Object?>{'italic': true}},
+        ],
+      });
+    });
+  });
+
+  group('Markdown parts', () {
+    List<String> block(String lang, int lines, [int width = 60]) =>
+        <String>['```$lang', for (var i = 0; i < lines; i++) '${'$i'.padLeft(4, '0')} ${'x' * width}', '```'];
+    bool balanced(String part) => RegExp(r'^```', multiLine: true).allMatches(part).length.isEven;
+
+    test('keeps a short report in one part, as it is', () {
+      final md = <String>['GET https://api.example.com/x', '→ 200 OK · 12 ms', '', '- Time: 10:55', '', ...block('http', 3)].join('\n');
+      expect(slackMarkdownChunks(md), <String>[md]);
+    });
+
+    test('cuts a long report at line ends, closing and reopening the code block with its language', () {
+      final md = <String>['GET https://api.example.com/bank-list', '', 'Response body:', ...block('json', 600)].join('\n');
+      final parts = slackMarkdownChunks(md);
+      expect(parts.length, greaterThan(1));
+      for (final part in parts) {
+        expect(part.length, lessThanOrEqualTo(kSlackMarkdownPartChars));
+        expect(balanced(part), isTrue);
+      }
+      for (final part in parts.skip(1)) {
+        expect(part.startsWith('```json\n'), isTrue);
+      }
+      // Nothing is lost: without the added fences the parts are the report again.
+      final joined = <String>[];
+      for (var i = 0; i < parts.length; i++) {
+        var part = parts[i];
+        if (i > 0) part = part.replaceFirst(RegExp(r'^```json\n'), '');
+        if (i < parts.length - 1) part = part.replaceFirst(RegExp(r'\n```$'), '');
+        joined.add(part);
+      }
+      expect(joined.join('\n'), md);
+    });
+
+    test('cuts a line longer than a part (minified JSON) without splitting a surrogate pair', () {
+      final line = '${'a' * 99}😀${'b' * 250}';
+      final parts = slackMarkdownChunks(<String>['```json', line, '```'].join('\n'), limit: 100);
+      for (final part in parts) {
+        expect(part.length, lessThanOrEqualTo(100));
+        expect(balanced(part), isTrue);
+        expect(RegExp(r'[\ud800-\udbff](?![\udc00-\udfff])').hasMatch(part), isFalse);
+      }
+      expect(parts.map((p) => p.replaceFirst(RegExp(r'^```json\n'), '').replaceFirst(RegExp(r'\n```$'), '')).join(), line);
+    });
+
+    test('starts the next part with a heading rather than ending one with it', () {
+      final parts = slackMarkdownChunks(<String>['a' * 50, '', '```http', 'h: 1', '```'].join('\n'), limit: 60);
+      expect(parts, <String>['a' * 50, '```http\nh: 1\n```']);
+    });
+
+    test('turns the report into rich text: paragraphs, headings, quotes, lists and code with its language', () {
+      final md = <String>[
+        '## 1 failed request',
+        'GET https://api.example.com/a?b=1 (see `x-id`)',
+        '→ 500 · 12 ms',
+        '',
+        '> Tapped **Pay** twice.',
+        '> Nothing happened.',
+        '- Time: 10:55',
+        '- Client: flow',
+        '',
+        'Response body (application/json):',
+        '```json',
+        '{ "a": "<b>" }',
+        '```',
+        '_Secret values are masked._ user_id_x stays',
+      ].join('\n');
+      expect(markdownToRichText(md), <String, Object?>{
+        'type': 'rich_text',
+        'elements': <Object?>[
+          <String, Object?>{
+            'type': 'rich_text_section',
+            'elements': <Object?>[
+              <String, Object?>{'type': 'text', 'text': '1 failed request', 'style': <String, Object?>{'bold': true}},
+            ],
+          },
+          <String, Object?>{
+            'type': 'rich_text_section',
+            'elements': <Object?>[
+              <String, Object?>{'type': 'text', 'text': 'GET '},
+              <String, Object?>{'type': 'link', 'url': 'https://api.example.com/a?b=1'},
+              <String, Object?>{'type': 'text', 'text': ' (see '},
+              <String, Object?>{'type': 'text', 'text': 'x-id', 'style': <String, Object?>{'code': true}},
+              <String, Object?>{'type': 'text', 'text': ')'},
+              <String, Object?>{'type': 'text', 'text': '\n'},
+              <String, Object?>{'type': 'text', 'text': '→ 500 · 12 ms'},
+              <String, Object?>{'type': 'text', 'text': '\n'},
+            ],
+          },
+          <String, Object?>{
+            'type': 'rich_text_quote',
+            'elements': <Object?>[
+              <String, Object?>{'type': 'text', 'text': 'Tapped '},
+              <String, Object?>{'type': 'text', 'text': 'Pay', 'style': <String, Object?>{'bold': true}},
+              <String, Object?>{'type': 'text', 'text': ' twice.'},
+              <String, Object?>{'type': 'text', 'text': '\n'},
+              <String, Object?>{'type': 'text', 'text': 'Nothing happened.'},
+            ],
+          },
+          <String, Object?>{
+            'type': 'rich_text_list',
+            'style': 'bullet',
+            'elements': <Object?>[
+              <String, Object?>{
+                'type': 'rich_text_section',
+                'elements': <Object?>[
+                  <String, Object?>{'type': 'text', 'text': 'Time: 10:55'},
+                ],
+              },
+              <String, Object?>{
+                'type': 'rich_text_section',
+                'elements': <Object?>[
+                  <String, Object?>{'type': 'text', 'text': 'Client: flow'},
+                ],
+              },
+            ],
+          },
+          <String, Object?>{
+            'type': 'rich_text_section',
+            'elements': <Object?>[
+              <String, Object?>{'type': 'text', 'text': 'Response body (application/json):'},
+            ],
+          },
+          <String, Object?>{
+            'type': 'rich_text_preformatted',
+            'elements': <Object?>[
+              <String, Object?>{'type': 'text', 'text': '{ "a": "<b>" }'},
+            ],
+            'language': 'json',
+            'border': 0,
+          },
+          <String, Object?>{
+            'type': 'rich_text_section',
+            'elements': <Object?>[
+              <String, Object?>{'type': 'text', 'text': 'Secret values are masked.', 'style': <String, Object?>{'italic': true}},
+              <String, Object?>{'type': 'text', 'text': ' user_id_x stays'},
+            ],
+          },
+        ],
+      });
+      // An 800-line body stays one block in one message.
+      final big = <String>['```json', for (var i = 0; i < 800; i++) '  "k$i": $i,', '```'].join('\n');
+      final elements = markdownToRichText(big)['elements']! as List<Object?>;
+      expect(elements, hasLength(1));
+      expect(elements.single, containsPair('type', 'rich_text_preformatted'));
+      expect(elements.single, containsPair('language', 'json'));
+    });
+
+    test('rich text: ordered lists, a link in a heading, an empty block and an empty report', () {
+      expect(markdownToRichText('# See https://x.example/a).'), <String, Object?>{
+        'type': 'rich_text',
+        'elements': <Object?>[
+          <String, Object?>{
+            'type': 'rich_text_section',
+            'elements': <Object?>[
+              <String, Object?>{'type': 'text', 'text': 'See ', 'style': <String, Object?>{'bold': true}},
+              <String, Object?>{'type': 'link', 'url': 'https://x.example/a', 'style': <String, Object?>{'bold': true}},
+              <String, Object?>{'type': 'text', 'text': ').', 'style': <String, Object?>{'bold': true}},
+            ],
+          },
+        ],
+      });
+      expect(markdownToRichText('1. one\n2) two'), <String, Object?>{
+        'type': 'rich_text',
+        'elements': <Object?>[
+          <String, Object?>{
+            'type': 'rich_text_list',
+            'style': 'ordered',
+            'elements': <Object?>[
+              <String, Object?>{
+                'type': 'rich_text_section',
+                'elements': <Object?>[
+                  <String, Object?>{'type': 'text', 'text': 'one'},
+                ],
+              },
+              <String, Object?>{
+                'type': 'rich_text_section',
+                'elements': <Object?>[
+                  <String, Object?>{'type': 'text', 'text': 'two'},
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      expect((markdownToRichText('```\n```')['elements']! as List<Object?>).single, <String, Object?>{
+        'type': 'rich_text_preformatted',
+        'elements': <Object?>[
+          <String, Object?>{'type': 'text', 'text': ' '},
+        ],
+        'border': 0,
+      });
+      expect(markdownToRichText('\n\n'), <String, Object?>{
+        'type': 'rich_text',
+        'elements': <Object?>[
+          <String, Object?>{
+            'type': 'rich_text_section',
+            'elements': <Object?>[
+              <String, Object?>{'type': 'text', 'text': ' '},
+            ],
+          },
+        ],
+      });
+    });
+
+    test('makes a notification line from the first plain line', () {
+      expect(notificationText('## GET https://x.example/a?b=<c>&d\n```json\n{}\n```'), 'GET https://x.example/a?b=&lt;c&gt;&amp;d');
+      expect(notificationText('```\ncode only\n```'), 'Dürbün');
+      expect(notificationText('- *${'y' * 300}*'), hasLength(150));
+    });
+  });
+
+  group('sending', () {
+    tearDown(() => debugPostToSlack = null);
+
+    /// A webhook that refuses the block types in [refused] (400
+    /// invalid_blocks) and takes the rest. Payloads to another URL are not
+    /// recorded.
+    List<Map<String, Object?>> refusing(List<String> refused) {
+      final sent = <Map<String, Object?>>[];
+      debugPostToSlack = (webhook, payload) async {
+        // What goes over the wire.
+        final json = jsonDecode(jsonEncode(payload)) as Map<String, Object?>;
+        if (webhook == _hook) sent.add(json);
+        return refused.contains(_typeOf(json)) ? (status: 400, answer: 'invalid_blocks') : (status: 200, answer: 'ok');
+      };
+      return sent;
+    }
+
+    test('posts the report as one rich text message, as a pasted report shows', () async {
+      final sent = refusing(const <String>[]);
+      const md = 'GET https://a.example/x\n\n- one\n\n```json\n{}\n```';
+      expect(await sendToSlack(_hook, markdown: md, text: 'fallback', partGap: Duration.zero), isNull);
+      expect(sent, hasLength(1));
+      expect(sent.single, <String, Object?>{
+        'text': 'GET https://a.example/x',
+        'blocks': <Object?>[markdownToRichText(md)],
+        'unfurl_links': false,
+        'unfurl_media': false,
+      });
+    });
+
+    test('sends a long report as numbered Markdown parts when Slack refuses the rich text', () async {
+      final sent = refusing(const <String>['rich_text']);
+      final md = <String>['GET https://a.example/x', '```json', for (var i = 0; i < 500; i++) '"k$i": "${'v' * 50}",', '```'].join('\n');
+      expect(await sendToSlack(_hook, markdown: md, text: '', partGap: Duration.zero), isNull);
+      final types = sent.map(_typeOf).toList();
+      expect(types.first, 'rich_text');
+      expect(types.length, greaterThan(2));
+      expect(types.skip(1).every((t) => t == 'markdown'), isTrue);
+      final parts = sent.skip(1).toList();
+      expect(parts.map((b) => b['text']), <String>[for (var i = 0; i < parts.length; i++) 'GET https://a.example/x (${i + 1}/${parts.length})']);
+      expect(parts.map((b) => ((b['blocks']! as List<Object?>).single! as Map<String, Object?>)['text']), slackMarkdownChunks(md));
+      expect(parts.every((b) => b['unfurl_links'] == false && b['unfurl_media'] == false), isTrue);
+    });
+
+    test('falls back to the plain text when the workspace refuses both block kinds', () async {
+      final sent = refusing(const <String>['rich_text', 'markdown']);
+      expect(await sendToSlack(_hook, markdown: '# x', text: '*x*', partGap: Duration.zero), isNull);
+      expect(sent.map(_typeOf), <String>['rich_text', 'markdown', 'text']);
+      expect(sent[2], <String, Object?>{'text': '*x*', 'unfurl_links': false, 'unfurl_media': false});
+    });
+
+    test('any other refusal or failure is the answer, not a fallback; nothing throws', () async {
+      final sent = <Map<String, Object?>>[];
+      debugPostToSlack = (webhook, payload) async {
+        sent.add(payload);
+        return (status: 410, answer: 'channel_is_archived');
+      };
+      expect(await sendToSlack(_hook, markdown: '# x', text: '*x*'), 'channel_is_archived');
+      expect(sent, hasLength(1));
+
+      debugPostToSlack = (webhook, payload) async => (status: 500, answer: '');
+      expect(await sendToSlack(_hook, markdown: '# x', text: '*x*'), 'HTTP 500');
+      debugPostToSlack = (webhook, payload) async => (status: 0, answer: 'timeout');
+      expect(await sendToSlack(_hook, markdown: '# x', text: '*x*'), 'timeout');
+      debugPostToSlack = (webhook, payload) async => throw StateError('boom');
+      expect(await sendToSlack(_hook, markdown: '# x', text: '*x*'), 'Bad state: boom');
+
+      // A part after the first one that does not go says which one.
+      var calls = 0;
+      debugPostToSlack = (webhook, payload) async => switch (calls++) {
+            0 => (status: 400, answer: 'invalid_blocks'),
+            1 => (status: 200, answer: 'ok'),
+            _ => (status: 403, answer: 'invalid_token'),
+          };
+      final md = <String>['GET https://a.example/x', '```json', for (var i = 0; i < 500; i++) '"k$i": "${'v' * 50}",', '```'].join('\n');
+      final n = slackMarkdownChunks(md).length;
+      expect(await sendToSlack(_hook, markdown: md, text: 'x', partGap: Duration.zero), 'invalid_token (2/$n)');
+      expect(calls, 3, reason: 'nothing after the part that failed');
+
+      // No Markdown: the text alone.
+      final plain = refusing(const <String>[]);
+      expect(await sendToSlack(_hook, markdown: ' ', text: 'just text'), isNull);
+      expect(plain.single, <String, Object?>{'text': 'just text', 'unfurl_links': false, 'unfurl_media': false});
+    });
+
+    testWidgets('the parts go 1.1 s apart', (tester) async {
+      final sent = refusing(const <String>['rich_text']);
+      final md = <String>['GET https://a.example/x', '```json', for (var i = 0; i < 500; i++) '"k$i": "${'v' * 50}",', '```'].join('\n');
+      String? result = 'pending';
+      unawaited(sendToSlack(_hook, markdown: md, text: 'x').then((r) => result = r));
+      for (var i = 0; i < 5 && sent.length < 2; i++) {
+        await tester.pump();
+      }
+      expect(sent, hasLength(2), reason: 'the rich text and the first part at once');
+      await tester.pump(const Duration(milliseconds: 1099));
+      expect(sent, hasLength(2));
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(sent, hasLength(3));
+      for (var i = 0; i < 10 && result == 'pending'; i++) {
+        await tester.pump(kSlackPartGap);
+      }
+      expect(result, isNull);
+      expect(sent, hasLength(1 + slackMarkdownChunks(md).length));
+    });
+  });
+
   group('log report', () {
     test('matches the desktop report of the same crash', () {
       final en = InspectorStrings.forLanguage('en');
@@ -162,11 +545,11 @@ void main() {
       expect(find.text('Send to Slack'), findsNothing);
     });
 
-    testWidgets('posts the report as mrkdwn only on tap, then closes', (tester) async {
-      final posts = <(String, String)>[];
-      debugPostToSlack = (webhook, text) async {
-        posts.add((webhook, text));
-        return null;
+    testWidgets('posts the report as rich text only on tap, then closes', (tester) async {
+      final posts = <(String, Map<String, Object?>)>[];
+      debugPostToSlack = (webhook, payload) async {
+        posts.add((webhook, jsonDecode(jsonEncode(payload)) as Map<String, Object?>));
+        return (status: 200, answer: 'ok');
       };
       await _openLogs(tester, _store(webhook: 'https://hooks.slack.com/services/T/B/x'));
       await _openShareSheet(tester);
@@ -174,18 +557,49 @@ void main() {
       await tester.tap(find.text('Send to Slack'));
       await tester.pumpAndSettle();
       expect(posts, hasLength(1));
-      final (webhook, text) = posts.single;
+      final (webhook, payload) = posts.single;
       expect(webhook, 'https://hooks.slack.com/services/T/B/x');
-      expect(text, startsWith('ERROR · checkout'));
-      expect(text, contains('"orderId": "A-17"'));
-      expect(text, contains('Error: StateError: card declined &lt;@here&gt;'));
-      expect(text, endsWith('Sent with Dürbün (in-app panel)'));
+      expect(payload['text'], startsWith('ERROR · checkout'));
+      expect(payload['unfurl_links'], isFalse);
+      expect(payload['unfurl_media'], isFalse);
+      final block = (payload['blocks']! as List<Object?>).single! as Map<String, Object?>;
+      expect(block['type'], 'rich_text');
+      final runs = _texts(block);
+      expect(runs.first, startsWith('ERROR · checkout'));
+      expect(runs, contains(contains('"orderId": "A-17"')));
+      expect(runs.join(), contains('StateError: card declined <@here>'), reason: 'rich text reads no mentions: nothing escaped');
+      expect((block['elements']! as List<Object?>).last, <String, Object?>{
+        'type': 'rich_text_section',
+        'elements': <Object?>[
+          <String, Object?>{'type': 'text', 'text': 'Sent with Dürbün (in-app panel)', 'style': <String, Object?>{'italic': true}},
+        ],
+      }, reason: 'the footer, in italics');
+      final code = (block['elements']! as List<Object?>).cast<Map<String, Object?>>().where((e) => e['type'] == 'rich_text_preformatted');
+      expect(code.map((e) => e['language']), contains('json'), reason: 'the data block keeps its language');
       expect(find.text('Sent to Slack'), findsOneWidget);
       expect(find.byType(BottomSheet), findsNothing);
     });
 
+    testWidgets('a workspace without blocks gets the mrkdwn text', (tester) async {
+      final posts = <Map<String, Object?>>[];
+      debugPostToSlack = (webhook, payload) async {
+        posts.add(payload);
+        return payload.containsKey('blocks') ? (status: 400, answer: 'invalid_blocks') : (status: 200, answer: 'ok');
+      };
+      await _openLogs(tester, _store(webhook: 'https://hooks.slack.com/services/T/B/x'));
+      await _openShareSheet(tester);
+      await tester.tap(find.text('Send to Slack'));
+      await tester.pumpAndSettle();
+      expect(posts.map(_typeOf), <String>['rich_text', 'markdown', 'text']);
+      final text = posts.last['text']! as String;
+      expect(text, startsWith('ERROR · checkout'));
+      expect(text, contains('Error: StateError: card declined &lt;@here&gt;'));
+      expect(text, endsWith('Sent with Dürbün (in-app panel)'));
+      expect(find.text('Sent to Slack'), findsOneWidget);
+    });
+
     testWidgets('a refused message keeps the sheet open and says why', (tester) async {
-      debugPostToSlack = (webhook, text) async => 'invalid_token';
+      debugPostToSlack = (webhook, payload) async => (status: 403, answer: 'invalid_token');
       await _openLogs(tester, _store(webhook: 'https://hooks.slack.com/services/T/B/x'));
       await _openShareSheet(tester);
       await tester.tap(find.text('Send to Slack'));
@@ -194,4 +608,27 @@ void main() {
       expect(find.byType(BottomSheet), findsOneWidget);
     });
   });
+}
+
+/// The block kind of a payload: `text` when it has none.
+String _typeOf(Map<String, Object?> payload) {
+  final blocks = payload['blocks'];
+  if (blocks is! List || blocks.isEmpty) return 'text';
+  return (blocks.first! as Map<String, Object?>)['type']! as String;
+}
+
+/// Every text run of a rich text block, in order.
+List<String> _texts(Map<String, Object?> block) {
+  final out = <String>[];
+  void walk(Object? node) {
+    if (node is Map) {
+      if (node['type'] == 'text' && node['text'] is String) out.add(node['text']! as String);
+      walk(node['elements']);
+    } else if (node is List) {
+      node.forEach(walk);
+    }
+  }
+
+  walk(block);
+  return out;
 }

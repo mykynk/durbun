@@ -554,7 +554,11 @@ export function notificationText(markdown: string): string {
     if (inBlock || !line) continue;
     const plain = line.replace(/^(#{1,6}\s+|[-*+]\s+|>\s*)/, '').replace(/[*_`~]/g, '').trim();
     if (!plain) continue;
-    const cut = plain.length > NOTIFICATION_CHARS ? `${plain.slice(0, NOTIFICATION_CHARS - 1)}…` : plain;
+    let end = NOTIFICATION_CHARS - 1;
+    // Never half an emoji: a cut after a high surrogate takes one character less.
+    const code = plain.charCodeAt(end - 1);
+    if (code >= 0xd800 && code <= 0xdbff) end--;
+    const cut = plain.length > NOTIFICATION_CHARS ? `${plain.slice(0, end)}…` : plain;
     return cut.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
   return 'Dürbün';

@@ -1,3 +1,14 @@
+## 0.3.1
+
+- In-app panel: with `DurbunOptions(metrics: false)` the panel has no
+  Performance tab, and the FPS chip does not lead there, instead of showing an
+  empty page.
+- In-app panel: **Send to Slack** posts the report as Slack rich text, the
+  way a report pasted into Slack shows: lists, quotes and code blocks with
+  their language, in one message however long. A workspace that does not
+  take rich text gets it as Markdown (in numbered messages when it is long),
+  and otherwise as plain text, as before.
+
 ## 0.3.0
 
 - In-app panel: **Tools → Mac connection** says why the app is not connected

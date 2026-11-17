@@ -1,15 +1,17 @@
 /// The panel shell: a header for the page on screen (the Dürbün mark with
 /// the desktop connection, a title, a subtitle, the theme switch, pause and
 /// close) over four pages, Network, Logs, Performance and Tools, picked in
-/// a floating bar at the bottom. Pages keep their state while another one
-/// is shown; detail pages are pushed over the whole shell, bar included.
+/// a floating bar at the bottom. Performance is not there while the app
+/// turned metrics off (`DurbunOptions(metrics: false)`). Pages keep their
+/// state while another one is shown; detail pages are pushed over the whole
+/// shell, bar included.
 library;
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../core/protocol.dart' show kSdkVersion;
+import '../core/protocol.dart' show SdkCapability, kSdkVersion;
 import '../flutter/durbun.dart' show Durbun;
 import '../flutter/metrics.dart' show displayRefreshRate;
 import 'logs_view.dart';
@@ -27,6 +29,15 @@ enum PanelTab { network, logs, performance, tools }
 /// The tab last shown with a store (one app run): the panel opens there
 /// again.
 final Expando<PanelTab> _lastTab = Expando<PanelTab>('durbun.tab');
+
+/// Whether [hello] says the app turned metrics off
+/// (`DurbunOptions(metrics: false)`): it lists what the app captures, without
+/// `metrics`. Without a hello (a store of its own, no `Durbun.init`) the
+/// answer is no.
+bool helloWithoutMetrics(Map<String, Object?>? hello) {
+  final caps = hello?['capabilities'];
+  return caps is List && !caps.contains(SdkCapability.metrics);
+}
 
 /// What the pages of the shell can ask of it: another tab, closing.
 class PanelScope extends InheritedWidget {
@@ -51,7 +62,8 @@ class InspectorHome extends StatefulWidget {
   final DurbunInspectorStore store;
 
   /// 0: Network, 1: Logs, 2: Performance, 3: Tools; null: the tab last
-  /// shown with [store].
+  /// shown with [store]. Network when that page is not there (a saved run,
+  /// metrics off).
   final int? initialTab;
 
   /// Closes the panel (default: pops this page's route).
@@ -67,9 +79,14 @@ class InspectorHome extends StatefulWidget {
 class _InspectorHomeState extends State<InspectorHome> {
   bool get _readOnly => widget.store.readOnly;
 
+  /// The app turned metrics off: no Performance page (nothing would fill it).
+  late bool _noMetrics = helloWithoutMetrics(widget.store.hello);
+
   List<PanelTab> get _tabs => _readOnly
       ? const <PanelTab>[PanelTab.network, PanelTab.logs]
-      : PanelTab.values;
+      : _noMetrics
+          ? const <PanelTab>[PanelTab.network, PanelTab.logs, PanelTab.tools]
+          : PanelTab.values;
 
   late PanelTab _tab = _initial();
 
@@ -78,6 +95,43 @@ class _InspectorHomeState extends State<InspectorHome> {
 
   /// Pause of the Network and Logs lists (not kept: the panel opens live).
   final Map<PanelTab, bool> _paused = <PanelTab, bool>{};
+
+  @override
+  void initState() {
+    super.initState();
+    widget.store.addListener(_onStore);
+  }
+
+  @override
+  void didUpdateWidget(InspectorHome old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.store, widget.store)) {
+      old.store.removeListener(_onStore);
+      widget.store.addListener(_onStore);
+      _onStore();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.store.removeListener(_onStore);
+    super.dispose();
+  }
+
+  /// A new hello may turn metrics off (or on again): the pages follow, and a
+  /// page that left gives way to Network.
+  void _onStore() {
+    final off = helloWithoutMetrics(widget.store.hello);
+    if (off == _noMetrics || !mounted) return;
+    setState(() {
+      _noMetrics = off;
+      if (!_tabs.contains(_tab)) {
+        _tab = PanelTab.network;
+        _built.add(_tab);
+        _lastTab[widget.store] = _tab;
+      }
+    });
+  }
 
   PanelTab _initial() {
     final given = widget.initialTab;
@@ -167,6 +221,7 @@ class _InspectorHomeState extends State<InspectorHome> {
                   onPause: () => setState(() => _paused[_tab] = !(_paused[_tab] ?? false)),
                   onClose: _close,
                   onOpen: _open,
+                  performance: tabs.contains(PanelTab.performance),
                   nav: docked ? _nav(context, tabs, docked: true) : null,
                 ),
                 if (widget.banner != null) widget.banner!,
@@ -243,8 +298,12 @@ class _Header extends StatelessWidget {
     required this.onPause,
     required this.onClose,
     required this.onOpen,
+    required this.performance,
     this.nav,
   });
+
+  /// Whether the shell has a Performance page (the FPS chip leads there).
+  final bool performance;
 
   /// The destinations, docked between the title and the buttons (a short
   /// window).
@@ -294,7 +353,11 @@ class _Header extends StatelessWidget {
                 final (String title, Widget? mark, List<String> subtitle) = readOnly
                     ? (tab == PanelTab.logs ? t.logs : t.network, null, <String>[t.previousRun])
                     : switch (tab) {
-                        PanelTab.network => (appName ?? t.network, _FpsChip(store: store, onTap: () => onOpen(PanelTab.performance)), <String>[if (os.isNotEmpty) os, link]),
+                        PanelTab.network => (
+                            appName ?? t.network,
+                            performance ? _FpsChip(store: store, onTap: () => onOpen(PanelTab.performance)) : null,
+                            <String>[if (os.isNotEmpty) os, link]
+                          ),
                         PanelTab.logs => (t.logs, _CountBadge(count: store.errorCount), <String>[if (appName != null) appName, paused ? t.pausedStream : t.liveStream]),
                         PanelTab.performance => (t.performance, null, <String>[if (appName != null) appName, t.liveStream]),
                         PanelTab.tools => (t.tools, null, <String>['${t.title} $kSdkVersion']),

@@ -502,7 +502,13 @@ class _ShareActionsState extends State<ShareActions> {
     final messenger = ScaffoldMessenger.maybeOf(context);
     final navigator = Navigator.of(context);
     setState(() => _sending = true);
-    final error = await sendToSlack(webhook, toSlackText(widget.report, cutNote: t.slackCutNote, footer: t.slackFooter));
+    // Rich text, as a report pasted into Slack shows; the mrkdwn text is the
+    // fallback for a workspace that refuses blocks.
+    final error = await sendToSlack(
+      webhook,
+      markdown: toSlackMarkdown(widget.report, cutNote: t.slackCutNote, footer: t.slackFooter),
+      text: toSlackText(widget.report, cutNote: t.slackCutNote, footer: t.slackFooter),
+    );
     if (!mounted) return;
     setState(() => _sending = false);
     messenger?.hideCurrentSnackBar();

@@ -1,11 +1,16 @@
 // The panel's shell: the floating bottom bar (docked in the header on a
 // short screen), the header, the theme switch, the summary tiles above the
-// request list and the duration bars of its cards.
+// request list, the duration bars of its cards, and no Performance page
+// while the app turned metrics off.
+import 'dart:io';
+
 import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/protocol.dart';
 import 'package:durbun/src/inspector/filter_ui.dart' show ActiveChip;
-import 'package:durbun/src/inspector/home.dart' show PanelNavBar, PanelNavRow;
-import 'package:durbun/src/inspector/network_view.dart' show CallRow, durationBarFraction;
+import 'package:durbun/src/inspector/home.dart'
+    show InspectorHome, PanelNavBar, PanelNavRow, PanelScope, PanelTab, helloWithoutMetrics;
+import 'package:durbun/src/inspector/network_view.dart' show CallRow, NetworkView, durationBarFraction;
+import 'package:durbun/src/inspector/perf_view.dart' show PerformanceView;
 import 'package:durbun/src/inspector/store.dart';
 import 'package:durbun/src/inspector/theme.dart';
 import 'package:flutter/material.dart';
@@ -35,6 +40,36 @@ Future<void> _open(WidgetTester tester, DurbunInspectorStore store, {Size size =
   ));
   Durbun.showInspector();
   await tester.pumpAndSettle();
+}
+
+/// A hello that lists [capabilities] (the app's options).
+Map<String, Object?> _hello(List<String> capabilities) => buildHello(
+      app: const <String, Object?>{'name': 'Pati', 'id': 'app.pati.mobile'},
+      device: const <String, Object?>{'platform': 'android', 'osVersion': '14', 'model': 'SM-A736B'},
+      session: 's',
+      capabilities: capabilities,
+      actions: const <Map<String, Object?>>[],
+    );
+
+const List<String> _withMetrics = <String>['logs', 'events', 'commands', 'network', 'mocks', 'streams', 'crash', 'metrics'];
+const List<String> _withoutMetrics = <String>['logs', 'events', 'commands', 'network', 'mocks', 'streams', 'crash'];
+
+/// The shell alone, opened at [initialTab] (as the previous run opens it).
+Future<void> _home(WidgetTester tester, DurbunInspectorStore store, {int? initialTab}) async {
+  tester.view.physicalSize = const Size(390, 844) * 3;
+  tester.view.devicePixelRatio = 3;
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(MaterialApp(
+    home: Builder(builder: (context) => DurbunTheme.wrap(context, InspectorHome(key: ObjectKey(store), store: store, initialTab: initialTab))),
+  ));
+  await tester.pumpAndSettle();
+}
+
+/// The page on screen: Network or Performance (or neither).
+String? _page(WidgetTester tester) {
+  final network = find.byType(NetworkView).evaluate().isNotEmpty;
+  final performance = find.byType(PerformanceView).evaluate().isNotEmpty;
+  return network == performance ? null : (network ? 'network' : 'performance');
 }
 
 /// The panel's colours as the list draws them.
@@ -132,6 +167,105 @@ void main() {
       expect(find.byTooltip('Performance'), findsNothing);
       expect(find.byTooltip('Tools'), findsNothing);
     });
+  });
+
+  group('Performance follows the metrics option', () {
+    testWidgets('metrics: false: no Performance in the bar or in the docked row', (tester) async {
+      final store = _store();
+      DurbunInspectorStore.instance = store;
+      await tester.runAsync(() async {
+        final unused = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        final deadPort = unused.port;
+        await unused.close();
+        await Durbun.init(DurbunOptions(enabled: true, port: deadPort, listenForUsb: false, useBackgroundIsolate: false, metrics: false));
+      });
+      expect(helloWithoutMetrics(store.hello), isTrue, reason: 'the running client says so in its hello');
+
+      await _open(tester, store);
+      expect(find.byType(PanelNavBar), findsOneWidget);
+      for (final label in <String>['Network', 'Logs', 'Tools']) {
+        expect(find.byTooltip(label), findsOneWidget, reason: label);
+      }
+      expect(find.byTooltip('Performance'), findsNothing);
+      await tester.tap(find.byTooltip('Tools'));
+      await tester.pumpAndSettle();
+      expect(find.text('Export session'), findsOneWidget, reason: 'the bar still works');
+
+      tester.view.physicalSize = const Size(844, 390) * 3;
+      await tester.pumpAndSettle();
+      expect(find.byType(PanelNavRow), findsOneWidget);
+      expect(find.byTooltip('Logs'), findsOneWidget);
+      expect(find.byTooltip('Performance'), findsNothing, reason: 'not docked either');
+
+      await tester.runAsync(Durbun.dispose);
+      // The panel store batches its listeners behind a short timer: drain it.
+      await tester.pump(const Duration(milliseconds: 250));
+    });
+
+    testWidgets('initialTab: 2 opens Network while metrics are off, Performance while they are on', (tester) async {
+      await _home(tester, _store()..ingest(_hello(_withoutMetrics)), initialTab: 2);
+      expect(_page(tester), 'network');
+      expect(find.byTooltip('Performance'), findsNothing);
+
+      await _home(tester, _store()..ingest(_hello(_withMetrics)), initialTab: 2);
+      expect(_page(tester), 'performance');
+    });
+
+    testWidgets('neither the FPS chip nor a page can open Performance while metrics are off', (tester) async {
+      final store = _store()
+        ..ingest(_hello(_withMetrics))
+        ..ingest(buildMetric(fps: 58));
+      await _open(tester, store);
+      expect(find.text('58 FPS'), findsOneWidget, reason: 'metrics on: the chip is next to the app name');
+      final chip = tester.getCenter(find.text('58 FPS'));
+
+      // The same app with metrics off (a sample that still came in changes nothing).
+      store
+        ..ingest(_hello(_withoutMetrics))
+        ..ingest(buildMetric(fps: 57));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('FPS'), findsNothing);
+      await tester.tapAt(chip);
+      await tester.pumpAndSettle();
+      expect(_page(tester), 'network');
+
+      tester.widget<PanelScope>(find.byType(PanelScope)).open(PanelTab.performance);
+      await tester.pumpAndSettle();
+      expect(_page(tester), 'network', reason: 'a page asking for Performance gets nothing');
+    });
+
+    testWidgets('a hello without metrics while Performance is shown goes back to Network', (tester) async {
+      final store = _store()..ingest(_hello(_withMetrics));
+      await _open(tester, store);
+      await tester.tap(find.byTooltip('Performance'));
+      await tester.pumpAndSettle();
+      expect(_page(tester), 'performance');
+
+      store.ingest(_hello(_withoutMetrics));
+      await tester.pumpAndSettle();
+      expect(_page(tester), 'network');
+      expect(find.byTooltip('Performance'), findsNothing);
+
+      store.ingest(_hello(_withMetrics));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Performance'), findsOneWidget, reason: 'back with the option');
+      expect(_page(tester), 'network', reason: 'the page on screen stays');
+    });
+
+    for (final (name, hello) in <(String, Map<String, Object?>?)>[('metrics on', _hello(_withMetrics)), ('no hello', null)]) {
+      testWidgets('$name: four tabs and the chip opens Performance', (tester) async {
+        final store = _store();
+        if (hello != null) store.ingest(hello);
+        store.ingest(buildMetric(fps: 58));
+        await _open(tester, store);
+        for (final label in <String>['Network', 'Logs', 'Performance', 'Tools']) {
+          expect(find.byTooltip(label), findsOneWidget, reason: label);
+        }
+        await tester.tap(find.text('58 FPS'));
+        await tester.pumpAndSettle();
+        expect(_page(tester), 'performance');
+      });
+    }
   });
 
   group('header', () {

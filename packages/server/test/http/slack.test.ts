@@ -303,6 +303,7 @@ describe('Markdown parts', () => {
     expect(notificationText('## GET https://x.example/a?b=<c>&d\n```json\n{}\n```')).toBe('GET https://x.example/a?b=&lt;c&gt;&amp;d');
     expect(notificationText('```\ncode only\n```')).toBe('Dürbün');
     expect(notificationText(`- *${'y'.repeat(300)}*`)).toHaveLength(150);
+    expect(notificationText(`${'y'.repeat(148)}😀${'z'.repeat(10)}`)).toBe(`${'y'.repeat(148)}…`);
   });
 });
 
