@@ -1,12 +1,13 @@
 /**
- * Send to Slack: Slack reads "mrkdwn", not Markdown. The share reports are light Markdown (plain lines,
- * `- ` bullets, fenced blocks), so the text needs only a few changes:
- *  - `&`, `<` and `>` escaped: Slack reads `<…>` as a link or an @channel mention;
- *  - every fence becomes plain ``` (Slack knows no longer fences and shows a language name as code), and a
- *    run of backticks inside a block is broken up so it cannot close the block early;
- *  - the text is cut below Slack's 40,000-character limit, an open block closed, and a note added.
- * The Flutter in-app panel does the same (`slack.dart` in `sdks/flutter/durbun`); `slack.test.ts` and
- * `slack_test.dart` pin the same output.
+ * Send to Slack. The share reports are light Markdown (plain lines, `- ` bullets, `##` headings, fenced blocks).
+ * The UI sends two versions and the server picks (`packages/server/src/http/slack.ts`):
+ *  - [toSlackMarkdown]: the report as Markdown, which the server posts as one rich text message (as a report
+ *    pasted into Slack shows: lists and code blocks with their language), or as `markdown` blocks in parts;
+ *  - [toSlackText]: Slack's own "mrkdwn", the plain fallback: `&`, `<` and `>` escaped (Slack reads `<…>` as a
+ *    link or an @channel mention) and every fence plain ``` (mrkdwn knows no language).
+ * Both break a run of backticks inside a block so it cannot close the block early, and cut the text below Slack's
+ * 40,000-character limit, an open block closed and a note added. The Flutter in-app panel does the same
+ * (`slack.dart` in `sdks/flutter/durbun`); `slack.test.ts` and `slack_test.dart` pin the same output.
  */
 
 /** Slack cuts a message's text after 40,000 characters (the server refuses longer texts). */
@@ -19,7 +20,7 @@ export const SLACK_MAX_CHARS = 40_000;
  */
 export const SLACK_ADD_URL = 'https://appnify.dev/durbun/slack/';
 
-const FENCE_OPEN = /^(`{3,})[\w+#.-]*$/;
+const FENCE_OPEN = /^(`{3,})([\w+#.-]*)$/;
 const ZWSP = '​';
 
 export interface SlackTextOptions {
@@ -46,11 +47,27 @@ function cutLine(line: string, max: number): string {
   return out;
 }
 
+/** The report as Slack mrkdwn: the plain message, and the fallback when a workspace refuses blocks. */
 export function toSlackText(report: string, options: SlackTextOptions): string {
+  return build(report, options, false);
+}
+
+/**
+ * The report as Markdown for Slack's rich text: fences keep their language, nothing is escaped (rich text reads no
+ * `<…>` mentions); the footer and the cut note in italics.
+ */
+export function toSlackMarkdown(report: string, options: SlackTextOptions): string {
+  return build(report, options, true);
+}
+
+function build(report: string, options: SlackTextOptions, markdown: boolean): string {
   const max = options.maxChars ?? SLACK_MAX_CHARS;
-  const footer = options.footer ? ['', escape(options.footer)] : [];
+  const esc = markdown ? (line: string) => line : escape;
+  const quiet = (line: string) => (markdown ? `_${line}_` : escape(line));
+  const footer = options.footer ? ['', quiet(options.footer)] : [];
+  const note = quiet(options.cutNote);
   // Room for the closing fence, the note and the footer.
-  const budget = max - (footer.join('\n').length + escape(options.cutNote).length + 8);
+  const budget = max - (footer.join('\n').length + note.length + 8);
   const out: string[] = [];
   let size = 0;
   let fence: string | null = null;
@@ -61,12 +78,12 @@ export function toSlackText(report: string, options: SlackTextOptions): string {
     if (fence === null) {
       const open = FENCE_OPEN.exec(raw);
       if (open) next = open[1]!;
-      line = open ? '```' : escape(raw);
+      line = open ? (markdown ? `\`\`\`${open[2]}` : '```') : esc(raw);
     } else if (raw === fence) {
       next = null;
       line = '```';
     } else {
-      line = escape(raw).replace(/`{3,}/g, (run) => run.split('').join(ZWSP));
+      line = esc(raw).replace(/`{3,}/g, (run) => run.split('').join(ZWSP));
     }
     const add = (out.length > 0 ? 1 : 0) + line.length;
     if (size + add > budget) {
@@ -82,7 +99,7 @@ export function toSlackText(report: string, options: SlackTextOptions): string {
   }
   if (cut) {
     if (fence !== null) out.push('```');
-    out.push(escape(options.cutNote));
+    out.push(note);
   }
   while (out.length > 0 && out[out.length - 1]!.trim() === '') out.pop();
   return [...out, ...footer].join('\n');

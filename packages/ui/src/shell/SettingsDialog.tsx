@@ -32,7 +32,7 @@ import { sdkHostLines } from './sdkHosts';
 import { DesktopServerRows } from './DesktopServerRows';
 import { hasDesktopConfig } from './desktopConfig';
 import { Snippet } from './Snippet';
-import { SLACK_ADD_URL, toSlackText } from '../lib/slack';
+import { SLACK_ADD_URL, toSlackMarkdown, toSlackText } from '../lib/slack';
 import { Group, NumberField, OfflineNote, Row, SectionHeader, useServerPatch } from './settingsParts';
 import { useDesktopPrefs } from './desktopPrefs';
 import { BackupSection } from '../features/transfer/BackupSection';
@@ -528,7 +528,9 @@ function SlackSection() {
   const test = () =>
     run('test', async () => {
       const footer = status?.sender ? t('common.slack.footerFrom', { sender: status.sender }) : t('common.slack.footer');
-      await api.sendToSlack(toSlackText(t('shell.settings.slackTestText'), { cutNote: t('common.slack.cutNote'), footer }));
+      const options = { cutNote: t('common.slack.cutNote'), footer };
+      const text = t('shell.settings.slackTestText');
+      await api.sendToSlack({ markdown: toSlackMarkdown(text, options), text: toSlackText(text, options) });
       toast.success(t('common.slack.sent'));
     });
   const remove = async () => {
@@ -560,7 +562,20 @@ function SlackSection() {
             </a>
           </Row>
         )}
-        <Row label={t('shell.settings.slackWebhook')} hint={linked ? t('shell.settings.slackLinkedTo', { hint: status?.hint ?? '' }) : t('shell.settings.slackWebhookHint')}>
+        <Row
+          label={t('shell.settings.slackWebhook')}
+          hint={
+            linked
+              ? `${t('shell.settings.slackLinkedTo', { hint: status?.hint ?? '' })} ${
+                  status?.uploads
+                    ? status.channel
+                      ? t('shell.settings.slackUploadsOn', { channel: status.channel })
+                      : t('shell.settings.slackUploadsOnNoChannel')
+                    : t('shell.settings.slackUploadsOff')
+                }`
+              : t('shell.settings.slackWebhookHint')
+          }
+        >
           {linked ? (
             <Button size="sm" variant="ghost" icon={Unplug} loading={busy === 'remove'} disabled={!connected || busy !== null} onClick={() => void remove()}>
               {t('shell.settings.slackRemove')}

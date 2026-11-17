@@ -255,6 +255,28 @@ export interface SlackStatus {
   /** "hooks.slack.com · …wxyz" */
   hint?: string;
   sender?: string;
+  /** A bug report's screenshot can go too (the connection URL from Add to Slack carries Dürbün's key). */
+  uploads?: boolean;
+  /** "#qa", when Slack named the channel. */
+  channel?: string;
+}
+
+/** What a send answers: the report went; `screenshot` only when one was asked for. */
+export interface SlackSendResult {
+  ok: true;
+  screenshot?: 'sent' | 'failed';
+  /** Why the screenshot did not go (an error body: code + English message, for `errorText`). */
+  screenshotError?: { code: string; message: string };
+}
+
+export interface SlackMessage {
+  /** The report as Markdown (`toSlackMarkdown`): posted as rich text. */
+  markdown?: string;
+  /** The report as mrkdwn (`toSlackText`): the fallback, or the message when there is no `markdown`. */
+  text?: string;
+  /** A screenshot's `/api/files/…` URL, uploaded to the channel after the report (needs `uploads`). */
+  screenshot?: string;
+  screenshotTitle?: string;
 }
 
 export function slackStatus(signal?: AbortSignal): Promise<SlackStatus> {
@@ -266,9 +288,9 @@ export function updateSlack(patch: { webhookUrl?: string | null; sender?: string
   return json('/api/slack', { ...postJson(patch), method: 'PUT' });
 }
 
-/** Posts Slack mrkdwn text (`toSlackText`) to the connected channel. */
-export async function sendToSlack(text: string, signal?: AbortSignal): Promise<void> {
-  await fetchOk('/api/slack/send', postJson({ text }, signal));
+/** Posts a report to the connected channel, then its screenshot when one is given. */
+export function sendToSlack(message: SlackMessage, signal?: AbortSignal): Promise<SlackSendResult> {
+  return json('/api/slack/send', postJson(message, signal));
 }
 
 /** URL of a file saved by the server (screenshots, recordings). */

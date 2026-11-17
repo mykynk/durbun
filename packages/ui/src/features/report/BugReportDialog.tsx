@@ -6,7 +6,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { Bug, Camera, ChevronDown, ChevronRight, Copy, FileArchive, RotateCw, ShieldAlert, ShieldCheck } from 'lucide-react';
 import type { BugReportRequest, DeviceInfo, LogEntry, NetworkEntry } from '@durbun/protocol';
 import { Button, Callout, Checkbox, CodeView, Dialog, Select, SlackButton, Spinner, Textarea, copyText, downloadBlob, formatClock, sdkLabel, toast, useShortcut } from '../../components';
-import { api, compileNoiseRules, compileScope, getScope, logStore, networkStore, sendCommand, useConnection, useHub, useLogVersion, useNetworkVersion, usePrefs, type Scope } from '../../data';
+import { api, compileNoiseRules, compileScope, getScope, logStore, networkStore, sendCommand, useConnection, useHub, useLogVersion, useNetworkVersion, usePrefs, useSlackStatus, type Scope } from '../../data';
 import { actionAvailability, screenshotAvailability } from '../../data/explain';
 import { errorText, useLanguage, useT } from '../../i18n';
 import { deviceDisplayName } from '../../i18n/codes';
@@ -181,6 +181,10 @@ export function BugReportDialog({ anchor, onClose }: BugReportDialogProps) {
 
   const shotName = shot.status === 'done' ? `screenshot${/\.(png|jpe?g|heic|webp)$/i.exec(shot.url)?.[0]?.toLowerCase() ?? '.png'}` : undefined;
   const includeShot = parts.screenshot && shot.status === 'done';
+  const slack = useSlackStatus();
+  // Slack takes the screenshot only through a connection that carries Dürbün's key (Add to Slack).
+  const slackShot = includeShot && shot.status === 'done' ? shot.url : undefined;
+  const slackNote = slackShot && slack?.configured ? (slack.uploads ? 'report.slackNoteShot' : 'report.slackNoteNoKey') : 'report.slackNote';
   const includeCrash = parts.crash && !!crash;
   const includeRecording = parts.recording && !noDevice;
   const allDevices = target.kind === 'all';
@@ -256,7 +260,13 @@ export function BugReportDialog({ anchor, onClose }: BugReportDialogProps) {
       footer={
         <>
           <span className="grow" />
-          <SlackButton report={markdown} onSent={bugReport.done} onConnect={onClose} />
+          <SlackButton
+            report={markdown}
+            screenshot={slackShot}
+            screenshotTitle={[t('report.parts.screenshot'), what].filter(Boolean).join(' · ')}
+            onSent={bugReport.done}
+            onConnect={onClose}
+          />
           <Button variant="secondary" icon={Copy} onClick={() => void copy()}>
             {t('report.copy')}
           </Button>
@@ -434,7 +444,7 @@ export function BugReportDialog({ anchor, onClose }: BugReportDialogProps) {
             {preview ? t('report.preview.hide') : t('report.preview.show')}
           </button>
           {preview ? <CodeView code={markdown} language="plain" lineNumbers={false} defaultWrap toolbar={false} maxHeight="min(40vh, 420px)" aria-label={t('report.preview.label')} /> : null}
-          <p className="br-hint">{t('report.slackNote')}</p>
+          <p className="br-hint">{t(slackNote)}</p>
         </section>
       </div>
     </Dialog>

@@ -73,7 +73,7 @@ export interface FlowServices {
   hub: Hub;
   deviceAction(deviceId: string, action: DeviceActionId, params: Record<string, unknown>): Promise<CommandReply>;
   mocks: { get(): MockRule[]; set(rules: MockRule[]): MockRule[] };
-  slack?: { status(): Promise<{ configured: boolean }>; send(raw: unknown): Promise<void> };
+  slack?: { status(): Promise<{ configured: boolean }>; send(raw: unknown): Promise<unknown> };
   maxBodyBytes(): number;
   fetchImpl?: typeof fetch;
   /** Dürbün's own listening ports: http.request never goes to them on this Mac (http/ownTargets.ts). */

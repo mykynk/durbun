@@ -45,9 +45,11 @@ Dürbün is a development tool. Things that are in scope include:
   uninstall) without asking first.
 - **Flow environments.** Secret environment values that leave the Mac in a share package or the AI pack, or
   that show in run records and reports unmasked.
-- **Slack.** The stored webhook (`slack.json` in the data folder) readable by other users of the Mac or
-  returned to the interface after it is saved, and the [Add to Slack](https://appnify.dev/durbun/slack/) page
-  leaking the webhook or the authorization code to anyone but your own browser.
+- **Slack.** The stored connection (`slack.json` in the data folder: the webhook and the upload key) readable by
+  other users of the Mac or returned to the interface after it is saved, the key sent anywhere but Slack's API
+  or a screenshot's bytes anywhere but Slack's upload host, and the
+  [Add to Slack](https://appnify.dev/durbun/slack/) page leaking the URL, the key or the authorization code to
+  anyone but your own browser.
 - **Updates.** The Mac app's update check or download installing anything other than a signed Dürbün release,
   or sending an identifier with the request.
 

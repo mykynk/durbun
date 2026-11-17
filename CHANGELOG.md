@@ -6,6 +6,24 @@ All notable changes to Dürbün are listed here. The format follows
 
 ## [Unreleased]
 
+Planned as 0.3.1.
+
+### Added
+
+- Send to Slack takes a bug report's screenshot along: the Mac app uploads it to the same channel right after the
+  report. It needs the connection URL from the [Add to Slack](https://appnify.dev/durbun/slack/) page, which now
+  carries Dürbün's upload key after a `#`; a connection made before keeps sending the text only, and the bug
+  report window says so. Older Dürbün versions accept the new URL and send the text only.
+
+### Changed
+
+- Send to Slack posts the report as Slack's rich text, the way a report pasted into Slack looks: lists, and code
+  blocks with their language and highlighting, in one message however long. Before, Slack split long reports
+  and broke their code blocks. A workspace that refuses rich text gets Markdown messages in parts, then the
+  plain text as before. The Flutter in-app panel sends the same way.
+- Flutter in-app panel: with `DurbunOptions(metrics: false)` the Performance tab is gone from the bar, and
+  nothing in the panel leads to it.
+
 ## [0.3.0] - 2026-11-16
 
 ### Security

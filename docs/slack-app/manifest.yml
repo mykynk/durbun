@@ -1,20 +1,22 @@
 # The "Dürbün" Slack app behind https://appnify.dev/durbun/slack/ (Add to Slack).
 #
-# It asks for one thing: an incoming webhook for the channel the person picks. It cannot read
-# messages, channels or members. PKCE lets the static page above trade Slack's code for the
-# webhook in the person's own browser, so there is no client secret and no server.
+# It asks for three things: an incoming webhook for the channel the person picks, uploading files
+# (a bug report's screenshot) and joining a public channel so that upload can land there. It cannot
+# read messages, files, channels or members. PKCE lets the static page above trade Slack's code for
+# the webhook and the bot token in the person's own browser, so there is no client secret and no
+# server. Token rotation stays off: a PKCE app's rotating tokens would need refreshing every 12 hours.
 #
 # To run your own copy: api.slack.com/apps -> Create New App -> From a manifest, paste this,
 # upload icon.png under Basic Information -> Display Information, and point redirect_urls at
 # your own page. Turning PKCE on cannot be undone without Slack support.
 display_information:
   name: Dürbün
-  description: Send a log line or a network request from Dürbün to a Slack channel, only when you click Send to Slack.
+  description: Send a log line, a request or a bug report with its screenshot from Dürbün to a Slack channel, only when you click Send to Slack.
   background_color: "#11141B"
   long_description: |-
-    Dürbün is a free, open-source Mac app (MIT) that shows the live logs, network requests and performance of Android and iOS apps. When something breaks, anyone on the team can send that log line or request to a Slack channel with one click on Send to Slack, from the Mac app or from the in-app panel on the phone.
+    Dürbün is a free, open-source Mac app (MIT) that shows the live logs, network requests and performance of Android and iOS apps. When something breaks, anyone on the team can send that log line, request or bug report to a Slack channel with one click on Send to Slack, from the Mac app or from the in-app panel on the phone.
 
-    Adding Dürbün to Slack gives you an incoming webhook for the channel you pick. Dürbün posts only the reports someone chooses to send; it cannot read messages, channels or members. The webhook URL is shown once in your own browser and kept on your machine: AppNify runs no server for this and stores nothing. Remove the app from Slack at any time to stop it.
+    Adding Dürbün to Slack gives you a webhook and a key for the channel you pick. Dürbün posts only the reports someone chooses to send, with the screenshot when a bug report has one; to upload it, Dürbün joins that channel if it is public. It cannot read messages, files, channels or members. The webhook URL and the key are shown once in your own browser and kept on your machine: AppNify runs no server for this and stores nothing. Remove the app from Slack at any time to stop it.
 
     Source code and docs: https://github.com/mykynk/durbun
 features:
@@ -28,6 +30,8 @@ oauth_config:
   scopes:
     bot:
       - incoming-webhook
+      - files:write
+      - channels:join
   pkce_enabled: true
 settings:
   incoming_webhooks:

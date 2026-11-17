@@ -45,9 +45,10 @@ ve canlı bir pencerede gösterir.
   yaptıklarını bekleme, mock senaryoları ve cihaz işlemleri; birbirine zincirlenir, birbirini alt akış olarak
   çağırır (bkz. [Akışlar](#akışlar)). Elle, kayıtlı isteklerden ya da kendi yapay zekâ asistanınızla yazın.
 - **Paylaşma.** Bir log satırı ya da istek, ekibinizin Dürbün olmadan okuyabileceği bir rapora dönüşür:
-  kopyalayın, Markdown olarak kaydedin ya da tek tıkla ekibinizin Slack kanalına gönderin (Ayarlar → Slack).
-  Kanalın webhook adresini almak da tek tık: [Slack'e ekle](https://appnify.dev/durbun/slack/?lang=tr).
-  Flutter uygulama içi paneli de telefondan gönderebilir.
+  kopyalayın, Markdown olarak kaydedin ya da tek tıkla ekibinizin Slack kanalına gönderin (Ayarlar → Slack);
+  rapor Slack'e yapıştırılmış gibi biçimli, hata raporu ekran görüntüsüyle gider. Kanalın bağlantı adresini
+  almak da tek tık: [Slack'e ekle](https://appnify.dev/durbun/slack/?lang=tr). Flutter uygulama içi paneli de
+  telefondan gönderebilir.
 - **Oturum kayıtları.** Her oturum yakalanırken Mac'inize kaydedilir: Dürbün kapansa ya da çökse bile önceki
   oturumu canlı veriden ayrı olarak yeniden açarsınız. Hiçbir şey Mac'ten çıkmaz.
 - **Yedekleme ve paylaşım.** Akışlarınız, mock kurallarınız, ortamlarınız ve ayarlarınız tek bir `.durbun`
@@ -271,10 +272,11 @@ SDK bağlantısında henüz eşleşme ve şifreleme yok:
   dışa aktarmayı siz seçmedikçe gizli değerleri (kimlik başlıkları, çerezler, token ve parola alanları)
   maskeler; log satırlarının içindeki metin maskelenmez. Bir değerin Mac'e hiç gelmemesi için onu her SDK'nın
   `redactHeaders` seçeneğiyle gizleyin.
-- Slack incoming webhook adresine sahip olan herkes o kanala mesaj atabilir. Mac uygulaması adresi veri
-  klasöründeki `slack.json` dosyasında (yalnızca sizin kullanıcınız okuyabilir) tutar ve bir daha göstermez.
-  Flutter panelinin webhook'u derleme komutunuzdan gelir (`--dart-define=DURBUN_SLACK_WEBHOOK`) ve o derlemenin
-  içine gömülür; derlemeye sahip olan onu bulabilir.
+- Slack bağlantı adresine sahip olan herkes o kanala mesaj atabilir; adresin anahtarı (Slack'e ekle'nin verdiği
+  `#` sonrası) oraya dosya da yükleyebilir, hiçbir şey okuyamaz. Mac uygulaması adresi veri klasöründeki
+  `slack.json` dosyasında (yalnızca sizin kullanıcınız okuyabilir) tutar ve bir daha göstermez. Flutter paneli
+  yalnızca webhook'u, yani `#` öncesini alır: derleme komutunuzdan gelir (`--dart-define=DURBUN_SLACK_WEBHOOK`)
+  ve o derlemenin içine gömülür; derlemeye sahip olan onu bulabilir.
 - Ortamların gizli değerleri ve yedek parolası veri klasöründe, yalnızca sizin kullanıcınızın okuyabileceği
   dosyalarda tutulur. Paylaşılan paketlerde asla bulunmaz; yedeklerde yalnızca parolanızla şifrelenmiş olarak
   bulunur. Bir akış içinde yazan istekleri ve cihaz işlemlerini çalıştırır; başkalarından gelen akışları

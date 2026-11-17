@@ -17,7 +17,7 @@
  *   GET  /api/files/crash/:udid/:name             a copied iOS crash report (<tempDir>/crash/<udid>/*.ips), as a download
  *   GET|DELETE /api/media[?deviceId=], GET|DELETE /api/media/:id   screenshots and recordings kept on disk (media.ts)
  *   GET /api/android/wireless, POST /api/android/wireless/pair|connect   Android pairing over Wi-Fi (androidWireless.ts)
- *   GET|PUT /api/slack, POST /api/slack/send       Send to Slack (slack.ts)
+ *   GET|PUT /api/slack, POST /api/slack/send       Send to Slack: Markdown report, then a screenshot (slack.ts)
  *   /api/flows…, /api/flow-runs…, /api/flow-environments, /api/packages…, /api/backup…, /api/ui-prefs
  *                                                 flows and Dürbün packages (flows/module.ts)
  */
@@ -34,7 +34,7 @@ import { bugReportZip, crashFileParts, parseBugReportRequest, sliceSessionExport
 import { buildHar, headerValue } from './har';
 import { DESKTOP_DEVICE_ID } from './replay';
 import { parseJsonBuffer } from './jsonParse';
-import type { SlackStore } from './slack';
+import { MAX_SLACK_SCREENSHOT_BYTES, type SlackScreenshot, type SlackStore } from './slack';
 import { streamJson } from './jsonStream';
 import { extensionFor } from './mime';
 import { isInside, SANDBOX_CSP, sendFile, statFile } from './static';
@@ -545,6 +545,18 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
     sendJson(res, 200, { file: finalPath, name, size });
   }
 
+  /** The screenshot a Send to Slack names (`/api/files/<name>`); no bytes when it is gone or too large to be one. */
+  async function slackScreenshot(body: unknown): Promise<SlackScreenshot | undefined> {
+    if (!isPlainObject(body) || typeof body.screenshot !== 'string' || !body.screenshot) return undefined;
+    // "/api/files/shot.png?t=…": a cache-busting query is not part of the name.
+    const name = tempFileName(body.screenshot.replace(/[?#].*$/, ''));
+    const title = typeof body.screenshotTitle === 'string' ? body.screenshotTitle : undefined;
+    const found = await tempFile(name);
+    if (found && found.stat.size > MAX_SLACK_SCREENSHOT_BYTES) return { name, size: found.stat.size, title };
+    const data = found ? await fsp.readFile(found.real).catch(() => undefined) : undefined;
+    return { name, data, title };
+  }
+
   /** A file directly inside the temp dir (no dot files, no way out through a symlink), or undefined. */
   async function tempFile(name: string): Promise<{ real: string; stat: NonNullable<Awaited<ReturnType<typeof statFile>>> } | undefined> {
     if (!name || name === '.' || name === '..' || name.startsWith('.') || /[\\/\0]/.test(name)) return undefined;
@@ -664,8 +676,8 @@ export function createApiHandler(deps: ApiDeps): ApiHandler {
         }
         if (segs.length === 2 && second === 'send') {
           requireMethod(req, 'POST');
-          await slack.send(await readJson(req, SLACK_BODY_LIMIT_BYTES));
-          return sendJson(res, 200, { ok: true });
+          const body = await readJson(req, SLACK_BODY_LIMIT_BYTES);
+          return sendJson(res, 200, await slack.send(body, await slackScreenshot(body)));
         }
         break;
       }

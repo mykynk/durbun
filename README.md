@@ -44,9 +44,9 @@ does in one readable, live window. *Dürbün* is Turkish for binoculars.
   scenarios and device actions, chained and calling each other as sub-flows (see [Flows](#flows)). Write them
   by hand, from captured requests, or with your own AI assistant.
 - **Share.** A log line or a request becomes a report your team can read without Dürbün: copy it, save it as
-  Markdown, or send it to your team's Slack channel with one click (Settings → Slack). Getting the channel's
-  webhook is one click too: [Add to Slack](https://appnify.dev/durbun/slack/). The Flutter in-app panel can
-  send it from the phone too.
+  Markdown, or send it to your team's Slack channel with one click (Settings → Slack), formatted as it would be
+  pasted, with a bug report's screenshot. Getting the channel's connection URL is one click too:
+  [Add to Slack](https://appnify.dev/durbun/slack/). The Flutter in-app panel can send it from the phone too.
 - **Session recordings.** Every run is saved on your Mac as it happens: after a quit or a crash you reopen the
   previous session, kept apart from live data. Nothing leaves the Mac.
 - **Backups and sharing.** Your flows, mock rules, environments and settings in one `.durbun` file: share
@@ -265,10 +265,11 @@ The SDK connection itself is not paired or encrypted yet:
   (credential headers, cookies, token and password fields) unless you choose an unmasked export; text inside
   log lines is not masked. To keep a value off the Mac altogether, hide it with each SDK's `redactHeaders`
   option.
-- A Slack incoming webhook URL lets anyone who has it post to its channel. The Mac app keeps it in
-  `slack.json` in its data folder (readable only by your user) and never shows it again. The Flutter panel's
-  webhook comes from your build command (`--dart-define=DURBUN_SLACK_WEBHOOK`) and is compiled into that
-  build, so whoever has the build can find it.
+- A Slack connection URL lets anyone who has it post to its channel, and its key (the part after `#`, from Add
+  to Slack) also lets them upload files there; it cannot read anything. The Mac app keeps it in `slack.json` in
+  its data folder (readable only by your user) and never shows it again. The Flutter panel takes only the
+  webhook, the part before `#`: it comes from your build command (`--dart-define=DURBUN_SLACK_WEBHOOK`) and is
+  compiled into that build, so whoever has the build can find it.
 - Environment secrets and the backup passphrase are kept in the data folder, readable only by your user.
   Shared packages never contain them; backups contain them only encrypted with your passphrase. A flow runs
   the requests and device actions written in it, so open flows from people you trust, and read what an AI

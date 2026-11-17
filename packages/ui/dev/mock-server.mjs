@@ -1939,7 +1939,7 @@ function readBody(req) {
 }
 
 /** Send to Slack state (the webhook itself is never kept: the mock only prints). */
-const slack = { hint: undefined, sender: undefined };
+const slack = { hint: undefined, sender: undefined, uploads: false, channel: undefined };
 
 const httpServer = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
@@ -2088,17 +2088,34 @@ const httpServer = http.createServer(async (req, res) => {
           if (patch.webhookUrl && !String(patch.webhookUrl).startsWith('https://')) {
             return json(res, 400, { error: 'The webhook URL must start with https://', code: 'slack.invalidUrl' });
           }
-          slack.hint = patch.webhookUrl ? `hooks.slack.com · …${String(patch.webhookUrl).slice(-4)}` : undefined;
+          // As the server: a connection URL from Add to Slack carries Dürbün's key after # (screenshots can go).
+          const [hook, key = ''] = String(patch.webhookUrl ?? '').split('#');
+          const params = new URLSearchParams(key);
+          slack.hint = hook ? `hooks.slack.com · …${hook.replace(/\/+$/, '').slice(-4)}` : undefined;
+          slack.uploads = !!(hook && params.get('token') && params.get('channel'));
+          slack.channel = slack.uploads ? params.get('channel_name') || undefined : undefined;
         }
         if ('sender' in patch) slack.sender = patch.sender || undefined;
       }
-      return json(res, 200, { configured: !!slack.hint, hint: slack.hint, sender: slack.sender });
+      return json(res, 200, {
+        configured: !!slack.hint,
+        hint: slack.hint,
+        sender: slack.sender,
+        ...(slack.hint && slack.uploads ? { uploads: true } : {}),
+        ...(slack.hint && slack.channel ? { channel: slack.channel } : {}),
+      });
     }
     if (p === '/api/slack/send' && req.method === 'POST') {
-      const { text = '' } = JSON.parse((await readBody(req)).toString() || '{}');
+      const { text = '', markdown = '', screenshot } = JSON.parse((await readBody(req)).toString() || '{}');
       if (!slack.hint) return json(res, 409, { error: 'Slack is not connected', code: 'slack.notConfigured' });
-      console.log(`[slack] ${String(text).length} chars:\n${text}\n`);
-      return setTimeout(() => json(res, 200, { ok: true }), 400);
+      const body = String(markdown || text);
+      console.log(`[slack] ${body.length} chars${screenshot ? ` + ${screenshot}` : ''}:\n${body}\n`);
+      const shot = !screenshot
+        ? {}
+        : slack.uploads
+          ? { screenshot: 'sent' }
+          : { screenshot: 'failed', screenshotError: { code: 'slack.uploadsOff', message: 'This Slack connection sends text only' } };
+      return setTimeout(() => json(res, 200, { ok: true, ...shot }), 400);
     }
     if (await handleFlowsApi(req, res, p, { json, readBody, broadcast })) return;
     if (p === '/api/upload' && req.method === 'POST') {

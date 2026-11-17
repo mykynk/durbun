@@ -4,15 +4,22 @@ import { sendToSlack } from '../data/api';
 import { updateSlack, useSlackStatus } from '../data/stores/slack';
 import { ui } from '../data/stores/ui';
 import { errorText, useLanguage, useT } from '../i18n';
-import { SLACK_ADD_URL, toSlackText } from '../lib/slack';
+import { SLACK_ADD_URL, toSlackMarkdown, toSlackText } from '../lib/slack';
 import { Button } from './Button';
 import { Input } from './Form';
 import { Popover } from './Popover';
 import { toast } from './Toast';
 
 export interface SlackButtonProps {
-  /** The report (light Markdown) to post; converted to Slack's mrkdwn here. */
+  /** The report (light Markdown) to post: sent as Markdown (rich text) with a mrkdwn fallback. */
   report: string;
+  /**
+   * A screenshot's `/api/files/…` URL to upload after the report. It goes only when the connection allows
+   * uploads (`SlackStatus.uploads`); the dialog says so next to the button.
+   */
+  screenshot?: string;
+  /** Its title in Slack ("Screenshot · Pati · Galaxy A73"). */
+  screenshotTitle?: string;
   disabled?: boolean;
   /** After a successful send (close the dialog). */
   onSent?: () => void;
@@ -26,7 +33,7 @@ export interface SlackButtonProps {
  * only when clicked. Without a webhook it offers to connect one right here, so the dialog and its report stay open
  * and the message can go as soon as the channel is linked.
  */
-export function SlackButton({ report, disabled, onSent, onConnect, variant = 'secondary' }: SlackButtonProps) {
+export function SlackButton({ report, screenshot, screenshotTitle, disabled, onSent, onConnect, variant = 'secondary' }: SlackButtonProps) {
   const t = useT();
   const status = useSlackStatus();
   const [sending, setSending] = useState(false);
@@ -38,8 +45,16 @@ export function SlackButton({ report, disabled, onSent, onConnect, variant = 'se
     setSending(true);
     try {
       const footer = status.sender ? t('common.slack.footerFrom', { sender: status.sender }) : t('common.slack.footer');
-      await sendToSlack(toSlackText(report, { cutNote: t('common.slack.cutNote'), footer }));
-      toast.success(t('common.slack.sent'));
+      const options = { cutNote: t('common.slack.cutNote'), footer };
+      const withShot = !!screenshot && !!status.uploads;
+      const result = await sendToSlack({
+        markdown: toSlackMarkdown(report, options),
+        text: toSlackText(report, options),
+        ...(withShot ? { screenshot, ...(screenshotTitle ? { screenshotTitle } : {}) } : {}),
+      });
+      // The report is in the channel either way; a screenshot that did not go is a warning, not a failure.
+      if (result.screenshot === 'failed') toast.warn(t('common.slack.sentNoShot'), { description: errorText(result.screenshotError) });
+      else toast.success(result.screenshot === 'sent' ? t('common.slack.sentWithShot') : t('common.slack.sent'));
       onSent?.();
     } catch (err) {
       toast.error(t('common.slack.failed'), { description: errorText(err) });

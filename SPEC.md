@@ -270,9 +270,9 @@ REST:
 | `POST /api/upload?name=<file>` (raw body, ≤ 2 GB streamed to tempDir) | `{ file }` server path to pass to `app-install` |
 | `GET /api/files/:name` | files saved in tempDir (screenshots, recordings) |
 | `GET /api/files/crash/:udid/:name` | copied iOS crash reports (phase 3): udid `/^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/`, name `/^[A-Za-z0-9_][A-Za-z0-9._-]{0,199}\.ips$/i` without `..`, realpath must stay inside `<tempDir>/crash/<udid>/`; always `Content-Disposition: attachment`, `text/plain`, `nosniff`; same /api access rules |
-| `GET /api/slack` | `{ configured, hint?, sender? }`: Send to Slack status; never the webhook URL (`hint` = host + last 4 characters) |
-| `PUT /api/slack` `{ webhookUrl?: string \| null, sender?: string \| null }` | same status; `https://` only (`slack.invalidUrl`); stored in `<dataDir>/slack.json` (0600), not in settings.json (which every UI receives) |
-| `POST /api/slack/send` `{ text }` (Slack mrkdwn, ≤ 40,000 chars, built by the UI) | `{ ok: true }`; posts `{ text, unfurl_links: false, unfurl_media: false }`, no redirects, 15 s timeout; `slack.notConfigured` 409, `slack.rateLimited` 429 (message ends in `: <seconds> s` from Retry-After, 30 s when missing), `slack.rejected` / `slack.unreachable` 502 |
+| `GET /api/slack` | `{ configured, hint?, sender?, uploads?, channel? }`: Send to Slack status; never the webhook URL or the key (`hint` = host + last 4 characters; `uploads`: the connection carries the upload key; `channel`: "#qa") |
+| `PUT /api/slack` `{ webhookUrl?: string \| null, sender?: string \| null }` | same status; `webhookUrl` is a connection URL: an `https://` webhook (`slack.invalidUrl`), optionally followed by `#token=xoxb-…&channel=C…&channel_name=…` from Add to Slack (`slack.invalidKey` when cut or altered; a fragment without them is dropped); a new URL replaces the whole connection; stored in `<dataDir>/slack.json` (0600), not in settings.json (which every UI receives) |
+| `POST /api/slack/send` `{ markdown?, text?, screenshot?, screenshotTitle? }` (each text ≤ 40,000 chars, built by the UI) | `{ ok: true, screenshot?: 'sent' \| 'failed', screenshotError?: { code, message } }`. `markdown` goes as one `rich_text` block (paragraphs, `##` bold, `>` quote, lists, code with `language`); on a 400 block refusal as `markdown` blocks in parts of ≤ 11,000 chars (code blocks closed and reopened, 1.1 s apart, numbered in the notification text), then as `text` (mrkdwn); without `markdown`, `text` as before. Always `unfurl_links/unfurl_media: false`, no redirects, 15 s timeout; `slack.notConfigured` 409, `slack.rateLimited` 429 (message ends in `: <seconds> s` from Retry-After, 30 s when missing), `slack.rejected` / `slack.unreachable` 502. Then `screenshot` (`/api/files/<name>`, query ignored, ≤ 50 MB image) is uploaded with the key: `conversations.join` once per channel, `files.getUploadURLExternal`, bytes to `*.slack.com` without the token, `files.completeUploadExternal` with `channel_id`. A screenshot that does not go never fails the request: `slack.uploadsOff`, `slack.screenshotGone`, `slack.notInChannel`, `slack.reconnect`, `slack.uploadRejected`, `slack.rateLimited`, `slack.unreachable` |
 | `GET /api/recordings` · `DELETE /api/recordings` | `SessionRecordingList` (§13): the recordings on disk, the recorder's status, `previous`; DELETE removes every one but the recording being written |
 | `DELETE /api/recordings/:id` · `GET /api/recordings/:id/export[?mask=0]` | the new list / a `.durbun.json` download (masked unless `mask=0`); 404 `recorder.unknown`, 409 `recorder.live` (the one being written) |
 | `POST /api/recordings/:id/open` · `DELETE /api/recordings/:id/open` | `SessionRecordingOpen` (loads it into a hub of its own, §13.3; 422 `recorder.unreadable`) / `{ ok: true }` (the window went back to live) |
@@ -1333,8 +1333,9 @@ what goes in.
   `screenshot.png`, `crash/<name>.ips` (iOS crash report copy), `recording.durbun.json` (the window, opens in
   Dürbün). Masked unless `mask: false`. Parts the server no longer has (temp files are cleaned after 24 h) are
   left out and named in `X-Durbun-Skipped`; the UI says so.
-- **Send to Slack** through the configured webhook: Slack receives the report text only (shortened to Slack's
-  limit), never the files; the dialog says so next to the button.
+- **Send to Slack** through the configured connection: Slack receives the report (shortened to 40,000
+  characters) and, when the connection carries the upload key and the screenshot is included, the screenshot
+  right after it; never the log file, HAR, crash report or recording. The dialog says which next to the button.
 - `GET /api/export` also takes `fromTs` / `toTs` (epoch ms): the lines, requests and samples inside the window.
 
 ### 12.5 States
