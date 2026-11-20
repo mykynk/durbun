@@ -66,7 +66,7 @@ export function createMockRecordings(opts = {}) {
           { name: 'Pati', bundleId: 'com.mykynk.pati', deviceId: PIXEL.id, version: '1.4.2' },
           { name: 'Kasa', bundleId: 'com.mykynk.kasa', deviceId: IPHONE.id, version: '2.0.1' },
         ],
-        serverVersion: '0.3.1',
+        serverVersion: '0.3.2',
       },
       {
         id: recordingId(crashStart, 'e5f6'),
@@ -78,7 +78,7 @@ export function createMockRecordings(opts = {}) {
         devices: [GALAXY],
         apps: [{ name: 'Kumbara', bundleId: 'com.mykynk.kumbara', deviceId: GALAXY.id, version: '3.1.0' }],
         gaps: 412,
-        serverVersion: '0.3.1',
+        serverVersion: '0.3.2',
       },
       {
         id: recordingId(oldStart, '0a1b'),
@@ -91,7 +91,7 @@ export function createMockRecordings(opts = {}) {
         devices: [PIXEL],
         apps: [{ name: 'Pati', bundleId: 'com.mykynk.pati', deviceId: PIXEL.id, version: '1.4.0' }],
         trimmed: true,
-        serverVersion: '0.3.1',
+        serverVersion: '0.3.2',
       },
     ];
   }
@@ -101,7 +101,7 @@ export function createMockRecordings(opts = {}) {
     const devices = opts.liveDevices?.() ?? [];
     const lastWriteAt = liveClosedAt ?? Date.now();
     const bytes = Math.round(counts.logs * 140 + counts.requests * 2400) + 4096;
-    return { id: liveId, startedAt, lastWriteAt, ...(liveClosedAt ? { endedAt: liveClosedAt } : {}), state: liveClosedAt ? 'ended' : 'recording', bytes, counts, devices, apps: [], serverVersion: '0.3.1' };
+    return { id: liveId, startedAt, lastWriteAt, ...(liveClosedAt ? { endedAt: liveClosedAt } : {}), state: liveClosedAt ? 'ended' : 'recording', bytes, counts, devices, apps: [], serverVersion: '0.3.2' };
   }
 
   /** The recording of this run exists once recording was on (the mock always has content). */

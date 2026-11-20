@@ -6,6 +6,41 @@ All notable changes to Dürbün are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-20
+
+### Added
+
+- Flutter in-app panel: **Clear** on the Network and Logs pages removes that page's requests or log lines only,
+  after asking.
+- Flutter in-app panel: the Share sheet has a **Message** field; the text goes on top of the report as a quote in
+  Copy, Share and Send to Slack. Send to Slack ends with who sent it, as the Mac app does ("Sent with Dürbün ·
+  Ayşe (in-app panel)"): typed once on the phone and kept, or given by the app with
+  `DurbunInspector(slackSender: ...)`.
+- Flutter: `DurbunInspector(tools: DurbunPanelTools(...))` turns each item of the panel's Tools tab on or off,
+  also while the app runs; `showNetworkBadge` and `showLogsBadge` hide the error counts on those tabs.
+- Flutter in-app panel: a request's and a log line's Share sheet take the screenshot from when the panel opened
+  along, left out with one tap; Share… sends it as a PNG and Send to Slack uploads it with the connection URL's
+  key.
+
+### Changed
+
+- Flutter in-app panel: **Report a bug** lets the tester pick what goes, as the Mac app does: the moment's line or
+  request, the screenshot, the log lines, the failed requests, the device and app facts and the full `.md` file
+  each have a checkbox, and **Show the report** shows the text before it goes.
+- Flutter in-app panel: the light/dark switch lives under **Tools → Dark theme** instead of every page's
+  header. **Mac connection** is listed under Tools once a Mac is in reach, so testers without a Mac no longer
+  see it.
+- Flutter in-app panel: a tap on a header, a General row or a JSON value no longer copies it; text is selected
+  with a long press, and **Copy all** copies a whole list.
+
+### Fixed
+
+- Flutter in-app panel: **Export session** could fail as a whole ("The export could not be made"). A request
+  whose data cannot be written now goes in as a short note, a time no date can hold reads as its arrival, and a
+  failed export names the kind of error.
+- Flutter in-app panel: a NaN or infinite number in a message (a time, a status, a sample) could break request
+  durations, Statistics and exports; it now reads as missing.
+
 ## [0.3.1] - 2026-11-17
 
 ### Added
@@ -537,7 +572,8 @@ First public release.
 - Android: `io.github.mykynk:durbun` and the no-op `durbun-noop` (OkHttp interceptor, Timber, metrics).
 - React Native / JavaScript: `@durbun/react-native` (fetch / XMLHttpRequest, console, errors).
 
-[Unreleased]: https://github.com/mykynk/durbun/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/mykynk/durbun/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/mykynk/durbun/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/mykynk/durbun/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mykynk/durbun/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mykynk/durbun/compare/v0.1.0...v0.2.0

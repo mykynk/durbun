@@ -24,8 +24,8 @@ flutter pub add durbun_dio
 
 ```yaml
 dependencies:
-  durbun: ^0.3.1
-  durbun_dio: ^0.3.1
+  durbun: ^0.3.2
+  durbun_dio: ^0.3.2
 ```
 
 ## Start

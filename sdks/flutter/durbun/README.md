@@ -45,7 +45,7 @@ or in `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  durbun: ^0.3.1
+  durbun: ^0.3.2
 ```
 
 After adding or updating the SDK, run `cd ios && pod install` once on iOS

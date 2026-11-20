@@ -1,7 +1,7 @@
 // swift-tools-version:5.9
 //
 // Dürbün iOS SDK for Swift Package Manager:
-//   .package(url: "https://github.com/mykynk/durbun", from: "0.3.1")
+//   .package(url: "https://github.com/mykynk/durbun", from: "0.3.2")
 // and depend on the "Durbun" product. The sources live in sdks/ios/Sources/Durbun; sdks/ios/Package.swift
 // is the development manifest with the tests (keep both targets alike). CocoaPods: Durbun.podspec.
 

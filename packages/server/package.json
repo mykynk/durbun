@@ -1,6 +1,6 @@
 {
   "name": "@durbun/server",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@durbun/protocol": "0.3.1",
+    "@durbun/protocol": "0.3.2",
     "plist": "^5.0.0",
     "ws": "^8.22.1"
   },

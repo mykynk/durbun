@@ -21,7 +21,7 @@ public enum Durbun {
     public typealias Level = DurbunLogLevel
 
     /// SDK version reported to the desktop in `hello.sdk.version`.
-    public static let version = "0.3.1"
+    public static let version = "0.3.2"
 
     /// Starts capturing and connecting to the Dürbün desktop app. Calling it again restarts the SDK
     /// with the new options. Runs in development builds (compiled with `DEBUG`, Simulator, debugger,

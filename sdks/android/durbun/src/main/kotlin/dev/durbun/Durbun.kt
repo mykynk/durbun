@@ -35,7 +35,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 object Durbun {
     /** SDK version reported to the desktop. */
-    const val VERSION: String = "0.3.1"
+    const val VERSION: String = "0.3.2"
 
     private const val TAG = "Durbun"
 
