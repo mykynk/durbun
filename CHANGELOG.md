@@ -24,6 +24,7 @@ All notable changes to Dürbün are listed here. The format follows
 
 ### Changed
 
+- Mac app: runs on Electron 45.4.1 (from 45.2.1), with that patch release's fixes.
 - Flutter in-app panel: **Report a bug** lets the tester pick what goes, as the Mac app does: the moment's line or
   request, the screenshot, the log lines, the failed requests, the device and app facts and the full `.md` file
   each have a checkbox, and **Show the report** shows the text before it goes.
