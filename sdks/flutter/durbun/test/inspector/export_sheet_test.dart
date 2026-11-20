@@ -164,8 +164,9 @@ void main() {
     final out = _fake(tester, shares: false);
     await _open(tester, _store());
     await _openSheet(tester);
-    // Masking off, for once.
-    await tester.tap(find.byType(Switch).first);
+    // Masking off, for once (the sheet's switch, not the Tools page's theme
+    // switch behind it).
+    await tester.tap(find.descendant(of: find.byType(BottomSheet), matching: find.byType(Switch)).first);
     await tester.pumpAndSettle();
     await _export(tester);
     expect(out.names.single, endsWith('.md'));
@@ -211,6 +212,9 @@ void main() {
     await _export(tester);
     expect(tester.takeException(), isNull);
     expect(find.text('The export could not be made. Try again.'), findsOneWidget);
+    // What a tester can pass on: the kind of error, not a stack.
+    expect(find.text('Technical detail: StateError. If it keeps happening, pass this on to the developer.'),
+        findsOneWidget);
   });
 
   for (final (name, size, text) in <(String, Size, double)>[

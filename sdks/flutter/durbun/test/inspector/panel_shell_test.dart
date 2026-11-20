@@ -1,7 +1,8 @@
 // The panel's shell: the floating bottom bar (docked in the header on a
-// short screen), the header, the theme switch, the summary tiles above the
-// request list, the duration bars of its cards, and no Performance page
-// while the app turned metrics off.
+// short screen), the header (Clear on Network and Logs), the theme switch in
+// Tools, what the app turns on and off (Tools items, tab badges), the summary
+// tiles above the request list, the duration bars of its cards, and no
+// Performance page while the app turned metrics off.
 import 'dart:io';
 
 import 'package:durbun/durbun.dart';
@@ -30,12 +31,19 @@ DurbunInspectorStore _store() => DurbunInspectorStore(notifyDelay: Duration.zero
   ..ingest(buildLog(level: 'error', message: 'it broke', tag: 't', ts: 1003))
   ..ingest(buildLog(level: 'info', message: 'fine', tag: 't', ts: 1004));
 
-Future<void> _open(WidgetTester tester, DurbunInspectorStore store, {Size size = const Size(390, 844)}) async {
+Future<void> _open(WidgetTester tester, DurbunInspectorStore store,
+    {Size size = const Size(390, 844),
+    DurbunPanelTools tools = const DurbunPanelTools(),
+    bool networkBadge = true,
+    bool logsBadge = true}) async {
   tester.view.physicalSize = size * 3;
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
-    builder: (context, child) => DurbunInspector(store: store, child: child!),
+    // A fresh app each time: a second _open in one test opens a new panel.
+    key: UniqueKey(),
+    builder: (context, child) => DurbunInspector(
+        store: store, tools: tools, showNetworkBadge: networkBadge, showLogsBadge: logsBadge, child: child!),
     home: const Scaffold(body: Text('the app')),
   ));
   Durbun.showInspector();
@@ -298,9 +306,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Dürbün $kSdkVersion'), findsWidgets);
       expect(find.text('On the phone only'), findsOneWidget, reason: 'said once, on the app card');
-      for (final tile in <String>['Statistics', 'Mac connection', 'App tools', 'Device & SDK']) {
+      for (final tile in <String>['Statistics', 'App tools', 'Device & SDK']) {
         expect(find.text(tile), findsOneWidget, reason: tile);
       }
+      expect(find.text('Mac connection'), findsNothing, reason: 'no Mac in reach: no tile that only says so');
       expect(find.textContaining('3 requests'), findsOneWidget, reason: 'the Statistics tile says how many');
       expect(find.text('Report a bug'), findsOneWidget, reason: 'above the tiles');
       await tester.scrollUntilVisible(find.text('Clear captured data'), 120, scrollable: find.byType(Scrollable).last);
@@ -319,23 +328,135 @@ void main() {
   });
 
   group('theme switch', () {
-    testWidgets('toggles from the system theme; the same choice again follows the system', (tester) async {
+    testWidgets('in Tools only; toggles from the system theme, the same choice again follows the system',
+        (tester) async {
       tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
       addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
-      await _open(tester, _store());
+      // Tall enough that the row is clear of the floating bar.
+      await _open(tester, _store(), size: const Size(390, 1400));
       expect(_colors(tester).isDark, isFalse, reason: 'the system is light');
-      await tester.tap(find.byTooltip('Switch to dark theme'));
+      expect(find.byIcon(Icons.contrast_rounded), findsNothing, reason: 'no theme button in the header');
+      await tester.tap(find.byTooltip('Tools'));
       await tester.pumpAndSettle();
-      expect(_colors(tester).isDark, isTrue);
+      final row = find.byKey(const ValueKey<String>('durbun-tools-theme'));
+      await tester.scrollUntilVisible(row, 120, scrollable: find.byType(Scrollable).last);
+      DurbunColors colors() => DurbunColors.of(tester.element(row));
+      expect(tester.widget<Switch>(find.descendant(of: row, matching: find.byType(Switch))).value, isFalse);
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      expect(colors().isDark, isTrue);
       expect(panelThemeChoice.value, Brightness.dark);
-      await tester.tap(find.byTooltip('Switch to light theme'));
+      expect(tester.widget<Switch>(find.descendant(of: row, matching: find.byType(Switch))).value, isTrue);
+      await tester.tap(find.descendant(of: row, matching: find.byType(Switch)));
       await tester.pumpAndSettle();
-      expect(_colors(tester).isDark, isFalse);
+      expect(colors().isDark, isFalse);
       expect(panelThemeChoice.value, isNull, reason: 'light is the system theme: follow it again');
 
       tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
       await tester.pumpAndSettle();
-      expect(_colors(tester).isDark, isTrue, reason: 'following the system');
+      expect(colors().isDark, isTrue, reason: 'following the system');
+    });
+  });
+
+  group('what the app turns on and off', () {
+    testWidgets('Tools items: every one off leaves the app card; the Mac connection tile on demand', (tester) async {
+      await _open(tester, _store(), tools: const DurbunPanelTools.none());
+      await tester.tap(find.byTooltip('Tools'));
+      await tester.pumpAndSettle();
+      for (final item in <String>[
+        'Report a bug',
+        'Statistics',
+        'Mac connection',
+        'App tools',
+        'Device & SDK',
+        'Export session',
+        'Previous run',
+        'Dark theme',
+        'Clear captured data',
+      ]) {
+        expect(find.text(item), findsNothing, reason: item);
+      }
+      expect(find.text('On the phone only'), findsOneWidget, reason: 'the app card stays');
+
+      await _open(tester, _store(), tools: const DurbunPanelTools(macConnection: true, exportSession: false));
+      await tester.tap(find.byTooltip('Tools'));
+      await tester.pumpAndSettle();
+      expect(find.text('Mac connection'), findsOneWidget, reason: 'always, as the app asked');
+      expect(find.text('Statistics'), findsOneWidget);
+      expect(find.text('Export session'), findsNothing);
+      expect(find.text('Previous run'), findsOneWidget);
+    });
+
+    testWidgets('a new value while the panel is open: it follows at once', (tester) async {
+      final store = _store();
+      await _open(tester, store);
+      await tester.tap(find.byTooltip('Tools'));
+      await tester.pumpAndSettle();
+      expect(find.text('Report a bug'), findsOneWidget);
+      store.configurePanel(tools: const DurbunPanelTools(bugReport: false));
+      await tester.pumpAndSettle();
+      expect(find.text('Report a bug'), findsNothing);
+    });
+
+    testWidgets('tab badges off: no red counts on Network and Logs, none next to the Logs title', (tester) async {
+      await _open(tester, _store());
+      expect(find.bySemanticsLabel(RegExp(r'^Network, 2 errors$')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Logs, 1 error$')), findsOneWidget);
+
+      await _open(tester, _store(), networkBadge: false, logsBadge: false);
+      expect(find.bySemanticsLabel(RegExp(r'^Network, ')), findsNothing);
+      expect(find.bySemanticsLabel(RegExp(r'^Logs, ')), findsNothing);
+      await tester.tap(find.byTooltip('Logs'));
+      await tester.pumpAndSettle();
+      expect(find.bySemanticsLabel('1 error'), findsNothing, reason: 'no count next to the title either');
+    });
+  });
+
+  group('Clear on a page', () {
+    testWidgets('Network: asks, then removes the requests only', (tester) async {
+      final store = _store();
+      await _open(tester, store);
+      await tester.tap(find.byTooltip('Clear requests'));
+      await tester.pumpAndSettle();
+      expect(find.text('Clear the requests?'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(store.calls, hasLength(3), reason: 'Cancel keeps them');
+
+      await tester.tap(find.byTooltip('Clear requests'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, 'Clear'));
+      await tester.pumpAndSettle();
+      expect(store.calls, isEmpty);
+      expect(store.failureCount, 0);
+      expect(store.logs, hasLength(2), reason: 'the logs stay');
+      expect(find.text('Requests cleared'), findsOneWidget);
+      expect(find.byType(CallRow), findsNothing);
+    });
+
+    testWidgets('Logs: asks, then removes the log lines only', (tester) async {
+      final store = _store();
+      await _open(tester, store);
+      await tester.tap(find.byTooltip('Logs'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Clear requests'), findsNothing);
+      await tester.tap(find.byTooltip('Clear logs'));
+      await tester.pumpAndSettle();
+      expect(find.text('Clear the logs?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Clear'));
+      await tester.pumpAndSettle();
+      expect(store.logs, isEmpty);
+      expect(store.errorCount, 0);
+      expect(store.calls, hasLength(3), reason: 'the requests stay');
+      expect(find.text('Logs cleared'), findsOneWidget);
+    });
+
+    testWidgets('no Clear on Performance or Tools', (tester) async {
+      await _open(tester, _store());
+      await tester.tap(find.byTooltip('Tools'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Clear requests'), findsNothing);
+      expect(find.byTooltip('Clear logs'), findsNothing);
     });
   });
 

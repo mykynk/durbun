@@ -14,6 +14,22 @@ import 'theme.dart';
 /// Smallest tap target where a row has the room (iOS 44 pt).
 const double kMinTapTarget = 44;
 
+/// [child] where a tap does nothing: text the tester selects with a long
+/// press (the selection area around it still gets that), with no tap that
+/// copies. The tap stops here: in a swiped tab view the selection area's
+/// own tap trips a framework assertion (auto-scroll across the pages).
+class TapStop extends StatelessWidget {
+  const TapStop({super.key, required this.child});
+
+  final Widget child;
+
+  static void _none() {}
+
+  @override
+  Widget build(BuildContext context) =>
+      GestureDetector(behavior: HitTestBehavior.opaque, onTap: _none, excludeFromSemantics: true, child: child);
+}
+
 /// Copies [text] and confirms with a short toast. The toast goes to the
 /// panel's own [ScaffoldMessenger] (the nearest one), so the app's snack
 /// bars are never hidden or replaced.
@@ -1275,8 +1291,8 @@ class GroupCard extends StatelessWidget {
   }
 }
 
-/// Key / value rows in a rounded card (General, the JWT claims). A tap on a
-/// row offers to copy its value.
+/// Key / value rows in a rounded card (General, the JWT claims). Plain
+/// text: a value is selected with a long press, a tap does nothing.
 class KeyValueTable extends StatelessWidget {
   const KeyValueTable({super.key, required this.rows});
 
@@ -1306,37 +1322,16 @@ class KeyValueTable extends StatelessWidget {
   }
 }
 
-class _KeyValueRow extends StatefulWidget {
+class _KeyValueRow extends StatelessWidget {
   const _KeyValueRow({required this.row});
 
   final (String, String, Color?) row;
 
   @override
-  State<_KeyValueRow> createState() => _KeyValueRowState();
-}
-
-class _KeyValueRowState extends State<_KeyValueRow> {
-  Offset _tapAt = Offset.zero;
-
-  Future<void> _menu() async {
-    final t = InspectorStrings.of(context);
-    final (name, value, _) = widget.row;
-    final choice = await showCopyMenu(context, _tapAt, <(String, IconData, String)>[
-      ('value', Icons.copy_rounded, t.copyValue),
-      ('line', Icons.notes_rounded, t.copyNameValue),
-    ]);
-    if (!mounted) return;
-    if (choice == 'value') copyText(context, value);
-    if (choice == 'line') copyText(context, '$name: $value');
-  }
-
-  @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    final (name, value, color) = widget.row;
-    return InkWell(
-      onTapDown: (d) => _tapAt = d.globalPosition,
-      onTap: _menu,
+    final (name, value, color) = row;
+    return TapStop(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(

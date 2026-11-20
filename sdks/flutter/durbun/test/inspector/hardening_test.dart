@@ -275,6 +275,56 @@ void main() {
       s.clear();
       expect(s.clears, before + 1);
     });
+
+    DurbunInspectorStore filled() {
+      final s = _store();
+      s
+        ..ingest(buildLog(level: 'error', message: 'boom', ts: 1000))
+        ..ingest(buildLog(level: 'info', message: 'fine', ts: 1001))
+        ..ingest(buildMetric(ts: 1002, cpu: 12));
+      _call(s, '1', 'https://api.example.com/1', body: List<int>.filled(40, 0x20), contentType: 'text/plain');
+      s
+        ..ingest(buildNetRequest(id: '2', ts: 1003, method: 'GET', url: 'https://api.example.com/2', headers: const []))
+        ..ingest(buildNetError(id: '2', ts: 1004, error: 'SocketException'));
+      return s;
+    }
+
+    test('Logs → Clear: the lines and their error count go, requests stay', () {
+      final s = filled();
+      expect(s.errorCount, 1);
+      expect(s.unseenErrors, 2, reason: 'one error line, one failed request');
+      final before = s.clears;
+      s.clearLogs();
+      expect(s.logs, isEmpty);
+      expect(s.errorCount, 0);
+      expect(s.droppedLogs, 0);
+      expect(s.unseenErrors, 1, reason: 'the failed request is still new');
+      expect(s.calls, hasLength(2));
+      expect(s.failureCount, 1);
+      expect(s.metrics, hasLength(1), reason: 'samples stay');
+      expect(s.clears, before + 1, reason: 'lists let go of rows kept from before');
+    });
+
+    test('Network → Clear: the requests, their bodies and failure count go, logs stay', () {
+      final s = filled();
+      s.calls.first.responseBody;
+      expect(s.bodyBytes, greaterThan(0));
+      final key = s.calls.first.key;
+      final before = s.clears;
+      s.clearCalls();
+      expect(s.calls, isEmpty);
+      expect(s.callByKey(key), isNull);
+      expect(s.bodyBytes, 0);
+      expect(s.failureCount, 0);
+      expect(s.droppedCalls, 0);
+      expect(s.unseenErrors, 1, reason: 'the error line is still new');
+      expect(s.logs, hasLength(2));
+      expect(s.metrics, hasLength(1));
+      expect(s.clears, before + 1);
+      // A request after the clear is captured as usual.
+      _call(s, '3', 'https://api.example.com/3');
+      expect(s.calls.single.url, 'https://api.example.com/3');
+    });
   });
 
   group('contrast', () {

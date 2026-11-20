@@ -17,6 +17,8 @@ library;
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
+
 import '../core/protocol.dart' show kSdkVersion;
 import 'network_model.dart';
 import 'share_report.dart';
@@ -95,9 +97,9 @@ String _pad2(int n) => n.toString().padLeft(2, '0');
 
 /// "21:34:59.120" in the export's local time.
 String _clock(double ts, int? utcOffsetMinutes) {
-  final ms = ts.round();
+  final ms = safeEpochMs(ts);
   final off = utcOffsetMinutes ?? DateTime.fromMillisecondsSinceEpoch(ms).timeZoneOffset.inMinutes;
-  final t = DateTime.fromMillisecondsSinceEpoch(ms + off * 60000, isUtc: true);
+  final t = DateTime.fromMillisecondsSinceEpoch(safeEpochMs(ms + off * 60000.0), isUtc: true);
   return '${_pad2(t.hour)}:${_pad2(t.minute)}:${_pad2(t.second)}.${t.millisecond.toString().padLeft(3, '0')}';
 }
 
@@ -153,8 +155,13 @@ Iterable<String> sessionMarkdown(List<InspectorCall> calls, ExportOptions o, Ins
   for (var i = 0; i < calls.length; i++) {
     final c = calls[i];
     final size = c.responseSize;
-    table.writeln('| ${i + 1} | ${_clock(c.ts, ctx.utcOffsetMinutes)} | ${_cell(c.method.toUpperCase())} | '
-        '${_cell(_statusText(c, t))} | ${_durationText(c)} | ${size == null ? '—' : shareBytes(size)} | ${_cell(m.url(c.url))} |');
+    try {
+      table.writeln('| ${i + 1} | ${_clock(c.ts, ctx.utcOffsetMinutes)} | ${_cell(c.method.toUpperCase())} | '
+          '${_cell(_statusText(c, t))} | ${_durationText(c)} | ${size == null ? '—' : shareBytes(size)} | ${_cell(m.url(c.url))} |');
+    } catch (e, st) {
+      _skipped(c, e, st);
+      table.writeln('| ${i + 1} | — | — | — | — | — | ${t.exportItemFailed} |');
+    }
     if (table.length > 16 * 1024) {
       yield table.toString();
       table.clear();
@@ -169,20 +176,28 @@ Iterable<String> sessionMarkdown(List<InspectorCall> calls, ExportOptions o, Ins
   final options = ShareOptions(mask: o.mask, bodies: o.bodies, curl: false);
   for (var i = 0; i < calls.length; i++) {
     final c = calls[i];
-    final lines = <String>[
-      ...shareReportLines(shareInputForCall(c, peek: true), options, t, m),
-      ...streamExportLines(c, m, t, bodies: o.bodies),
-    ];
-    yield '### ${i + 1}. ${_title(c, t)}\n\n${lines.join('\n').trimRight()}\n\n';
+    String section;
+    try {
+      final lines = <String>[
+        ...shareReportLines(shareInputForCall(c, peek: true), options, t, m),
+        ...streamExportLines(c, m, t, bodies: o.bodies),
+      ];
+      section = '### ${i + 1}. ${_title(c, t)}\n\n${lines.join('\n').trimRight()}\n\n';
+    } catch (e, st) {
+      // One request the report cannot read never costs the whole export.
+      _skipped(c, e, st);
+      section = '### ${i + 1}. ${t.exportItemFailed}\n\n_${t.exportItemFailedBody}_\n\n';
+    }
+    yield section;
   }
   if (m.count > 0) yield '---\n\n${t.reportMasked}\n';
 }
 
 /* ───────────────────────────── HAR 1.2 ───────────────────────────── */
 
-double _ms3(double ms) => (ms * 1000).roundToDouble() / 1000;
+double _ms3(double ms) => ms.isFinite ? (ms * 1000).roundToDouble() / 1000 : -1;
 
-String _iso(double ts) => DateTime.fromMillisecondsSinceEpoch(ts.round(), isUtc: true).toIso8601String();
+String _iso(double ts) => DateTime.fromMillisecondsSinceEpoch(safeEpochMs(ts), isUtc: true).toIso8601String();
 
 String _decodeComponent(String s) {
   try {
@@ -468,7 +483,15 @@ Iterable<String> sessionHar(List<InspectorCall> calls, ExportOptions o, ExportCo
   final creator = jsonEncode(<String, Object?>{'name': 'Dürbün', 'version': kSdkVersion});
   yield '{"log":{"version":"1.2","creator":$creator,"pages":[],"entries":[\n';
   for (var i = 0; i < ordered.length; i++) {
-    yield '${i > 0 ? ',\n' : ''}${jsonEncode(harEntry(ordered[i], m, bodies: o.bodies))}';
+    String entry;
+    try {
+      entry = jsonEncode(harEntry(ordered[i], m, bodies: o.bodies));
+    } catch (e, st) {
+      // One request the log cannot hold never costs the whole export.
+      _skipped(ordered[i], e, st);
+      entry = jsonEncode(_skippedHarEntry(ordered[i], m));
+    }
+    yield '${i > 0 ? ',\n' : ''}$entry';
   }
   final notes = <String, Object?>{
     if (ctx.app != null) 'app': ctx.app,
@@ -482,6 +505,55 @@ Iterable<String> sessionHar(List<InspectorCall> calls, ExportOptions o, ExportCo
   };
   final comment = <String>[if (ctx.app != null) ctx.app!, if (ctx.device != null) ctx.device!].join(' · ');
   yield '\n],"comment":${jsonEncode(comment)},"_durbun":${jsonEncode(notes)}}}\n';
+}
+
+/// A request the HAR log could not hold (its data broke the export): an
+/// entry with what is safe to write, marked under `_durbun`.
+Map<String, Object?> _skippedHarEntry(InspectorCall c, ShareMasker m) {
+  String url;
+  try {
+    url = m.url(c.url);
+  } catch (_) {
+    url = '';
+  }
+  return <String, Object?>{
+    'startedDateTime': _iso(c.ts),
+    'time': 0,
+    'request': <String, Object?>{
+      'method': (c.method.isEmpty ? 'GET' : c.method).toUpperCase(),
+      'url': url,
+      'httpVersion': '',
+      'cookies': const <Object?>[],
+      'headers': const <Object?>[],
+      'queryString': const <Object?>[],
+      'headersSize': -1,
+      'bodySize': -1,
+    },
+    'response': <String, Object?>{
+      'status': c.status ?? 0,
+      'statusText': '',
+      'httpVersion': '',
+      'cookies': const <Object?>[],
+      'headers': const <Object?>[],
+      'content': const <String, Object?>{'size': 0, 'mimeType': 'x-unknown'},
+      'redirectURL': '',
+      'headersSize': -1,
+      'bodySize': -1,
+    },
+    'cache': const <String, Object?>{},
+    'timings': const <String, Object?>{'send': 0, 'wait': 0, 'receive': 0},
+    '_durbun': <String, Object?>{'id': c.id, 'exportFailed': true},
+  };
+}
+
+/// Debug builds: says in the console which request the export left out
+/// and why (once per request), so the cause can be found and fixed.
+void _skipped(InspectorCall c, Object error, StackTrace stack) {
+  if (!kDebugMode) return;
+  try {
+    debugPrint('Dürbün: the session export left out request ${c.id} (${c.method} ${c.url}): $error\n'
+        '${stack.toString().split('\n').take(8).join('\n')}');
+  } catch (_) {}
 }
 
 /// The export of [calls] in [o]'s format.

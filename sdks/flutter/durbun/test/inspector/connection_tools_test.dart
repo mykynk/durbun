@@ -89,9 +89,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Tools').first);
     await tester.pumpAndSettle();
-    expect(find.text('Mac connection'), findsOneWidget);
+    // No Mac in reach yet (never connected, no address): no tile that only
+    // says "not connected"; Device & SDK still leads to the page.
+    expect(find.text('Mac connection'), findsNothing);
     expect(find.text('App tools'), findsOneWidget);
-    await tester.tap(find.text('Mac connection'));
+    await tester.tap(find.text('Device & SDK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(DButton, 'Mac connection'));
     await tester.pumpAndSettle();
     expect(find.text('The Dürbün desktop is not open'), findsOneWidget);
     expect(find.textContaining('127.0.0.1:$port'), findsOneWidget, reason: 'the attempt is listed');

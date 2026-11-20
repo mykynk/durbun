@@ -14,6 +14,7 @@ import 'app_snapshot.dart';
 import 'format.dart';
 import 'panel.dart';
 import 'panel_prefs.dart';
+import 'panel_tools.dart';
 import 'run_file.dart';
 import 'run_log.dart';
 import 'store.dart';
@@ -72,6 +73,10 @@ class DurbunInspector extends StatefulWidget {
     this.maxBodyBytes = DurbunInspectorStore.kDefaultMaxBodyBytes,
     this.keepPreviousRun = false,
     this.showHint = true,
+    this.tools = const DurbunPanelTools(),
+    this.showNetworkBadge = true,
+    this.showLogsBadge = true,
+    this.slackSender,
   });
 
   /// For `MaterialApp.builder` / `CupertinoApp.builder`.
@@ -133,6 +138,23 @@ class DurbunInspector extends StatefulWidget {
   /// once per install (kept in the app's cache directory). Only when
   /// [openOnShake] is on and [showBubble] is off. Set false to never show it.
   final bool showHint;
+
+  /// Which items the panel's Tools tab shows (all by default; the Mac
+  /// connection tile only once a Mac is in reach). See [DurbunPanelTools].
+  final DurbunPanelTools tools;
+
+  /// The red count of failed requests on the Network tab. On by default.
+  final bool showNetworkBadge;
+
+  /// The red count of errors on the Logs tab and next to its title. On by
+  /// default.
+  final bool showLogsBadge;
+
+  /// Who sends from the panel to Slack, at the end of every message there
+  /// ("Sent with Dürbün · Ayşe"), e.g. the signed-in user's name. A name a
+  /// tester types in the panel's Slack sheet is kept on the phone and wins;
+  /// with neither, the message ends without a name.
+  final String? slackSender;
 
   static final ValueNotifier<int> _openRequests = ValueNotifier<int>(0);
 
@@ -207,7 +229,14 @@ class _DurbunInspectorState extends State<DurbunInspector> with WidgetsBindingOb
   /// Hands the options to the store and follows whether the SDK feeds it
   /// (`Durbun.init()` can run after `runApp`).
   void _configure() {
-    final store = _store..defaultHosts = widget.defaultHosts;
+    final store = _store
+      ..defaultHosts = widget.defaultHosts
+      ..configurePanel(
+        tools: widget.tools,
+        networkBadge: widget.showNetworkBadge,
+        logsBadge: widget.showLogsBadge,
+        slackSender: widget.slackSender,
+      );
     if (widget.store == null) {
       store
         ..maxCalls = widget.maxRequests

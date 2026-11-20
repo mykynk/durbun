@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart';
 import '../core/protocol.dart' show kEncodedLineKey, kPendingBodyMarker;
 import '../core/streams/sse_parser.dart' show isEventStreamContentType;
 import '../core/streams/stream_host.dart';
+import 'panel_tools.dart';
 import 'print_lines.dart';
 import 'streams.dart';
 import 'text_match.dart';
@@ -298,9 +299,12 @@ class InspectorCall {
   bool get isFailure =>
       state == InspectorCallState.failed || (status != null && status! >= 400);
 
-  Duration? get duration => endTs == null
-      ? null
-      : Duration(microseconds: ((endTs! - ts) * 1000).round());
+  Duration? get duration {
+    final end = endTs;
+    if (end == null) return null;
+    final us = (end - ts) * 1000;
+    return us.isFinite ? Duration(microseconds: us.round()) : null;
+  }
 
   /// Parsed once (rows, filters and the header badge read it on every
   /// store update).
@@ -677,6 +681,44 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
   /// or `--dart-define=DURBUN_SLACK_WEBHOOK`); null hides the button.
   String? slackWebhook;
 
+  DurbunPanelTools _panelTools = const DurbunPanelTools();
+  bool _networkBadge = true;
+  bool _logsBadge = true;
+  String? _slackSender;
+
+  /// What Tools shows ([DurbunInspector.tools]).
+  DurbunPanelTools get panelTools => _panelTools;
+
+  /// Red counts on the Network and Logs tabs (and next to the Logs title)
+  /// ([DurbunInspector.showNetworkBadge], [DurbunInspector.showLogsBadge]).
+  bool get networkBadge => _networkBadge;
+  bool get logsBadge => _logsBadge;
+
+  /// The app's name for whoever sends to Slack from the panel
+  /// ([DurbunInspector.slackSender]); a name typed on the phone wins.
+  String? get slackSender => _slackSender;
+
+  /// Takes the app's panel settings; an open panel follows at once.
+  void configurePanel({
+    DurbunPanelTools tools = const DurbunPanelTools(),
+    bool networkBadge = true,
+    bool logsBadge = true,
+    String? slackSender,
+  }) {
+    final sender = slackSender?.trim();
+    final name = sender == null || sender.isEmpty ? null : sender;
+    if (tools == _panelTools && networkBadge == _networkBadge && logsBadge == _logsBadge && name == _slackSender) return;
+    _panelTools = tools;
+    _networkBadge = networkBadge;
+    _logsBadge = logsBadge;
+    _slackSender = name;
+    // Called while the app builds (DurbunInspector's update): the panel's
+    // listeners hear it right after that build.
+    scheduleMicrotask(() {
+      if (!_disposed) notifyListeners();
+    });
+  }
+
   /// Set by the IO backend: builds the client's current hello.
   Map<String, Object?>? Function()? helloProvider;
 
@@ -745,9 +787,39 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
 
   InspectorCall? callByKey(String key) => _callsByKey[key];
 
-  /// Grows with every [clear] (lists let go of rows kept from before).
+  /// Grows with every [clear], [clearLogs] and [clearCalls] (lists let go
+  /// of rows kept from before).
   int get clears => _clears;
   int _clears = 0;
+
+  /// Removes the log lines only (Logs → Clear): requests and samples stay.
+  void clearLogs() {
+    _clears++;
+    _logs.clear();
+    _droppedLogs = 0;
+    _errorsTotal = 0;
+    _seenErrors = 0;
+    _scheduleNotify();
+  }
+
+  /// Removes the requests only (Network → Clear), with their bodies and
+  /// stream messages: log lines and samples stay.
+  void clearCalls() {
+    _clears++;
+    for (final c in _calls) {
+      c.stream?.releaseAll();
+    }
+    _calls.clear();
+    _callsByKey.clear();
+    _bodyBytes = 0;
+    _streamBytes = 0;
+    _streamHeld = 0;
+    _droppedCalls = 0;
+    _droppedOtherHostCalls = 0;
+    _failuresTotal = 0;
+    _seenFailures = 0;
+    _scheduleNotify();
+  }
 
   void clear() {
     _clears++;
@@ -849,7 +921,7 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
         _addLog(
           InspectorLog(
             seq: ++_seq,
-            ts: _num(m['ts']) ?? _now(),
+            ts: _ts(m['ts']),
             level: m['level'] is String ? m['level'] as String : 'info',
             message: _cap(m['message'] is String ? m['message'] as String : ''),
             cutChars: _cutOf(m['message']),
@@ -865,7 +937,7 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
         _addLog(
           InspectorLog(
             seq: ++_seq,
-            ts: _num(m['ts']) ?? _now(),
+            ts: _ts(m['ts']),
             level: 'info',
             message: m['name'] is String ? m['name'] as String : '',
             data: props,
@@ -886,7 +958,7 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
       case 'metric':
         _metrics.addLast(
           InspectorMetric(
-            ts: _num(m['ts']) ?? _now(),
+            ts: _ts(m['ts']),
             fps: _num(m['fps']),
             jankyFrames: _num(m['jankyFrames'])?.toInt(),
             frameBuildMs: _num(m['frameBuildMs']),
@@ -974,7 +1046,7 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
       key: key,
       id: id,
       seq: ++_seq,
-      ts: _num(m['ts']) ?? _now(),
+      ts: _ts(m['ts']),
       method: m['method'] is String ? m['method'] as String : 'GET',
       url: m['url'] is String ? m['url'] as String : '',
       requestHeaders: _headers(m['headers']),
@@ -1011,7 +1083,7 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
       ..status = _num(m['status'])?.toInt()
       ..statusText = m['statusText'] as String?
       ..responseHeaders = _headers(m['headers'])
-      ..endTs = _num(m['ts']) ?? _now()
+      ..endTs = _ts(m['ts'])
       ..protocol = m['protocol'] as String?
       ..remoteAddress = m['remoteAddress'] as String?
       ..timings = _map(m['timings'])
@@ -1029,7 +1101,7 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
     final call = _callsByKey[_key(m['id'], native)];
     if (call == null) return;
     // A connection that opened: its stream ends (the handshake stays done).
-    final ts = _num(m['ts']) ?? _now();
+    final ts = _ts(m['ts']);
     final stream = call.stream ??
         (call.status != null && call.connectionKind == StreamKind.webSocket
             ? _streamOf(call, StreamKind.webSocket, ts)
@@ -1044,7 +1116,7 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
     call
       ..error = m['error'] is String ? m['error'] as String : 'error'
       ..cancelled = m['cancelled'] == true
-      ..endTs = _num(m['ts']) ?? _now()
+      ..endTs = _ts(m['ts'])
       ..mocked = call.mocked || m['mocked'] == true
       ..mockRuleId = call.mockRuleId ?? m['mockRuleId'] as String?;
     call.revision++;
@@ -1194,7 +1266,7 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
     if (call == null) return;
     final (payload, base64, truncated) = _wirePayload(m['body']);
     final opcode = m['opcode'] is String ? m['opcode'] as String : 'text';
-    _addStreamMessage(call, StreamKind.webSocket, _num(m['ts']) ?? _now(),
+    _addStreamMessage(call, StreamKind.webSocket, _ts(m['ts']),
         out: m['dir'] == 'out',
         type: opcode,
         size: _num(m['size'])?.toInt() ?? 0,
@@ -1209,7 +1281,7 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
   void _onWireSse(Map<String, Object?> m, {required bool native}) {
     final call = _callsByKey[_key(m['id'], native)];
     if (call == null) return;
-    final ts = _num(m['ts']) ?? _now();
+    final ts = _ts(m['ts']);
     if (m['end'] == true) {
       _endStream(call, _streamOf(call, StreamKind.sse, ts), ts, sseEnded: true);
       return;
@@ -1440,7 +1512,17 @@ class DurbunInspectorStore extends ChangeNotifier implements LocalStreamSink {
 
   static double _now() => DateTime.now().microsecondsSinceEpoch / 1000.0;
 
-  static double? _num(Object? v) => v is num ? v.toDouble() : null;
+  /// A message's time (epoch ms); one no date can hold (nanoseconds, a
+  /// broken clock) reads as its arrival, so rows, reports and exports always
+  /// have a real time.
+  static double _ts(Object? v) {
+    final ms = _num(v);
+    return ms != null && ms.abs() < 8.6e15 ? ms : _now();
+  }
+
+  /// A number from a message; NaN and infinities read as missing (a
+  /// status, time or sample the panel cannot round or plot).
+  static double? _num(Object? v) => v is num && v.isFinite ? v.toDouble() : null;
 
   static Map<String, Object?>? _map(Object? v) =>
       v is Map ? v.map((k, v) => MapEntry('$k', v)) : null;

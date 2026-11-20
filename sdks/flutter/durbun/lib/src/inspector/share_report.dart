@@ -398,11 +398,15 @@ String _pad(int n, [int width = 2]) => n.toString().padLeft(width, '0');
 String _stamp(DateTime t, String between) =>
     '${_pad(t.year, 4)}-${_pad(t.month)}-${_pad(t.day)}$between${_pad(t.hour)}:${_pad(t.minute)}:${_pad(t.second)}.${_pad(t.millisecond, 3)}';
 
+/// [ts] as epoch ms a [DateTime] can hold; a value that is not a time (NaN,
+/// infinite, out of range) reads as 0, so a report never fails on it.
+int safeEpochMs(double ts) => ts.isFinite && ts.abs() < 8.6e15 ? ts.round() : 0;
+
 /// "2026-11-04 19:22:19.768 (UTC+03:00) · 2026-11-04T16:22:19.768Z"
 String shareTime(double ts, [int? utcOffsetMinutes]) {
-  final ms = ts.round();
+  final ms = safeEpochMs(ts);
   final off = utcOffsetMinutes ?? DateTime.fromMillisecondsSinceEpoch(ms).timeZoneOffset.inMinutes;
-  final local = DateTime.fromMillisecondsSinceEpoch(ms + off * 60000, isUtc: true);
+  final local = DateTime.fromMillisecondsSinceEpoch(safeEpochMs(ms + off * 60000.0), isUtc: true);
   final abs = off.abs();
   final zone = 'UTC${off < 0 ? '-' : '+'}${_pad(abs ~/ 60)}:${_pad(abs % 60)}';
   return '${_stamp(local, ' ')} ($zone) · ${_stamp(DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true), 'T')}Z';

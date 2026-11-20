@@ -23,10 +23,14 @@ import 'filter_ui.dart' show SheetSwitch;
 import 'format.dart' show formatClock;
 import 'share_sheet.dart' show FilesShareOutcome, canShareNatively, rememberShareMask, shareFilesNatively, shareOptionsOf;
 import 'slack.dart';
+import 'screenshot_attach.dart';
+import 'slack_sender.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
 import 'widgets.dart';
+
+export 'screenshot_attach.dart' show debugBugBytesWriter, debugSnapshotPng;
 
 /// Opens the report about [anchor] on the panel's navigator.
 Future<void> openBugReport(BuildContext context, DurbunInspectorStore store, BugAnchor anchor) {
@@ -39,22 +43,6 @@ Future<void> openBugReport(BuildContext context, DurbunInspectorStore store, Bug
 /// Writes the report file and returns its path (tests replace it).
 @visibleForTesting
 ExportWriter? debugBugTextWriter;
-
-/// Writes the screenshot file and returns its path (tests replace it).
-@visibleForTesting
-Future<String?> Function(String name, List<int> bytes)? debugBugBytesWriter;
-
-/// Encodes the screenshot as PNG (tests replace it: encoding needs the
-/// engine's real event loop).
-@visibleForTesting
-Future<Uint8List?> Function(ui.Image image)? debugSnapshotPng;
-
-Future<Uint8List?> _png(ui.Image image) async {
-  final encode = debugSnapshotPng;
-  if (encode != null) return encode(image);
-  final data = await image.toByteData(format: ui.ImageByteFormat.png);
-  return data?.buffer.asUint8List();
-}
 
 /// The note typed and not yet sent, per store (one app run): leaving the
 /// page by mistake does not lose it.
@@ -91,6 +79,12 @@ class _BugReportPageState extends State<BugReportPage> {
   bool _withShot = true;
   late final double _now;
 
+  /// What goes in: every part by default, as on the desktop.
+  BugParts _parts = const BugParts();
+
+  /// The report text shown under the parts.
+  bool _preview = false;
+
   bool _busy = false;
 
   /// The busy send is the Slack one (its button says Sending…).
@@ -124,34 +118,26 @@ class _BugReportPageState extends State<BugReportPage> {
 
   BugWindow get _window => bugWindow(_moment, _before);
 
-  BugReportInput _input(BugContents contents) {
-    final base = bugReportInputFor(
-      widget.store,
-      note: _note.text,
-      anchor: widget.anchor,
-      momentMs: _moment,
-      window: _window,
-      contents: contents,
-      mask: _mask,
-    );
-    final off = widget.utcOffsetMinutes;
-    return off == null
-        ? base
-        : BugReportInput(
-            note: base.note,
-            anchor: base.anchor,
-            momentMs: base.momentMs,
-            window: base.window,
-            contents: base.contents,
-            mask: base.mask,
-            app: base.app,
-            appName: base.appName,
-            device: base.device,
-            deviceName: base.deviceName,
-            sdk: base.sdk,
-            utcOffsetMinutes: off,
-          );
-  }
+  BugReportInput _input(BugContents contents) => bugReportInputFor(
+        widget.store,
+        note: _note.text,
+        anchor: widget.anchor,
+        momentMs: _moment,
+        window: _window,
+        contents: contents,
+        mask: _mask,
+        parts: _parts,
+        utcOffsetMinutes: widget.utcOffsetMinutes,
+      );
+
+  /// The full report goes as a file only when the tester keeps it in and the
+  /// host has a share sheet that takes files.
+  bool get _sendsFile => _parts.file && canShareNatively;
+
+  void _setParts(BugParts parts) => setState(() {
+        _parts = parts;
+        _notice = null;
+      });
 
   bool get _hasShot => _shot != null;
 
@@ -179,13 +165,13 @@ class _BugReportPageState extends State<BugReportPage> {
       final fileName = '$stem.md';
       final shotName = '$stem.png';
       final writeText = debugBugTextWriter ?? ((String name, Iterable<String> chunks) => writeExportFile(name, chunks));
-      final filePath = await writeText(fileName, bugReportFile(input, t));
+      final filePath = _sendsFile ? await writeText(fileName, bugReportFile(input, t)) : null;
       String? shotPath;
       final shot = _sendsShot ? _shot : null;
       if (shot != null) {
-        final bytes = await _png(shot);
+        final bytes = await snapshotPng(shot);
         if (bytes != null && bytes.isNotEmpty) {
-          shotPath = await (debugBugBytesWriter ?? ((String n, List<int> b) => writeExportBytes(n, b)))(shotName, bytes);
+          shotPath = await writeSnapshotFile(shotName, bytes);
         }
       }
       final paths = <String>[if (filePath != null) filePath, if (shotPath != null) shotPath];
@@ -250,10 +236,14 @@ class _BugReportPageState extends State<BugReportPage> {
     final input = _input(contents);
     final report = buildBugReportText(input, t);
     final connection = SlackConnection.parse(url);
+    // The name at the end says who sent it; kept for the next sends.
+    final typed = typedSlackSender.value;
+    if (typed != null) setSlackSender(typed, persist: true);
+    final footer = slackFooterFor(t, slackSenderFor(widget.store));
     final error = await sendToSlack(
       connection.webhook,
-      markdown: toSlackMarkdown(report, cutNote: t.slackCutNote, footer: t.slackFooter),
-      text: toSlackText(report, cutNote: t.slackCutNote, footer: t.slackFooter),
+      markdown: toSlackMarkdown(report, cutNote: t.slackCutNote, footer: footer),
+      text: toSlackText(report, cutNote: t.slackCutNote, footer: footer),
     );
     if (!mounted) return;
     if (error != null) {
@@ -273,14 +263,14 @@ class _BugReportPageState extends State<BugReportPage> {
       } else {
         Uint8List? bytes;
         try {
-          bytes = await _png(shot);
+          bytes = await snapshotPng(shot);
         } catch (_) {}
         final stem = bugFileStem(input.appName, DateTime.fromMicrosecondsSinceEpoch((_now * 1000).round()));
         final problem = bytes == null || bytes.isEmpty
             ? const SlackShotError(SlackShotProblem.rejected, 'PNG')
             : await sendScreenshotToSlack(connection, bytes,
                 title: '${t.bugScreenshot} · ${bugSubject(input, t)}', fileName: '$stem.png');
-        if (problem != null) shotWhy = _shotReason(problem, t);
+        if (problem != null) shotWhy = slackShotReason(problem, t);
       }
     }
     if (!mounted) return;
@@ -295,16 +285,6 @@ class _BugReportPageState extends State<BugReportPage> {
         content: Text(shot != null ? t.slackSentWithShot : t.slackSent), duration: const Duration(milliseconds: 1600)));
     if (navigator.canPop()) navigator.pop();
   }
-
-  static String _shotReason(SlackShotError e, InspectorStrings t) => switch (e.problem) {
-        SlackShotProblem.noKey => t.slackShotNoKey,
-        SlackShotProblem.reconnect => t.slackShotReconnect,
-        SlackShotProblem.notInChannel => t.slackShotNotInChannel,
-        SlackShotProblem.notInDm => t.slackShotNotInDm,
-        SlackShotProblem.rateLimited => t.slackShotRateLimited,
-        SlackShotProblem.unreachable => t.slackShotUnreachable,
-        SlackShotProblem.rejected => t.slackShotRejected(e.detail),
-      };
 
   void _setBefore(int seconds) {
     _lastBefore[widget.store] = seconds;
@@ -325,54 +305,7 @@ class _BugReportPageState extends State<BugReportPage> {
   Future<void> _enlarge() async {
     final image = _shot;
     if (image == null) return;
-    final t = InspectorStrings.of(context);
-    await showDialog<void>(
-      context: context,
-      useRootNavigator: false,
-      builder: (dialogContext) => DurbunTheme.wrap(
-        dialogContext,
-        Builder(builder: (dialog) {
-          final c = DurbunColors.of(dialog);
-          return Dialog(
-            backgroundColor: c.bgPanel,
-            insetPadding: const EdgeInsets.all(DurbunSpace.lg),
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              children: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 52, 12, 12),
-                  child: Semantics(
-                    image: true,
-                    label: t.bugScreenshot,
-                    child: InteractiveViewer(
-                      maxScale: 4,
-                      child: RawImage(image: image, fit: BoxFit.contain),
-                    ),
-                  ),
-                ),
-                PositionedDirectional(
-                  top: 4,
-                  start: 16,
-                  end: 52,
-                  child: SizedBox(
-                    height: kMinTapTarget,
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: Text(t.bugScreenshot, style: DurbunType.heading(size: DurbunType.label, color: c.text)),
-                    ),
-                  ),
-                ),
-                PositionedDirectional(
-                  top: 4,
-                  end: 4,
-                  child: DIconButton(icon: Icons.close_rounded, tooltip: t.close, onTap: () => Navigator.of(dialog).pop()),
-                ),
-              ],
-            ),
-          );
-        }),
-      ),
-    );
+    await showScreenshotDialog(context, image);
   }
 
   @override
@@ -388,13 +321,13 @@ class _BugReportPageState extends State<BugReportPage> {
           final contents = collectBugContents(widget.store, _window, anchor: widget.anchor);
           final off = widget.utcOffsetMinutes;
           final range = '${bugClock(_window.fromMs, off)} – ${bugClock(_window.toMs, off)}';
-          // One webhook per app: a restored previous run's store has none of its own.
-          final slackUrl = canSendToSlack ? widget.store.slackWebhook ?? DurbunInspectorStore.existing?.slackWebhook : null;
-          final summary = <String>[
-            t.bugLogs(contents.totalLines),
-            t.bugFailed(contents.totalFailed),
+          final slackUrl = slackWebhookFor(widget.store);
+          final going = <String>[
+            if (_parts.logs) t.bugLogs(contents.totalLines),
+            if (_parts.requests) t.bugFailed(contents.totalFailed),
             if (_sendsShot) t.bugScreenshotWord,
-          ].join(' · ');
+          ];
+          final summary = going.isEmpty ? t.bugSummaryNoteOnly : going.join(' · ');
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
@@ -410,6 +343,11 @@ class _BugReportPageState extends State<BugReportPage> {
                       _MomentCard(anchor: widget.anchor, momentMs: _moment, utcOffsetMinutes: off),
                       SectionTitle(t.bugNoteLabel),
                       _NoteField(controller: _note, enabled: !_busy),
+                      // Who sends it to Slack (at the message's end).
+                      if (slackUrl != null) ...<Widget>[
+                        const SizedBox(height: 10),
+                        SlackSenderField(store: widget.store, enabled: !_busy),
+                      ],
                       SectionTitle(t.bugContents),
                       _WindowChoice(before: _before, range: range, onChanged: _busy ? null : _setBefore),
                       const SizedBox(height: DurbunSpace.md),
@@ -419,7 +357,11 @@ class _BugReportPageState extends State<BugReportPage> {
                       ],
                       _ContentsCard(
                         store: widget.store,
+                        anchor: widget.anchor,
                         contents: contents,
+                        parts: _parts,
+                        fileOffered: canShareNatively,
+                        onParts: _busy ? null : _setParts,
                         shot: _shot,
                         shotAt: _shotAt,
                         withShot: _withShot,
@@ -438,6 +380,9 @@ class _BugReportPageState extends State<BugReportPage> {
                           },
                         ),
                       ),
+                      const SizedBox(height: DurbunSpace.sm),
+                      _PreviewToggle(open: _preview, onTap: () => setState(() => _preview = !_preview)),
+                      if (_preview) _Preview(text: buildBugReportText(_input(contents), t)),
                     ],
                   ),
                 ),
@@ -648,7 +593,11 @@ class _WindowChoice extends StatelessWidget {
 class _ContentsCard extends StatelessWidget {
   const _ContentsCard({
     required this.store,
+    required this.anchor,
     required this.contents,
+    required this.parts,
+    required this.fileOffered,
+    required this.onParts,
     required this.shot,
     required this.shotAt,
     required this.withShot,
@@ -657,7 +606,13 @@ class _ContentsCard extends StatelessWidget {
   });
 
   final DurbunInspectorStore store;
+  final BugAnchor anchor;
   final BugContents contents;
+  final BugParts parts;
+
+  /// The .md file row (only where Share… can attach files).
+  final bool fileOffered;
+  final ValueChanged<BugParts>? onParts;
   final ui.Image? shot;
   final double? shotAt;
   final bool withShot;
@@ -677,7 +632,7 @@ class _ContentsCard extends StatelessWidget {
       if (contents.lines.length < contents.totalLines)
         t.bugLinesCapped(contents.lines.length, contents.totalLines)
       else if (shown < contents.totalLines)
-        t.bugLinesInFile(shown),
+        fileOffered && parts.file ? t.bugLinesInFile(shown) : t.bugLinesInText(shown),
     ].join(' · ');
     final failedHint = <String>[
       for (final call in contents.failed.reversed.take(2))
@@ -699,155 +654,188 @@ class _ContentsCard extends StatelessWidget {
       if (os.isNotEmpty) os,
       sdkLabel(hello)!.split(' · ').first,
     ].join(' · ');
+    final onParts = this.onParts;
+    ValueChanged<bool>? set(BugParts Function(bool v) change) => onParts == null ? null : (v) => onParts(change(v));
     Widget divider() => Divider(height: 1, indent: DurbunSpace.lg + 36, color: c.hairline);
+    final request = anchor.call != null;
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          _ScreenshotRow(shot: shot, shotAt: shotAt, included: withShot, onToggle: onToggleShot, onEnlarge: onEnlarge),
+          if (anchor.log != null || request) ...<Widget>[
+            _PartRow(
+              key: const ValueKey<String>('durbun-bug-part-moment'),
+              icon: request ? Icons.swap_vert_rounded : Icons.my_location_rounded,
+              title: request ? t.bugPartMomentRequest : t.bugPartMoment,
+              subtitle: request ? t.bugPartMomentRequestHint : t.bugPartMomentHint,
+              value: parts.moment,
+              onChanged: set((v) => parts.copyWith(moment: v)),
+            ),
+            divider(),
+          ],
+          ScreenshotRow(shot: shot, shotAt: shotAt, included: withShot, onToggle: onToggleShot, onEnlarge: onEnlarge),
           divider(),
-          ListRow(
+          _PartRow(
+            key: const ValueKey<String>('durbun-bug-part-logs'),
             icon: Icons.notes_rounded,
             title: contents.totalLines == 0 ? t.bugNoLogs : t.bugLogs(contents.totalLines),
             subtitle: logsHint.isEmpty ? null : logsHint,
+            value: parts.logs,
+            onChanged: set((v) => parts.copyWith(logs: v)),
           ),
           divider(),
-          ListRow(
+          _PartRow(
+            key: const ValueKey<String>('durbun-bug-part-requests'),
             icon: Icons.swap_vert_rounded,
             iconColor: contents.totalFailed > 0 ? c.danger : null,
             title: contents.totalFailed == 0 ? t.bugNoFailed : t.bugFailed(contents.totalFailed),
             subtitle: failedHint.isEmpty ? null : failedHint,
+            value: parts.requests,
+            onChanged: set((v) => parts.copyWith(requests: v)),
           ),
           divider(),
-          ListRow(icon: Icons.smartphone_rounded, title: t.bugFacts, subtitle: facts),
-        ],
-      ),
-    );
-  }
-}
-
-class _ScreenshotRow extends StatelessWidget {
-  const _ScreenshotRow({required this.shot, required this.shotAt, required this.included, required this.onToggle, required this.onEnlarge});
-
-  final ui.Image? shot;
-  final double? shotAt;
-  final bool included;
-  final VoidCallback? onToggle;
-  final VoidCallback onEnlarge;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = DurbunColors.of(context);
-    final t = InspectorStrings.of(context);
-    final image = shot;
-    final String status;
-    if (image == null) {
-      status = t.bugScreenshotNoneHint;
-    } else if (!included) {
-      status = t.bugScreenshotOut;
-    } else {
-      status = t.bugScreenshotWhen(shotAt == null ? '' : formatClock(shotAt!).substring(0, 8));
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(DurbunSpace.lg, 14, DurbunSpace.lg, 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          _Thumbnail(image: image, included: included, onTap: image == null ? null : onEnlarge),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(image == null ? t.bugScreenshotNone : t.bugScreenshot,
-                    style: TextStyle(fontSize: DurbunType.label, color: c.text, fontWeight: FontWeight.w500, height: 1.3)),
-                const SizedBox(height: 2),
-                Text(status, style: DurbunType.ui(size: DurbunType.body, color: c.textMuted, height: 1.35)),
-                if (image != null && included) ...<Widget>[
-                  const SizedBox(height: 4),
-                  Text(t.bugScreenshotNotMasked, style: DurbunType.ui(size: DurbunType.sm, color: c.textSubtle, height: 1.35)),
-                ],
-                if (image != null) ...<Widget>[
-                  const SizedBox(height: 10),
-                  DButton(
-                    kind: included ? DButtonKind.outline : DButtonKind.tonal,
-                    icon: included ? Icons.hide_image_outlined : Icons.add_photo_alternate_outlined,
-                    label: included ? t.bugScreenshotRemove : t.bugScreenshotAdd,
-                    onTap: onToggle,
-                  ),
-                ],
-              ],
-            ),
+          _PartRow(
+            key: const ValueKey<String>('durbun-bug-part-facts'),
+            icon: Icons.smartphone_rounded,
+            title: t.bugFacts,
+            subtitle: facts,
+            value: parts.facts,
+            onChanged: set((v) => parts.copyWith(facts: v)),
           ),
+          if (fileOffered) ...<Widget>[
+            divider(),
+            _PartRow(
+              key: const ValueKey<String>('durbun-bug-part-file'),
+              icon: Icons.description_outlined,
+              title: t.bugPartFile,
+              subtitle: t.bugPartFileHint,
+              value: parts.file,
+              onChanged: set((v) => parts.copyWith(file: v)),
+            ),
+          ],
         ],
       ),
     );
   }
 }
 
-/// The screenshot, small, in a phone-like frame; dimmed with a crossed eye
-/// when it stays out, a placeholder when there is none.
-class _Thumbnail extends StatelessWidget {
-  const _Thumbnail({required this.image, required this.included, required this.onTap});
+/// One part of the report with its checkbox: the whole row toggles it; off,
+/// it reads muted and says it stays out.
+class _PartRow extends StatelessWidget {
+  const _PartRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.iconColor,
+    this.subtitle,
+  });
 
-  final ui.Image? image;
-  final bool included;
-  final VoidCallback? onTap;
+  final IconData icon;
+  final Color? iconColor;
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
-    final img = image;
-    final aspect = img == null || img.height == 0 ? 0.46 : img.width / img.height;
-    final width = aspect < 1 ? 64.0 : 112.0;
-    final height = (width / aspect).clamp(48.0, 140.0);
-    final radius = BorderRadius.circular(DurbunRadius.md);
-    final Widget picture = img == null
-        ? ColoredBox(
-            color: c.bgSunken,
-            child: Center(child: Icon(Icons.image_not_supported_outlined, size: 22, color: c.textSubtle)),
-          )
-        : Stack(
-            fit: StackFit.expand,
+    final onChanged = this.onChanged;
+    final sub = value ? subtitle : t.bugPartOut;
+    return MergeSemantics(
+      child: Pressable(
+        onTap: onChanged == null ? null : () => onChanged(!value),
+        builder: (pressed) => AnimatedContainer(
+          duration: DurbunMotion.of(context, DurbunMotion.fast),
+          color: pressed ? c.bgHover : Colors.transparent,
+          constraints: const BoxConstraints(minHeight: 52),
+          padding: const EdgeInsetsDirectional.fromSTEB(DurbunSpace.lg, 10, 6, 10),
+          child: Row(
             children: <Widget>[
-              Opacity(opacity: included ? 1 : 0.3, child: RawImage(image: img, fit: BoxFit.cover, alignment: Alignment.topCenter)),
-              if (!included)
-                Center(
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(color: c.bgPanel, shape: BoxShape.circle, border: Border.all(color: c.border)),
-                    child: Icon(Icons.visibility_off_outlined, size: 18, color: c.textMuted),
-                  ),
+              Icon(icon, size: 22, color: value ? iconColor ?? c.textMuted : c.textSubtle),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(title,
+                        style: TextStyle(
+                            fontSize: DurbunType.label,
+                            color: value ? c.text : c.textMuted,
+                            fontWeight: FontWeight.w500,
+                            height: 1.3)),
+                    if (sub != null) ...<Widget>[
+                      const SizedBox(height: 2),
+                      Text(sub, style: TextStyle(fontSize: DurbunType.body, color: c.textSubtle, height: 1.35)),
+                    ],
+                  ],
                 ),
+              ),
+              const SizedBox(width: 4),
+              Checkbox(
+                value: value,
+                onChanged: onChanged == null ? null : (v) => onChanged(v ?? false),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
             ],
-          );
-    final frame = Container(
-      width: width,
-      height: height,
-      clipBehavior: Clip.antiAlias,
-      foregroundDecoration: BoxDecoration(borderRadius: radius, border: Border.all(color: c.borderStrong)),
-      decoration: BoxDecoration(borderRadius: radius),
-      child: picture,
-    );
-    if (onTap == null) return ExcludeSemantics(child: frame);
-    return Semantics(
-      button: true,
-      image: true,
-      label: t.bugScreenshotEnlarge,
-      child: Tooltip(
-        message: t.bugScreenshotEnlarge,
-        excludeFromSemantics: true,
-        // 44 pt to tap even for a short (landscape) picture.
-        child: Pressable(
-          onTap: onTap,
-          builder: (pressed) => ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: kMinTapTarget, minWidth: kMinTapTarget),
-            child: Opacity(opacity: pressed ? 0.8 : 1, child: frame),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// "Show the report": the text Slack and the clipboard get, below the parts.
+class _PreviewToggle extends StatelessWidget {
+  const _PreviewToggle({required this.open, required this.onTap});
+
+  final bool open;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = InspectorStrings.of(context);
+    return Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: DButton(
+        key: const ValueKey<String>('durbun-bug-preview'),
+        kind: DButtonKind.ghost,
+        icon: open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+        label: open ? t.bugPreviewHide : t.bugPreviewShow,
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+class _Preview extends StatelessWidget {
+  const _Preview({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DurbunColors.of(context);
+    final t = InspectorStrings.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
+          child: Text(t.bugPreviewHint, style: DurbunType.ui(size: DurbunType.sm, color: c.textSubtle, height: 1.35)),
+        ),
+        Container(
+          key: const ValueKey<String>('durbun-bug-preview-text'),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+              color: c.cardBg, border: Border.all(color: c.border), borderRadius: BorderRadius.circular(DurbunRadius.lg)),
+          child: Text(text, style: DurbunType.monoStyle(size: 11.5, color: c.text, height: 1.4)),
+        ),
+      ],
     );
   }
 }

@@ -11,6 +11,7 @@ import 'package:durbun/src/inspector/network_view.dart' show CallRow;
 import 'package:durbun/src/inspector/perf_view.dart' show StatTile;
 import 'package:durbun/src/inspector/share_sheet.dart';
 import 'package:durbun/src/inspector/slack.dart';
+import 'package:durbun/src/inspector/slack_sender.dart';
 import 'package:durbun/src/inspector/store.dart';
 import 'package:durbun/src/inspector/strings.dart';
 import 'package:durbun/src/inspector/theme.dart';
@@ -283,6 +284,12 @@ Future<void> _reveal(WidgetTester tester, Finder f) async {
   await tester.pumpAndSettle();
 }
 
+/// Scrolls the page either way until [f] is on screen.
+Future<void> _show(WidgetTester tester, Finder f) async {
+  await tester.ensureVisible(f);
+  await tester.pumpAndSettle();
+}
+
 Finder _summary() => find.byKey(const ValueKey<String>('durbun-bug-summary'));
 
 String _summaryText(WidgetTester tester) => tester.widget<Text>(_summary()).data!;
@@ -512,6 +519,68 @@ void main() {
     });
   });
 
+  group('parts the tester leaves out', () {
+    BugReportInput partsInput(BugParts parts) {
+      final (s, crash) = _seeded();
+      final w = bugWindow(crash.ts, 60);
+      return bugReportInputFor(s,
+          note: 'x',
+          anchor: BugAnchor.log(crash),
+          momentMs: crash.ts,
+          window: w,
+          contents: collectBugContents(s, w, anchor: BugAnchor.log(crash)),
+          mask: true,
+          parts: parts,
+          utcOffsetMinutes: _istanbul);
+    }
+
+    test('logs and requests off: their sections leave the text and the file', () {
+      final input = partsInput(const BugParts(logs: false, requests: false));
+      final text = buildBugReportText(input, _en);
+      expect(text, contains('## The moment'));
+      expect(text, isNot(contains('failed request')));
+      expect(text, isNot(contains('## Log lines')));
+      expect(text, isNot(contains('E/vet')));
+      final file = bugReportFile(input, _en).join();
+      expect(file, contains('## The moment'));
+      expect(file, isNot(contains('## Log lines')));
+      expect(file, isNot(contains('failed request')));
+      expect(file.trimRight(), endsWith('_Secret values are masked._'));
+    });
+
+    test('facts off: no device, app or SDK, and no names in the title', () {
+      final text = buildBugReportText(partsInput(const BugParts(facts: false)), _en);
+      expect(text, startsWith('# Bug report\n'));
+      expect(text, isNot(contains('Galaxy A73')));
+      expect(text, isNot(contains('- App:')));
+      expect(text, isNot(contains('- SDK:')));
+      expect(text, contains('- Moment:'), reason: 'when it happened stays');
+    });
+
+    test('the moment off: its section goes, the window stays', () {
+      final text = buildBugReportText(partsInput(const BugParts(moment: false)), _en);
+      expect(text, isNot(contains('## The moment')));
+      expect(text, isNot(contains('Stack trace:')));
+      expect(text, contains('## 4 failed requests'));
+      expect(text, contains('## Log lines (12)'));
+    });
+
+    test('everything is on by default', () {
+      final (s, crash) = _seeded();
+      final w = bugWindow(crash.ts, 60);
+      final base = bugReportInputFor(s,
+          note: 'x',
+          anchor: BugAnchor.log(crash),
+          momentMs: crash.ts,
+          window: w,
+          contents: collectBugContents(s, w, anchor: BugAnchor.log(crash)),
+          mask: true,
+          utcOffsetMinutes: _istanbul);
+      expect(base.parts, const BugParts());
+      expect(buildBugReportText(partsInput(const BugParts()), _en), buildBugReportText(base, _en));
+    });
+  });
+
   group('share channel', () {
     tearDown(() => debugShareHandler = null);
 
@@ -612,6 +681,90 @@ void main() {
       await tester.tap(find.text('Put it back'));
       await tester.pumpAndSettle();
       expect(_summaryText(tester), endsWith('· screenshot'));
+    });
+
+    testWidgets('every part has its checkbox: off, it reads so and leaves the summary and the text', (tester) async {
+      final (s, crash) = _seeded();
+      final out = _fakeShare(tester);
+      setPanelOpening(s, PanelOpening(_now, await _picture(tester)));
+      addTearDown(() => setPanelOpening(s, null));
+      await _page(tester, s, BugAnchor.log(crash));
+      Finder part(String name) => find.byKey(ValueKey<String>('durbun-bug-part-$name'));
+      for (final name in <String>['moment', 'logs', 'requests', 'facts', 'file']) {
+        await _show(tester, part(name));
+        expect(find.descendant(of: part(name), matching: find.byType(Checkbox)), findsOneWidget, reason: name);
+      }
+      expect(find.text('The moment’s line'), findsOneWidget);
+
+      await _show(tester, part('logs'));
+      await tester.tap(part('logs'));
+      await tester.pumpAndSettle();
+      expect(_summaryText(tester), '4 failed requests · screenshot');
+      expect(find.descendant(of: part('logs'), matching: find.text('Not in the report')), findsOneWidget);
+      await tester.tap(part('requests'));
+      await tester.pumpAndSettle();
+      await _show(tester, find.text('Leave the screenshot out'));
+      await tester.tap(find.text('Leave the screenshot out'));
+      await tester.pumpAndSettle();
+      expect(_summaryText(tester), 'The note and the moment only');
+
+      await tester.tap(find.text('Copy'));
+      await tester.pumpAndSettle();
+      final copied = out.clipboard.single!;
+      expect(copied, contains('## The moment'));
+      expect(copied, isNot(contains('## Log lines')));
+      expect(copied, isNot(contains('failed request')));
+
+      // Back in: the row reads as before.
+      await _show(tester, part('logs'));
+      await tester.tap(part('logs'));
+      await tester.pumpAndSettle();
+      expect(_summaryText(tester), '12 log lines');
+    });
+
+    testWidgets('the .md file left out: Share… sends the text and the PNG only', (tester) async {
+      final (s, crash) = _seeded();
+      final out = _fakeShare(tester);
+      setPanelOpening(s, PanelOpening(_now, await _picture(tester)));
+      addTearDown(() => setPanelOpening(s, null));
+      await _page(tester, s, BugAnchor.log(crash));
+      final file = find.byKey(const ValueKey<String>('durbun-bug-part-file'));
+      await _show(tester, file);
+      await tester.tap(file);
+      await tester.pumpAndSettle();
+      await _share(tester);
+      final (method, args) = out.calls.single;
+      expect(method, 'shareFiles');
+      expect((args['paths']! as List).single, endsWith('.png'));
+      expect(args['mimes'], <String>['image/png']);
+      expect(out.texts, isEmpty, reason: 'no file written');
+      expect(args['text'], isNot(contains('.md')));
+    });
+
+    testWidgets('Show the report: the text that goes, following the parts', (tester) async {
+      final (s, crash) = _seeded();
+      await _page(tester, s, BugAnchor.log(crash));
+      final toggle = find.byKey(const ValueKey<String>('durbun-bug-preview'));
+      await _reveal(tester, toggle);
+      expect(find.text('Show the report'), findsOneWidget);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      String preview() => tester
+          .widget<Text>(
+              find.descendant(of: find.byKey(const ValueKey<String>('durbun-bug-preview-text')), matching: find.byType(Text)))
+          .data!;
+      expect(preview(), startsWith('# Bug report: Pati · Galaxy A73'));
+      expect(preview(), contains('## The moment'));
+      expect(find.text('Hide the report'), findsOneWidget);
+
+      // Up the page again (the list builds what is near the screen only).
+      final moment = find.byKey(const ValueKey<String>('durbun-bug-part-moment'));
+      await tester.dragUntilVisible(moment, _list(), const Offset(0, 200));
+      await tester.pumpAndSettle();
+      await tester.tap(moment);
+      await tester.pumpAndSettle();
+      await _reveal(tester, find.byKey(const ValueKey<String>('durbun-bug-preview-text')));
+      expect(preview(), isNot(contains('## The moment')));
     });
 
     testWidgets('share: the text, the Markdown file and the PNG in one sheet', (tester) async {
@@ -731,6 +884,8 @@ void main() {
         _fakeShare(tester);
         final (reports, calls) = fakeSlack();
         await open(tester, keyed);
+        await tester.ensureVisible(find.text('Leave the screenshot out'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Leave the screenshot out'));
         await tester.pumpAndSettle();
         await tester.tap(slackButton());
@@ -777,6 +932,27 @@ void main() {
         _fakeShare(tester);
         await open(tester, null);
         expect(slackButton(), findsNothing);
+        expect(find.byKey(const ValueKey<String>('durbun-slack-sender')), findsNothing, reason: 'no Slack, no name');
+      });
+
+      testWidgets('the name under the note signs the report, as the desktop does', (tester) async {
+        addTearDown(debugResetSlackSender);
+        _fakeShare(tester);
+        fakeSlack();
+        final payloads = <String>[];
+        debugPostToSlack = (url, payload) async {
+          payloads.add(jsonEncode(payload));
+          return (status: 200, answer: 'ok');
+        };
+        await open(tester, hook);
+        final name = find.byKey(const ValueKey<String>('durbun-slack-sender'));
+        await tester.ensureVisible(name);
+        await tester.enterText(name, 'Yusuf');
+        await tester.pumpAndSettle();
+        await tester.tap(slackButton());
+        await tester.pumpAndSettle();
+        expect(payloads.single, contains('Sent with Dürbün · Yusuf (in-app panel)'));
+        expect(typedSlackSender.value, 'Yusuf', reason: 'kept for the next report');
       });
     });
 

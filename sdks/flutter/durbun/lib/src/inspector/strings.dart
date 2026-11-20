@@ -49,6 +49,20 @@ class InspectorStrings {
     'Logs, requests and samples on this phone are removed. The desktop keeps its copy.',
   );
   String get cancel => _('Vazgeç', 'Cancel');
+  String get clearLogs => _('Logları temizle', 'Clear logs');
+  String get clearRequests => _('İstekleri temizle', 'Clear requests');
+  String get clearLogsConfirmTitle => _('Loglar temizlensin mi?', 'Clear the logs?');
+  String get clearLogsConfirmBody => _(
+        'Bu telefondaki log satırları silinir; istekler ve ölçümler kalır. Masaüstündeki kopya kalır.',
+        'Log lines on this phone are removed; requests and samples stay. The desktop keeps its copy.',
+      );
+  String get clearRequestsConfirmTitle => _('İstekler temizlensin mi?', 'Clear the requests?');
+  String get clearRequestsConfirmBody => _(
+        'Bu telefondaki istekler gövdeleri ve mesajlarıyla silinir; loglar ve ölçümler kalır. Masaüstündeki kopya kalır.',
+        'Requests on this phone are removed with their bodies and messages; logs and samples stay. The desktop keeps its copy.',
+      );
+  String get logsCleared => _('Loglar temizlendi', 'Logs cleared');
+  String get requestsCleared => _('İstekler temizlendi', 'Requests cleared');
   String newItems(int n) => _('$n yeni', '$n new');
   String requestCount(int n) => _('$n istek', n == 1 ? '1 request' : '$n requests');
   String dropped(int n) => _('Yer açmak için en eski $n kayıt silindi', 'The oldest $n entries were removed to make room');
@@ -78,8 +92,8 @@ class InspectorStrings {
   String get off => _('Kapalı', 'Off');
 
   /* the panel's header and navigation */
-  String get switchToLight => _('Açık temaya geç', 'Switch to light theme');
-  String get switchToDark => _('Koyu temaya geç', 'Switch to dark theme');
+  String get darkTheme => _('Koyu tema', 'Dark theme');
+  String get darkThemeHint => _('Yalnızca bu panel; telefonun ayarıyla başlar', 'This panel only; starts from the phone’s setting');
   String get liveStream => _('Canlı akış', 'Live');
   String get pausedStream => _('Duraklatıldı', 'Paused');
   String get openPerformance => _('Performansı aç', 'Open performance');
@@ -228,6 +242,13 @@ class InspectorStrings {
     'Sharing did not open, and the export ($size) is too large to copy. Turn bodies off and try again.',
   );
   String get exportFailed => _('Dışa aktarılamadı. Yeniden deneyin.', 'The export could not be made. Try again.');
+  String exportFailedDetail(String kind) =>
+      _('Teknik ayrıntı: $kind. Sorun sürerse bunu geliştiriciye iletin.', 'Technical detail: $kind. If it keeps happening, pass this on to the developer.');
+  String get exportItemFailed => _('Bu istek dışa aktarılamadı', 'This request could not be exported');
+  String get exportItemFailedBody => _(
+        'Verisi okunamadı; dışa aktarımın geri kalanı tam.',
+        'Its data could not be read; the rest of the export is complete.',
+      );
   String exportSubject(String? app, int n) => app == null ? 'Dürbün · ${requestCount(n)}' : 'Dürbün · $app · ${requestCount(n)}';
   String get exportReportTitle => _('Dürbün · Ağ oturumu', 'Dürbün · Network session');
   String get exportedAt => _('Dışa aktarıldı', 'Exported');
@@ -620,6 +641,15 @@ class InspectorStrings {
   String get shareSend => _('Paylaş…', 'Share…');
   String get shareCopied => _('Rapor kopyalandı', 'Report copied');
   String get shareFallback => _('Paylaşım açılamadı; rapor panoya kopyalandı', 'Sharing did not open; the report was copied');
+  String get shareScreenshotOut => _('Paylaşılmayacak', 'Not shared');
+  String get shareShotTextOnly => _(
+        'Ekran görüntüsü eklenemedi; yalnızca metin paylaşıldı.',
+        'The screenshot could not be attached; only the text was shared.',
+      );
+  String get shareShotSlackNoKey => _(
+        'Bu build’in Slack bağlantısı yalnızca metin gönderir; ekran görüntüsü Paylaş… ile gider.',
+        'This build’s Slack connection sends text only; the screenshot goes with Share….',
+      );
   String get copyReport => _('Paylaşım raporunu kopyala', 'Copy share report');
   String get shareLogTitle => _('Log satırını paylaş', 'Share log line');
   String get shareLogDescription => _(
@@ -634,6 +664,12 @@ class InspectorStrings {
   String slackFailed(String why) => _('Slack’e gönderilemedi: $why', 'Could not send to Slack: $why');
   String get slackCutNote => _('… (Slack sınırı nedeniyle kısaltıldı)', '… (shortened to fit Slack)');
   String get slackFooter => _('Dürbün ile gönderildi (uygulama içi panel)', 'Sent with Dürbün (in-app panel)');
+  String slackFooterFrom(String name) =>
+      _('Dürbün ile gönderildi · $name (uygulama içi panel)', 'Sent with Dürbün · $name (in-app panel)');
+  String get slackSenderLabel => _('Adınız', 'Your name');
+  String get slackSenderHint => _('Adınız (Slack mesajının sonunda görünür)', 'Your name (shown at the end of the Slack message)');
+  String get shareNoteLabel => _('Mesaj', 'Message');
+  String get shareNoteHint => _('İsteğe bağlı: ne oldu, neye bakılmalı?', 'Optional: what happened, what to look at?');
   String get slackSentWithShot => _('Slack’e ekran görüntüsüyle gönderildi', 'Sent to Slack with the screenshot');
   String get slackShotNotSent => _('Rapor Slack’e gitti, ekran görüntüsü gitmedi', 'The report went to Slack, the screenshot did not');
   String slackShotWhy(String reason) => _(
@@ -701,6 +737,7 @@ class InspectorStrings {
         'Metinde son $shown satır, ekteki dosyada hepsi',
         'The text shows the last $shown; the attached file has every line',
       );
+  String bugLinesInText(int shown) => _('Metinde son $shown satır', 'The text shows the last $shown');
   String bugCrashCount(int n) => _('$n çökme', n == 1 ? '1 crash' : '$n crashes');
   String get bugFromShareHint => _(
         'Çevresindeki loglar ve ekran görüntüsüyle birlikte',
@@ -719,6 +756,28 @@ class InspectorStrings {
         'No screenshot could be taken this time. The report goes without one.',
       );
   String get bugScreenshotEnlarge => _('Ekran görüntüsünü büyüt', 'Enlarge the screenshot');
+  String get bugPartMoment => _('Andaki satır', 'The moment’s line');
+  String get bugPartMomentRequest => _('Andaki istek', 'The moment’s request');
+  String get bugPartMomentHint => _('Mesajı, yığın izi ve verisiyle', 'Its message, stack trace and data');
+  String get bugPartMomentRequestHint => _('URL, durum, başlıklar ve gövdeler', 'URL, status, headers and bodies');
+  String get bugPartFile => _('Tam rapor dosyası (.md)', 'Full report file (.md)');
+  String get bugPartFileHint => _(
+        'Her satır yığın iziyle, istekler gövdeleriyle. Yalnızca Paylaş… ile gider.',
+        'Every line with its stack, the requests with their bodies. Goes with Share… only.',
+      );
+  String get bugPartOut => _('Rapora girmeyecek', 'Not in the report');
+  String bugPartInclude(String part) => _('$part: rapora ekle', '$part: put in the report');
+  String get bugPartMomentWord => _('andaki satır', 'the moment’s line');
+  String get bugPartMomentRequestWord => _('andaki istek', 'the moment’s request');
+  String get bugPartFactsWord => _('cihaz bilgileri', 'device facts');
+  String get bugPartFileWord => _('.md dosyası', '.md file');
+  String get bugSummaryNoteOnly => _('Yalnızca not ve an', 'The note and the moment only');
+  String get bugPreviewShow => _('Raporu göster', 'Show the report');
+  String get bugPreviewHide => _('Raporu gizle', 'Hide the report');
+  String get bugPreviewHint => _(
+        'Slack’e ve panoya giden metin. Paylaş… buna ekran görüntüsünü ve .md dosyasını ekler.',
+        'The text Slack and the clipboard get. Share… adds the screenshot and the .md file.',
+      );
   /// [before] is a choice of the segments ("1 dk").
   String bugWindowLine(String before, int afterS) =>
       _('Anın $before öncesi ve $afterS sn sonrası', '$before before the moment and $afterS s after');

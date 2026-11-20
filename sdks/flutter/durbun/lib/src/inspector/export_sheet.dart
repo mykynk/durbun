@@ -98,7 +98,8 @@ class _Tee {
 
 /// Writes the export of [calls], opens the share sheet with it, and falls
 /// back to the clipboard. Returns the outcome and the export's size (for
-/// "too large"). [cancelled] is asked before anything opens.
+/// "too large"), or the kind of error (for "failed"). [cancelled] is asked
+/// before anything opens.
 Future<(ExportOutcome, String)> runSessionExport({
   required List<InspectorCall> calls,
   required ExportOptions options,
@@ -110,8 +111,14 @@ Future<(ExportOutcome, String)> runSessionExport({
 }) async {
   try {
     return await _runSessionExport(calls, options, t, context, subject, appName, cancelled);
-  } catch (_) {
-    return (ExportOutcome.failed, '');
+  } catch (e, st) {
+    // The sheet shows the kind of error; a debug build prints the rest.
+    if (kDebugMode) {
+      try {
+        debugPrint('Dürbün: the session export failed: $e\n${st.toString().split('\n').take(8).join('\n')}');
+      } catch (_) {}
+    }
+    return (ExportOutcome.failed, '${e.runtimeType}');
   }
 }
 
@@ -174,6 +181,9 @@ class _ExportSheetState extends State<_ExportSheet> {
   /// Why the last try did not share (too large to copy, failed).
   String? _problem;
 
+  /// The kind of error behind a failed try, for a bug report.
+  String? _problemDetail;
+
   List<InspectorCall> get _calls => _o.all ? _all : _listed;
 
   @override
@@ -187,6 +197,7 @@ class _ExportSheetState extends State<_ExportSheet> {
     setState(() {
       _o = o;
       _problem = null;
+      _problemDetail = null;
     });
   }
 
@@ -199,6 +210,7 @@ class _ExportSheetState extends State<_ExportSheet> {
     setState(() {
       _busy = true;
       _problem = null;
+      _problemDetail = null;
     });
     final app = hostAppLabel(store);
     final appInfo = store.hello?['app'];
@@ -236,6 +248,7 @@ class _ExportSheetState extends State<_ExportSheet> {
         setState(() {
           _busy = false;
           _problem = t.exportFailed;
+          _problemDetail = size.isEmpty ? null : t.exportFailedDetail(size);
         });
     }
   }
@@ -331,7 +344,7 @@ class _ExportSheetState extends State<_ExportSheet> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 if (_problem != null) ...<Widget>[
-                  Callout(title: _problem!, tone: CalloutTone.warning),
+                  Callout(title: _problem!, body: _problemDetail, tone: CalloutTone.warning),
                   const SizedBox(height: 10),
                 ] else if (calls.isEmpty) ...<Widget>[
                   Text(t.exportNothing, textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: c.textSubtle)),

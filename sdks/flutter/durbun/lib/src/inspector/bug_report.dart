@@ -120,6 +120,47 @@ BugContents collectBugContents(DurbunInspectorStore store, BugWindow window, {Bu
   );
 }
 
+/// Which parts the tester sends, each on by default (the desktop's "What
+/// goes in"). Off, a part's section is left out of the text and the file.
+class BugParts {
+  const BugParts({this.moment = true, this.logs = true, this.requests = true, this.facts = true, this.file = true});
+
+  /// The moment's own line or request, in full.
+  final bool moment;
+
+  /// The log lines of the window.
+  final bool logs;
+
+  /// The failed requests of the window.
+  final bool requests;
+
+  /// The device, the app and the SDK (and their names in the title).
+  final bool facts;
+
+  /// The full report as a .md file beside the text (Share… only).
+  final bool file;
+
+  BugParts copyWith({bool? moment, bool? logs, bool? requests, bool? facts, bool? file}) => BugParts(
+        moment: moment ?? this.moment,
+        logs: logs ?? this.logs,
+        requests: requests ?? this.requests,
+        facts: facts ?? this.facts,
+        file: file ?? this.file,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is BugParts &&
+      other.moment == moment &&
+      other.logs == logs &&
+      other.requests == requests &&
+      other.facts == facts &&
+      other.file == file;
+
+  @override
+  int get hashCode => Object.hash(moment, logs, requests, facts, file);
+}
+
 /// Everything a report says.
 class BugReportInput {
   const BugReportInput({
@@ -137,6 +178,7 @@ class BugReportInput {
     this.screenshotName,
     this.fileName,
     this.utcOffsetMinutes,
+    this.parts = const BugParts(),
   });
 
   final String note;
@@ -168,6 +210,9 @@ class BugReportInput {
   /// Minutes east of UTC for local times (default: this device's offset).
   final int? utcOffsetMinutes;
 
+  /// What goes in.
+  final BugParts parts;
+
   /// The same report with exactly these attachments (none by default).
   BugReportInput withAttachments({String? fileName, String? screenshotName}) => BugReportInput(
         note: note,
@@ -184,6 +229,7 @@ class BugReportInput {
         screenshotName: screenshotName,
         fileName: fileName,
         utcOffsetMinutes: utcOffsetMinutes,
+        parts: parts,
       );
 }
 
@@ -214,6 +260,8 @@ BugReportInput bugReportInputFor(
   required BugWindow window,
   required BugContents contents,
   required bool mask,
+  BugParts parts = const BugParts(),
+  int? utcOffsetMinutes,
 }) =>
     BugReportInput(
       note: note,
@@ -227,6 +275,8 @@ BugReportInput bugReportInputFor(
       device: hostDeviceLabel(store),
       deviceName: deviceShortName(store.hello?['device']),
       sdk: sdkLabel(store.hello),
+      parts: parts,
+      utcOffsetMinutes: utcOffsetMinutes,
     );
 
 String? _text(Object? v) => v is String && v.trim().isNotEmpty ? v.trim() : null;
@@ -246,20 +296,22 @@ String? deviceShortName(Object? device) {
 
 /// "Pati · Galaxy A73": the app's and the device's names, for the title
 /// and the subject.
-String bugWhat(BugReportInput input) =>
-    <String?>[input.appName, input.deviceName].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
+String bugWhat(BugReportInput input) => !input.parts.facts
+    ? ''
+    : <String?>[input.appName, input.deviceName].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
 
 String bugSubject(BugReportInput input, InspectorStrings t) {
   final what = bugWhat(input);
   return what.isEmpty ? t.bugMdTitle : t.bugMdTitleFor(what);
 }
 
-/// `durbun-bug-pati-20261116-122736`: the files' name without extension.
-String bugFileStem(String? appName, DateTime local) {
+/// `durbun-bug-pati-20261116-122736`: the files' name without extension
+/// ([kind] `shot`: a shared request's or log line's screenshot).
+String bugFileStem(String? appName, DateTime local, {String kind = 'bug'}) {
   String two(int n) => n.toString().padLeft(2, '0');
   final app = (appName ?? '').toLowerCase().replaceAll(RegExp('[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
   final stamp = '${local.year}${two(local.month)}${two(local.day)}-${two(local.hour)}${two(local.minute)}${two(local.second)}';
-  return <String>['durbun-bug', if (app.isNotEmpty) app.length > 32 ? app.substring(0, 32) : app, stamp].join('-');
+  return <String>['durbun-$kind', if (app.isNotEmpty) app.length > 32 ? app.substring(0, 32) : app, stamp].join('-');
 }
 
 /* ───────────── lines ───────────── */
@@ -364,9 +416,11 @@ List<String> _head(BugReportInput input, InspectorStrings t) {
     '',
     '- ${t.bugMdMoment}: ${shareTime(input.momentMs, off)}',
     '- ${t.bugMdWindow(bugClock(input.window.fromMs, off), bugClock(input.window.toMs, off))}',
-    if (input.device != null) '- ${t.reportDevice}: ${input.device}',
-    if (input.app != null) '- ${t.reportApp}: ${input.app}',
-    if (input.sdk != null) '- ${t.bugMdSdk}: ${input.sdk}',
+    if (input.parts.facts) ...<String>[
+      if (input.device != null) '- ${t.reportDevice}: ${input.device}',
+      if (input.app != null) '- ${t.reportApp}: ${input.app}',
+      if (input.sdk != null) '- ${t.bugMdSdk}: ${input.sdk}',
+    ],
     '',
   ]);
   return out;
@@ -377,7 +431,7 @@ List<String> _moment(BugReportInput input, InspectorStrings t, ShareMasker m, {r
   final anchor = input.anchor;
   final log = anchor.log;
   final call = anchor.call;
-  if (log == null && call == null) return const <String>[];
+  if ((log == null && call == null) || !input.parts.moment) return const <String>[];
   final text = log != null
       ? buildLogReport(
           LogShareInput(
@@ -447,22 +501,27 @@ String buildBugReportText(BugReportInput input, InspectorStrings t) {
   final off = input.utcOffsetMinutes;
   final out = <String>[..._head(input, t), ..._moment(input, t, m, curl: false)];
   final c = input.contents;
+  final parts = input.parts;
 
-  out.addAll(<String>['## ${t.bugFailed(c.totalFailed)}', '']);
-  if (c.totalFailed == 0) {
-    out.add(t.bugMdNoFailed);
-  } else {
-    if (c.totalFailed > c.failed.length) out.add(t.bugMdMoreRequests(c.totalFailed - c.failed.length));
-    for (final call in c.failed) {
-      out.add('- ${bugRequestLine(call, m, t, utcOffsetMinutes: off)}');
+  if (parts.requests) {
+    out.addAll(<String>['## ${t.bugFailed(c.totalFailed)}', '']);
+    if (c.totalFailed == 0) {
+      out.add(t.bugMdNoFailed);
+    } else {
+      if (c.totalFailed > c.failed.length) out.add(t.bugMdMoreRequests(c.totalFailed - c.failed.length));
+      for (final call in c.failed) {
+        out.add('- ${bugRequestLine(call, m, t, utcOffsetMinutes: off)}');
+      }
     }
+    out.add('');
   }
-  out.add('');
 
-  out.addAll(<String>['## ${t.bugMdLogLines(c.totalLines)}', '']);
-  if (c.totalLines == 0) {
-    out.addAll(<String>[t.bugMdNoLogs, '']);
+  if (!parts.logs) {
+    // Left out by the tester.
+  } else if (c.totalLines == 0) {
+    out.addAll(<String>['## ${t.bugMdLogLines(c.totalLines)}', '', t.bugMdNoLogs, '']);
   } else {
+    out.addAll(<String>['## ${t.bugMdLogLines(c.totalLines)}', '']);
     final shown = c.lines.length > kBugTextLines ? c.lines.sublist(c.lines.length - kBugTextLines) : c.lines;
     if (shown.length < c.totalLines) out.add(t.bugMdLastLines(shown.length, c.totalLines));
     if (input.fileName != null && shown.length < c.totalLines) out.add(t.bugMdAllInFile(input.fileName!));
@@ -488,15 +547,21 @@ Iterable<String> bugReportFile(BugReportInput input, InspectorStrings t) sync* {
   final c = input.contents;
   yield '${<String>[..._head(input, t), ..._moment(input, t, m, curl: true)].join('\n')}\n';
 
-  final lines = <String>['## ${t.bugMdLogLines(c.totalLines)}', ''];
-  if (c.totalLines == 0) {
-    lines.addAll(<String>[t.bugMdNoLogs, '']);
-  } else {
-    if (c.lines.length < c.totalLines) lines.addAll(<String>[t.bugMdLinesCut(c.totalLines - c.lines.length), '']);
-    fencedBlock(lines, '', c.lines.map((l) => bugLogLine(l, m, utcOffsetMinutes: off, full: true)).join('\n'));
+  if (input.parts.logs) {
+    final lines = <String>['## ${t.bugMdLogLines(c.totalLines)}', ''];
+    if (c.totalLines == 0) {
+      lines.addAll(<String>[t.bugMdNoLogs, '']);
+    } else {
+      if (c.lines.length < c.totalLines) lines.addAll(<String>[t.bugMdLinesCut(c.totalLines - c.lines.length), '']);
+      fencedBlock(lines, '', c.lines.map((l) => bugLogLine(l, m, utcOffsetMinutes: off, full: true)).join('\n'));
+    }
+    yield '${lines.join('\n')}\n';
   }
-  yield '${lines.join('\n')}\n';
 
+  if (!input.parts.requests) {
+    yield '_${input.mask ? t.bugMdMasked : t.bugMdRaw}_\n';
+    return;
+  }
   final head = <String>['## ${t.bugFailed(c.totalFailed)}', ''];
   if (c.totalFailed == 0) {
     head.addAll(<String>[t.bugMdNoFailed, '']);

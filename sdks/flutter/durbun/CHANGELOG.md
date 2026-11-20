@@ -1,3 +1,45 @@
+## 0.3.2
+
+- In-app panel: **Clear** in the Network and Logs headers removes that page's
+  requests or log lines only, after asking; the other page, Performance and
+  the connection stay.
+- In-app panel: the Share sheet has a **Message** field. What the tester types
+  goes on top of the report as a quote (Slack's notification shows it), in
+  Copy, Share and Send to Slack alike.
+- In-app panel: **Send to Slack** says who sent the message, as the Mac app
+  does: "Sent with Dürbün · Ayşe (in-app panel)". The name is typed once in
+  **Your name** (Share sheet and Report a bug) and kept on the phone;
+  `DurbunInspector(slackSender: ...)` fills it in, and a name typed on the
+  phone wins.
+- New `DurbunInspector(tools: DurbunPanelTools(...))` turns each Tools item on
+  or off (Report a bug, Statistics, Mac connection, App tools, Device & SDK,
+  Mocks, Export session, Previous run, Dark theme, Clear), also while the app
+  runs. `showNetworkBadge: false` and `showLogsBadge: false` hide the error
+  counts on those tabs.
+- In-app panel: **Report a bug** lets the tester pick what goes, as the Mac app
+  does: the moment's line or request, the screenshot, the log lines, the
+  failed requests, the device and app facts and the full `.md` file each have
+  a checkbox. **Show the report** shows the exact text before it goes.
+- In-app panel: a request's and a log line's Share sheet take the screenshot
+  from when the panel opened along (left out with one tap): Share… sends it as
+  a PNG, Send to Slack uploads it with the connection URL's key.
+- In-app panel: the light/dark switch moved from every page's header to
+  **Tools → Dark theme**.
+- In-app panel: **Tools → Mac connection** is listed once a Mac is in reach
+  (connected now or earlier in the run, or a Wi-Fi address set), so testers
+  without a Mac no longer see it. Device & SDK still opens the page.
+- In-app panel: a tap on a header, a General row or a JSON value no longer
+  copies it. Text is selected with a long press; **Copy all** copies a whole
+  list and the body toolbar a whole body. A long value or a JWT still opens on
+  a tap.
+- Fixed: **Export session** could fail as a whole with "The export could not
+  be made". A request whose data cannot be written now goes in as a short
+  note, a time no date can hold reads as the time it arrived, and a failed
+  export names the kind of error to pass on.
+- Fixed: a message carrying a NaN or infinite number (a time, a status, a
+  sample) could break request durations, Statistics and exports; such a value
+  now reads as missing.
+
 ## 0.3.1
 
 - In-app panel: with `DurbunOptions(metrics: false)` the panel has no

@@ -30,3 +30,4 @@ export 'src/core/types.dart'
 export 'src/flutter/durbun.dart' show Durbun, DurbunNetwork;
 export 'src/flutter/navigation.dart' show DurbunNavigatorObserver;
 export 'src/inspector/inspector.dart' show DurbunInspector;
+export 'src/inspector/panel_tools.dart' show DurbunPanelTools;

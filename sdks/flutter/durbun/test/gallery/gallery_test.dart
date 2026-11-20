@@ -20,6 +20,7 @@ import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/protocol.dart' show buildErrorInfo, buildLog, buildNetWs;
 import 'package:durbun/src/flutter/durbun.dart' show durbunBackend;
 import 'package:durbun/src/inspector/bug_report_view.dart';
+import 'package:durbun/src/inspector/export_sheet.dart' show debugExportWriter;
 import 'package:durbun/src/inspector/filter_ui.dart' show FilterButton;
 import 'package:durbun/src/inspector/home.dart' show PanelNavBar;
 import 'package:durbun/src/inspector/inspector.dart' show ShakeHint;
@@ -28,8 +29,10 @@ import 'package:durbun/src/inspector/network_view.dart' show CallRow;
 import 'package:durbun/src/inspector/run_log.dart';
 import 'package:durbun/src/inspector/share_sheet.dart' show debugShareHandler;
 import 'package:durbun/src/inspector/slack.dart' show debugPostSlackForm, debugPostToSlack, debugResetSlackJoins;
+import 'package:durbun/src/inspector/slack_sender.dart' show debugResetSlackSender;
 import 'package:durbun/src/inspector/store.dart';
 import 'package:durbun/src/inspector/theme.dart' show debugResetPanelTheme;
+import 'package:durbun/src/inspector/widgets.dart' show DButton;
 import 'package:durbun/src/inspector/strings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -169,7 +172,15 @@ class PatiHome extends StatelessWidget {
 }
 
 /// The host app: its own (orange) theme, Turkish, the panel in its builder.
-Widget patiApp({DurbunInspectorStore? store, bool keepPreviousRun = false, bool bubble = false, Widget? overlay}) => RepaintBoundary(
+Widget patiApp(
+        {DurbunInspectorStore? store,
+        bool keepPreviousRun = false,
+        bool bubble = false,
+        Widget? overlay,
+        DurbunPanelTools tools = const DurbunPanelTools(),
+        bool networkBadge = true,
+        bool logsBadge = true}) =>
+    RepaintBoundary(
       key: _frame,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
@@ -183,6 +194,9 @@ Widget patiApp({DurbunInspectorStore? store, bool keepPreviousRun = false, bool 
           keepPreviousRun: keepPreviousRun,
           showBubble: bubble,
           showHint: false,
+          tools: tools,
+          showNetworkBadge: networkBadge,
+          showLogsBadge: logsBadge,
           child: overlay == null ? child! : Stack(children: <Widget>[child!, overlay]),
         ),
         home: const PatiHome(),
@@ -472,7 +486,8 @@ void main() {
     await step(tester, 'jwt', () async {
       await tester.tap(find.text('Authorization').first);
       await settle(tester);
-      await tapText(tester, tr.decodeJwt, last: true);
+      // A tap opens the claims; a long token asks first (claims or full value).
+      if (find.text(tr.decodeJwt).evaluate().isNotEmpty) await tapText(tester, tr.decodeJwt, last: true);
       await shot(tester, '19-detail-jwt');
       await back(tester);
     });
@@ -752,12 +767,33 @@ void main() {
   }, size: kLandscape, textScale: 2);
 
   gallery('share', (tester) async {
-    await openPanel(tester);
+    final store = await openPanel(tester);
     await step(tester, 'share sheet', () async {
       await openRow(tester, '/v2/cart/items');
       await tester.tap(find.byTooltip(tr.share).first);
       await settle(tester);
       await shot(tester, '27-share-sheet');
+      await back(tester);
+      await back(tester);
+    });
+    await step(tester, 'share sheet with Slack, a message and a name', () async {
+      store.slackWebhook = 'https://hooks.slack.com/services/T000/B000/abcd';
+      addTearDown(() {
+        store.slackWebhook = null;
+        debugResetSlackSender();
+      });
+      await openRow(tester, '/v2/cart/items');
+      await tester.tap(find.byTooltip(tr.share).first);
+      await settle(tester);
+      final name = find.byKey(const ValueKey<String>('durbun-slack-sender'));
+      await tester.ensureVisible(name);
+      await tester.enterText(name, 'Ayşe');
+      final note = find.byKey(const ValueKey<String>('durbun-share-note'));
+      await tester.ensureVisible(note);
+      await tester.enterText(note, 'Sepete ekleme ikinci denemede bozuluyor');
+      FocusManager.instance.primaryFocus?.unfocus();
+      await settle(tester);
+      await shot(tester, '27b-share-sheet-slack-message');
     });
   });
 
@@ -967,13 +1003,20 @@ void main() {
         await shot(tester, '60-tools-not-connected');
       });
       await step(tester, 'not connected', () async {
-        await tapTool(tester, tr.macConnection);
+        // No Mac in reach yet: no tile; Device & SDK leads to the page.
+        await tapTool(tester, tr.deviceAndSdk);
+        final button = find.widgetWithText(DButton, tr.macConnection);
+        await tester.ensureVisible(button);
+        await settle(tester);
+        await tester.tap(button);
+        await settle(tester);
         await shot(tester, '61-connection-not-connected');
         await tester.enterText(find.byKey(const ValueKey<String>('durbun-mac-address')), 'ayşenin mac');
         await tester.tap(find.text(tr.connect).first);
         await tester.pump();
         await settle(tester);
         await shot(tester, '62-connection-bad-address');
+        await back(tester);
         await back(tester);
       });
       await step(tester, 'app tools', () async {
@@ -1077,6 +1120,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey<String>('durbun-log-bug')));
       await settle(tester);
       await shot(tester, '114-bug-report-slack');
+      await tester.ensureVisible(find.byKey(const ValueKey<String>('durbun-slack-sender')));
+      await settle(tester);
+      await shot(tester, '114b-bug-report-slack-name');
       await tester.tap(find.byKey(const ValueKey<String>('durbun-bug-slack')));
       await settle(tester);
       await shot(tester, '115-bug-report-slack-no-shot');
@@ -1105,6 +1151,32 @@ void main() {
       await tester.drag(find.byKey(const ValueKey<String>('durbun-bug-list')), const Offset(0, -2000));
       await settle(tester);
       await shot(tester, '105-bug-report-end');
+      // The tester picks what goes: logs and device facts out.
+      for (final key in <String>['durbun-bug-part-logs', 'durbun-bug-part-facts']) {
+        final row = find.byKey(ValueKey<String>(key));
+        await tester.ensureVisible(row);
+        await settle(tester);
+        await tester.tap(row);
+        await settle(tester);
+      }
+      await shot(tester, '105b-bug-report-parts-off');
+      final preview = find.byKey(const ValueKey<String>('durbun-bug-preview'));
+      await tester.ensureVisible(preview);
+      await settle(tester);
+      await tester.tap(preview);
+      await settle(tester);
+      await tester.drag(find.byKey(const ValueKey<String>('durbun-bug-list')), const Offset(0, -500));
+      await settle(tester);
+      await shot(tester, '105c-bug-report-preview');
+      await tester.tap(preview);
+      await settle(tester);
+      for (final key in <String>['durbun-bug-part-logs', 'durbun-bug-part-facts']) {
+        await tester.dragUntilVisible(
+            find.byKey(ValueKey<String>(key)), find.byKey(const ValueKey<String>('durbun-bug-list')), const Offset(0, 200));
+        await settle(tester);
+        await tester.tap(find.byKey(ValueKey<String>(key)));
+        await settle(tester);
+      }
       await tapText(tester, tr.shareSend);
       await shot(tester, '106-bug-report-text-only');
       await back(tester);
@@ -1248,10 +1320,59 @@ void main() {
     await shot(tester, '91-landscape-logs');
   }, size: kLandscape);
 
+  gallery('page clear', (tester) async {
+    await openPanel(tester);
+    await step(tester, 'network clear confirm', () async {
+      await tester.tap(find.byTooltip(tr.clearRequests).first);
+      await settle(tester);
+      await shot(tester, '01b-network-clear-confirm');
+      await tapText(tester, tr.cancel);
+    });
+    await step(tester, 'logs cleared', () async {
+      await openTab(tester, tr.logs);
+      await tester.tap(find.byTooltip(tr.clearLogs).first);
+      await settle(tester);
+      await shot(tester, '30b-logs-clear-confirm');
+      await tapText(tester, tr.clear, last: true);
+      await shot(tester, '30c-logs-cleared');
+    });
+  });
+
+  gallery('host-limited panel', (tester) async {
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+    await tester.pumpWidget(patiApp(
+      store: patiStore(),
+      tools: const DurbunPanelTools(previousRun: false, exportSession: false, clearData: false, theme: false),
+      networkBadge: false,
+      logsBadge: false,
+    ));
+    await settle(tester);
+    Durbun.showInspector();
+    await settle(tester);
+    await shot(tester, '93-host-no-badges');
+    await openTools(tester);
+    await shot(tester, '94-host-tools-limited');
+  });
+
+  gallery('export error', (tester) async {
+    debugExportWriter = (name, chunks) async => throw StateError('disk full');
+    addTearDown(() => debugExportWriter = null);
+    await openPanel(tester);
+    await step(tester, 'export fails', () async {
+      await tapTool(tester, tr.exportSession);
+      final send = find.text(tr.exportSend);
+      await tester.ensureVisible(send);
+      await tester.tap(send);
+      await settle(tester);
+      await shot(tester, '95-export-error');
+    });
+  });
+
   gallery('theme switch', (tester) async {
     await openPanel(tester);
-    await tester.tap(find.byTooltip(_theme(tester) == 'dark' ? tr.switchToLight : tr.switchToDark).first);
-    await settle(tester);
+    // The switch lives in Tools only.
+    await tapTool(tester, tr.darkTheme);
     // Named for the theme it started in: the other one is on screen.
     await shot(tester, '92-theme-switched');
     debugResetPanelTheme();

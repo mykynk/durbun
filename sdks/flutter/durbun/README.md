@@ -658,11 +658,15 @@ required, so a tester can inspect the app on their own phone.
 ### What the panel shows
 
 The panel has its own look in light and dark: it follows the phone, and the
-switch at the top keeps your choice. Four tabs sit at the bottom: **Network**,
-**Logs**, **Performance** (not there with `metrics: false`) and **Tools** (on a
-short screen, such as a phone in landscape, they move into the header). Tools
-opens Report a bug, Mac connection, App tools, Mocks (only while the Mac app is
-connected), Statistics, Device & SDK, Export session, Previous run and Clear:
+**Dark theme** switch under Tools keeps your choice. Four tabs sit at the
+bottom: **Network**, **Logs**, **Performance** (not there with
+`metrics: false`) and **Tools** (on a short screen, such as a phone in
+landscape, they move into the header). Tools opens Report a bug, Statistics,
+Mac connection (once a Mac is in reach: connected now or earlier in the run, or
+a Wi-Fi address set; Device & SDK opens it otherwise), App tools, Device & SDK,
+Mocks (only while the Mac app is connected), Export session, Previous run, Dark
+theme and Clear. [The app chooses](#choosing-what-the-panel-offers) which of
+them are there:
 
 - **Logs:** a live stream (newest at the bottom; it stops following when you
   scroll up and resumes with "↓ N new"), V D I W E level toggles, the quick
@@ -734,14 +738,17 @@ connected), Statistics, Device & SDK, Export session, Previous run and Clear:
   requests from 1 minute before it to 10 seconds after (30 s, 2 min or 5 min
   are one tap away), a screenshot of the app taken just before the panel
   opened, the device and app facts and a note. Before anything leaves, the
-  screen lists what goes in with counts; the screenshot can be left out, and
-  secret values are masked as in Share (in log text too: tokens, cookies,
-  passwords, API keys) unless the switch is turned off. One system share sheet
-  carries the Markdown text (each failed request on one line, the last 50 log
-  lines), the whole report as a `.md` file (up to 500 lines with their stacks
-  and data, every failed request in full, cURL for the moment's request) and
-  the screenshot as a PNG; if the share sheet cannot open, the report is
-  copied. The screenshot is taken only while Dürbün runs, kept in memory only
+  screen lists what goes in with counts, and the tester picks the parts, as in
+  the Mac app: the moment's own line or request, the screenshot, the log lines,
+  the failed requests, the device and app facts and the full `.md` file each
+  have a checkbox, all on by default; a part left out leaves the text and the
+  file. **Show the report** shows the exact text before it goes. Secret values
+  are masked as in Share (in log text too: tokens, cookies, passwords, API
+  keys) unless the switch is turned off. One system share sheet carries the
+  Markdown text (each failed request on one line, the last 50 log lines), the
+  whole report as a `.md` file (up to 500 lines with their stacks and data,
+  every failed request in full, cURL for the moment's request) and the
+  screenshot as a PNG; if the share sheet cannot open, the report is copied. The screenshot is taken only while Dürbün runs, kept in memory only
   while the panel is open and not masked; platform views (maps, web views,
   video) may come out blank. The Mac app is not needed.
 - **Export session** (under Tools): the requests in the Network list (with
@@ -781,6 +788,38 @@ iOS 15+ `os_log` / `Logger` / `NSLog`) appear in the panel even without a Mac
 connection, and the host app needs no setup. The Mac app reads these from the
 device itself over USB, so lines are not delivered twice. The header shows the
 connection, and the Network and Logs tabs count the errors.
+
+Text in a detail page is selected with a long press and copied from the
+selection's menu; a tap copies nothing. **Copy all** copies a whole list
+(headers, cookies, query parameters), and a body is copied whole from its
+toolbar. A long value or a JWT opens its full text or claims on a tap.
+
+### Choosing what the panel offers
+
+Every item of the Tools tab can be turned off, and the error counts on the
+Network and Logs tabs hidden. Everything is on by default; the app card at the
+top of Tools is always there.
+
+```dart
+MaterialApp(
+  builder: (context, child) => DurbunInspector(
+    tools: const DurbunPanelTools(previousRun: false, clearData: false),
+    showNetworkBadge: false,   // no failed-request count on Network
+    showLogsBadge: false,      // no error count on Logs
+    child: child!,
+  ),
+);
+```
+
+`DurbunPanelTools` has one switch per item: `bugReport`, `statistics`,
+`macConnection`, `appTools`, `deviceInfo`, `mocks`, `exportSession`,
+`previousRun`, `theme` and `clearData`. `macConnection` is `null` by default
+(shown once a Mac is in reach, so testers without a Mac never see it); `true`
+shows it always and `false` never. `DurbunPanelTools.none()` leaves only the app
+card, and `copyWith` changes single items. A new value takes effect while the
+app runs, for example from your own debug menu. Turning off `clearData` removes
+the red *Clear captured data* card only: Network and Logs keep their own
+**Clear** button.
 
 ### Limits and settings
 
@@ -840,8 +879,10 @@ connection, and the Network and Logs tabs count the errors.
 - Filters, search, sort order and the last open tab are kept when the panel is
   closed and reopened. **Pause** on the Network list holds back new requests.
   In a list scrolled up, rows you are reading do not move even if old entries
-  are evicted. *Clear captured data* asks for confirmation first. Shake
-  detection is paused while the panel is open.
+  are evicted. **Clear** in the Network and Logs headers removes that page's
+  requests or log lines only (the other page, Performance and the connection
+  stay); it asks first, like *Clear captured data* under Tools, which removes
+  everything. Shake detection is paused while the panel is open.
 - In builds where Dürbün is off (`DURBUN=false`, or a release build without the
   define), the panel does not open and shaking is not listened to; the widget
   only draws the app.
@@ -876,9 +917,18 @@ bug, gets a **Send to Slack** button: the report goes to that webhook's
 channel (for example `#mobile-app`) from the phone itself, without the Mac,
 and only when someone taps it. Slack shows it as one message, the way a report pasted into
 Slack looks (lists, quotes and code blocks with their language, however long),
-ending with "Sent with Dürbün (in-app panel)". A workspace that does not take
-rich text gets the report as Markdown, in numbered messages when it is long,
-and otherwise as plain text.
+ending with who sent it: "Sent with Dürbün · Ayşe (in-app panel)". A workspace
+that does not take rich text gets the report as Markdown, in numbered messages
+when it is long, and otherwise as plain text.
+
+The Share sheet has a **Message** field: what the tester types goes on top of
+the report as a quote (Slack's notification shows it), and in Copy and Share
+too. The name is typed once in **Your name** (on the Share sheet and the bug
+report page) and kept on the phone for the next launches. The app can fill it
+in, for example with the signed-in tester's name:
+`DurbunInspector(slackSender: 'Ayşe', child: child!)`; a name typed on the
+phone wins. Without a name the message ends with "Sent with Dürbün (in-app
+panel)".
 
 1. Open [Add to Slack](https://appnify.dev/durbun/slack/), pick the channel
    and copy the connection URL it shows. (A webhook of your own Slack app
@@ -894,13 +944,16 @@ A git-ignored `--dart-define-from-file` works the same way, and
 `DurbunOptions(slackWebhook: ...)` sets it in code. Only `https://` URLs are
 used; without a webhook the button does not appear.
 
-**The bug report's screenshot.** The URL from Add to Slack carries a key
-after `#` (`#token=xoxb-…&channel=…`). Give the panel the whole URL and Report
-a bug uploads its screenshot to the same channel right after the report: the
-app's screen from when the panel opened, without the panel itself. With only
-the part before `#` the report goes as text, and the page says the screenshot
-did not go (Share still sends it). If Slack answers that Dürbün is not in a
-private channel, type `/invite @Durbun` there once.
+**The screenshot.** A request's and a log line's Share sheet offer the same
+screenshot as Report a bug: the app's screen from when the panel opened,
+without the panel itself, in by default and left out with one tap. Share…
+sends it as a PNG beside the text; Copy copies the text only. The URL from
+Add to Slack carries a key after `#` (`#token=xoxb-…&channel=…`). Give the
+panel the whole URL and Send to Slack uploads the screenshot to the same
+channel right after the report. With only the part before `#` the report goes
+as text: the Share sheet says so beforehand, and Report a bug says afterwards
+that the screenshot did not go (Share still sends it). If Slack answers that
+Dürbün is not in a private channel, type `/invite @Durbun` there once.
 
 To keep the URL out of some builds altogether, choose it at compile time.
 `appFlavor` (from `--flavor`) is a constant, so a build of the other flavor

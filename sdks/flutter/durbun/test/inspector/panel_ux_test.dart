@@ -153,8 +153,6 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('Bearer eyJ'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Decode JWT'));
-      await tester.pumpAndSettle();
       expect(find.textContaining('u1'), findsWidgets);
       await tester.tap(find.text('Copy as JSON'));
       await tester.pump();

@@ -1,7 +1,7 @@
 /// The panel shell: a header for the page on screen (the Dürbün mark with
-/// the desktop connection, a title, a subtitle, the theme switch, pause and
-/// close) over four pages, Network, Logs, Performance and Tools, picked in
-/// a floating bar at the bottom. Performance is not there while the app
+/// the desktop connection, a title, a subtitle; Clear and pause on Network
+/// and Logs; close) over four pages, Network, Logs, Performance and Tools,
+/// picked in a floating bar at the bottom. Performance is not there while the app
 /// turned metrics off (`DurbunOptions(metrics: false)`). Pages keep their
 /// state while another one is shown; detail pages are pushed over the whole
 /// shell, bar included.
@@ -155,6 +155,25 @@ class _InspectorHomeState extends State<InspectorHome> {
 
   void _close() => (widget.onClose ?? () => Navigator.of(context).maybePop())();
 
+  /// Network → Clear: the requests; Logs → Clear: the log lines. Asked
+  /// first: a tap next to Close must not lose what a tester came to send.
+  Future<void> _clearPage(PanelTab tab) async {
+    final t = InspectorStrings.of(context);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final logs = tab == PanelTab.logs;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final yes = await confirmClear(
+      context,
+      title: logs ? t.clearLogsConfirmTitle : t.clearRequestsConfirmTitle,
+      body: logs ? t.clearLogsConfirmBody : t.clearRequestsConfirmBody,
+    );
+    if (!yes || !mounted) return;
+    logs ? widget.store.clearLogs() : widget.store.clearCalls();
+    messenger?.hideCurrentSnackBar();
+    messenger?.showSnackBar(SnackBar(
+        content: Text(logs ? t.logsCleared : t.requestsCleared), duration: const Duration(milliseconds: 1400)));
+  }
+
   Widget _page(PanelTab tab) {
     final store = widget.store;
     return switch (tab) {
@@ -177,8 +196,10 @@ class _InspectorHomeState extends State<InspectorHome> {
           final destinations = <PanelDestination>[
             for (final tab in tabs)
               switch (tab) {
-                PanelTab.network => PanelDestination(t.network, Icons.swap_vert_rounded, badge: listedFailures(widget.store)),
-                PanelTab.logs => PanelDestination(t.logs, Icons.notes_rounded, badge: widget.store.errorCount),
+                PanelTab.network => PanelDestination(t.network, Icons.swap_vert_rounded,
+                    badge: widget.store.networkBadge ? listedFailures(widget.store) : 0),
+                PanelTab.logs => PanelDestination(t.logs, Icons.notes_rounded,
+                    badge: widget.store.logsBadge ? widget.store.errorCount : 0),
                 PanelTab.performance => PanelDestination(t.performance, Icons.speed_rounded),
                 PanelTab.tools => PanelDestination(t.tools, Icons.grid_view_rounded),
               },
@@ -219,6 +240,7 @@ class _InspectorHomeState extends State<InspectorHome> {
                   readOnly: _readOnly,
                   paused: _paused[_tab] ?? false,
                   onPause: () => setState(() => _paused[_tab] = !(_paused[_tab] ?? false)),
+                  onClear: () => _clearPage(_tab),
                   onClose: _close,
                   onOpen: _open,
                   performance: tabs.contains(PanelTab.performance),
@@ -296,6 +318,7 @@ class _Header extends StatelessWidget {
     required this.readOnly,
     required this.paused,
     required this.onPause,
+    required this.onClear,
     required this.onClose,
     required this.onOpen,
     required this.performance,
@@ -313,6 +336,9 @@ class _Header extends StatelessWidget {
   final bool readOnly;
   final bool paused;
   final VoidCallback onPause;
+
+  /// Clears the page on screen (Network: requests, Logs: log lines).
+  final VoidCallback onClear;
   final VoidCallback onClose;
   final void Function(PanelTab tab) onOpen;
 
@@ -342,13 +368,17 @@ class _Header extends StatelessWidget {
                 final hello = store.hello;
                 final app = hello?['app'] is Map ? hello!['app'] as Map : null;
                 final device = hello?['device'] is Map ? hello!['device'] as Map : null;
-                final appName = app?['name'] is String && (app!['name'] as String).isNotEmpty ? app['name'] as String : null;
+                final appName =
+                    app?['name'] is String && (app!['name'] as String).isNotEmpty ? app['name'] as String : null;
                 final platform = switch ('${device?['platform'] ?? ''}') {
                   'ios' => 'iOS',
                   'android' => 'Android',
                   final p => p,
                 };
-                final os = <String>[if (platform.isNotEmpty) platform, if (device?['osVersion'] != null) '${device!['osVersion']}'].join(' ');
+                final os = <String>[
+                  if (platform.isNotEmpty) platform,
+                  if (device?['osVersion'] != null) '${device!['osVersion']}'
+                ].join(' ');
                 final link = connected ? t.desktopConnected : t.onPhoneOnly;
                 final (String title, Widget? mark, List<String> subtitle) = readOnly
                     ? (tab == PanelTab.logs ? t.logs : t.network, null, <String>[t.previousRun])
@@ -358,8 +388,16 @@ class _Header extends StatelessWidget {
                             performance ? _FpsChip(store: store, onTap: () => onOpen(PanelTab.performance)) : null,
                             <String>[if (os.isNotEmpty) os, link]
                           ),
-                        PanelTab.logs => (t.logs, _CountBadge(count: store.errorCount), <String>[if (appName != null) appName, paused ? t.pausedStream : t.liveStream]),
-                        PanelTab.performance => (t.performance, null, <String>[if (appName != null) appName, t.liveStream]),
+                        PanelTab.logs => (
+                            t.logs,
+                            store.logsBadge ? _CountBadge(count: store.errorCount) : null,
+                            <String>[if (appName != null) appName, paused ? t.pausedStream : t.liveStream]
+                          ),
+                        PanelTab.performance => (
+                            t.performance,
+                            null,
+                            <String>[if (appName != null) appName, t.liveStream]
+                          ),
                         PanelTab.tools => (t.tools, null, <String>['${t.title} $kSdkVersion']),
                       };
                 return Row(
@@ -397,7 +435,8 @@ class _Header extends StatelessWidget {
                                     title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: DurbunType.heading(size: 16, color: c.text).copyWith(height: 1.25, letterSpacing: -0.1),
+                                    style: DurbunType.heading(size: 16, color: c.text)
+                                        .copyWith(height: 1.25, letterSpacing: -0.1),
                                   ),
                                 ),
                                 if (mark != null) ...<Widget>[const SizedBox(width: 8), mark],
@@ -431,7 +470,13 @@ class _Header extends StatelessWidget {
                     ),
                     if (nav != null) ...<Widget>[const SizedBox(width: 8), nav!],
                     const SizedBox(width: 4),
-                    if (!readOnly) const ThemeSwitchButton(),
+                    if (live && !readOnly)
+                      DIconButton(
+                        boxed: true,
+                        icon: Icons.delete_sweep_outlined,
+                        tooltip: tab == PanelTab.logs ? t.clearLogs : t.clearRequests,
+                        onTap: onClear,
+                      ),
                     if (live && !readOnly)
                       DIconButton(
                         boxed: true,
@@ -448,23 +493,6 @@ class _Header extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Light / dark for the panel, starting from the phone's setting.
-class ThemeSwitchButton extends StatelessWidget {
-  const ThemeSwitchButton({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = InspectorStrings.of(context);
-    final dark = DurbunColors.of(context).isDark;
-    return DIconButton(
-      boxed: true,
-      icon: Icons.contrast_rounded,
-      tooltip: dark ? t.switchToLight : t.switchToDark,
-      onTap: () => togglePanelTheme(context),
     );
   }
 }
@@ -509,7 +537,9 @@ class _FpsChip extends StatelessWidget {
               children: <Widget>[
                 Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
                 const SizedBox(width: 5),
-                Text(text, style: DurbunType.monoStyle(size: DurbunType.monoSm, color: color, weight: FontWeight.w600, height: 1.2)),
+                Text(text,
+                    style: DurbunType.monoStyle(
+                        size: DurbunType.monoSm, color: color, weight: FontWeight.w600, height: 1.2)),
               ],
             ),
           ),
@@ -541,7 +571,8 @@ class _CountBadge extends StatelessWidget {
           widthFactor: 1,
           heightFactor: 1,
           child: Text(count > 999 ? '999+' : '$count',
-              style: DurbunType.monoStyle(size: DurbunType.monoSm, color: c.onDanger, weight: FontWeight.w700, height: 1.1)),
+              style: DurbunType.monoStyle(
+                  size: DurbunType.monoSm, color: c.onDanger, weight: FontWeight.w700, height: 1.1)),
         ),
       ),
     );
@@ -637,7 +668,8 @@ class PanelNavBar extends StatelessWidget {
 
   /// The bar's height in [context] (what a page leaves free under it).
   static double extent(BuildContext context) {
-    final scale = MediaQuery.textScalerOf(context).clamp(maxScaleFactor: _maxScale).scale(DurbunType.caption) / DurbunType.caption;
+    final scale = MediaQuery.textScalerOf(context).clamp(maxScaleFactor: _maxScale).scale(DurbunType.caption) /
+        DurbunType.caption;
     final item = docked(context) ? 44.0 : math.max(52.0, 14 + 22 + 3 + DurbunType.caption * scale * 1.3);
     return item + 12 + 2;
   }
@@ -731,7 +763,11 @@ class PanelNavRow extends StatelessWidget {
 
 class _NavItem extends StatelessWidget {
   const _NavItem(
-      {required this.destination, required this.selected, required this.compact, required this.barColor, required this.onTap});
+      {required this.destination,
+      required this.selected,
+      required this.compact,
+      required this.barColor,
+      required this.onTap});
 
   final PanelDestination destination;
   final bool selected;
@@ -750,8 +786,7 @@ class _NavItem extends StatelessWidget {
       clipBehavior: Clip.none,
       children: <Widget>[
         Icon(destination.icon, size: 22, color: fg),
-        if (badge > 0)
-          Positioned(left: 13, top: -5, child: _NavBadge(count: badge, ring: bg)),
+        if (badge > 0) Positioned(left: 13, top: -5, child: _NavBadge(count: badge, ring: bg)),
       ],
     );
     final label = FittedBox(

@@ -1993,7 +1993,8 @@ List<List<String>> responseCookies(List<List<String>> headers) =>
     ];
 
 /// Name / value pairs (headers, cookies, query) in one card, the name over
-/// its value. A tap offers copy, the full value and, for a token, its JWT.
+/// its value, as selectable text; Copy all under the card. A tap opens the
+/// full value of a long one and the JWT of a token, nothing else.
 class _PairsList extends StatelessWidget {
   const _PairsList({required this.pairs, required this.empty});
 
@@ -2005,7 +2006,7 @@ class _PairsList extends StatelessWidget {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     if (pairs.isEmpty) return EmptyState(title: empty);
-    return ListView(
+    return swipeSafeSelection(ListView(
       padding: _pagePadding(context).copyWith(top: 2),
       children: <Widget>[
         Container(
@@ -2038,7 +2039,7 @@ class _PairsList extends StatelessWidget {
           ),
         ),
       ],
-    );
+    ));
   }
 }
 
@@ -2059,34 +2060,32 @@ class _PairRowState extends State<_PairRow> {
 
   bool get _long => widget.value.length > 480 || '\n'.allMatches(widget.value).length >= _maxLines;
 
-  Future<void> _menu() async {
+  /// A token's JWT and a long value's full text; with both, a menu. A short
+  /// plain value has no tap: it is selected, or copied with Copy all.
+  Future<void> _open() async {
     final t = InspectorStrings.of(context);
-    final choice = await showCopyMenu(context, _tapAt, <(String, IconData, String)>[
-      if (_jwt != null) ('jwt', Icons.key_rounded, t.decodeJwt),
-      ('value', Icons.copy_rounded, t.copyValue),
-      ('line', Icons.notes_rounded, t.copyNameValue),
-      if (_long) ('full', Icons.open_in_full_rounded, t.showFullValue),
-    ]);
-    if (!mounted) return;
-    switch (choice) {
-      case 'jwt':
-        unawaited(showJwtSheet(context, _jwt!));
-      case 'value':
-        copyText(context, widget.value);
-      case 'line':
-        copyText(context, '${widget.name}: ${widget.value}');
-      case 'full':
-        unawaited(_showValue(context, widget.name, widget.value));
+    final jwt = _jwt;
+    var choice = jwt != null ? 'jwt' : 'full';
+    if (jwt != null && _long) {
+      final picked = await showCopyMenu(context, _tapAt, <(String, IconData, String)>[
+        ('jwt', Icons.key_rounded, t.decodeJwt),
+        ('full', Icons.open_in_full_rounded, t.showFullValue),
+      ]);
+      if (picked == null || !mounted) return;
+      choice = picked;
+    }
+    if (choice == 'jwt' && jwt != null) {
+      unawaited(showJwtSheet(context, jwt));
+    } else {
+      unawaited(_showValue(context, widget.name, widget.value));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
-    return InkWell(
-      onTapDown: (d) => _tapAt = d.globalPosition,
-      onTap: _menu,
-      child: Padding(
+    final tappable = _jwt != null || _long;
+    final Widget content = Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2110,8 +2109,9 @@ class _PairRowState extends State<_PairRow> {
                 style: DurbunType.monoStyle(size: 12.5, color: c.text, height: 1.4)),
           ],
         ),
-      ),
-    );
+      );
+    if (!tappable) return TapStop(child: content);
+    return InkWell(onTapDown: (d) => _tapAt = d.globalPosition, onTap: _open, child: content);
   }
 }
 

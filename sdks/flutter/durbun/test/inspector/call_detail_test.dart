@@ -4,6 +4,7 @@ import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/body.dart' show wireBodyFromPending;
 import 'package:durbun/src/core/protocol.dart';
 import 'package:durbun/src/inspector/jwt.dart';
+import 'package:durbun/src/inspector/screenshot_attach.dart' show debugBugBytesWriter, debugSnapshotPng;
 import 'package:durbun/src/inspector/store.dart';
 import 'package:durbun/src/inspector/widgets.dart' show DIconButton;
 import 'package:flutter/material.dart';
@@ -126,7 +127,7 @@ void main() {
     expect(find.text('Total time'), findsOneWidget);
   });
 
-  testWidgets('a token in a header: JWT badge, decoded claims from the row menu', (tester) async {
+  testWidgets('a token in a header: JWT badge, decoded claims on a tap', (tester) async {
     await _phone(tester);
     await _open(tester, _store(), '/v1/login');
     await _tab(tester, 'Request');
@@ -136,18 +137,16 @@ void main() {
 
     await tester.tap(find.text('Authorization'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Decode JWT'));
-    await tester.pumpAndSettle();
     expect(find.text('Claims'), findsOneWidget);
     expect(find.text('sub'), findsOneWidget);
     expect(find.textContaining('Expires in'), findsOneWidget);
   });
 
-  testWidgets('a header row copies its value', (tester) async {
+  testWidgets('a tap on a header copies nothing; Copy all copies every header', (tester) async {
     await _phone(tester);
-    String? copied;
+    final copied = <String?>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-      if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String?;
+      if (call.method == 'Clipboard.setData') copied.add((call.arguments as Map)['text'] as String?);
       return null;
     });
     addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
@@ -157,12 +156,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Retry-After'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Copy name and value'));
+    expect(copied, isEmpty, reason: 'selection copies a part; Copy all the whole list');
+    expect(find.text('Copy name and value'), findsNothing, reason: 'no copy menu');
+    await tester.tap(find.text('Copy all'));
     await tester.pumpAndSettle();
-    expect(copied, 'Retry-After: 5');
+    expect(copied.single, contains('Retry-After: 5'));
   });
 
-  testWidgets('a tap on a JSON value copies it; a General row offers copy', (tester) async {
+  testWidgets('a tap on a JSON value or a General row copies nothing', (tester) async {
     await _phone(tester);
     final copied = <String?>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
@@ -173,15 +174,13 @@ void main() {
     await _open(tester, _store(), '/v1/login');
     await tester.tap(find.text('Method'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Copy value'));
-    await tester.pumpAndSettle();
-    expect(copied.last, 'POST');
+    expect(find.text('Copy value'), findsNothing, reason: 'no copy menu: the text is selected instead');
 
     await _tab(tester, 'Response');
     await tester.tap(find.textContaining('login-ok'));
     await tester.pumpAndSettle();
-    expect(copied.last, 'login-ok', reason: 'a string without its quotes');
-    expect(find.text('Copied · token'), findsOneWidget);
+    expect(copied, isEmpty);
+    expect(find.textContaining('Copied'), findsNothing);
   });
 
   testWidgets('a failed request: short status row, a timing note that fits the failure', (tester) async {
@@ -206,13 +205,22 @@ void main() {
       return null;
     });
     addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
-    // The plugin answers "share": false first (no share sheet), then true.
+    // The panel's screenshot goes along: its PNG and file faked (encoding
+    // needs the engine's real event loop).
+    debugSnapshotPng = (_) async => Uint8List.fromList(<int>[137, 80, 78, 71]);
+    debugBugBytesWriter = (name, bytes) async => '/cache/durbun-export/$name';
+    addTearDown(() {
+      debugSnapshotPng = null;
+      debugBugBytesWriter = null;
+    });
+    // The plugin answers "shareFiles" and "share": false first (no share
+    // sheet), then true.
     const native = MethodChannel('dev.durbun/native');
     final shared = <Map<Object?, Object?>>[];
     var opens = false;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(native, (call) async {
-      if (call.method != 'share') return null;
-      shared.add(call.arguments as Map<Object?, Object?>);
+      if (call.method != 'share' && call.method != 'shareFiles') return null;
+      shared.add(<Object?, Object?>{...call.arguments as Map<Object?, Object?>, 'method': call.method});
       return opens;
     });
     addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(native, null));
@@ -231,7 +239,8 @@ void main() {
     await tester.tap(find.text('Share…'));
     await tester.pumpAndSettle();
     expect(find.text('Share request'), findsNothing);
-    expect(shared.single['subject'], 'POST /v1/login → 200');
+    expect(shared.map((a) => a['method']), <String>['shareFiles', 'share'], reason: 'with the screenshot, then the text alone');
+    expect(shared.last['subject'], 'POST /v1/login → 200');
     expect(copied.last, startsWith('POST https://api.example.com/v1/login\n→ 200 OK'));
     expect(copied.last, contains('Authorization: Bearer eyJ'));
     expect(find.text('Sharing did not open; the report was copied'), findsOneWidget);
@@ -244,7 +253,9 @@ void main() {
     await tester.tap(find.text('Share…'));
     await tester.pumpAndSettle();
     expect(find.text('Share request'), findsNothing);
+    expect(shared.last['method'], 'shareFiles');
     expect(shared.last['text'], contains('"token": "login-ok"'));
+    expect(shared.last['mimes'], <String>['image/png']);
     expect(copied.length, before);
 
     // The menu copies the report with the options last used (masking off).

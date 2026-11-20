@@ -9,7 +9,6 @@ import 'package:flutter/material.dart';
 
 import '../flutter/backend.dart' show DurbunOffReason, DurbunStartState;
 import '../flutter/durbun.dart' show durbunBackend;
-import 'home.dart' show ThemeSwitchButton;
 import 'strings.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -63,8 +62,6 @@ class InspectorUnavailablePage extends StatelessWidget {
         title: Text(t.title),
         automaticallyImplyLeading: false,
         actions: <Widget>[
-          const ThemeSwitchButton(),
-          const SizedBox(width: 4),
           DIconButton(icon: Icons.close_rounded, tooltip: t.close, onTap: onClose),
           const SizedBox(width: 8),
         ],

@@ -6,6 +6,7 @@ import 'package:durbun/durbun.dart';
 import 'package:durbun/src/core/protocol.dart';
 import 'package:durbun/src/inspector/share_report.dart';
 import 'package:durbun/src/inspector/slack.dart';
+import 'package:durbun/src/inspector/slack_sender.dart';
 import 'package:durbun/src/inspector/store.dart';
 import 'package:durbun/src/inspector/strings.dart';
 import 'package:flutter/material.dart';
@@ -34,12 +35,12 @@ const String _report = 'POST https://api.example.com/login?next=<home>&x=1\n'
     '}\n'
     '````\n';
 
-Future<void> _openLogs(WidgetTester tester, DurbunInspectorStore store) async {
+Future<void> _openLogs(WidgetTester tester, DurbunInspectorStore store, {String? slackSender}) async {
   tester.view.physicalSize = const Size(390, 844) * 3;
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
-    builder: (context, child) => DurbunInspector(store: store, child: child!),
+    builder: (context, child) => DurbunInspector(store: store, slackSender: slackSender, child: child!),
     home: const Scaffold(body: Text('the app')),
   ));
   Durbun.showInspector();
@@ -676,8 +677,41 @@ void main() {
     });
   });
 
+  group('the tester’s message and name', () {
+    tearDown(debugResetSlackSender);
+    final en = InspectorStrings.forLanguage('en');
+    final tr = InspectorStrings.forLanguage('tr');
+
+    test('the message goes above the report as a quote; nothing typed changes nothing', () {
+      expect(withShareNote('GET /a', ''), 'GET /a');
+      expect(withShareNote('GET /a', '  \n '), 'GET /a');
+      expect(withShareNote('GET /a', ' Login fails \n\non 4G  '), '> Login fails\n>\n> on 4G\n\nGET /a');
+      expect(withShareNote('GET /a', 'see:\n  indented'), '> see:\n>   indented\n\nGET /a', reason: 'indents stay');
+    });
+
+    test('the footer names who sent it, as the desktop does', () {
+      expect(slackFooterFor(en, null), 'Sent with Dürbün (in-app panel)');
+      expect(slackFooterFor(en, 'Ayşe'), 'Sent with Dürbün · Ayşe (in-app panel)');
+      expect(slackFooterFor(tr, 'Yusuf'), 'Dürbün ile gönderildi · Yusuf (uygulama içi panel)');
+    });
+
+    test('the name typed on the phone wins over the app’s; blanks and long names are tidied', () {
+      final store = DurbunInspectorStore(notifyDelay: Duration.zero)..configurePanel(slackSender: 'QA team');
+      expect(slackSenderFor(store), 'QA team');
+      setSlackSender('  Ayşe   Yılmaz ');
+      expect(slackSenderFor(store), 'Ayşe Yılmaz');
+      setSlackSender('   ');
+      expect(slackSenderFor(store), 'QA team', reason: 'an emptied field gives the app’s name back');
+      setSlackSender('x' * 200);
+      expect(slackSenderFor(store), hasLength(60));
+    });
+  });
+
   group('Send to Slack in the panel', () {
-    tearDown(() => debugPostToSlack = null);
+    tearDown(() {
+      debugPostToSlack = null;
+      debugResetSlackSender();
+    });
 
     testWidgets('no webhook: no Slack button', (tester) async {
       await _openLogs(tester, _store());
@@ -737,6 +771,64 @@ void main() {
       expect(text, contains('Error: StateError: card declined &lt;@here&gt;'));
       expect(text, endsWith('Sent with Dürbün (in-app panel)'));
       expect(find.text('Sent to Slack'), findsOneWidget);
+    });
+
+    testWidgets('a message and a name: the message heads the post, the name ends it, and is kept', (tester) async {
+      final posts = <Map<String, Object?>>[];
+      debugPostToSlack = (webhook, payload) async {
+        posts.add(jsonDecode(jsonEncode(payload)) as Map<String, Object?>);
+        return (status: 200, answer: 'ok');
+      };
+      await _openLogs(tester, _store(webhook: 'https://hooks.slack.com/services/T/B/x'));
+      await _openShareSheet(tester);
+      final note = find.byKey(const ValueKey<String>('durbun-share-note'));
+      final name = find.byKey(const ValueKey<String>('durbun-slack-sender'));
+      await tester.ensureVisible(note);
+      await tester.enterText(note, 'Checkout breaks on the second try');
+      await tester.ensureVisible(name);
+      await tester.enterText(name, 'Ayşe');
+      await tester.pumpAndSettle();
+      expect(find.text('> Checkout breaks on the second try'), findsOneWidget, reason: 'the preview shows it');
+
+      await tester.ensureVisible(find.text('Send to Slack'));
+      await tester.tap(find.text('Send to Slack'));
+      await tester.pumpAndSettle();
+      final payload = posts.single;
+      expect(payload['text'], 'Checkout breaks on the second try', reason: 'the notification reads the message');
+      final runs = _texts((payload['blocks']! as List<Object?>).single! as Map<String, Object?>);
+      expect(runs.first, 'Checkout breaks on the second try');
+      expect(runs, contains(startsWith('ERROR · checkout')));
+      expect(runs.last, 'Sent with Dürbün · Ayşe (in-app panel)');
+      expect(typedSlackSender.value, 'Ayşe', reason: 'kept for the next message');
+
+      // The next sheet starts with the name and an empty message.
+      await _openShareSheet(tester);
+      await tester.ensureVisible(name);
+      expect(tester.widget<TextField>(find.descendant(of: name, matching: find.byType(TextField))).controller!.text, 'Ayşe');
+      expect(tester.widget<TextField>(find.descendant(of: note, matching: find.byType(TextField))).controller!.text, isEmpty);
+    });
+
+    testWidgets('the app’s name signs the post when the phone has none; no webhook, no name field', (tester) async {
+      final posts = <Map<String, Object?>>[];
+      debugPostToSlack = (webhook, payload) async {
+        posts.add(jsonDecode(jsonEncode(payload)) as Map<String, Object?>);
+        return (status: 200, answer: 'ok');
+      };
+      final store = _store(webhook: 'https://hooks.slack.com/services/T/B/x');
+      await _openLogs(tester, store, slackSender: 'QA team');
+      await _openShareSheet(tester);
+      await tester.ensureVisible(find.text('Send to Slack'));
+      await tester.tap(find.text('Send to Slack'));
+      await tester.pumpAndSettle();
+      final runs = _texts((posts.single['blocks']! as List<Object?>).single! as Map<String, Object?>);
+      expect(runs.last, 'Sent with Dürbün · QA team (in-app panel)');
+      expect(runs.first, startsWith('ERROR · checkout'), reason: 'no message: the report starts the post');
+
+      store.slackWebhook = null;
+      await tester.pumpAndSettle();
+      await _openShareSheet(tester);
+      expect(find.byKey(const ValueKey<String>('durbun-share-note')), findsOneWidget, reason: 'the message is for every way out');
+      expect(find.byKey(const ValueKey<String>('durbun-slack-sender')), findsNothing);
     });
 
     testWidgets('a refused message keeps the sheet open and says why', (tester) async {

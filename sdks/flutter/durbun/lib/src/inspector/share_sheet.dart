@@ -3,17 +3,22 @@
 /// no extra package) and Send to Slack when the app set a webhook.
 library;
 
+import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'bug_report.dart' show BugAnchor, isReportedFailure;
+import 'app_snapshot.dart' show panelOpeningOf;
+import 'bug_report.dart' show BugAnchor, bugFileStem, isReportedFailure;
 import 'bug_report_view.dart' show openBugReport;
 import 'filter_ui.dart' show SheetSwitch;
+import 'screenshot_attach.dart';
 import 'share_report.dart';
 import 'slack.dart';
+import 'slack_sender.dart';
 import 'store.dart';
 import 'strings.dart';
 import 'theme.dart';
@@ -73,7 +78,7 @@ const MethodChannel _native = MethodChannel('dev.durbun/native');
 /// Opens the system share sheet with [text]; false when it could not open.
 Future<bool> shareTextNatively(String text, {String? subject}) async {
   try {
-    return await _native.invokeMethod<bool>('share', <String, Object?>{'text': text, 'subject': subject}) ?? false;
+    return await _invokeShare('share', <String, Object?>{'text': text, 'subject': subject});
   } catch (_) {
     return false;
   }
@@ -269,6 +274,7 @@ class _ShareSheetState extends State<_ShareSheet> {
       subject: _subject,
       store: widget.store,
       onBug: widget.onBug,
+      screenshot: true,
       options: <Widget>[
         SheetSwitch(
             label: t.shareMask,
@@ -317,6 +323,7 @@ class _LogShareSheetState extends State<_LogShareSheet> {
       subject: '${log.level.toUpperCase()} ${first.length > 80 ? '${first.substring(0, 80)}…' : first}',
       store: widget.store,
       onBug: widget.onBug,
+      screenshot: true,
       // Only structured data has field names to mask.
       options: <Widget>[
         if (log.data != null)
@@ -346,6 +353,7 @@ class _ReportSheet extends StatefulWidget {
     required this.store,
     this.options = const <Widget>[],
     this.onBug,
+    this.screenshot = false,
   });
 
   final String title;
@@ -358,6 +366,10 @@ class _ReportSheet extends StatefulWidget {
   /// Opens "Report a bug" about the same moment (a failure, an error).
   final VoidCallback? onBug;
 
+  /// Offers the app's screenshot from when the panel opened (in by
+  /// default, left out with one tap), when there is one.
+  final bool screenshot;
+
   @override
   State<_ReportSheet> createState() => _ReportSheetState();
 }
@@ -365,9 +377,39 @@ class _ReportSheet extends StatefulWidget {
 class _ReportSheetState extends State<_ReportSheet> {
   final ScrollController _scroll = ScrollController();
 
+  /// The tester's own message, above the report wherever it goes.
+  final TextEditingController _note = TextEditingController();
+
+  /// The report's size, measured again only when the report changes.
+  String? _sized;
+  int _reportBytes = 0;
+
+  /// A handle of the sheet's own on the opening's picture, and when.
+  ui.Image? _shot;
+  double? _shotAt;
+  bool _withShot = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _note.addListener(_noteChanged);
+    if (widget.screenshot) {
+      final opening = panelOpeningOf(widget.store);
+      _shot = opening?.cloneImage();
+      _shotAt = _shot == null ? null : opening!.atMs;
+    }
+  }
+
+  void _noteChanged() => setState(() {});
+
   @override
   void dispose() {
+    _note.removeListener(_noteChanged);
+    _note.dispose();
     _scroll.dispose();
+    try {
+      _shot?.dispose();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -375,6 +417,17 @@ class _ReportSheetState extends State<_ReportSheet> {
   Widget build(BuildContext context) {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
+    final slackUrl = slackWebhookFor(widget.store);
+    final slack = slackUrl != null;
+    final shot = _shot;
+    final note = _note.text.trim();
+    final report = withShareNote(widget.report, note);
+    if (!identical(_sized, widget.report)) {
+      _sized = widget.report;
+      _reportBytes = utf8.encode(widget.report).length;
+    }
+    final added = report.length - widget.report.length;
+    final bytes = _reportBytes + (added == 0 ? 0 : utf8.encode(report.substring(0, added)).length);
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.9),
       child: Column(
@@ -402,25 +455,80 @@ class _ReportSheetState extends State<_ReportSheet> {
                       widget.onBug!();
                     }),
                     ...widget.options,
+                    if (shot != null)
+                      Container(
+                        key: const ValueKey<String>('durbun-share-shot'),
+                        margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                        decoration: BoxDecoration(
+                            color: c.cardBg,
+                            borderRadius: BorderRadius.circular(DurbunRadius.lg),
+                            border: Border.all(color: c.border)),
+                        child: ScreenshotRow(
+                          shot: shot,
+                          shotAt: _shotAt,
+                          included: _withShot,
+                          outText: t.shareScreenshotOut,
+                          // Slack takes it only with the upload key: said
+                          // before sending, Share… still sends it.
+                          note: slack && !SlackConnection.parse(slackUrl).uploads ? t.shareShotSlackNoKey : null,
+                          onToggle: () => setState(() => _withShot = !_withShot),
+                          onEnlarge: () => unawaited(showScreenshotDialog(context, shot)),
+                        ),
+                      ),
+                    // A word from the tester above the report; with Slack,
+                    // who sends it (at the message's end).
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                      child: SectionTitle(t.shareNoteLabel),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: PanelTextField(
+                        key: const ValueKey<String>('durbun-share-note'),
+                        controller: _note,
+                        label: t.shareNoteLabel,
+                        hint: t.shareNoteHint,
+                        minLines: 2,
+                        maxLines: 5,
+                      ),
+                    ),
+                    if (slack)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                        child: SlackSenderField(store: widget.store),
+                      ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: SectionTitle(t.preview,
-                          trailing: Text(shareBytes(utf8.encode(widget.report).length), style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle))),
+                          trailing: Text(shareBytes(bytes), style: DurbunType.monoStyle(size: 11.5, color: c.textSubtle))),
                     ),
-                    // What the teammate gets, exactly.
+                    // What the teammate gets, exactly: the note as a quote,
+                    // then the report (its text unchanged while typing).
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 12),
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                          color: c.cardBg, border: Border.all(color: c.border), borderRadius: BorderRadius.circular(DurbunRadius.lg)),
-                      child: Text(widget.report, style: DurbunType.monoStyle(size: 11.5, color: c.text, height: 1.4)),
+                          color: c.cardBg,
+                          border: Border.all(color: c.border),
+                          borderRadius: BorderRadius.circular(DurbunRadius.lg)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          if (note.isNotEmpty) ...<Widget>[
+                            Text(withShareNote('', note).trimRight(),
+                                style: DurbunType.monoStyle(size: 11.5, color: c.accentInk, height: 1.4)),
+                            const SizedBox(height: 16),
+                          ],
+                          Text(widget.report, style: DurbunType.monoStyle(size: 11.5, color: c.text, height: 1.4)),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
           ),
-          ShareActions(report: widget.report, subject: widget.subject, store: widget.store),
+          ShareActions(report: report, subject: widget.subject, store: widget.store, screenshot: _withShot ? shot : null),
         ],
       ),
     );
@@ -456,13 +564,19 @@ class _BugRow extends StatelessWidget {
 }
 
 /// Copy, the system share sheet and, when the app set a Slack webhook, Send
-/// to Slack: the buttons pinned under a share preview.
+/// to Slack: the buttons pinned under a share preview. With a [screenshot],
+/// Share… sends it as a PNG beside the text and Send to Slack uploads it
+/// after the report when the connection has the upload key; Copy copies the
+/// text (a clipboard holds no picture next to it).
 class ShareActions extends StatefulWidget {
-  const ShareActions({super.key, required this.report, required this.subject, required this.store});
+  const ShareActions({super.key, required this.report, required this.subject, required this.store, this.screenshot});
 
   final String report;
   final String subject;
   final DurbunInspectorStore store;
+
+  /// The app's screenshot to send along, or null. The caller owns it.
+  final ui.Image? screenshot;
 
   @override
   State<ShareActions> createState() => _ShareActionsState();
@@ -470,6 +584,28 @@ class ShareActions extends StatefulWidget {
 
 class _ShareActionsState extends State<ShareActions> {
   bool _sending = false;
+
+  /// Share… is writing the screenshot file.
+  bool _preparing = false;
+
+  /// What the last send said, above the buttons: the title, the tone, a line.
+  (String, CalloutTone, String?)? _notice;
+
+  /// `durbun-shot-pati-20261119-165702.png`.
+  String get _shotName {
+    final app = widget.store.hello?['app'];
+    final name = app is Map ? app['name'] : null;
+    return '${bugFileStem(name is String ? name : null, DateTime.now(), kind: 'shot')}.png';
+  }
+
+  Future<Uint8List?> _shotBytes(ui.Image shot) async {
+    try {
+      final bytes = await snapshotPng(shot);
+      return bytes == null || bytes.isEmpty ? null : bytes;
+    } catch (_) {
+      return null;
+    }
+  }
 
   void _copy() {
     final t = InspectorStrings.of(context);
@@ -484,40 +620,98 @@ class _ShareActionsState extends State<ShareActions> {
     final t = InspectorStrings.of(context);
     final messenger = ScaffoldMessenger.maybeOf(context);
     final navigator = Navigator.of(context);
-    final opened = await shareTextNatively(widget.report, subject: widget.subject);
+    final shot = widget.screenshot;
+    bool opened;
+    var textOnly = false;
+    if (shot == null) {
+      opened = await shareTextNatively(widget.report, subject: widget.subject);
+    } else {
+      setState(() {
+        _preparing = true;
+        _notice = null;
+      });
+      String? path;
+      final bytes = await _shotBytes(shot);
+      if (bytes != null) {
+        try {
+          path = await writeSnapshotFile(_shotName, bytes);
+        } catch (_) {}
+      }
+      final outcome = await shareFilesNatively(
+        text: widget.report,
+        subject: widget.subject,
+        paths: <String>[if (path != null) path],
+        mimes: <String>[if (path != null) 'image/png'],
+      );
+      if (!mounted) return;
+      setState(() => _preparing = false);
+      opened = outcome != FilesShareOutcome.failed;
+      textOnly = outcome == FilesShareOutcome.textOnly;
+    }
     if (!mounted) return;
+    messenger?.hideCurrentSnackBar();
     if (!opened) {
       // No share sheet (old plugin build, an embedder without it): the clipboard still works.
       await Clipboard.setData(ClipboardData(text: widget.report));
-      messenger?.hideCurrentSnackBar();
       messenger?.showSnackBar(SnackBar(content: Text(t.shareFallback), duration: const Duration(seconds: 3)));
+    } else if (textOnly) {
+      messenger?.showSnackBar(SnackBar(content: Text(t.shareShotTextOnly), duration: const Duration(seconds: 3)));
     }
     if (navigator.canPop()) navigator.pop();
   }
 
   /// Posts only on this tap; the sheet stays open when it fails, so the
-  /// report can still be copied or shared.
-  Future<void> _slack(String webhook) async {
+  /// report can still be copied or shared. The screenshot goes after the
+  /// report when the connection has the upload key; when only it failed,
+  /// the sheet stays and says why, so Share… can still send it.
+  Future<void> _slack(String url) async {
     final t = InspectorStrings.of(context);
     final messenger = ScaffoldMessenger.maybeOf(context);
     final navigator = Navigator.of(context);
-    setState(() => _sending = true);
+    setState(() {
+      _sending = true;
+      _notice = null;
+    });
+    final connection = SlackConnection.parse(url);
+    // The name at the end says who sent it; kept for the next sends.
+    final sender = slackSenderFor(widget.store);
+    final typed = typedSlackSender.value;
+    if (typed != null) setSlackSender(typed, persist: true);
+    final footer = slackFooterFor(t, sender);
     // Rich text, as a report pasted into Slack shows; the mrkdwn text is the
     // fallback for a workspace that refuses blocks.
     final error = await sendToSlack(
-      webhook,
-      markdown: toSlackMarkdown(widget.report, cutNote: t.slackCutNote, footer: t.slackFooter),
-      text: toSlackText(widget.report, cutNote: t.slackCutNote, footer: t.slackFooter),
+      connection.webhook,
+      markdown: toSlackMarkdown(widget.report, cutNote: t.slackCutNote, footer: footer),
+      text: toSlackText(widget.report, cutNote: t.slackCutNote, footer: footer),
     );
     if (!mounted) return;
-    setState(() => _sending = false);
-    messenger?.hideCurrentSnackBar();
-    if (error == null) {
-      if (navigator.canPop()) navigator.pop();
-      messenger?.showSnackBar(SnackBar(content: Text(t.slackSent), duration: const Duration(milliseconds: 1600)));
-    } else {
+    if (error != null) {
+      setState(() => _sending = false);
+      messenger?.hideCurrentSnackBar();
       messenger?.showSnackBar(SnackBar(content: Text(t.slackFailed(error)), duration: const Duration(seconds: 5)));
+      return;
     }
+    // Without the key the sheet said beforehand that Slack takes text only.
+    final shot = connection.uploads ? widget.screenshot : null;
+    String? why;
+    if (shot != null) {
+      final bytes = await _shotBytes(shot);
+      final problem = bytes == null
+          ? const SlackShotError(SlackShotProblem.rejected, 'PNG')
+          : await sendScreenshotToSlack(connection, bytes, title: '${t.bugScreenshot} · ${widget.subject}', fileName: _shotName);
+      if (problem != null) why = slackShotReason(problem, t);
+    }
+    if (!mounted) return;
+    setState(() {
+      _sending = false;
+      if (why != null) _notice = (t.slackShotNotSent, CalloutTone.warning, t.slackShotWhy(why));
+    });
+    if (why != null) return;
+    messenger?.hideCurrentSnackBar();
+    if (navigator.canPop()) navigator.pop();
+    messenger?.showSnackBar(
+        SnackBar(content: Text(shot != null ? t.slackSentWithShot : t.slackSent), duration: const Duration(milliseconds: 1600)));
   }
 
   @override
@@ -525,8 +719,8 @@ class _ShareActionsState extends State<ShareActions> {
     final c = DurbunColors.of(context);
     final t = InspectorStrings.of(context);
     final bottom = MediaQuery.paddingOf(context).bottom;
-    // One webhook per app: a restored previous run's store has none of its own.
-    final webhook = canSendToSlack ? widget.store.slackWebhook ?? DurbunInspectorStore.existing?.slackWebhook : null;
+    final webhook = slackWebhookFor(widget.store);
+    final busy = _sending || _preparing;
     return Container(
       decoration: BoxDecoration(color: c.bgPanel, border: Border(top: BorderSide(color: c.hairline))),
       padding: EdgeInsets.fromLTRB(16, 10, 16, 12 + bottom),
@@ -534,20 +728,28 @@ class _ShareActionsState extends State<ShareActions> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          if (_notice != null) ...<Widget>[
+            Callout(title: _notice!.$1, tone: _notice!.$2, body: _notice!.$3),
+            const SizedBox(height: 10),
+          ],
           if (webhook != null) ...<Widget>[
             DButton(
                 large: true,
                 primary: true,
                 icon: Icons.send_rounded,
                 label: _sending ? t.slackSending : t.slackSend,
-                onTap: _sending ? null : () => _slack(webhook)),
+                onTap: busy ? null : () => _slack(webhook)),
             const SizedBox(height: 10),
           ],
           Row(
             children: <Widget>[
               Expanded(
                 child: DButton(
-                    large: true, primary: webhook == null && !canShareNatively, icon: Icons.copy_rounded, label: t.copy, onTap: _copy),
+                    large: true,
+                    primary: webhook == null && !canShareNatively,
+                    icon: Icons.copy_rounded,
+                    label: t.copy,
+                    onTap: busy ? null : _copy),
               ),
               if (canShareNatively) ...<Widget>[
                 const SizedBox(width: 10),
@@ -556,8 +758,8 @@ class _ShareActionsState extends State<ShareActions> {
                       large: true,
                       primary: webhook == null,
                       icon: defaultTargetPlatform == TargetPlatform.iOS ? Icons.ios_share_rounded : Icons.share_rounded,
-                      label: t.shareSend,
-                      onTap: _share),
+                      label: _preparing ? t.exportPreparing : t.shareSend,
+                      onTap: busy ? null : () => unawaited(_share())),
                 ),
               ],
             ],
